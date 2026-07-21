@@ -1,0 +1,13 @@
+{
+  "name": "doc-writer-toolkit",
+  "owner": {
+    "name": "Vadym Sachenko"
+  },
+  "plugins": [
+    {
+      "name": "doc-writer-toolkit",
+      "source": "./plugins/doc-writer-toolkit",
+      "description": "Skills, commands, and content rules (style guide, glossary, templates) for writing Docusaurus product documentation."
+    }
+  ]
+}
