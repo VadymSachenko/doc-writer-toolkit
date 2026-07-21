@@ -1,5 +1,6 @@
 {
   "name": "doc-writer-toolkit",
+  "description": "Skills, commands, and content rules for writing Docusaurus product documentation, reusable across projects.",
   "owner": {
     "name": "Vadym Sachenko"
   },
