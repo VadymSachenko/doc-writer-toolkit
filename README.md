@@ -15,6 +15,12 @@ A [Claude Code plugin marketplace](https://code.claude.com/docs/en/plugin-market
 
 The skills and most of `doc-rules/` (grammar, style guide) are reusable as-is for any Docusaurus documentation project. `context/doc-rules/project-rules/glossary-*.md`, `api-integration-context.md`, `context/doc-rules/doc-examples/`, and `context/doc-templates/` currently carry UCPay-specific terminology and examples. If a second, unrelated product ever needs this toolkit with different terminology, that seam is where to split into a second plugin — the skills already reference everything through `${CLAUDE_PLUGIN_ROOT}`, so no skill logic would need to change.
 
+## `tools/`
+
+Standalone utilities that support the skills above but aren't Claude Code plugin components (they have real system dependencies, so they're not auto-loaded — run them manually):
+
+- **`sme-video-context/`** — turns a meeting recording into an LLM-readable package (timestamped transcript, deduplicated screenshots, OCR, transcript-to-image alignment). Feeds the `convert-sme-input` skill's raw material. Requires `ffmpeg`, `tesseract`, and a Python venv — see its own `README.md`.
+
 ## Install into a project
 
 Add to the project's `.claude/settings.json`:
