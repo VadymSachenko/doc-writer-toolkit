@@ -6,9 +6,11 @@ A [Claude Code plugin marketplace](https://code.claude.com/docs/en/plugin-market
 
 `plugins/doc-writer-toolkit/`:
 
-- **`skills/`** — mechanics for writing and maintaining docs: `api-doc-writer`, `user-guide-writer`, `concept-doc-writer`, `doc-translator`, `doc-alignment-checker`, `convert-sme-input`, `extract-sme-screenshots`, `cleanup-unused-screenshots`. These are generic — they don't hardcode a product name or brand.
-- **`commands/`** — slash-command wrappers around the skills above (`/create-api-doc`, `/translate-doc`, `/check-doc-alignment`, `/fix-doc-todos`).
+- **`skills/`** — mechanics for writing and maintaining docs: `api-doc-writer`, `user-guide-writer`, `concept-doc-writer`, `doc-translator`, `doc-alignment-checker`, `doc-style-reviewer`, `convert-sme-input`, `extract-sme-screenshots`, `cleanup-unused-screenshots`. These are generic — they don't hardcode a product name or brand.
+- **`commands/`** — slash-command wrappers around the skills above (`/create-api-doc`, `/translate-doc`, `/check-doc-alignment`, `/review-doc-style`, `/fix-doc-todos`).
 - **`context/doc-rules/`** — style guide, Ukrainian grammar reference (`ua-grammar/`, product-agnostic), and `project-rules/` (glossary, product-integration context — currently UCPay-specific).
+- **`context/google-developer-style-guide/`** — complete distilled corpus of the public Google Developer Documentation Style Guide (121 files), with routed loading for token efficiency. Used by `doc-style-reviewer` skill.
+- **`context/microsoft-style-guide/`** — complete distilled corpus of the Microsoft Writing Style Guide (English + Ukrainian localization, 168 files), with routed loading for token efficiency. Used by `doc-style-reviewer` skill.
 - **`context/doc-templates/`** — page templates for API reference pages, user guides, and concept topics.
 - **`scripts/`** — non-skill utilities that plugin skills shell out to (see below).
 

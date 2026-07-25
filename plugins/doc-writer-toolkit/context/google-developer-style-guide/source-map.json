@@ -1,0 +1,1847 @@
+{
+  "official_root": "https://developers.google.com/style",
+  "snapshot_date": "2026-07-16",
+  "pages": [
+    {
+      "order": 1,
+      "title": "About this guide",
+      "slug": "index",
+      "url": "https://developers.google.com/style",
+      "updated": "2026-04-27",
+      "headings": [
+        "About this guide Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Editorial resources",
+        "Reference hierarchy",
+        "Other editorial resources",
+        "Annotations used in this guide",
+        "Break the rules"
+      ],
+      "source_sha256": "f35f1c5e3ca116b57e0f136a884a168f0c80da7168305a99509356c1f13bcf97",
+      "text_sha256": "4bd6e5468f14a60c206a098dd5108e4a493814c191b257f07a2f93294aab4545",
+      "text_bytes": 4628,
+      "local_files": [
+        "README.md",
+        "AUTHORITY-AND-PRECEDENCE.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 2,
+      "title": "Highlights",
+      "slug": "highlights",
+      "url": "https://developers.google.com/style/highlights",
+      "updated": "2025-04-02",
+      "headings": [
+        "Highlights Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Tone and content",
+        "Language and grammar",
+        "Formatting, punctuation, and organization",
+        "Images"
+      ],
+      "source_sha256": "b74da6b911499ab14892f45ec31a50470482f693b08694db07bb3f0faab4f5e5",
+      "text_sha256": "de1ac35122125d9098a51b6f9cb7ce0a0b3cff626b1eea83d67a56124957eee7",
+      "text_bytes": 2808,
+      "local_files": [
+        "principles/voice-and-tone.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 3,
+      "title": "What's new",
+      "slug": "whats-new",
+      "url": "https://developers.google.com/style/whats-new",
+      "updated": "2026-07-07",
+      "headings": [
+        "What's new Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "July 7, 2026",
+        "April 7, 2026",
+        "May 8, 2025",
+        "January 17, 2025",
+        "October 29, 2024",
+        "August 15, 2024",
+        "May 16, 2024",
+        "March 21, 2024",
+        "January 22, 2024",
+        "November 8, 2023",
+        "October 24, 2023",
+        "September 29, 2023",
+        "August 24, 2023",
+        "July 26, 2023",
+        "June 15, 2023",
+        "May 9, 2023",
+        "March 31, 2023",
+        "February 13, 2023",
+        "December 12, 2022",
+        "November 7, 2022",
+        "October 31, 2022",
+        "October 10, 2022",
+        "September 26, 2022",
+        "September 19, 2022",
+        "September 12, 2022",
+        "September 5, 2022",
+        "August 29, 2022",
+        "August 22, 2022",
+        "August 15, 2022",
+        "August 8, 2022",
+        "August 1, 2022",
+        "July 25, 2022",
+        "July 18, 2022",
+        "June 20, 2022",
+        "June 13, 2022",
+        "June 6, 2022",
+        "May 16, 2022",
+        "May 9, 2022",
+        "April 25, 2022",
+        "April 18, 2022",
+        "April 11, 2022",
+        "April 4, 2022",
+        "March 28, 2022",
+        "February 21, 2022",
+        "February 7, 2022",
+        "January 31, 2022",
+        "January 24, 2022",
+        "January 18, 2022",
+        "December 31, 2021",
+        "November 30, 2021",
+        "November 1, 2021",
+        "October 11, 2021",
+        "October 4, 2021",
+        "September 13, 2021",
+        "September 6, 2021",
+        "August 30, 2021",
+        "August 16, 2021",
+        "August 2, 2021",
+        "July 26, 2021",
+        "July 19, 2021",
+        "July 12, 2021",
+        "July 5, 2021",
+        "June 28, 2021",
+        "June 21, 2021",
+        "June 7, 2021",
+        "May 24, 2021",
+        "May 3, 2021",
+        "April 26, 2021",
+        "April 19, 2021",
+        "April 12, 2021",
+        "April 5, 2021",
+        "March 29, 2021",
+        "March 15, 2021",
+        "March 8, 2021",
+        "March 1, 2021",
+        "February 15, 2021",
+        "February 1, 2021",
+        "January 25, 2021",
+        "January 11, 2021",
+        "January 4, 2021",
+        "December 28, 2020",
+        "December 14, 2020",
+        "December 7, 2020",
+        "November 30, 2020",
+        "November 23, 2020",
+        "November 16, 2020",
+        "November 9, 2020",
+        "November 2, 2020",
+        "October 19, 2020",
+        "October 12, 2020",
+        "October 5, 2020",
+        "September 28, 2020",
+        "September 21, 2020",
+        "September 14, 2020",
+        "September 7, 2020",
+        "August 31, 2020",
+        "August 24, 2020",
+        "August 10, 2020",
+        "August 3, 2020",
+        "July 27, 2020",
+        "July 20, 2020",
+        "July 13, 2020",
+        "June 29, 2020",
+        "June 22, 2020",
+        "June 15, 2020",
+        "June 8, 2020",
+        "June 1, 2020",
+        "May 25, 2020",
+        "May 18, 2020",
+        "May 11, 2020",
+        "May 4, 2020",
+        "April 27, 2020",
+        "April 20, 2020",
+        "April 13, 2020",
+        "April 6, 2020",
+        "March 30, 2020",
+        "March 23, 2020",
+        "March 2, 2020",
+        "February 24, 2020",
+        "January 13, 2020",
+        "January 6, 2020",
+        "December 23, 2019",
+        "December 16, 2019",
+        "December 9, 2019",
+        "December 2, 2019",
+        "November 25, 2019",
+        "November 18, 2019",
+        "November 11, 2019",
+        "October 28, 2019",
+        "October 21, 2019",
+        "October 8, 2019",
+        "September 30, 2019",
+        "September 23, 2019",
+        "September 16, 2019",
+        "June 24, 2019",
+        "June 17, 2019",
+        "May 20, 2019",
+        "April 29, 2019",
+        "April 22, 2019",
+        "April 15, 2019",
+        "March 4, 2019",
+        "February 25, 2019",
+        "February 4, 2019",
+        "January 28, 2019",
+        "January 14, 2019",
+        "December 3, 2018",
+        "October 29, 2018",
+        "October 8, 2018",
+        "September 18, 2018",
+        "September 4, 2018",
+        "August 13, 2018",
+        "July 30, 2018",
+        "June 25, 2018",
+        "June 19, 2018",
+        "June 12, 2018",
+        "May 21, 2018",
+        "May 14, 2018",
+        "April 2, 2018",
+        "March 26, 2018",
+        "February 26, 2018",
+        "February 12, 2018",
+        "January 29, 2018",
+        "January 8, 2018",
+        "December 11, 2017",
+        "November 13, 2017",
+        "October 23, 2017",
+        "September 4, 2017",
+        "August 28, 2017",
+        "August 21, 2017",
+        "July 31, 2017",
+        "July 10, 2017",
+        "June 8, 2017"
+      ],
+      "source_sha256": "d25a566db56f672f39c7895fff620bfcb3762163b8d3648807addf8a1d07f59c",
+      "text_sha256": "a1ae00f4bcae7365a55381dbbcd1f09ff4b9f2c42c46ba5daee8e0f48d4eb33a",
+      "text_bytes": 59927,
+      "local_files": [
+        "maintenance/source-map.md",
+        "maintenance/unresolved-items.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 4,
+      "title": "Philosophy of this style guide",
+      "slug": "philosophy",
+      "url": "https://developers.google.com/style/philosophy",
+      "updated": "2024-10-15",
+      "headings": [
+        "Philosophy of this style guide Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Intended purpose",
+        "Explanation of reasons for guidelines"
+      ],
+      "source_sha256": "083677b65990088b6c85bfeaf32430906c77f44862ca1dac0eae8a54318f8dc1",
+      "text_sha256": "14662d6ce4dd0a74c8dd0fefae41e8d71b450807b49f81bbed1c093ed4518fc0",
+      "text_bytes": 3425,
+      "local_files": [
+        "principles/voice-and-tone.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 5,
+      "title": "Word list",
+      "slug": "word-list",
+      "url": "https://developers.google.com/style/word-list",
+      "updated": "2026-05-27",
+      "headings": [
+        "Word list Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Word list",
+        "Numbers and Symbols",
+        "A",
+        "B",
+        "C",
+        "D",
+        "E",
+        "F",
+        "G",
+        "H",
+        "I",
+        "J",
+        "K",
+        "L",
+        "M",
+        "N",
+        "O",
+        "P",
+        "Q",
+        "R",
+        "S",
+        "T",
+        "U",
+        "V",
+        "W",
+        "Y",
+        "Z"
+      ],
+      "source_sha256": "c92a75793dca5785ef4f83e3a248ba96272e6e8a0febd72d56f5bb936f44458b",
+      "text_sha256": "4ec7ce1269423d41bd76b1f688eb8e69fec3a86ea8662f385b6053767e1893c7",
+      "text_bytes": 110929,
+      "local_files": [
+        "terminology/INDEX.md",
+        "terminology/a-z/ (46 chunks)"
+      ],
+      "covered": true
+    },
+    {
+      "order": 6,
+      "title": "Product names",
+      "slug": "product-names",
+      "url": "https://developers.google.com/style/product-names",
+      "updated": "2025-03-21",
+      "headings": [
+        "Product names Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Capitalize product names",
+        "Feature names",
+        "Shorten Google product names",
+        "Possessives of product names",
+        "Articles before product names",
+        "Use \"service\" to refer to multiple products",
+        "Don't use product names as verbs"
+      ],
+      "source_sha256": "f83bdd2679669ec085607e976a6dd969b052011dfe4e902c85b0985926acecdb",
+      "text_sha256": "7406478b8404aef84688997ef86e1554e2aa6fe33c354e8aa0e49ffbe9aa09c4",
+      "text_bytes": 5562,
+      "local_files": [
+        "names-and-naming/product-names-and-trademarks.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 7,
+      "title": "Text-formatting summary",
+      "slug": "text-formatting",
+      "url": "https://developers.google.com/style/text-formatting",
+      "updated": "2026-01-20",
+      "headings": [
+        "Text-formatting summary Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "More resources"
+      ],
+      "source_sha256": "ecbb5beac782b2a62eb4e71271b8af417bac06fd589f904e49a991d8de3eadd3",
+      "text_sha256": "eca51b04825469cb94b65cfec7f070c1f1e69798538a3b243d16caefc222f55e",
+      "text_bytes": 5287,
+      "local_files": [
+        "formatting/text-formatting.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 8,
+      "title": "Write accessible documentation",
+      "slug": "accessibility",
+      "url": "https://developers.google.com/style/accessibility",
+      "updated": "2025-04-21",
+      "headings": [
+        "Write accessible documentation Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "General dos and don'ts",
+        "Ease of reading",
+        "Headings and titles",
+        "Links",
+        "Lists",
+        "Images",
+        "Videos, recordings, and GIFs",
+        "Buttons and icons",
+        "UI navigation",
+        "Tables",
+        "Interactive elements",
+        "Forms",
+        "Custom CSS and JavaScript",
+        "Document rendering",
+        "More resources"
+      ],
+      "source_sha256": "0ce8bc6dfa0274cecea260015bf5dcadbbd63e64ab1ca361a76f1311d27ac08a",
+      "text_sha256": "11c7541036cc1ec0724c6f47434b12c0915a48dd047a3b6275496abc6811710c",
+      "text_bytes": 12256,
+      "local_files": [
+        "principles/accessibility.md",
+        "visuals/images-and-media.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 9,
+      "title": "Avoid excessive claims",
+      "slug": "excessive-claims",
+      "url": "https://developers.google.com/style/excessive-claims",
+      "updated": "2024-10-15",
+      "headings": [
+        "Avoid excessive claims Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary"
+      ],
+      "source_sha256": "686129fbb19b70085a2ef62acd636ea6ad8d9a10fc489131d3f3ddb64ad4a5e6",
+      "text_sha256": "45a5f3839508cbedc31bf97e35fed16e930cfc97bd92d6b2f5a95ef340fbdec7",
+      "text_bytes": 4115,
+      "local_files": [
+        "principles/precision-and-longevity.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 10,
+      "title": "Future features",
+      "slug": "future",
+      "url": "https://developers.google.com/style/future",
+      "updated": "2026-05-19",
+      "headings": [
+        "Future features Stay organized with collections Save and categorize content based on your preferences."
+      ],
+      "source_sha256": "c53fa725a8738ac92f36e23d0339cd6dc2a73bf74e0f4b9661e3907424360d20",
+      "text_sha256": "50ca7d2eaf453b57ef990c71eee2658eabaafe617e0334e3f6a8477d9d3b6fa1",
+      "text_bytes": 1096,
+      "local_files": [
+        "principles/precision-and-longevity.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 11,
+      "title": "Write for a global audience",
+      "slug": "translation",
+      "url": "https://developers.google.com/style/translation",
+      "updated": "2026-06-11",
+      "headings": [
+        "Write for a global audience Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Use clear, concise, and unambiguous language",
+        "Use simpler words and shorter sentences",
+        "Avoid phrasal verbs",
+        "Use modifiers appropriately",
+        "Use active voice and present tense",
+        "Use words in their primary sense",
+        "Use helper words and optional words",
+        "Clarify abbreviations and pronouns",
+        "Use apostrophes appropriately",
+        "Address users and their needs directly",
+        "Be consistent",
+        "Use consistent terminology",
+        "Use standard sentence structures and formatting",
+        "Use consistent text formatting",
+        "Be inclusive",
+        "Consider accessibility for images"
+      ],
+      "source_sha256": "efff6a295f63f7e8f12e20f59f32093baaabf3aefa09c75872dd2bf0e1bece03",
+      "text_sha256": "a0bb62063a26984a43333101f3e1cbf971cdfc613ee731010104e6fd15250455",
+      "text_bytes": 12297,
+      "local_files": [
+        "principles/global-audience.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 12,
+      "title": "Write inclusive documentation",
+      "slug": "inclusive-documentation",
+      "url": "https://developers.google.com/style/inclusive-documentation",
+      "updated": "2026-05-27",
+      "headings": [
+        "Write inclusive documentation Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Avoid unnecessarily gendered language",
+        "Avoid figurative language",
+        "Avoid ableist language",
+        "Avoid graphic or metaphorical language",
+        "Write diverse and inclusive examples",
+        "Write about features and users in inclusive ways",
+        "Replace or write around non-inclusive terms",
+        "Replace established terms",
+        "Write around non-inclusive code terms",
+        "Avoid bias and harm when discussing disability and accessibility"
+      ],
+      "source_sha256": "58b220f019c67181adab92f83754af941e0aa98fc76428feee6b2350a4e1cc9c",
+      "text_sha256": "38b9430a34c1fe44ec24bfc9e9d68939751093f1330e42f24efb9ff0409fdc90",
+      "text_bytes": 12643,
+      "local_files": [
+        "principles/inclusive-language.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 13,
+      "title": "Jargon",
+      "slug": "jargon",
+      "url": "https://developers.google.com/style/jargon",
+      "updated": "2025-06-25",
+      "headings": [
+        "Jargon Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary"
+      ],
+      "source_sha256": "830d25ab29c40d05802b1c513fc6cf664edc7ca888c83ae5ec49848fbe589180",
+      "text_sha256": "2563aec98396707220d28ce2a336728d77d8418a48bb1a19b16f2841aba92f9b",
+      "text_bytes": 4329,
+      "local_files": [
+        "principles/jargon-and-prescriptive-writing.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 14,
+      "title": "Prescriptive documentation",
+      "slug": "prescriptive-documentation",
+      "url": "https://developers.google.com/style/prescriptive-documentation",
+      "updated": "2025-02-07",
+      "headings": [
+        "Prescriptive documentation Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Word choice for recommendations and requirements",
+        "More resources"
+      ],
+      "source_sha256": "23dc1c6394be0a990741d3ff592df5c1324a001ea4c268577f4886b737f2e043",
+      "text_sha256": "2553200dcc10c62870d833f256b0b5cebb9d3b95fd95b2d9cf19a483beeda0ae",
+      "text_bytes": 5509,
+      "local_files": [
+        "principles/jargon-and-prescriptive-writing.md",
+        "procedures/procedures.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 15,
+      "title": "Third-party content",
+      "slug": "other-sources",
+      "url": "https://developers.google.com/style/other-sources",
+      "updated": "2024-10-15",
+      "headings": [
+        "Third-party content Stay organized with collections Save and categorize content based on your preferences.",
+        "Avoid third-party content"
+      ],
+      "source_sha256": "9d2009c1a2d65c7334076aa35db1c66b3427679baa0c7ed65ba2fb3e27864195",
+      "text_sha256": "9950e4f7778e04cd586f88a2f55011d567ad9003e41cfaf666ca7138d02334ea",
+      "text_bytes": 2413,
+      "local_files": [
+        "principles/precision-and-longevity.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 16,
+      "title": "Timeless documentation",
+      "slug": "timeless-documentation",
+      "url": "https://developers.google.com/style/timeless-documentation",
+      "updated": "2024-10-15",
+      "headings": [
+        "Timeless documentation Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Words and phrases to avoid"
+      ],
+      "source_sha256": "4aa559cb36c2a84890626bb7ebf756ee8551bb516b1ec09f82c00222ce04531c",
+      "text_sha256": "f161b17207c0536642c95f4c42f18dec753c65349600ad2721135a1d634905e0",
+      "text_bytes": 5124,
+      "local_files": [
+        "principles/precision-and-longevity.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 17,
+      "title": "Voice and tone",
+      "slug": "tone",
+      "url": "https://developers.google.com/style/tone",
+      "updated": "2026-05-27",
+      "headings": [
+        "Voice and tone Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Some things to avoid where possible",
+        "Some techniques and approaches to consider",
+        "Politeness and use of please",
+        "Examples"
+      ],
+      "source_sha256": "dae1fb6ff24db6ce2612dabf4295b91f7ab593b61954736bb763b21a885c3ba1",
+      "text_sha256": "fa9986a28501156e11614c32822c28314a93bd4055e743bc9a8c71a0176cc16a",
+      "text_bytes": 5939,
+      "local_files": [
+        "principles/voice-and-tone.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 18,
+      "title": "Abbreviations",
+      "slug": "abbreviations",
+      "url": "https://developers.google.com/style/abbreviations",
+      "updated": "2025-12-01",
+      "headings": [
+        "Abbreviations Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Long and short versions of a word",
+        "When to use abbreviations",
+        "General dos and don'ts",
+        "When to spell out a term",
+        "Format abbreviation introductions",
+        "Abbreviations not to use",
+        "Periods with abbreviations",
+        "Plural abbreviations",
+        "Abbreviations as verbs",
+        "Indefinite articles before abbreviations"
+      ],
+      "source_sha256": "62b577ea56ea56c2d6a619b714a67cda743edf3e01fe943136638268f569cf35",
+      "text_sha256": "1711a53142805cfd2a50828f4d4ff6ae5a7b23fa779b70e7176f609f29437bda",
+      "text_bytes": 8871,
+      "local_files": [
+        "language/abbreviations-and-capitalization.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 19,
+      "title": "Active voice",
+      "slug": "voice",
+      "url": "https://developers.google.com/style/voice",
+      "updated": "2024-10-15",
+      "headings": [
+        "Active voice Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Exceptions"
+      ],
+      "source_sha256": "daf4f74eb95db99e01cacafd0f4cc8ca8cfb5e5ca018d037f7c6c05557883be8",
+      "text_sha256": "dbbf087e7f0b5abf9c03a2accaa3fc25f10e524651e361602a7f408db3b9bbb9",
+      "text_bytes": 3441,
+      "local_files": [
+        "language/grammar-person-and-voice.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 20,
+      "title": "Anthropomorphism",
+      "slug": "anthropomorphism",
+      "url": "https://developers.google.com/style/anthropomorphism",
+      "updated": "2024-10-15",
+      "headings": [
+        "Anthropomorphism Stay organized with collections Save and categorize content based on your preferences."
+      ],
+      "source_sha256": "3d47f404b72285d6ec474f8c69a5fd8e3b9bad3fa0958cd405d279642bfdee46",
+      "text_sha256": "a790d658b41a7483dfa00bcfb78b69662edf1a50edcc63ee5507a808cbd3eec4",
+      "text_bytes": 1498,
+      "local_files": [
+        "language/grammar-person-and-voice.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 21,
+      "title": "Articles (a, an, the)",
+      "slug": "articles",
+      "url": "https://developers.google.com/style/articles",
+      "updated": "2025-03-21",
+      "headings": [
+        "Articles (a, an, the) Stay organized with collections Save and categorize content based on your preferences."
+      ],
+      "source_sha256": "c52fadb036b9d31f9095bfac54ba3d431c2161a05dc1e78b74a428c540dc3e11",
+      "text_sha256": "524830e23f38a06ddbf69da25f6690a877c1800a8d22682275f4c1cde80c2aea",
+      "text_bytes": 1690,
+      "local_files": [
+        "language/articles-plurals-and-possessives.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 22,
+      "title": "Capitalization",
+      "slug": "capitalization",
+      "url": "https://developers.google.com/style/capitalization",
+      "updated": "2025-04-02",
+      "headings": [
+        "Capitalization Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Capitalize product names",
+        "Capitalization in titles and headings",
+        "Capitalization in references to titles and headings",
+        "Capitalization and colons",
+        "Capitalization and figures",
+        "Capitalization in glossaries and indexes",
+        "Capitalization and hyphenated words",
+        "Capitalization in lists",
+        "Capitalization for tables in text",
+        "Special capitalization style names"
+      ],
+      "source_sha256": "0dca0bd577bd2a23ce3169eb148e636b858dcb039572a9a2b968c5a1983b52de",
+      "text_sha256": "514eab5a7d40e7d0ec3a3d80e6b7b2ac617f0ece5ff0a150f0e2a73a73131b24",
+      "text_bytes": 5407,
+      "local_files": [
+        "language/abbreviations-and-capitalization.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 23,
+      "title": "Contractions",
+      "slug": "contractions",
+      "url": "https://developers.google.com/style/contractions",
+      "updated": "2025-02-21",
+      "headings": [
+        "Contractions Stay organized with collections Save and categorize content based on your preferences.",
+        "Negation contractions",
+        "Contractions to avoid"
+      ],
+      "source_sha256": "16945ef87ca2180fa7db3f016353abb2542c49451ab5482262211a26420a5002",
+      "text_sha256": "2933d44b437a5dec8e85e16eede635768aebc2a7dbc1658cb0cb4a7d0bcffb69",
+      "text_bytes": 1722,
+      "local_files": [
+        "language/abbreviations-and-capitalization.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 24,
+      "title": "Pluralization",
+      "slug": "pluralization",
+      "url": "https://developers.google.com/style/pluralization",
+      "updated": "2026-01-20",
+      "headings": [
+        "Pluralization Stay organized with collections Save and categorize content based on your preferences.",
+        "Singular and plural",
+        "Plural abbreviations",
+        "Plural product and feature names",
+        "Plurals in parentheses",
+        "Plural pronouns"
+      ],
+      "source_sha256": "8177984f347e95510fb6d89295068144c79d7c58b741d2992f581e4cba4f8dc1",
+      "text_sha256": "52b03f0047be8bfda070e5c092d98ecc3d0cf22f482713f83733fb9ad9186102",
+      "text_bytes": 5194,
+      "local_files": [
+        "language/articles-plurals-and-possessives.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 25,
+      "title": "Possessives",
+      "slug": "possessives",
+      "url": "https://developers.google.com/style/possessives",
+      "updated": "2025-12-01",
+      "headings": [
+        "Possessives Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Product, feature, and company names",
+        "Code items"
+      ],
+      "source_sha256": "825a5aeb9e3d7e33e9632bb600cab6ab4aeb19960e160e8af46a0a49966166ca",
+      "text_sha256": "002b2ba6c7a3ed5867a097788673b26058b459d4d0ef5cac08028421c33da631",
+      "text_bytes": 3649,
+      "local_files": [
+        "language/articles-plurals-and-possessives.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 26,
+      "title": "Prepositions",
+      "slug": "prepositions",
+      "url": "https://developers.google.com/style/prepositions",
+      "updated": "2024-10-15",
+      "headings": [
+        "Prepositions Stay organized with collections Save and categorize content based on your preferences."
+      ],
+      "source_sha256": "46746872265a88e41515946c0942a11df51ef47a23d92eca5631d43c7ee76777",
+      "text_sha256": "7c65dcd8afc556a3d996b0e95954289b911188df917caf9b646b875f03495ccb",
+      "text_bytes": 1836,
+      "local_files": [
+        "language/grammar-person-and-voice.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 27,
+      "title": "Present tense",
+      "slug": "tense",
+      "url": "https://developers.google.com/style/tense",
+      "updated": "2024-10-15",
+      "headings": [
+        "Present tense Stay organized with collections Save and categorize content based on your preferences."
+      ],
+      "source_sha256": "1482314661d9228a02805798c4e6c23bb03a44bd87c595644fc903e8cc8e8a03",
+      "text_sha256": "c8f59e30dcbf946ee124f30c8d897e0bdf73b071e8597b274ffc619e8f0dd79d",
+      "text_bytes": 2186,
+      "local_files": [
+        "language/grammar-person-and-voice.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 28,
+      "title": "Pronouns",
+      "slug": "pronouns",
+      "url": "https://developers.google.com/style/pronouns",
+      "updated": "2024-10-15",
+      "headings": [
+        "Pronouns Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Ambiguous pronoun references",
+        "Gender-neutral pronouns",
+        "Optional pronouns",
+        "Personal pronouns",
+        "Relative pronouns"
+      ],
+      "source_sha256": "32ad0a27515147a5009fd4960dc1643394d3c6f427fabc5c213cf681b22a15c6",
+      "text_sha256": "1d485acd00fcab3aca312482cbd3a39578478813c224159591b06878b8f80451",
+      "text_bytes": 5383,
+      "local_files": [
+        "language/grammar-person-and-voice.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 29,
+      "title": "Second person and first person",
+      "slug": "person",
+      "url": "https://developers.google.com/style/person",
+      "updated": "2025-04-10",
+      "headings": [
+        "Second person and first person Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Address the reader as you",
+        "Use first-person plural pronouns carefully",
+        "Address your audience consistently"
+      ],
+      "source_sha256": "37f0cc3f5f6d6788494ea5d565161a1b3e717941a768293f65ddfcb47a4b7062",
+      "text_sha256": "862cdf19d6e4fc0ce8149de1866e97303ff1c2eea88dad0e6c752363a7e5dcbe",
+      "text_bytes": 4328,
+      "local_files": [
+        "language/grammar-person-and-voice.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 30,
+      "title": "Sentence structure",
+      "slug": "sentence-structure",
+      "url": "https://developers.google.com/style/sentence-structure",
+      "updated": "2024-10-15",
+      "headings": [
+        "Sentence structure Stay organized with collections Save and categorize content based on your preferences."
+      ],
+      "source_sha256": "a197c6de28ae44ebaae4f1b21f1f468a085b8d95733b2fcc56631ff970a94e81",
+      "text_sha256": "17a79d374fbdabebb4bf435ea47e6fc8314b88fe0cde5fdff93cf31156eba0b2",
+      "text_bytes": 1759,
+      "local_files": [
+        "language/grammar-person-and-voice.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 31,
+      "title": "Verb forms in reference documentation",
+      "slug": "reference-verbs",
+      "url": "https://developers.google.com/style/reference-verbs",
+      "updated": "2024-10-15",
+      "headings": [
+        "Verb forms in reference documentation Stay organized with collections Save and categorize content based on your preferences."
+      ],
+      "source_sha256": "7ab36a92baaff8d2887de8153307792528199f1ae89485c3a7693bcbe94b9080",
+      "text_sha256": "e6fcf8790a2745277e62e76c54abf828544051a2d818ccb88a6947f5624e300a",
+      "text_bytes": 1612,
+      "local_files": [
+        "language/reference-verbs.md",
+        "technical-content/api-reference-comments.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 32,
+      "title": "Colons",
+      "slug": "colons",
+      "url": "https://developers.google.com/style/colons",
+      "updated": "2024-10-15",
+      "headings": [
+        "Colons Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Introductory phrase preceding colon",
+        "Colons within sentences",
+        "See also"
+      ],
+      "source_sha256": "9a4a80ed291af394d79a7dd587328865c7b4188a9a68ee89e0de7efc639c9f32",
+      "text_sha256": "a0413c8346afe19475f8478ca1d8adb9dca1712bacb28a70bdc7fa0c096737bc",
+      "text_bytes": 2782,
+      "local_files": [
+        "punctuation/commas-and-colons.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 33,
+      "title": "Commas",
+      "slug": "commas",
+      "url": "https://developers.google.com/style/commas",
+      "updated": "2025-08-05",
+      "headings": [
+        "Commas Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Serial commas",
+        "Commas after introductory words and phrases",
+        "Commas separating two independent clauses",
+        "Commas separating independent from dependent clauses",
+        "Set off other kinds of clauses",
+        "Punctuate numbers",
+        "Punctuate examples"
+      ],
+      "source_sha256": "f588e321904df9030e35c94d3afd990557add99f68cef662c5d8ccee69d03dce",
+      "text_sha256": "9d0998c52186f60c74df0a110eeb7efb87693fc645677eb1846348690c64e53a",
+      "text_bytes": 4953,
+      "local_files": [
+        "punctuation/commas-and-colons.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 34,
+      "title": "Dashes",
+      "slug": "dashes",
+      "url": "https://developers.google.com/style/dashes",
+      "updated": "2024-10-15",
+      "headings": [
+        "Dashes Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Em dashes",
+        "En dashes",
+        "Colons instead of dashes in description lists"
+      ],
+      "source_sha256": "a6d8f626b65f69ccd87346d01fa73f0e6d33cdfd586f0a87a9e519c6c6b07754",
+      "text_sha256": "dee1110e0e7fbe01fdd2caed28bd4fcee05ae52fae2d68494cbb3823152b7353",
+      "text_bytes": 3555,
+      "local_files": [
+        "punctuation/dashes-hyphens-and-ranges.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 35,
+      "title": "Ellipses",
+      "slug": "ellipses",
+      "url": "https://developers.google.com/style/ellipses",
+      "updated": "2024-10-15",
+      "headings": [
+        "Ellipses Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Ellipses as suspension points",
+        "Ellipses in a user interface",
+        "Ellipses in text",
+        "Punctuation and spacing of ellipses"
+      ],
+      "source_sha256": "93eff07633f44cb6c7dacb2be27fa787cf91eef330fc6650807b7f58dd2c8a3e",
+      "text_sha256": "46955686af4cca1ce061a355dd606abfdaa7a68ea667bb28542075673c78e997",
+      "text_bytes": 3849,
+      "local_files": [
+        "punctuation/quotes-parentheses-ellipses-and-slashes.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 36,
+      "title": "Hyphens",
+      "slug": "hyphens",
+      "url": "https://developers.google.com/style/hyphens",
+      "updated": "2026-04-17",
+      "headings": [
+        "Hyphens Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "General guidelines",
+        "Prefixes",
+        "Exceptions",
+        "The non prefix",
+        "Compounds",
+        "Compound nouns",
+        "Compound modifiers before a noun",
+        "Numbers and units of measurement",
+        "Compound terms after a verb",
+        "Range of numbers",
+        "Spaces around hyphens",
+        "Suspended hyphens"
+      ],
+      "source_sha256": "742392b54fe48e2fe556e2f7fb90138254b23b493ba1ed66bfdccb27ade40ac5",
+      "text_sha256": "ffa307527fc86b39c881b6e0d31e602d3ed8dc782abfb9ff0b48b23dff7fb52d",
+      "text_bytes": 9156,
+      "local_files": [
+        "punctuation/dashes-hyphens-and-ranges.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 37,
+      "title": "Parentheses",
+      "slug": "parentheses",
+      "url": "https://developers.google.com/style/parentheses",
+      "updated": "2025-12-01",
+      "headings": [
+        "Parentheses Stay organized with collections Save and categorize content based on your preferences."
+      ],
+      "source_sha256": "8bbdac1a6c9dba6ffe40c963ab8e858d1f0d4e219fef6b24c5049b4659b32cf5",
+      "text_sha256": "0a929b9712d3d4d28f6d61bf790ca28f558e542af4a2aec002674c5d83faead4",
+      "text_bytes": 2348,
+      "local_files": [
+        "punctuation/quotes-parentheses-ellipses-and-slashes.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 38,
+      "title": "Periods and other end punctuation",
+      "slug": "periods",
+      "url": "https://developers.google.com/style/periods",
+      "updated": "2026-01-13",
+      "headings": [
+        "Periods and other end punctuation Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Periods with lists",
+        "Periods with URLs",
+        "Periods with quotation marks",
+        "Periods with parentheses",
+        "Periods with headings",
+        "Periods with numbers",
+        "Periods with captions",
+        "Periods with alt text",
+        "Periods with abbreviations",
+        "Spaces between sentences",
+        "Exclamation points"
+      ],
+      "source_sha256": "2e66b45cc9436ca65301746e7f8a1b089cfadd70186d1e42b1b350d07c0a3785",
+      "text_sha256": "c87564632e143a9f6c014ebe7f2844f8dd914bd4a096524aae489f2ce2495831",
+      "text_bytes": 5011,
+      "local_files": [
+        "punctuation/periods-semicolons-and-end-punctuation.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 39,
+      "title": "Quotation marks",
+      "slug": "quotation-marks",
+      "url": "https://developers.google.com/style/quotation-marks",
+      "updated": "2025-05-14",
+      "headings": [
+        "Quotation marks Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "When to use quotation marks",
+        "Commas and periods with quotation marks",
+        "Straight and curly quotation marks",
+        "Single quotation marks"
+      ],
+      "source_sha256": "55aaa9e4ef448b7a1a27b369d3580606bcdaf4db63fe7c8a3f4f4bef62a047ef",
+      "text_sha256": "c39644005c985d62959ce9c992eb408d542cc4fb4fb3a62017f498066b29354a",
+      "text_bytes": 5535,
+      "local_files": [
+        "punctuation/quotes-parentheses-ellipses-and-slashes.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 40,
+      "title": "Semicolons",
+      "slug": "semicolons",
+      "url": "https://developers.google.com/style/semicolons",
+      "updated": "2024-10-15",
+      "headings": [
+        "Semicolons Stay organized with collections Save and categorize content based on your preferences."
+      ],
+      "source_sha256": "811770c65447d10b4ac254b6cc679eea5b1a9d287256cef9a269e84f92e37cad",
+      "text_sha256": "e81167cca5ff0c408bcb6fc6d8a248800f73fe0e37c1270418db9c6c2916b619",
+      "text_bytes": 2296,
+      "local_files": [
+        "punctuation/periods-semicolons-and-end-punctuation.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 41,
+      "title": "Slashes",
+      "slug": "slashes",
+      "url": "https://developers.google.com/style/slashes",
+      "updated": "2024-10-15",
+      "headings": [
+        "Slashes Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Slashes with dates",
+        "Slashes with alternatives",
+        "And/or",
+        "Slashes with file paths and URLs",
+        "Slashes with fractions",
+        "Slashes with abbreviations"
+      ],
+      "source_sha256": "fc6265ce59dc13ed6e3936d98d5bbbedcd42687c4fa661d1abc17f41dcf1824f",
+      "text_sha256": "18006e8222bd06028f24962e1da3affe1eedbdcabb5a832699cc45484b187144",
+      "text_bytes": 3637,
+      "local_files": [
+        "punctuation/quotes-parentheses-ellipses-and-slashes.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 42,
+      "title": "Dates and times",
+      "slug": "dates-times",
+      "url": "https://developers.google.com/style/dates-times",
+      "updated": "2024-10-15",
+      "headings": [
+        "Dates and times Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Express times",
+        "Express time zones",
+        "Express dates",
+        "Partial dates and abbreviations",
+        "Dates in the middle of a sentence",
+        "Why we prefer dates written out",
+        "Numeric-only date format",
+        "Express dates and times together",
+        "Express divisions of the year"
+      ],
+      "source_sha256": "d4082eb9e7bb02a01d67e324bdc79bc822d94eb7fe350ad479e3578c9c00f2fb",
+      "text_sha256": "5147f147542b5eb2d7d71277e551ed623afea1a4486a491f9e6ab27bafbcd9c7",
+      "text_bytes": 6656,
+      "local_files": [
+        "formatting/dates-and-times.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 43,
+      "title": "Format examples",
+      "slug": "format-examples",
+      "url": "https://developers.google.com/style/format-examples",
+      "updated": "2025-12-02",
+      "headings": [
+        "Format examples Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary"
+      ],
+      "source_sha256": "d6429ce5105457e29c5647a8006e0951e060648b66ab3086835520402e89cf72",
+      "text_sha256": "5edb5d02697e9debe8aab6dbb553ba70ef5a901939b8625cf891a6e3324087f7",
+      "text_bytes": 3108,
+      "local_files": [
+        "formatting/text-formatting.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 44,
+      "title": "Diagrams, figures, and other images",
+      "slug": "images",
+      "url": "https://developers.google.com/style/images",
+      "updated": "2025-05-16",
+      "headings": [
+        "Diagrams, figures, and other images Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Create and save images",
+        "Text associated with images",
+        "Example",
+        "HTML",
+        "Markdown",
+        "Alt text",
+        "Figure captions",
+        "Figure descriptions",
+        "Text in figures",
+        "Accessibility resources",
+        "High-resolution images",
+        "Layout of images on a page"
+      ],
+      "source_sha256": "c298934df24393f322343080737f6718a9f939b490df107d9802ea33bf34fbb5",
+      "text_sha256": "db935e8930b93edbc0fe11149ceef14b5c4a8a452b02eaa8f63139e896287188",
+      "text_bytes": 18876,
+      "local_files": [
+        "visuals/images-and-media.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 45,
+      "title": "Footnotes",
+      "slug": "footnotes",
+      "url": "https://developers.google.com/style/footnotes",
+      "updated": "2025-04-02",
+      "headings": [
+        "Footnotes Stay organized with collections Save and categorize content based on your preferences."
+      ],
+      "source_sha256": "978f1508674bef3451a0fb2ba33b93827d83ba40d765004feb4eb79da7bcb43d",
+      "text_sha256": "74ebaedd8b07a08c913b5555f134166f02af08ab4062dcf5ffe07a9ee3eed48e",
+      "text_bytes": 1580,
+      "local_files": [
+        "content-structure/notices-and-footnotes.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 46,
+      "title": "Headings and titles",
+      "slug": "headings",
+      "url": "https://developers.google.com/style/headings",
+      "updated": "2026-06-08",
+      "headings": [
+        "Headings and titles Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Heading and title text",
+        "Title phrasing",
+        "Mixed heading styles",
+        "Use of -ing verb forms",
+        "Example headings",
+        "HTML",
+        "Markdown",
+        "Heading and title format",
+        "Syntax and capitalization",
+        "Formatting and code",
+        "Hierarchy and structure",
+        "Refer to a group of sections"
+      ],
+      "source_sha256": "f58345c48da41a4f4a3d57e0ac4ad89f94b24345bb4fbec40297403f7c6e3f1e",
+      "text_sha256": "214b153b142e67aa74ebde7a51b605ce5f888c90acfdc587f676a0ab02eb12ad",
+      "text_bytes": 9436,
+      "local_files": [
+        "content-structure/headings-and-paragraphs.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 47,
+      "title": "Use italics to discuss terms",
+      "slug": "italics-terms",
+      "url": "https://developers.google.com/style/italics-terms",
+      "updated": "2025-05-22",
+      "headings": [
+        "Use italics to discuss terms Stay organized with collections Save and categorize content based on your preferences.",
+        "New terms",
+        "Words as words"
+      ],
+      "source_sha256": "a2123b40a5d1c703d7941897ecf3dc7f54d67dbf3a6c6b292cc11d2bb021ee9c",
+      "text_sha256": "cf4f1cc5ebe39293077fab775bdb9886f8107f7158975e8ab398dfec639a9ded",
+      "text_bytes": 1354,
+      "local_files": [
+        "formatting/text-formatting.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 48,
+      "title": "Lists",
+      "slug": "lists",
+      "url": "https://developers.google.com/style/lists",
+      "updated": "2025-05-16",
+      "headings": [
+        "Lists Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "List or table?",
+        "Types of lists",
+        "Multiple paragraph list items",
+        "Introductory sentences for lists",
+        "Objectives",
+        "Unusual list numbering",
+        "Sub-steps in a numbered procedure",
+        "Parallel syntax",
+        "Capitalization and end punctuation",
+        "Numbered, lettered, and bulleted lists",
+        "Description lists",
+        "Description lists that use run-in headings",
+        "Comma-separated lists"
+      ],
+      "source_sha256": "b80c10c68cabc901541533313b5aab0a4798d23db2c45e5c53d19354187d6f60",
+      "text_sha256": "d10e8eb1f61c83ff3056d1ab1918edd6a45bc06b2a35caeb32562924e5acc86b",
+      "text_bytes": 11817,
+      "local_files": [
+        "content-structure/lists.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 49,
+      "title": "Mathematical notation",
+      "slug": "mathematical-notation",
+      "url": "https://developers.google.com/style/mathematical-notation",
+      "updated": "2026-03-03",
+      "headings": [
+        "Mathematical notation Stay organized with collections Save and categorize content based on your preferences.",
+        "Use HTML entities for mathematical symbols",
+        "Format mathematical notation",
+        "Operators",
+        "Variables",
+        "Expressions and equations",
+        "Fractions",
+        "Exponents and subscripts",
+        "Notation as words",
+        "Tools for complex or multiline equations",
+        "More resources"
+      ],
+      "source_sha256": "06241bcb6719f7e8a7b3db79e8adf1a338562d57fedacd1d3aea6ad9240e1ce3",
+      "text_sha256": "905f9921d525bfa14118ceb068e3985302234bae1c9765b5703380fbf907c202",
+      "text_bytes": 5792,
+      "local_files": [
+        "formatting/mathematical-notation-and-phone.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 50,
+      "title": "Notes, cautions, warnings, and other notices",
+      "slug": "notices",
+      "url": "https://developers.google.com/style/notices",
+      "updated": "2025-09-08",
+      "headings": [
+        "Notes, cautions, warnings, and other notices Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Pick a notice type",
+        "When to use a note notice type",
+        "When not to use a note notice type",
+        "Examples"
+      ],
+      "source_sha256": "19e299101742f96f5326342ac7420a4465b71fed5ac6d23847b73a47afdae7b7",
+      "text_sha256": "235031fd2396769e225b60097a2e72d21064c8cd482c90e9ead0100ea7588b36",
+      "text_bytes": 5243,
+      "local_files": [
+        "content-structure/notices-and-footnotes.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 51,
+      "title": "Numbers",
+      "slug": "numbers",
+      "url": "https://developers.google.com/style/numbers",
+      "updated": "2026-04-17",
+      "headings": [
+        "Numbers Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Ordinal numbers",
+        "Numbers as words",
+        "Numbers as numerals",
+        "Numbers as Roman numerals",
+        "Fractions",
+        "Percentages",
+        "Ranges of numbers",
+        "Suspended hyphens",
+        "Currency",
+        "Commas and decimal points in numbers",
+        "Dimensions",
+        "Exponents",
+        "Accompany numerical concepts with real-world practical implications",
+        "Mathematical notation and visuals"
+      ],
+      "source_sha256": "fdd9adba345e15b531cc9c266ae77af5c5bbd7a534b3c423c36e6d2675544358",
+      "text_sha256": "65823dd19ebe1877f718d502ebb19f590503217cb971988ef7c0bac8d68f1e47",
+      "text_bytes": 8447,
+      "local_files": [
+        "formatting/numbers-and-units.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 52,
+      "title": "Paragraph structure",
+      "slug": "paragraph-structure",
+      "url": "https://developers.google.com/style/paragraph-structure",
+      "updated": "2024-10-15",
+      "headings": [
+        "Paragraph structure Stay organized with collections Save and categorize content based on your preferences.",
+        "Put critical information first",
+        "Format paragraphs"
+      ],
+      "source_sha256": "43166ef80b818677c2f8330b831c42de125c37041647265ec53ec3dab4f4e62a",
+      "text_sha256": "fe479a1f16df7f47ad3b9d418b68e723a8f20c40a50bafc87776d05862630661",
+      "text_bytes": 2291,
+      "local_files": [
+        "content-structure/headings-and-paragraphs.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 53,
+      "title": "Format phone numbers in text",
+      "slug": "phone-numbers",
+      "url": "https://developers.google.com/style/phone-numbers",
+      "updated": "2025-04-17",
+      "headings": [
+        "Format phone numbers in text Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Use example phone numbers",
+        "Format phone numbers in HTML or Markdown",
+        "Example",
+        "HTML",
+        "Markdown",
+        "Format North American phone numbers",
+        "Format international phone numbers",
+        "Format phone numbers that include an extension"
+      ],
+      "source_sha256": "38dee3d28e6784c040d63f0241fe54918ab95ed4cdd1080f61cfe3bedea30866",
+      "text_sha256": "c88ce9a94a57a9339aa758d96909f213683bcaaac943b38a289d487bddf8fc7a",
+      "text_bytes": 3417,
+      "local_files": [
+        "formatting/mathematical-notation-and-phone.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 54,
+      "title": "Procedures",
+      "slug": "procedures",
+      "url": "https://developers.google.com/style/procedures",
+      "updated": "2026-06-08",
+      "headings": [
+        "Procedures Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Introductory sentences",
+        "Single-step procedures",
+        "Sub-steps in numbered procedures",
+        "Order of multiple components in a step",
+        "Multi-action procedures",
+        "Multiple procedures for the same task",
+        "Repetitive procedures",
+        "Optional steps",
+        "Steps that say where to complete a task",
+        "Steps with goals",
+        "Steps with results or justifications",
+        "Summary of guidelines for writing procedures"
+      ],
+      "source_sha256": "01203908085dd9406c8462bedcace317032676d308ab3af9c956f0180427ab17",
+      "text_sha256": "542fdfac57a0618f40417db085230fca655e290fb18c6f91c19154bd353e2b8f",
+      "text_bytes": 13219,
+      "local_files": [
+        "procedures/procedures.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 55,
+      "title": "Tables",
+      "slug": "tables",
+      "url": "https://developers.google.com/style/tables",
+      "updated": "2025-03-21",
+      "headings": [
+        "Tables Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "List or table?",
+        "Places not to use tables",
+        "Multi-paragraph table cells",
+        "Introductory sentences for tables",
+        "Table placement",
+        "Table captions",
+        "Table formatting",
+        "Table column heads",
+        "Responsive tables",
+        "Link to tables"
+      ],
+      "source_sha256": "d6a7c86ed57153fa4f9d3fd6315dabe35c492a92a527813cad7ae49f144f08f9",
+      "text_sha256": "f64b4fe312e18c61974ed3b901cddd81708767faa76bb8cdc647ea433dc20131",
+      "text_bytes": 7041,
+      "local_files": [
+        "content-structure/tables.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 56,
+      "title": "Units of measurement",
+      "slug": "units-of-measure",
+      "url": "https://developers.google.com/style/units-of-measure",
+      "updated": "2026-04-17",
+      "headings": [
+        "Units of measurement Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Spaces in units of measurement",
+        "Example",
+        "HTML",
+        "Markdown",
+        "Ranges of numbers with units",
+        "Hyphens with multiplied units",
+        "Use k to indicate thousands",
+        "Currency",
+        "Rates",
+        "Decimal and binary units",
+        "More resources"
+      ],
+      "source_sha256": "f4131f948da887a93ced282c41ce17cac3df466c894fc859d9ec68dc3c307b28",
+      "text_sha256": "5d57dfd160e3329b806f54612d0e1ac2efe7329cb1c64e58fa15db0ec76c804a",
+      "text_bytes": 5668,
+      "local_files": [
+        "formatting/numbers-and-units.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 57,
+      "title": "Cross-references and linking",
+      "slug": "cross-references",
+      "url": "https://developers.google.com/style/cross-references",
+      "updated": "2025-11-07",
+      "headings": [
+        "Cross-references and linking Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Choose links selectively",
+        "Provide context on the page",
+        "Avoid duplicate links",
+        "Provide the most relevant link",
+        "Link to third-party sites",
+        "Write descriptive link text",
+        "Two options for effective link text",
+        "Page titles as link text",
+        "Descriptive phrases as link text",
+        "Avoid vague link text",
+        "Avoid URLs as link text",
+        "Include abbreviations in link text",
+        "Link to commands",
+        "Write link introductions (\"For more information\")",
+        "Clarify the purpose of a link",
+        "Explain unexpected link behavior",
+        "Open links in the current tab",
+        "Don't use external link icons",
+        "Punctuation around link text",
+        "Quotation marks and italics",
+        "Avoid external links in your documentation navigation",
+        "Style link text"
+      ],
+      "source_sha256": "13c867e142683532682d00f943b0d28d9731b00495ce3546e61b8a6b1f968eab",
+      "text_sha256": "e8032b7684def06c52039866f320b1ff127db604ae75067bad44a0b506e2d811",
+      "text_bytes": 14173,
+      "local_files": [
+        "linking/links-and-cross-references.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 58,
+      "title": "Make headings into link targets",
+      "slug": "headings-targets",
+      "url": "https://developers.google.com/style/headings-targets",
+      "updated": "2026-05-06",
+      "headings": [
+        "Make headings into link targets Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Add a custom anchor",
+        "HTML",
+        "Markdown",
+        "Revise a heading"
+      ],
+      "source_sha256": "e9a7a91769053d22efce4fbb1018e281cfa6ad86625ba8bd75a98833248d79a7",
+      "text_sha256": "f4762eaab7915dfdea6b58e29d36f730770c0feb34b8b2fa41d296fcf3abedb3",
+      "text_bytes": 4767,
+      "local_files": [
+        "linking/anchors-and-targets.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 59,
+      "title": "API reference code comments",
+      "slug": "api-reference-comments",
+      "url": "https://developers.google.com/style/api-reference-comments",
+      "updated": "2026-07-01",
+      "headings": [
+        "API reference code comments Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Documentation basics",
+        "Classes, interfaces, structs",
+        "Members",
+        "Methods",
+        "Description",
+        "Parameters",
+        "Return values",
+        "Exceptions",
+        "Deprecations",
+        "Examples"
+      ],
+      "source_sha256": "babe26d4f08171ea74d8af94757ee557e26ed1fa8840a35c31f0f70ba14d93ad",
+      "text_sha256": "108604a8f335a01b21b105bba08a3e83fc4fe3d538a84f7d0e76b53aec80f2e2",
+      "text_bytes": 9959,
+      "local_files": [
+        "technical-content/api-reference-comments.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 60,
+      "title": "Code in text",
+      "slug": "code-in-text",
+      "url": "https://developers.google.com/style/code-in-text",
+      "updated": "2026-01-06",
+      "headings": [
+        "Code in text Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Some specific items to put in code font",
+        "Items to put in ordinary (non-code) font",
+        "Code in UI elements",
+        "Items that are sometimes in code font",
+        "Method names",
+        "HTTP status codes",
+        "Grammatical treatment of code elements",
+        "Linking API terms in Android"
+      ],
+      "source_sha256": "c0668a9cffecb5d6f1125746d0fe0f1ed6a8f8be7bfb4ac9376e91f78b3815a5",
+      "text_sha256": "f5671be4c9954d1ab63a2e338e74f3d1e1f8de03b4a4dd3026ff567f3127b2c0",
+      "text_bytes": 14223,
+      "local_files": [
+        "technical-content/code-in-text-and-samples.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 61,
+      "title": "Code samples",
+      "slug": "code-samples",
+      "url": "https://developers.google.com/style/code-samples",
+      "updated": "2025-10-10",
+      "headings": [
+        "Code samples Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Basic guidelines",
+        "Introductory statements",
+        "Code style guides"
+      ],
+      "source_sha256": "bd730652d30caf25add2264814e400802f646279adbb35384cac0a4931f0657c",
+      "text_sha256": "ec25c6596eef5b72c7b918af44fe6b6830840f5d952b68500577fd6eae6fede7",
+      "text_bytes": 4897,
+      "local_files": [
+        "technical-content/code-in-text-and-samples.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 62,
+      "title": "Document command-line syntax",
+      "slug": "code-syntax",
+      "url": "https://developers.google.com/style/code-syntax",
+      "updated": "2025-10-10",
+      "headings": [
+        "Document command-line syntax Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Best practices",
+        "Format a command",
+        "Command prompt",
+        "Optional arguments",
+        "Mutually exclusive arguments",
+        "Arguments that can repeat",
+        "Optional arguments in click-to-copy commands",
+        "Import a bootable virtual disk",
+        "Import a non-bootable virtual disk",
+        "Output from commands",
+        "Command-line terminology",
+        "gcloud commands",
+        "Example command",
+        "Example command with a flag",
+        "Example command with multiple elements",
+        "Linux commands",
+        "Linux signals"
+      ],
+      "source_sha256": "bca862c7c66e0eca11659c2be3db72415b1df1f7badc2a19f0e19ef12094fb5e",
+      "text_sha256": "cbf1620ab04979823674b7f01732f16fb492edefa60b4e02b8dead502ea94263",
+      "text_bytes": 18882,
+      "local_files": [
+        "technical-content/command-line-syntax.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 63,
+      "title": "Format placeholders",
+      "slug": "placeholders",
+      "url": "https://developers.google.com/style/placeholders",
+      "updated": "2025-08-28",
+      "headings": [
+        "Format placeholders Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Placeholders",
+        "Placeholders in inline text",
+        "Placeholders in code blocks",
+        "Placeholder text",
+        "Explain placeholders",
+        "Single placeholder",
+        "Two or more placeholders",
+        "Placeholders in output",
+        "Response"
+      ],
+      "source_sha256": "f576e687d3c735a659d213f8f5b562c3b1f8482a73c7cf58c148fb602311f652",
+      "text_sha256": "52d664831fd8ae4844725a382a1192c61ba4c4ab7e08ef72b3b876df7210951a",
+      "text_bytes": 10435,
+      "local_files": [
+        "technical-content/placeholders.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 64,
+      "title": "UI elements and interaction",
+      "slug": "ui-elements",
+      "url": "https://developers.google.com/style/ui-elements",
+      "updated": "2026-05-06",
+      "headings": [
+        "UI elements and interaction Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Focus on the task",
+        "Format names of UI elements",
+        "Use appropriate capitalization",
+        "Refer to UI elements",
+        "Terminology and usage",
+        "Windows, pages, dialogs, panes, and sections",
+        "Menus and menu bars",
+        "Use angle brackets",
+        "HTML",
+        "Markdown",
+        "Navigation menu",
+        "Toolbar",
+        "Buttons and icons",
+        "Difficult-to-find UI elements",
+        "Tab",
+        "Text box",
+        "List box, combo box, and spin box",
+        "Checkbox",
+        "Radio button",
+        "Expander arrow",
+        "Toggle",
+        "Press and type keyboard keys",
+        "Prepositions",
+        "Verbs in procedures"
+      ],
+      "source_sha256": "775c6f0f0833c9d1c0c9c3589ed7534821a2eb1e50bc15bbec539fa22710acbc",
+      "text_sha256": "fe1c77b81ee185bed2b029b3f054c1f290ec2188e042e672e437bc68e2e207b3",
+      "text_bytes": 18718,
+      "local_files": [
+        "technical-content/ui-elements-and-interaction.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 65,
+      "title": "HTML and semantic tagging",
+      "slug": "semantic-tagging",
+      "url": "https://developers.google.com/style/semantic-tagging",
+      "updated": "2024-10-15",
+      "headings": [
+        "HTML and semantic tagging Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Visual formatting"
+      ],
+      "source_sha256": "c89c58dbc1add87cad8ddeb1a3a7adbe11528683255fffc8a1f437a94858dae0",
+      "text_sha256": "aa9c113b20830da880e1684c845b9bc320d7ac64f7e0b0946ce81d0eafa60ec1",
+      "text_bytes": 3071,
+      "local_files": [
+        "technical-content/html-markdown-and-semantics.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 66,
+      "title": "HTML formatting",
+      "slug": "html-formatting",
+      "url": "https://developers.google.com/style/html-formatting",
+      "updated": "2024-10-15",
+      "headings": [
+        "HTML formatting Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Line length"
+      ],
+      "source_sha256": "585819d5a5da6b5cd3812aa57b79a33bd2a8277df60acadd4109110b556e5ae1",
+      "text_sha256": "1e6dc6798e27f29309ea69973d633b809c59347cdf5a2a7eb4a8096620c9cfd7",
+      "text_bytes": 3296,
+      "local_files": [
+        "technical-content/html-markdown-and-semantics.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 67,
+      "title": "Markdown versus HTML",
+      "slug": "markdown",
+      "url": "https://developers.google.com/style/markdown",
+      "updated": "2024-10-15",
+      "headings": [
+        "Markdown versus HTML Stay organized with collections Save and categorize content based on your preferences."
+      ],
+      "source_sha256": "430a4e2e1987b5d0cf8b085207d57f99f935f30fcf279bf40d632a79435048be",
+      "text_sha256": "6c3098f59eee3cf213763dcaa91a5b87b528f67e17185cddce634e46c5255040",
+      "text_bytes": 1798,
+      "local_files": [
+        "technical-content/html-markdown-and-semantics.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 68,
+      "title": "Example domains and names",
+      "slug": "examples",
+      "url": "https://developers.google.com/style/examples",
+      "updated": "2025-04-17",
+      "headings": [
+        "Example domains and names Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Example domain names",
+        "Example email addresses",
+        "Example person names",
+        "Example person surnames",
+        "Further notes about example people",
+        "Example company names",
+        "Example phone numbers",
+        "Example IP addresses",
+        "Example street addresses",
+        "Example project names",
+        "Example service account IDs"
+      ],
+      "source_sha256": "57cbe2a77b7e5109354de78364bdf71063fa367683dd5adace8e5a1f84248a1c",
+      "text_sha256": "41efd41db1ed939bcbd2f07658b29c936d887f0c8aec164e1fa6503f7f871bb8",
+      "text_bytes": 7850,
+      "local_files": [
+        "names-and-naming/safe-example-data.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 69,
+      "title": "Filenames and file types",
+      "slug": "filenames",
+      "url": "https://developers.google.com/style/filenames",
+      "updated": "2025-10-14",
+      "headings": [
+        "Filenames and file types Stay organized with collections Save and categorize content based on your preferences.",
+        "Page Summary",
+        "Guidelines for names",
+        "Exceptions for consistency",
+        "Other exceptions",
+        "Refer to files",
+        "Refer to filenames",
+        "Refer to file interactions",
+        "Refer to file types"
+      ],
+      "source_sha256": "f528377595622ca67b8e583628c7ef01f5b471282a599a821db4d981d8ef3697",
+      "text_sha256": "23ac2fdee75c722fe0bacdd8063b601c56de2c709d592529073b183b95cef2a0",
+      "text_bytes": 5090,
+      "local_files": [
+        "names-and-naming/filenames-and-file-types.md"
+      ],
+      "covered": true
+    },
+    {
+      "order": 70,
+      "title": "Trademarks",
+      "slug": "trademarks",
+      "url": "https://developers.google.com/style/trademarks",
+      "updated": "2024-10-15",
+      "headings": [
+        "Trademarks Stay organized with collections Save and categorize content based on your preferences.",
+        "Label trademarked terms",
+        "Use trademarks only as modifiers"
+      ],
+      "source_sha256": "69c40fae4b7286d4fc21ee522dc0616784577441e1e1fe52f76f623efb307d90",
+      "text_sha256": "a90e2b763cf74977b455db3acd7a6d0fc473a5352d1b16365eb4928c7345faa2",
+      "text_bytes": 1879,
+      "local_files": [
+        "names-and-naming/product-names-and-trademarks.md"
+      ],
+      "covered": true
+    }
+  ]
+}

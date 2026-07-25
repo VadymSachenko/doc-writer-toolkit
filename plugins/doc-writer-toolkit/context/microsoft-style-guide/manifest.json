@@ -1,0 +1,2251 @@
+{
+  "schema_version": 1,
+  "captured": "2026-07-16",
+  "routing_entry": "ROUTING.md",
+  "authority_entry": "AUTHORITY-AND-PRECEDENCE.md",
+  "rules": [
+    {
+      "id": "MWSG-EN-ACRONYMS",
+      "title": "Acronyms and abbreviations",
+      "languages": [
+        "en-US"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/acronyms"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "acronym",
+        "abbreviation",
+        "initialism"
+      ],
+      "path": "en-us/acronyms.md",
+      "content_types": []
+    },
+    {
+      "id": "MWSG-EN-CAPITALIZATION",
+      "title": "Capitalization",
+      "languages": [
+        "en-US"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/capitalization"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "capitalization",
+        "sentence case",
+        "title case"
+      ],
+      "path": "en-us/capitalization.md",
+      "content_types": []
+    },
+    {
+      "id": "MWSG-EN-GRAMMAR-PERSON",
+      "title": "Person, nouns, and pronouns",
+      "languages": [
+        "en-US"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/grammar/person",
+        "https://learn.microsoft.com/en-us/style-guide/grammar/nouns-pronouns"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "person",
+        "pronoun",
+        "you",
+        "we",
+        "they",
+        "noun"
+      ],
+      "path": "en-us/grammar/person-nouns-and-pronouns.md",
+      "content_types": []
+    },
+    {
+      "id": "MWSG-EN-GRAMMAR-STRUCTURE",
+      "title": "Sentence structure, modifiers, and prepositions",
+      "languages": [
+        "en-US"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/grammar/grammar-and-parts-of-speech",
+        "https://learn.microsoft.com/en-us/style-guide/grammar/prepositions",
+        "https://learn.microsoft.com/en-us/style-guide/grammar/dangling-misplaced-modifiers"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "sentence",
+        "modifier",
+        "preposition",
+        "UI"
+      ],
+      "path": "en-us/grammar/sentence-structure-and-prepositions.md",
+      "content_types": []
+    },
+    {
+      "id": "MWSG-EN-GRAMMAR-VERBS",
+      "title": "Verbs and voice",
+      "languages": [
+        "en-US"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/grammar/verbs",
+        "https://learn.microsoft.com/en-us/style-guide/grammar/ing-words"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "verb",
+        "active voice",
+        "imperative",
+        "gerund",
+        "participle"
+      ],
+      "path": "en-us/grammar/verbs-and-voice.md",
+      "content_types": []
+    },
+    {
+      "id": "MWSG-EN-NUMBERS",
+      "title": "Numbers",
+      "languages": [
+        "en-US"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/numbers"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "number",
+        "numeral",
+        "fraction",
+        "range",
+        "percentage"
+      ],
+      "path": "en-us/numbers.md",
+      "content_types": []
+    },
+    {
+      "id": "MWSG-EN-PUNCTUATION-COMMAS-COLONS",
+      "title": "Commas and colons",
+      "languages": [
+        "en-US"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/punctuation/commas",
+        "https://learn.microsoft.com/en-us/style-guide/punctuation/colons"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "comma",
+        "serial comma",
+        "colon"
+      ],
+      "path": "en-us/punctuation/commas-and-colons.md",
+      "content_types": []
+    },
+    {
+      "id": "MWSG-EN-PUNCTUATION-CORE",
+      "title": "Core punctuation",
+      "languages": [
+        "en-US"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/punctuation/",
+        "https://learn.microsoft.com/en-us/style-guide/punctuation/formatting-punctuation",
+        "https://learn.microsoft.com/en-us/style-guide/punctuation/periods",
+        "https://learn.microsoft.com/en-us/style-guide/punctuation/question-marks",
+        "https://learn.microsoft.com/en-us/style-guide/punctuation/exclamation-points",
+        "https://learn.microsoft.com/en-us/style-guide/punctuation/semicolons"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "punctuation",
+        "period",
+        "question mark",
+        "exclamation",
+        "semicolon"
+      ],
+      "path": "en-us/punctuation/core-punctuation.md",
+      "content_types": []
+    },
+    {
+      "id": "MWSG-EN-PUNCTUATION-DASHES",
+      "title": "Em dashes, en dashes, hyphens, and minus signs",
+      "languages": [
+        "en-US"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/punctuation/dashes-hyphens",
+        "https://learn.microsoft.com/en-us/style-guide/punctuation/em-dashes",
+        "https://learn.microsoft.com/en-us/style-guide/punctuation/en-dashes",
+        "https://learn.microsoft.com/en-us/style-guide/punctuation/hyphens"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "em dash",
+        "en dash",
+        "hyphen",
+        "minus"
+      ],
+      "path": "en-us/punctuation/dashes-hyphens-minus.md",
+      "content_types": []
+    },
+    {
+      "id": "MWSG-EN-PUNCTUATION-MISC",
+      "title": "Quotation marks, apostrophes, ellipses, and slashes",
+      "languages": [
+        "en-US"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/punctuation/apostrophes",
+        "https://learn.microsoft.com/en-us/style-guide/punctuation/quotation-marks",
+        "https://learn.microsoft.com/en-us/style-guide/punctuation/ellipses",
+        "https://learn.microsoft.com/en-us/style-guide/punctuation/slashes"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "quotation",
+        "apostrophe",
+        "ellipsis",
+        "slash"
+      ],
+      "path": "en-us/punctuation/quotes-apostrophes-ellipses-slashes.md",
+      "content_types": []
+    },
+    {
+      "id": "MWSG-TERM-A-01",
+      "title": "Microsoft terms A 1",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/a-01.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-A-02",
+      "title": "Microsoft terms A 2",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/a-02.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-A-03",
+      "title": "Microsoft terms A 3",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/a-03.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-B-01",
+      "title": "Microsoft terms B 1",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/b-01.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-B-02",
+      "title": "Microsoft terms B 2",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/b-02.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-B-03",
+      "title": "Microsoft terms B 3",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/b-03.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-C-01",
+      "title": "Microsoft terms C 1",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/c-01.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-C-02",
+      "title": "Microsoft terms C 2",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/c-02.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-C-03",
+      "title": "Microsoft terms C 3",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/c-03.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-C-04",
+      "title": "Microsoft terms C 4",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/c-04.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-D-01",
+      "title": "Microsoft terms D 1",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/d-01.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-D-02",
+      "title": "Microsoft terms D 2",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/d-02.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-D-03",
+      "title": "Microsoft terms D 3",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/d-03.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-E-01",
+      "title": "Microsoft terms E 1",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/e-01.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-E-02",
+      "title": "Microsoft terms E 2",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/e-02.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-F-01",
+      "title": "Microsoft terms F 1",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/f-01.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-F-02",
+      "title": "Microsoft terms F 2",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/f-02.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-G-01",
+      "title": "Microsoft terms G 1",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/g-01.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-G-02",
+      "title": "Microsoft terms G 2",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/g-02.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-H-01",
+      "title": "Microsoft terms H 1",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/h-01.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-H-02",
+      "title": "Microsoft terms H 2",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/h-02.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-I-01",
+      "title": "Microsoft terms I 1",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/i-01.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-I-02",
+      "title": "Microsoft terms I 2",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/i-02.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-I-03",
+      "title": "Microsoft terms I 3",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/i-03.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-J-01",
+      "title": "Microsoft terms J 1",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/j-01.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-K-01",
+      "title": "Microsoft terms K 1",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/k-01.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-L-01",
+      "title": "Microsoft terms L 1",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/l-01.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-L-02",
+      "title": "Microsoft terms L 2",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/l-02.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-M-01",
+      "title": "Microsoft terms M 1",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/m-01.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-M-02",
+      "title": "Microsoft terms M 2",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/m-02.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-M-03",
+      "title": "Microsoft terms M 3",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/m-03.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-N-01",
+      "title": "Microsoft terms N 1",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/n-01.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-N-02",
+      "title": "Microsoft terms N 2",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/n-02.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-NUMBERS-SYMBOLS-01",
+      "title": "Microsoft terms NUMBERS-SYMBOLS 1",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/numbers-symbols-01.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-O-01",
+      "title": "Microsoft terms O 1",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/o-01.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-O-02",
+      "title": "Microsoft terms O 2",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/o-02.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-P-01",
+      "title": "Microsoft terms P 1",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/p-01.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-P-02",
+      "title": "Microsoft terms P 2",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/p-02.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-P-03",
+      "title": "Microsoft terms P 3",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/p-03.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-P-04",
+      "title": "Microsoft terms P 4",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/p-04.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-Q-01",
+      "title": "Microsoft terms Q 1",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/q-01.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-R-01",
+      "title": "Microsoft terms R 1",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/r-01.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-R-02",
+      "title": "Microsoft terms R 2",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/r-02.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-S-01",
+      "title": "Microsoft terms S 1",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/s-01.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-S-02",
+      "title": "Microsoft terms S 2",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/s-02.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-S-03",
+      "title": "Microsoft terms S 3",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/s-03.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-S-04",
+      "title": "Microsoft terms S 4",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/s-04.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-T-01",
+      "title": "Microsoft terms T 1",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/t-01.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-T-02",
+      "title": "Microsoft terms T 2",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/t-02.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-U-01",
+      "title": "Microsoft terms U 1",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/u-01.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-U-02",
+      "title": "Microsoft terms U 2",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/u-02.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-V-01",
+      "title": "Microsoft terms V 1",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/v-01.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-W-01",
+      "title": "Microsoft terms W 1",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/w-01.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-W-02",
+      "title": "Microsoft terms W 2",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/w-02.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-X-01",
+      "title": "Microsoft terms X 1",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/x-01.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-Y-01",
+      "title": "Microsoft terms Y 1",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/y-01.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-Z-01",
+      "title": "Microsoft terms Z 1",
+      "languages": [
+        "en-US"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/a-z/z-01.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-TERM-COLLECTION-ACCESSIBILITY",
+      "title": "Accessibility terms",
+      "languages": [
+        "shared"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/a-z-word-list-term-collections/term-collections/accessibility-terms"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/term-collections/accessibility.md",
+      "content_types": [],
+      "keywords": []
+    },
+    {
+      "id": "MWSG-TERM-COLLECTION-AI",
+      "title": "AI and bot terms",
+      "languages": [
+        "shared"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/a-z-word-list-term-collections/term-collections/ai-bot-terms"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/term-collections/ai-and-bots.md",
+      "content_types": [],
+      "keywords": []
+    },
+    {
+      "id": "MWSG-TERM-COLLECTION-BITS",
+      "title": "Bits and bytes",
+      "languages": [
+        "shared"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/a-z-word-list-term-collections/term-collections/bits-bytes-terms"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/term-collections/bits-and-bytes.md",
+      "content_types": [],
+      "keywords": []
+    },
+    {
+      "id": "MWSG-TERM-COLLECTION-CLOUD",
+      "title": "Cloud-computing terms",
+      "languages": [
+        "shared"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/a-z-word-list-term-collections/term-collections/cloud-computing-terms"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/term-collections/cloud-computing.md",
+      "content_types": [],
+      "keywords": []
+    },
+    {
+      "id": "MWSG-TERM-COLLECTION-DEVICES",
+      "title": "Computer and device terms",
+      "languages": [
+        "shared"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/a-z-word-list-term-collections/term-collections/computer-device-terms"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/term-collections/computers-and-devices.md",
+      "content_types": [],
+      "keywords": []
+    },
+    {
+      "id": "MWSG-TERM-COLLECTION-DATE-TIME",
+      "title": "Date and time terms",
+      "languages": [
+        "en-US"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/a-z-word-list-term-collections/term-collections/date-time-terms"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/term-collections/date-and-time.md",
+      "content_types": [],
+      "keywords": []
+    },
+    {
+      "id": "MWSG-TERM-COLLECTION-KEYS",
+      "title": "Keys and keyboard shortcuts",
+      "languages": [
+        "shared"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/a-z-word-list-term-collections/term-collections/keys-keyboard-shortcuts"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/term-collections/keys-and-shortcuts.md",
+      "content_types": [],
+      "keywords": []
+    },
+    {
+      "id": "MWSG-TERM-COLLECTION-MOUSE",
+      "title": "Mouse interaction terms",
+      "languages": [
+        "shared"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/a-z-word-list-term-collections/term-collections/mouse-mouse-interaction-terms"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/term-collections/mouse-interactions.md",
+      "content_types": [],
+      "keywords": []
+    },
+    {
+      "id": "MWSG-TERM-COLLECTION-SECURITY",
+      "title": "Security terms",
+      "languages": [
+        "shared"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/a-z-word-list-term-collections/term-collections/security-terms"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/term-collections/security.md",
+      "content_types": [],
+      "keywords": []
+    },
+    {
+      "id": "MWSG-TERM-COLLECTION-SPECIAL-CHARS",
+      "title": "Special characters",
+      "languages": [
+        "shared"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/a-z-word-list-term-collections/term-collections/special-characters"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/term-collections/special-characters.md",
+      "content_types": [],
+      "keywords": []
+    },
+    {
+      "id": "MWSG-TERM-COLLECTION-TOUCH",
+      "title": "Touch and pen interaction terms",
+      "languages": [
+        "shared"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/a-z-word-list-term-collections/term-collections/touch-pen-interaction-terms"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/term-collections/touch-and-pen.md",
+      "content_types": [],
+      "keywords": []
+    },
+    {
+      "id": "MWSG-TERM-COLLECTION-UNITS",
+      "title": "Units of measure",
+      "languages": [
+        "shared"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/a-z-word-list-term-collections/term-collections/units-of-measure-terms"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "path": "en-us/terminology/term-collections/units-of-measure.md",
+      "content_types": [],
+      "keywords": []
+    },
+    {
+      "id": "MWSG-EN-CONTRACTIONS",
+      "title": "Contractions",
+      "languages": [
+        "en-US"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/word-choice/use-contractions"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "contraction",
+        "tone",
+        "negation"
+      ],
+      "path": "en-us/word-choice/contractions.md",
+      "content_types": []
+    },
+    {
+      "id": "MWSG-EN-WORD-CHOICE",
+      "title": "Plain and precise English",
+      "languages": [
+        "en-US"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/word-choice/",
+        "https://learn.microsoft.com/en-us/style-guide/word-choice/use-simple-words-concise-sentences",
+        "https://learn.microsoft.com/en-us/style-guide/word-choice/dont-use-common-words-new-ways",
+        "https://learn.microsoft.com/en-us/style-guide/word-choice/use-technical-terms-carefully",
+        "https://learn.microsoft.com/en-us/style-guide/word-choice/avoid-jargon",
+        "https://learn.microsoft.com/en-us/style-guide/word-choice/use-us-spelling-avoid-non-english-words"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "word choice",
+        "plain language",
+        "jargon",
+        "US spelling"
+      ],
+      "path": "en-us/word-choice/plain-and-precise-language.md",
+      "content_types": []
+    },
+    {
+      "id": "MWSG-LOC-CONFLICTS",
+      "title": "Localization conflict resolution",
+      "languages": [
+        "en-US",
+        "uk-UA"
+      ],
+      "content_types": [
+        "localization"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "conflict",
+        "precedence",
+        "terminology"
+      ],
+      "path": "localization/conflicts.md",
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-LOC-EN-UK-ROUTER",
+      "title": "English-to-Ukrainian rule router",
+      "languages": [
+        "en-US",
+        "uk-UA"
+      ],
+      "content_types": [
+        "localization"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "translation",
+        "applicability",
+        "routing",
+        "Ukrainian"
+      ],
+      "path": "localization/en-to-uk-routing.md",
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-LOC-APPLICABILITY",
+      "title": "Cross-language applicability matrix",
+      "languages": [
+        "en-US",
+        "uk-UA"
+      ],
+      "content_types": [
+        "localization"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "applicability",
+        "shared",
+        "en-US-only",
+        "uk-UA"
+      ],
+      "path": "localization/rule-applicability.md",
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-LOC-TERMINOLOGY-MAPPING",
+      "title": "Compact English-to-Ukrainian terminology map",
+      "languages": [
+        "en-US",
+        "uk-UA"
+      ],
+      "content_types": [
+        "localization",
+        "ui",
+        "software"
+      ],
+      "source_urls": [
+        "https://aka.ms/ukrainian-styleguide"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "terminology",
+        "mapping",
+        "English",
+        "Ukrainian"
+      ],
+      "path": "localization/terminology-mapping.md"
+    },
+    {
+      "id": "MWSG-SHARED-VISUAL-ACCESSIBILITY",
+      "title": "Accessible color, graphics, and media",
+      "languages": [
+        "shared"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/accessibility/colors-patterns-text-graphics-design",
+        "https://learn.microsoft.com/en-us/style-guide/accessibility/graphics-design-media"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "color",
+        "contrast",
+        "alt text",
+        "captions",
+        "media",
+        "tables"
+      ],
+      "path": "shared/accessibility/visual-and-media-accessibility.md",
+      "content_types": []
+    },
+    {
+      "id": "MWSG-SHARED-ACCESSIBLE-WRITING",
+      "title": "Writing for all abilities",
+      "languages": [
+        "shared"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/accessibility/accessibility-guidelines-requirements",
+        "https://learn.microsoft.com/en-us/style-guide/accessibility/writing-all-abilities"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "accessibility",
+        "screen reader",
+        "links",
+        "headings",
+        "alternative input"
+      ],
+      "path": "shared/accessibility/writing-for-accessibility.md",
+      "content_types": []
+    },
+    {
+      "id": "MWSG-SHARED-HEADINGS",
+      "title": "Headings",
+      "languages": [
+        "shared"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/scannable-content/headings"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "heading",
+        "title",
+        "hierarchy",
+        "sentence case"
+      ],
+      "path": "shared/content-design/headings.md",
+      "content_types": []
+    },
+    {
+      "id": "MWSG-SHARED-LISTS",
+      "title": "Lists",
+      "languages": [
+        "shared"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/scannable-content/lists"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "list",
+        "bullets",
+        "numbering",
+        "term list",
+        "punctuation"
+      ],
+      "path": "shared/content-design/lists.md",
+      "content_types": []
+    },
+    {
+      "id": "MWSG-SHARED-PLANNING",
+      "title": "Content and design planning",
+      "languages": [
+        "shared"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/content-planning",
+        "https://learn.microsoft.com/en-us/style-guide/design-planning",
+        "https://learn.microsoft.com/en-us/style-guide/final-publishing-review"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "planning",
+        "audience",
+        "content type",
+        "template",
+        "review"
+      ],
+      "path": "shared/content-design/planning-and-review.md",
+      "content_types": []
+    },
+    {
+      "id": "MWSG-SHARED-RESPONSIVE-SEARCH",
+      "title": "Scannable, responsive, and searchable content",
+      "languages": [
+        "shared"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/scannable-content/",
+        "https://learn.microsoft.com/en-us/style-guide/responsive-content",
+        "https://learn.microsoft.com/en-us/style-guide/search-writing"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "scannable",
+        "responsive",
+        "SEO",
+        "keywords",
+        "links"
+      ],
+      "path": "shared/content-design/responsive-and-searchable-content.md",
+      "content_types": []
+    },
+    {
+      "id": "MWSG-SHARED-TABLES-CALLOUTS",
+      "title": "Tables, sidebars, and pull quotes",
+      "languages": [
+        "shared"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/scannable-content/tables",
+        "https://learn.microsoft.com/en-us/style-guide/scannable-content/sidebars",
+        "https://learn.microsoft.com/en-us/style-guide/scannable-content/pull-quotes"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "table",
+        "sidebar",
+        "callout",
+        "pull quote"
+      ],
+      "path": "shared/content-design/tables-and-callouts.md",
+      "content_types": []
+    },
+    {
+      "id": "MWSG-SHARED-BOTS",
+      "title": "Bots and virtual agents",
+      "languages": [
+        "shared"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/chatbots-virtual-agents/",
+        "https://learn.microsoft.com/en-us/style-guide/chatbots-virtual-agents/structural-technical-considerations",
+        "https://learn.microsoft.com/en-us/style-guide/chatbots-virtual-agents/writing-bots",
+        "https://learn.microsoft.com/en-us/style-guide/chatbots-virtual-agents/care-feeding-bot"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "bot",
+        "virtual agent",
+        "conversation",
+        "escalation"
+      ],
+      "path": "shared/conversational-content/bots-and-virtual-agents.md",
+      "content_types": []
+    },
+    {
+      "id": "MWSG-SHARED-CODE",
+      "title": "Code examples and developer text formatting",
+      "languages": [
+        "shared"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/developer-content/code-examples",
+        "https://learn.microsoft.com/en-us/style-guide/developer-content/formatting-developer-text-elements"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "code",
+        "sample",
+        "syntax",
+        "identifier",
+        "output"
+      ],
+      "path": "shared/developer-content/code-examples-and-formatting.md",
+      "content_types": []
+    },
+    {
+      "id": "MWSG-SHARED-DEVELOPER",
+      "title": "Developer content",
+      "languages": [
+        "shared"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/developer-content/"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "developer",
+        "technical audience",
+        "API"
+      ],
+      "path": "shared/developer-content/developer-content.md",
+      "content_types": []
+    },
+    {
+      "id": "MWSG-SHARED-REFERENCE-DOCS",
+      "title": "Reference documentation",
+      "languages": [
+        "shared"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/developer-content/reference-documentation"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "reference",
+        "API",
+        "parameter",
+        "return value",
+        "syntax"
+      ],
+      "path": "shared/developer-content/reference-documentation.md",
+      "content_types": []
+    },
+    {
+      "id": "MWSG-SHARED-FORMATTING-COMMON",
+      "title": "Formatting instructions and common text elements",
+      "languages": [
+        "shared"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/procedures-instructions/formatting-text-in-instructions",
+        "https://learn.microsoft.com/en-us/style-guide/text-formatting/formatting-common-text-elements"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "formatting",
+        "UI",
+        "filenames",
+        "keys",
+        "commands",
+        "errors"
+      ],
+      "path": "shared/formatting/instructions-and-common-elements.md",
+      "content_types": []
+    },
+    {
+      "id": "MWSG-SHARED-TYPE-LAYOUT",
+      "title": "Type, layout, and titles",
+      "languages": [
+        "shared"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/text-formatting/",
+        "https://learn.microsoft.com/en-us/style-guide/text-formatting/using-type",
+        "https://learn.microsoft.com/en-us/style-guide/text-formatting/use-sentence-style-capitalization",
+        "https://learn.microsoft.com/en-us/style-guide/text-formatting/use-left-alignment",
+        "https://learn.microsoft.com/en-us/style-guide/text-formatting/dont-compress-line-spacing",
+        "https://learn.microsoft.com/en-us/style-guide/text-formatting/formatting-titles"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "type",
+        "layout",
+        "title",
+        "capitalization",
+        "alignment",
+        "spacing"
+      ],
+      "path": "shared/formatting/type-layout-and-titles.md",
+      "content_types": []
+    },
+    {
+      "id": "MWSG-SHARED-URLS",
+      "title": "URLs and web addresses",
+      "languages": [
+        "shared"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/urls-web-addresses"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "URL",
+        "URI",
+        "web address",
+        "link"
+      ],
+      "path": "shared/formatting/urls-and-web-addresses.md",
+      "content_types": []
+    },
+    {
+      "id": "MWSG-SHARED-GLOBAL-ASSETS",
+      "title": "Global examples, art, names, time, and currency",
+      "languages": [
+        "shared"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/global-communications/art",
+        "https://learn.microsoft.com/en-us/style-guide/global-communications/currency",
+        "https://learn.microsoft.com/en-us/style-guide/global-communications/examples-scenarios",
+        "https://learn.microsoft.com/en-us/style-guide/global-communications/names-contact-information",
+        "https://learn.microsoft.com/en-us/style-guide/global-communications/time-place"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "art",
+        "currency",
+        "names",
+        "address",
+        "date",
+        "time",
+        "examples"
+      ],
+      "path": "shared/globalization/examples-art-and-data.md",
+      "content_types": []
+    },
+    {
+      "id": "MWSG-SHARED-GLOBAL-WRITING",
+      "title": "Global-ready writing",
+      "languages": [
+        "shared"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/global-communications/",
+        "https://learn.microsoft.com/en-us/style-guide/global-communications/writing-tips"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "globalization",
+        "localization",
+        "translation",
+        "machine translation"
+      ],
+      "path": "shared/globalization/global-ready-writing.md",
+      "content_types": []
+    },
+    {
+      "id": "MWSG-SHARED-GLOBAL-WEB",
+      "title": "Global-ready web and software",
+      "languages": [
+        "shared"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/global-communications/web-software-html-considerations"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "web",
+        "software",
+        "HTML",
+        "localization",
+        "RTL",
+        "links"
+      ],
+      "path": "shared/globalization/global-web-and-software.md",
+      "content_types": []
+    },
+    {
+      "id": "MWSG-SHARED-INCLUSIVE",
+      "title": "Bias-free and inclusive communication",
+      "languages": [
+        "shared"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/bias-free-communication",
+        "https://learn.microsoft.com/en-us/style-guide/a-z-word-list-term-collections/term-collections/accessibility-terms"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "inclusive",
+        "gender",
+        "disability",
+        "stereotypes",
+        "bias"
+      ],
+      "path": "shared/inclusive-content/bias-free-language.md",
+      "content_types": []
+    },
+    {
+      "id": "MWSG-SHARED-ALTERNATIVE-INPUT",
+      "title": "Alternative input methods",
+      "languages": [
+        "shared"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/procedures-instructions/describing-alternative-input-methods"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "keyboard",
+        "mouse",
+        "touch",
+        "pen",
+        "accessibility",
+        "shortcut"
+      ],
+      "path": "shared/procedures/alternative-input-methods.md",
+      "content_types": []
+    },
+    {
+      "id": "MWSG-SHARED-NETWORK-DIAGRAMS",
+      "title": "Network traffic diagrams",
+      "languages": [
+        "shared"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/procedures-instructions/illustrating-network-traffic-flows"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "network",
+        "diagram",
+        "traffic",
+        "ports",
+        "protocols"
+      ],
+      "path": "shared/procedures/network-traffic-diagrams.md",
+      "content_types": []
+    },
+    {
+      "id": "MWSG-SHARED-PROCEDURES",
+      "title": "Step-by-step instructions",
+      "languages": [
+        "shared"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/procedures-instructions/",
+        "https://learn.microsoft.com/en-us/style-guide/procedures-instructions/writing-step-by-step-instructions"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "procedure",
+        "steps",
+        "instructions",
+        "imperative",
+        "prerequisite"
+      ],
+      "path": "shared/procedures/step-by-step-instructions.md",
+      "content_types": []
+    },
+    {
+      "id": "MWSG-SHARED-UI-INTERACTIONS",
+      "title": "Describing interactions with the UI",
+      "languages": [
+        "shared"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/procedures-instructions/describing-interactions-with-ui"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "UI",
+        "select",
+        "choose",
+        "open",
+        "close",
+        "enter",
+        "pane"
+      ],
+      "path": "shared/procedures/ui-interactions.md",
+      "content_types": []
+    },
+    {
+      "id": "MWSG-SHARED-VOICE",
+      "title": "Microsoft voice and top principles",
+      "languages": [
+        "shared"
+      ],
+      "source_urls": [
+        "https://learn.microsoft.com/en-us/style-guide/brand-voice-above-all-simple-human",
+        "https://learn.microsoft.com/en-us/style-guide/top-10-tips-style-voice"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "voice",
+        "tone",
+        "concise",
+        "conversational",
+        "clarity"
+      ],
+      "path": "shared/voice/microsoft-voice.md",
+      "content_types": []
+    },
+    {
+      "id": "MWSG-UK-COPILOT-PROMPTS",
+      "title": "Готові запити Copilot українською",
+      "languages": [
+        "uk-UA"
+      ],
+      "content_types": [
+        "copilot-prompt",
+        "ui"
+      ],
+      "source_urls": [
+        "https://aka.ms/ukrainian-styleguide"
+      ],
+      "source_sections": [
+        "5.3"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "Copilot",
+        "prompt",
+        "запит",
+        "entity token",
+        "placeholder"
+      ],
+      "path": "uk-ua/conversational-content/copilot-prompts.md"
+    },
+    {
+      "id": "MWSG-UK-DOCUMENTATION",
+      "title": "Заголовки, типографіка й посилання на UI",
+      "languages": [
+        "uk-UA"
+      ],
+      "content_types": [
+        "documentation",
+        "help"
+      ],
+      "source_urls": [
+        "https://aka.ms/ukrainian-styleguide"
+      ],
+      "source_sections": [
+        "5.5",
+        "5.5.1-5.5.4"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "заголовки",
+        "документація",
+        "типографіка",
+        "ui"
+      ],
+      "path": "uk-ua/documentation/titles-typography-and-ui.md"
+    },
+    {
+      "id": "MWSG-UK-GRAMMAR-AUTHORITY",
+      "title": "Авторитетне джерело правил української мови",
+      "languages": [
+        "uk-UA"
+      ],
+      "status": "active",
+      "path": "uk-ua/grammar-authority.md",
+      "content_types": [],
+      "keywords": [],
+      "source_urls": []
+    },
+    {
+      "id": "MWSG-UK-INCLUSIVE",
+      "title": "Інклюзивна й доступна українська мова",
+      "languages": [
+        "uk-UA"
+      ],
+      "content_types": [
+        "all"
+      ],
+      "source_urls": [
+        "https://aka.ms/ukrainian-styleguide"
+      ],
+      "source_sections": [
+        "3",
+        "3.1",
+        "3.2",
+        "5.1"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "інклюзивність",
+        "гендер",
+        "інвалідність",
+        "доступність"
+      ],
+      "path": "uk-ua/inclusive-language/inclusive-and-accessible.md"
+    },
+    {
+      "id": "MWSG-UK-ABBREVIATIONS",
+      "title": "Українські скорочення й акроніми",
+      "languages": [
+        "uk-UA"
+      ],
+      "content_types": [
+        "documentation",
+        "ui",
+        "software"
+      ],
+      "source_urls": [
+        "https://aka.ms/ukrainian-styleguide"
+      ],
+      "source_sections": [
+        "4.2.1",
+        "4.2.2"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "скорочення",
+        "акроніми",
+        "абревіатури"
+      ],
+      "path": "uk-ua/language-standards/abbreviations-and-acronyms.md"
+    },
+    {
+      "id": "MWSG-UK-CAP-DESCRIPTORS-PREPOSITIONS",
+      "title": "Регістр, дескриптори й прийменники в локалізації",
+      "languages": [
+        "uk-UA"
+      ],
+      "content_types": [
+        "documentation",
+        "ui",
+        "software"
+      ],
+      "source_urls": [
+        "https://aka.ms/ukrainian-styleguide"
+      ],
+      "source_sections": [
+        "4.2.5",
+        "4.2.7",
+        "4.2.9",
+        "4.2.13"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "регістр",
+        "дескриптор",
+        "прийменники",
+        "ui"
+      ],
+      "path": "uk-ua/language-standards/capitalization-descriptors-prepositions.md"
+    },
+    {
+      "id": "MWSG-UK-GRAMMAR-OVERLAY",
+      "title": "Стилістичні граматичні рішення для локалізації",
+      "languages": [
+        "uk-UA"
+      ],
+      "content_types": [
+        "documentation",
+        "ui",
+        "software"
+      ],
+      "source_urls": [
+        "https://aka.ms/ukrainian-styleguide"
+      ],
+      "source_sections": [
+        "4.2.3-4.2.19"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "дієслова",
+        "іменники",
+        "займенники",
+        "пасив",
+        "вид"
+      ],
+      "path": "uk-ua/language-standards/grammar-style-overlay.md"
+    },
+    {
+      "id": "MWSG-UK-ORTHOGRAPHY-PRECEDENCE",
+      "title": "Межа правопису й локалізаційних правил",
+      "languages": [
+        "uk-UA"
+      ],
+      "content_types": [
+        "all"
+      ],
+      "source_urls": [
+        "https://aka.ms/ukrainian-styleguide"
+      ],
+      "source_sections": [
+        "4.1"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "правопис",
+        "2019",
+        "пріоритет",
+        "конфлікт"
+      ],
+      "path": "uk-ua/language-standards/orthography-precedence.md"
+    },
+    {
+      "id": "MWSG-UK-PUNCTUATION-OVERLAY",
+      "title": "Пунктуація в українській локалізації",
+      "languages": [
+        "uk-UA"
+      ],
+      "content_types": [
+        "documentation",
+        "ui",
+        "software"
+      ],
+      "source_urls": [
+        "https://aka.ms/ukrainian-styleguide"
+      ],
+      "source_sections": [
+        "4.2.15",
+        "4.2.18"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "пунктуація",
+        "лапки",
+        "тире",
+        "три крапки",
+        "списки"
+      ],
+      "path": "uk-ua/language-standards/punctuation-localization.md"
+    },
+    {
+      "id": "MWSG-UK-NUMBERS-PLACEHOLDERS",
+      "title": "Числа, одиниці та підстановки",
+      "languages": [
+        "uk-UA"
+      ],
+      "content_types": [
+        "documentation",
+        "ui",
+        "software"
+      ],
+      "source_urls": [
+        "https://aka.ms/ukrainian-styleguide"
+      ],
+      "source_sections": [
+        "4.2.12",
+        "5.6.2",
+        "5.6.8"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "числа",
+        "одиниці",
+        "змінні",
+        "placeholders",
+        "формати"
+      ],
+      "path": "uk-ua/locale-formats/numbers-and-placeholders.md"
+    },
+    {
+      "id": "MWSG-UK-KEYS-STATUS",
+      "title": "Клавіші, сполучення й рядок стану",
+      "languages": [
+        "uk-UA"
+      ],
+      "content_types": [
+        "documentation",
+        "ui",
+        "software",
+        "status-message"
+      ],
+      "source_urls": [
+        "https://aka.ms/ukrainian-styleguide"
+      ],
+      "source_sections": [
+        "5.6.1",
+        "5.6.3",
+        "5.6.4",
+        "5.6.6-5.6.8"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "клавіші",
+        "shortcuts",
+        "access keys",
+        "status"
+      ],
+      "path": "uk-ua/software-and-web/keys-shortcuts-and-status.md"
+    },
+    {
+      "id": "MWSG-UK-MESSAGES",
+      "title": "Повідомлення, помилки й тривалі операції",
+      "languages": [
+        "uk-UA"
+      ],
+      "content_types": [
+        "ui",
+        "software",
+        "status-message",
+        "error-message"
+      ],
+      "source_urls": [
+        "https://aka.ms/ukrainian-styleguide"
+      ],
+      "source_sections": [
+        "5.6",
+        "5.6.2",
+        "5.6.5"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "повідомлення",
+        "помилки",
+        "please",
+        "standard phrases"
+      ],
+      "path": "uk-ua/software-and-web/messages-and-errors.md"
+    },
+    {
+      "id": "MWSG-UK-FREQUENT-CHOICES",
+      "title": "Часті лексичні рішення Microsoft українською",
+      "languages": [
+        "uk-UA"
+      ],
+      "content_types": [
+        "documentation",
+        "ui",
+        "software"
+      ],
+      "source_urls": [
+        "https://aka.ms/ukrainian-styleguide"
+      ],
+      "source_sections": [
+        "4.3"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "термінологія",
+        "відповідники",
+        "часті помилки",
+        "слововживання"
+      ],
+      "path": "uk-ua/terminology/frequent-choices.md"
+    },
+    {
+      "id": "MWSG-UK-GENITIVE-IT",
+      "title": "Родовий відмінок поширених ІТ-термінів",
+      "languages": [
+        "uk-UA"
+      ],
+      "content_types": [
+        "documentation",
+        "ui",
+        "software"
+      ],
+      "source_urls": [
+        "https://aka.ms/ukrainian-styleguide"
+      ],
+      "source_sections": [
+        "4.2.11"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "родовий відмінок",
+        "genitive",
+        "IT terms"
+      ],
+      "path": "uk-ua/terminology/genitive-it-forms.md"
+    },
+    {
+      "id": "MWSG-UK-PRODUCTS-FEATURES",
+      "title": "Продукти, функції, торговельні марки й файли",
+      "languages": [
+        "uk-UA"
+      ],
+      "content_types": [
+        "documentation",
+        "ui",
+        "software",
+        "marketing"
+      ],
+      "source_urls": [
+        "https://aka.ms/ukrainian-styleguide"
+      ],
+      "source_sections": [
+        "5.2",
+        "5.4"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "продукти",
+        "функції",
+        "trademarks",
+        "файли",
+        "версії"
+      ],
+      "path": "uk-ua/ui-localization/products-features-and-files.md"
+    },
+    {
+      "id": "MWSG-UK-VOICE",
+      "title": "Голос і тон Microsoft українською",
+      "languages": [
+        "uk-UA"
+      ],
+      "content_types": [
+        "all"
+      ],
+      "source_urls": [
+        "https://aka.ms/ukrainian-styleguide"
+      ],
+      "source_sections": [
+        "2",
+        "2.1",
+        "2.2"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "голос",
+        "тон",
+        "стислість",
+        "природність",
+        "ви"
+      ],
+      "path": "uk-ua/voice-and-tone/microsoft-voice.md"
+    },
+    {
+      "id": "MWSG-UK-VOICE-VIDEO",
+      "title": "Українське озвучення й відео",
+      "languages": [
+        "uk-UA"
+      ],
+      "content_types": [
+        "video",
+        "voiceover"
+      ],
+      "source_urls": [
+        "https://aka.ms/ukrainian-styleguide"
+      ],
+      "source_sections": [
+        "5.7",
+        "5.7.1-5.7.3"
+      ],
+      "captured": "2026-07-16",
+      "status": "active",
+      "keywords": [
+        "відео",
+        "озвучення",
+        "pronunciation",
+        "voiceover"
+      ],
+      "path": "uk-ua/voice-video/voice-and-video.md"
+    }
+  ]
+}

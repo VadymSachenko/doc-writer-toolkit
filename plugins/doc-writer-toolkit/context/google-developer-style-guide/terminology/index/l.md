@@ -1,0 +1,26 @@
+# L terminology index
+
+Source: [https://developers.google.com/style/word-list](https://developers.google.com/style/word-list) · Snapshot: 2026-07-16
+
+- [`lame`](../a-z/l-01.md#term-lame)
+- [`later`](../a-z/l-01.md#term-later)
+- [`latest`](../a-z/l-01.md#term-latest)
+- [`learnings`](../a-z/l-01.md#term-learnings)
+- [`left-nav, right-nav`](../a-z/l-01.md#term-left-nav)
+- [`legacy`](../a-z/l-01.md#term-legacy)
+- [`let's (as a contraction of let us)`](../a-z/l-01.md#term-lets)
+- [`Letter of Authorization and Connecting Facility Assignment (LOA-CFA)`](../a-z/l-01.md#term-loa-cfa)
+- [`leverage`](../a-z/l-01.md#term-leverage)
+- [`lifecycle`](../a-z/l-01.md#term-lifecycle)
+- [`lift and shift`](../a-z/l-01.md#term-lift-and-shift)
+- [`like`](../a-z/l-01.md#term-like)
+- [`limits`](../a-z/l-01.md#term-limits)
+- [`lint`](../a-z/l-01.md#term-lint)
+- [`little-endian`](../a-z/l-01.md#term-little-endian)
+- [`livestream`](../a-z/l-01.md#term-livestream)
+- [`load balancing (noun), load-balancing (adjective)`](../a-z/l-01.md#term-load-balancing)
+- [`lock screen`](../a-z/l-01.md#term-lock-screen)
+- [`login (noun or adjective), log in (verb)`](../a-z/l-01.md#term-login)
+- [`long press`](../a-z/l-01.md#term-long-press)
+- [`long-running operation`](../a-z/l-02.md#term-lro)
+- [`lower`](../a-z/l-02.md#term-lower)
