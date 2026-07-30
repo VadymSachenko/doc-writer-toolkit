@@ -2,7 +2,9 @@
 id: MWSG-SHARED-UI-INTERACTIONS
 title: Describing interactions with the UI
 languages: [shared]
-scope: language-specific
+scope: mixed
+language_specific_sections:
+  - "Verb choices"
 source_urls:
   - https://learn.microsoft.com/en-us/style-guide/procedures-instructions/describing-interactions-with-ui
 captured: 2026-07-16
@@ -13,6 +15,8 @@ keywords: [UI, select, choose, open, close, enter, pane]
 # Describing interactions with the UI
 
 Prefer verbs that work with keyboard, mouse, touch, voice, and assistive technology.
+
+## Verb choices
 
 | Verb | Use for |
 |---|---|
