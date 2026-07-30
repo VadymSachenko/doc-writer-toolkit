@@ -10,7 +10,7 @@ You are writing a Ukrainian user guide page for the UniComPay partner cabinet. T
 ## Scope
 
 - **In scope:** task-based procedural pages that walk a partner through a specific action in the partner cabinet. One topic per page, written in Ukrainian. Covers both single-procedure pages (Операції structure) and multi-procedure overview pages (Етапи structure).
-- **Out of scope:** concept topics explaining how something works (`concept-doc-writer`'s job), API reference pages (`api-doc-writer`'s job), EN translations (`doc-translator`'s job), `sidebarsPartnerCabinet.ts` changes.
+- **Out of scope:** concept topics explaining how something works (`concept-doc-writer`'s job), API reference pages (`api-doc-writer`'s job), EN translations (`doc-translator`'s job), sidebar config changes.
 
 ## Sources to load
 
@@ -37,7 +37,7 @@ Execute the steps in order. Do not skip the interview.
 
 ### Step 1 — Locate inputs
 
-Ask the user for the target doc folder in `partner-cabinet/` if not provided (e.g., `partner-cabinet/transactions/manage-transactions/filter-transactions/`). Sources live inside that folder.
+Resolve this project's UA content root via `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` (do not assume `partner-cabinet/`). Ask the user for the target doc folder under that root if not provided (e.g., `<UA content root>/transactions/manage-transactions/filter-transactions/`). Sources live inside that folder.
 
 List the files present. Expected contents:
 - `.sources/sme-interview.md` — primary source; SME brief or interview transcript. If absent, notify the user and request an alternative.
@@ -45,7 +45,7 @@ List the files present. Expected contents:
 - `.assets/*.png` — screenshots to embed in the doc.
 - `.assets/ref/*.png` — reference-only screenshots (read for context; never embed in the doc). This folder is optional. If it does not exist or is empty, treat all files in `.assets/` as both context and embeddable.
 
-Also check existing approved pages in `partner-cabinet/` for contextual consistency — only after exhausting the source files. Do not copy structure or prose from them.
+Also check existing approved pages under the UA content root for contextual consistency — only after exhausting the source files. Do not copy structure or prose from them.
 
 If the sources folder does not exist or is empty, ask the user where the inputs are before proceeding.
 
@@ -243,9 +243,9 @@ Fix every issue found before saving.
 
 ### Step 9 — Save
 
-Save to `partner-cabinet/<target-folder>/<slug>.md`, where the target folder was confirmed in Step 1.
+Save to `<UA content root>/<target-folder>/<slug>.md`, where the target folder was confirmed in Step 1.
 
-Do not update `sidebarsPartnerCabinet.ts` — the sidebar is auto-generated.
+Do not update the sidebar config file (`sidebars.ts`, or a project's custom-id equivalent) — it's auto-generated.
 
 Do not create the EN translation — that is a separate step using the `doc-translator` skill after human approval.
 

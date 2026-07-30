@@ -1,23 +1,25 @@
 ---
 name: doc-alignment-checker
-description: Checks whether a UA partner-cabinet page and its EN counterpart in i18n/en/ are structurally aligned. The caller specifies which version is the source of truth (main). Reports structural gaps, type-column violations, bad link prefixes, mismatched tables, and missing markers. Use explicitly ("check-doc-alignment", "use doc-alignment-checker to check...").
+description: Checks whether a UA documentation page and its EN counterpart are structurally aligned, using the project's own declared content roots. The caller specifies which version is the source of truth (main). Reports structural gaps, type-column violations, bad link prefixes, mismatched tables, and missing markers. Use explicitly ("check-doc-alignment", "use doc-alignment-checker to check...").
 ---
 
 # doc-alignment-checker
 
-You are checking whether a Ukrainian documentation page (`partner-cabinet/`) and its English counterpart (`i18n/en/docusaurus-plugin-content-docs-partner-cabinet/current/`) are structurally aligned. The caller specifies which version is the **main** (source of truth); the other is the **secondary** that must conform to it.
+You are checking whether a Ukrainian documentation page and its English counterpart are structurally aligned. The caller specifies which version is the **main** (source of truth); the other is the **secondary** that must conform to it.
 
 ## Scope
 
-- **In scope:** any Markdown/MDX page that exists in both `partner-cabinet/` and `i18n/en/docusaurus-plugin-content-docs-partner-cabinet/current/`.
-- **Out of scope:** content quality review, translation accuracy, style-guide compliance beyond the rules listed below. API reference pages in `docs/` are not checked here.
+- **In scope:** any Markdown/MDX page that exists in both the project's UA content root and its EN i18n root (see Path mapping).
+- **Out of scope:** content quality review, translation accuracy, style-guide compliance beyond the rules listed below. English-only reference sections with no UA counterpart (e.g. an API reference `docs/` tree in a project that splits UA and EN content into separate roots) are not checked here.
 
 ## Path mapping
 
+Resolve the project's actual roots via `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` before doing anything else — do not assume `partner-cabinet/`.
+
 | Role | Path |
 |---|---|
-| Ukrainian | `partner-cabinet/<relative-path>.md` |
-| English | `i18n/en/docusaurus-plugin-content-docs-partner-cabinet/current/<relative-path>.md` |
+| Ukrainian | `<UA content root>/<relative-path>.md` |
+| English | `<EN i18n root>/<relative-path>.md` |
 
 ## Step 0 — Identify main and secondary
 
@@ -71,7 +73,7 @@ This check applies regardless of which file is main.
 
 ### Check 5 — Internal link prefixes
 
-Internal links within `partner-cabinet` docs must use the `/partner-cabinet/` prefix. Flag any internal link that uses a bare relative path or an incorrect prefix.
+Internal links within the UA content root must use this project's declared **UA URL prefix** (resolved in Path mapping above — e.g. `/partner-cabinet/`, or `/` for a project with no split instance). Flag any internal link that uses a bare relative path or an incorrect prefix.
 
 Check both files for this pattern.
 

@@ -23,14 +23,11 @@ Load these files at the start of the task. Do not load others unless the user re
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-en.md` — canonical EN terminology.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/api-integration-context.md` — cross-cutting facts about the API (balances, transaction lifecycle, webhooks, disputes, auth, business rules). Always applicable background.
 
-**Style-guide rules (load all seven):**
-- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/style-guide-rules/formatting-and-organization.md`
-- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/style-guide-rules/language-and-grammar.md`
-- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/style-guide-rules/computer-interfaces.md`
-- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/style-guide-rules/linking.md`
-- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/style-guide-rules/text-formatting-summary.md`
-- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/style-guide-rules/punctuation.md`
-- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/style-guide-rules/word-list.md`
+**Style guide (project-declared, resolved before drafting):**
+- Follow `${CLAUDE_PLUGIN_ROOT}/context/style-guide-registry.md` — "Resolving which guide a project uses" section — to find this project's declared `Style guide:` token (from its `CLAUDE.md`), then that file's "Loading procedure per guide" for the resolved token, mapping the content you're about to write (request/response tables, code samples, error lists, admonitions, formulas, terminology, etc.) to the matched topical files.
+- Apply every matched rule while drafting, not just at a later review pass.
+- If the project has no declared style guide, follow the registry's fallback: ask once, offer to persist the answer to that project's `CLAUDE.md`.
+- Do not hand-copy a guide name, corpus path, or individual rule into this skill file — the registry is the single source of truth and changes independently of this file.
 
 **Examples — voice and tone reference only:**
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/doc-examples/api-reference-docs/api-example-retrieve-guest-carts.md`
@@ -109,6 +106,7 @@ Before writing to disk, check:
 - No stale links from example files (e.g., `/docs/wellfunnel-*`)
 - Every fact is traceable to an input source or a user answer from Step 4
 - All required template sections are present; optional ones are either filled or omitted (not left as empty placeholders)
+- The draft conforms to every rule in the style-guide topical files loaded per "Sources to load" (resolved via `style-guide-registry.md`) — check against those files directly, don't rely on memory of past drafts
 
 ### Step 7 — Save
 

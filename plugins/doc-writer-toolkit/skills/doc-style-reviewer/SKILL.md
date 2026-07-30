@@ -14,12 +14,7 @@ You are reviewing a single documentation page against exactly one rule corpus, s
 
 ## Guide modes
 
-| `guide:` value | Label | Corpus/corpora | Router |
-|---|---|---|---|
-| `gdsg` | Google Developer Style Guide (English) | `${CLAUDE_PLUGIN_ROOT}/context/google-developer-style-guide/` | `ROUTING.md` |
-| `mssg-en` | Microsoft Writing Style Guide (English) | `${CLAUDE_PLUGIN_ROOT}/context/microsoft-style-guide/` (`en-us/`, `shared/` only) | `ROUTING.md` |
-| `mssg-ua` | Microsoft Ukrainian Localization Style Guide + UA grammar authority | `${CLAUDE_PLUGIN_ROOT}/context/microsoft-style-guide/` (`uk-ua/`, `shared/` only) **+** `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/ua-grammar/` | `ROUTING.md` + `INDEX.md` |
-| `ua-grammar` | Official Ukrainian orthography (Український правопис 2019) — grammar/punctuation only | `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/ua-grammar/` | `INDEX.md` |
+The four `guide:` tokens, their corpus, and their router live in `${CLAUDE_PLUGIN_ROOT}/context/style-guide-registry.md` ("Guide modes" table) — that file is the single source of truth for this mapping, shared with the drafting skills. Read it to resolve `guide:<value>` into a corpus/router pair; do not re-embed the table here.
 
 ## Argument handling
 
@@ -28,18 +23,7 @@ You are reviewing a single documentation page against exactly one rule corpus, s
 
 ## Step 0 — Load and pre-scan the target document
 
-Read the whole file. Scan it once (before touching any corpus file) and record which routing signals are present — this vocabulary is deliberately the same one each corpus's own router expects:
-
-- Procedures/imperative steps, numbered or bulleted lists
-- Code blocks and inline code
-- API-reference structure (parameter tables, request/response objects)
-- UI element mentions, placeholders (`*PLACEHOLDER*`, `{param}`, `<PLACEHOLDER>`)
-- Tables, links, images and alt text
-- Numbers, units, dates, percentages
-- Proper names, brand/product names, Latin-script terms embedded in Cyrillic prose
-- Admonitions (MDX `:::note`, `:::tip`, `:::warning`, `:::caution`)
-- MDX components (`<Tabs>`, `<TabItem>`, etc.)
-- Frontmatter `title`/`description` present
+Read the whole file. Scan it once (before touching any corpus file) and record which of the registry's "Content signals" (`${CLAUDE_PLUGIN_ROOT}/context/style-guide-registry.md`) are present.
 
 This single scan feeds whichever router(s) the chosen `guide:` mode uses — for `mssg-ua`, do not re-scan between the two corpora.
 
@@ -56,36 +40,7 @@ If the split is inconclusive (near-even, or the file is too short/mostly code), 
 
 ## Step 2 — Load routed corpus files
 
-For each `guide:` mode, follow a specific branch:
-
-### `gdsg` mode
-1. Read `${CLAUDE_PLUGIN_ROOT}/context/google-developer-style-guide/ROUTING.md`.
-2. Map Step 0's signals to the routing table rows.
-3. Load only the matched topic files. Quote ROUTING.md's own instruction: "Never load the full manifest, source map, all terminology indexes, or all rule files into model context."
-4. Do not load all A–Z terminology chunks or the full terminology manifest — search `terminology/INDEX.md` only when a specific term arises during review (Step 4).
-
-### `mssg-en` mode
-1. Read `${CLAUDE_PLUGIN_ROOT}/context/microsoft-style-guide/ROUTING.md`.
-2. Use **only** the `en-us/*` and `shared/*` rows from the routing table — skip `uk-ua/*` rows entirely.
-3. Map Step 0's signals to those rows and load only the matched files.
-4. Quote ROUTING.md: "Never load all A–Z files, the full Ukrainian word index, or the complete manifest into model context."
-5. Do not load all `en-us/terminology/a-z/*.md` chunks — search `en-us/terminology/INDEX.md` only when a specific term arises.
-
-### `mssg-ua` mode
-1. Read `${CLAUDE_PLUGIN_ROOT}/context/microsoft-style-guide/ROUTING.md`.
-2. Use **only** the `uk-ua/*` and `shared/*` rows — skip `en-us/*` rows.
-3. For the "Ukrainian spelling, grammar, or punctuation" signal, follow that row's instruction into `uk-ua/grammar-authority.md`, then onward to `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/ua-grammar/INDEX.md`.
-4. For `doc-rules/ua-grammar/INDEX.md`, map Step 0's signals against its own "Load triggers" table and load only the matched topical files (`01a`–`05g`, not `00-cheatsheet.md`).
-5. **Do not** load `doc-rules/ua-grammar/00-cheatsheet.md` — it contains project-specific terminology overrides and is not universal.
-6. **Token budget:** `ua-grammar/INDEX.md`'s minimum always-load set is ~62k tokens alone. Stick to signal-driven loading; do not over-load. Never load `99-word-index.md` wholesale — search it only for a specific word.
-
-### `ua-grammar` mode
-1. Read `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/ua-grammar/INDEX.md`.
-2. Map Step 0's signals against its "Load triggers" table.
-3. Load only the matched topical files (`01a`–`05g`).
-4. **Do not** load `00-cheatsheet.md` — not universal.
-5. **Never** load `99-word-index.md` wholesale — grep it only when verifying a specific word's spelling.
-6. **Token budget:** same as above. Signal-driven baseline only.
+Follow the "Loading procedure per guide" section in `${CLAUDE_PLUGIN_ROOT}/context/style-guide-registry.md` for whichever `guide:` token was passed, substituting Step 0's signals for "the content signals." That file's per-guide branches (`gdsg`/`mssg-en`/`mssg-ua`/`ua-grammar`), token-budget cautions, and the `ua-grammar`-as-special-case note all apply here unchanged — do not re-copy them into this file.
 
 ## Step 3 — Optional project glossary
 
@@ -102,11 +57,22 @@ Walk the document top to bottom applying only the loaded rules.
 ### Skip list
 Never flag content inside these — only check structural conformance where a rule genuinely covers it:
 
-- Fenced code blocks and inline code spans (`` ` `` or `` ``` ``).
+- Fenced code blocks and inline code spans (`` ` `` or `` ``` ``) — **except** a formula or mathematical expression (contains variable subscripts, operators like `×`/`÷`, or is introduced as "формула"/"formula"/"equation"). There the violation is the choice of code formatting itself (see Glyph-level checks below), so still flag it — do not treat the code-fence skip as covering "should this even be a code block."
 - MDX `import` and `export` statements, JSX tag names themselves (but DO check human-readable prose inside JSX children and admonition bodies).
 - Frontmatter YAML syntax itself — but `title`/`description` values ARE in-scope prose (they render as page title/meta and templates show they follow specific case/mood conventions).
 - `{/* ... */}` comments, including anchor comments (`{/* #slug */}`).
 - Link targets and URLs themselves — check link text, not the URL string.
+
+### Glyph-level checks (character identity, not just presence)
+
+Some правопис rules prescribe not only *whether* a mark is required but *which exact character* represents it — easy to skim past even with the relevant topical file loaded, since the rule text explains *when* to use the mark and a reviewer can confirm that without checking *which glyph* was actually typed. Always run these two checks explicitly, in both `ua-grammar` and `mssg-ua` modes, regardless of Step 0 signals or whether the topical file was otherwise triggered:
+
+- **Apostrophe** — must be the typographic **’** (U+2019), never the straight ASCII **'** (U+0027) or grave **`** (U+0060). The правопис's own source text (§7, `01a-vowels-alternations.md`) is typeset with **’** exclusively. Grep the draft for the ASCII apostrophe used word-internally in Cyrillic text (e.g. `об'єднує`, `п'ять`) and flag every occurrence as **[UA-SPELLING]**, citing §7.
+- **Number-range dash** — §161.I.14 models number/date ranges (`2010—2018`, `сторінки 1—10`) with an **em dash (—, U+2014)**, unspaced. A hyphen (`-`) or en dash (`–`, U+2013) in the same position is a mismatch — flag as **[UA-PUNCTUATION]**, citing §161.I.14.
+
+In `gdsg` mode specifically, always run this additional check regardless of Step 0 signals:
+
+- **Math formulas in code formatting** — scan for any fenced code block or inline code span containing a formula (variable subscripts like `x_i`, operators such as `×`/`÷`/`±`, or content following a lead-in like "формула"/"обчислює"/"equation"). `GDSG-FORMAT-SPECIAL-NOTATION` (`formatting/mathematical-notation-and-phone.md`) requires semantic notation — italic variables, `<sub>`/`<sup>` for subscripts/superscripts, upright operators/numbers/units — not code formatting, which renders every character in the same upright monospace. Flag every instance as **[FORMATTING]**, citing `GDSG-FORMAT-SPECIAL-NOTATION`, even though it sits inside what the skip list would otherwise treat as code.
 
 ### Terminology and spelling lookup
 Do this **reactively** during the review pass, never speculatively:
@@ -116,6 +82,7 @@ Do this **reactively** during the review pass, never speculatively:
 ### False-positive guards
 - In `ua-grammar` mode, Latin-script brand names, API abbreviations (UUID, JSON, HTTP, etc.), and UI labels kept in Latin script are **correct** per Український правопис §121 (foreign words) — do not flag them as spelling errors just for being non-Cyrillic.
 - In `mssg-ua` mode, same guard applies.
+- Terms fixed by the project glossary (Step 3) must never be flagged for re-localization, even when the loaded corpus prefers a different translation. The glossary's rank-0 status is absolute: e.g., the glossary mandates «ендпоінт», so never suggest «кінцева точка» in its place — even though the Microsoft Ukrainian glossary localizes "endpoint" that way. When a corpus rule and a glossary entry conflict, the glossary wins silently (no finding).
 
 ### Finding structure
 For each violation found, record:

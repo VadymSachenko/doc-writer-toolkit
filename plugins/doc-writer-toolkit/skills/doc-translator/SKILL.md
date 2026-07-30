@@ -1,6 +1,6 @@
 ---
 name: doc-translator
-description: Translates approved UA partner-cabinet pages into English for i18n/en/docusaurus-plugin-content-docs-partner-cabinet/current/. Handles any doc under partner-cabinet/, preserves all MDX/code structure, and enforces the project EN glossary. Use explicitly ("translate-doc", "use doc-translator to translate...").
+description: Translates an approved UA documentation page into English, at the corresponding path in the project's own declared EN i18n root. Preserves all MDX/code structure and enforces the project EN glossary. Use explicitly ("translate-doc", "use doc-translator to translate...").
 ---
 
 # doc-translator
@@ -9,31 +9,31 @@ You are translating an approved Ukrainian documentation page for UniComPay into 
 
 ## Scope
 
-- **In scope:** any Markdown/MDX page under `partner-cabinet/` that has been approved in Ukrainian. Produces the English version at the corresponding path under `i18n/en/docusaurus-plugin-content-docs-partner-cabinet/current/`.
-- **Out of scope:** writing new content, changing structure, fixing errors in the Ukrainian source, API reference pages in `docs/`.
+- **In scope:** any Markdown/MDX page under the project's UA content root that has been approved in Ukrainian. Produces the English version at the corresponding path under the project's EN i18n root (see Path mapping).
+- **Out of scope:** writing new content, changing structure, fixing errors in the Ukrainian source, English-only reference sections with no UA counterpart (e.g. an API reference `docs/` tree in a project that splits UA and EN content into separate roots).
 
 ## Path mapping
 
+Resolve the project's actual roots via `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` before doing anything else — do not assume `partner-cabinet/`.
+
 | Ukrainian source | English output |
 |---|---|
-| `partner-cabinet/<relative-path>.md` | `i18n/en/docusaurus-plugin-content-docs-partner-cabinet/current/<relative-path>.md` |
+| `<UA content root>/<relative-path>.md` | `<EN i18n root>/<relative-path>.md` |
 
-Examples:
+Example, for a project whose declared UA content root is `partner-cabinet/` and EN i18n root is `i18n/en/docusaurus-plugin-content-docs-partner-cabinet/current/`:
 - `partner-cabinet/transactions/transactions.md` → `i18n/en/docusaurus-plugin-content-docs-partner-cabinet/current/transactions/transactions.md`
-- `partner-cabinet/transactions/manage-transactions/filter-transactions/filter-transactions.md` → `i18n/en/docusaurus-plugin-content-docs-partner-cabinet/current/transactions/manage-transactions/filter-transactions/filter-transactions.md`
 
 ## Sources to load
 
 Load these files at the start of the task.
 
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-en.md` — canonical EN terminology. Use it to replace UA terms with their correct EN equivalents.
-- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/style-guide-rules/word-list.md` — banned and preferred words; check every translated sentence against this list.
-- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/style-guide-rules/language-and-grammar.md` — active voice, tense, person, and abbreviation rules.
-- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/style-guide-rules/procedures.md` — step formatting, intro sentences, single-step rules.
-- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/style-guide-rules/punctuation.md` — colon intro, slash restrictions, ampersand rules.
-- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/style-guide-rules/formatting-and-organization.md` — numbers, headings, optional step formatting.
-- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/style-guide-rules/computer-interfaces.md` — UI element formatting and placeholder rules.
-- The Ukrainian source file at `partner-cabinet/<relative-path>.md`.
+- The Ukrainian source file, at the path resolved above.
+
+**Style guide (project-declared, resolved before translating):**
+- Follow `${CLAUDE_PLUGIN_ROOT}/context/style-guide-registry.md` — "Resolving which guide a project uses" section — to find this project's declared `Style guide:` token, then that file's "Loading procedure per guide" for the resolved token, mapping the content you're about to translate (terminology, tone, notation, procedures, punctuation) to the matched topical files.
+- If the project has no declared style guide, follow the registry's fallback: ask once, offer to persist the answer to that project's `CLAUDE.md`.
+- Do not hand-copy a guide name, corpus path, or individual rule into this skill file. `context/doc-rules/style-guide-rules/` is a retired, unmaintained digest — do not load it.
 
 ## What to translate
 
@@ -61,7 +61,7 @@ Load these files at the start of the task.
 
 ### Heading IDs
 
-All UA headings in `partner-cabinet/` carry an anchor comment: `## Передумови {/* #prerequisites */}`.
+All UA headings in the UA content root carry an anchor comment: `## Передумови {/* #prerequisites */}`.
 
 When translating to English:
 - The text inside `{/* #... */}` is the canonical EN anchor slug. Derive the EN heading from it (convert kebab-case to title/sentence words).
@@ -247,7 +247,7 @@ Do not capitalize after a colon that introduces a list, a code sample, or a UI e
 
 ### Step 1 — Locate the source file
 
-Read the Ukrainian source at `partner-cabinet/<relative-path>.md`. If the file does not exist, stop and tell the user before doing anything else.
+Read the Ukrainian source at `<UA content root>/<relative-path>.md`, using the root resolved from `project-paths.md`. If the file does not exist, stop and tell the user before doing anything else.
 
 Check whether an English version already exists at the target path. If it does, read it and note any content that has diverged from the Ukrainian source (e.g., manual edits). Report this to the user and ask whether to overwrite or merge.
 
@@ -298,13 +298,13 @@ Before saving, check:
 
 ### Step 5 — Save
 
-Write the English file to `i18n/en/docusaurus-plugin-content-docs-partner-cabinet/current/<relative-path>.md`. Create intermediate directories as needed.
+Write the English file to `<EN i18n root>/<relative-path>.md`, using the root resolved from `project-paths.md`. Create intermediate directories as needed.
 
 Set `last_update.date` in the English output to today's date (format: `M/D/YYYY`).
 
 Also update `last_update.date` in the Ukrainian source file to today's date. This is the only permitted change to the Ukrainian source.
 
-Do not modify `sidebarsPartnerCabinet.ts`, `docusaurus.config.ts`, or any JSON files.
+Do not modify any sidebar config file (`sidebars.ts`, or a project's custom-id equivalent like `sidebarsPartnerCabinet.ts`), `docusaurus.config.ts`, or any JSON files.
 
 ### Step 6 — Report
 

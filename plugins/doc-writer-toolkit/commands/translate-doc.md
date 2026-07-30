@@ -1,13 +1,13 @@
 ---
-description: Translate an approved English doc page into Ukrainian using the doc-translator skill.
-argument-hint: "<relative-path-from-docs>"
+description: Translate an approved Ukrainian doc page into English using the doc-translator skill.
+argument-hint: "<relative-path>"
 ---
 
-Use the `doc-translator` skill to translate an approved English documentation page into Ukrainian.
+Use the `doc-translator` skill to translate an approved Ukrainian documentation page into English.
 
-- **Doc path relative to the project folder:** $ARGUMENTS.md
-- **Source file:** `i18n/en/docusaurus-plugin-content-docs/current/$ARGUMENTS.md`
-- **Output file:** `$ARGUMENTS.md`
+- **Doc path relative to the UA content root:** $ARGUMENTS.md
+
+The skill resolves this project's actual UA content root and EN i18n root itself (via `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`) — do not hardcode a path here.
 
 Strictly follow the skill's workflow.
 

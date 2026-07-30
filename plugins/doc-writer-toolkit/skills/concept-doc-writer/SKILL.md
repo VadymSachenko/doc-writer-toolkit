@@ -26,6 +26,12 @@ Load these files at the start of the task. Do not load others unless the user re
 **UA grammar:**
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/ua-grammar/00-cheatsheet.md` — always-loaded quick reference: UCPay terminology, formatting, and the most common UA errors.
 
+**Style guide (project-declared, resolved before drafting):**
+- Follow `${CLAUDE_PLUGIN_ROOT}/context/style-guide-registry.md` — "Resolving which guide a project uses" section — to find this project's declared `Style guide:` token (from its `CLAUDE.md`), then that file's "Loading procedure per guide" for the resolved token, mapping the content you're about to write (formulas, tables, lists, code samples, admonitions, etc.) to the matched topical files.
+- Apply every matched rule while drafting, not just at a later review pass.
+- If the project has no declared style guide, follow the registry's fallback: ask once, offer to persist the answer to that project's `CLAUDE.md`.
+- Do not hand-copy a guide name, corpus path, or individual rule into this skill file — the registry is the single source of truth and changes independently of this file.
+
 **Examples — voice and tone reference only:**
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/doc-examples/concept-topic-examples/concept-topic-example-localizations-overview.md`
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/doc-examples/concept-topic-examples/concept-topic-example-upsell-upgrade-subscription.md`
@@ -38,7 +44,7 @@ Execute the steps in order. Do not skip the interview.
 
 ### Step 1 — Locate inputs
 
-Ask the user for the target doc folder in `partner-cabinet/` if not provided (e.g., `partner-cabinet/transactions/transaction-lifecycle/`). Sources live inside that folder.
+Resolve this project's UA content root via `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` (do not assume `partner-cabinet/`). Ask the user for the target doc folder under that root if not provided (e.g., `<UA content root>/transactions/transaction-lifecycle/`). Sources live inside that folder.
 
 List the files present. Expected contents:
 - `.sources/sme-interview.md` — primary source; SME brief or interview transcript. If absent, notify the user and request an alternative.
@@ -46,7 +52,7 @@ List the files present. Expected contents:
 - `.assets/*.png` — screenshots to embed in the doc.
 - `.assets/ref/*.png` — reference-only screenshots (read for context; never embed in the doc). This folder is optional. If it does not exist or is empty, treat all files in `.assets/` as both context and embeddable.
 
-Also check existing approved pages in `partner-cabinet/` for contextual consistency — only after exhausting the source files. Do not copy structure or prose from them.
+Also check existing approved pages under the UA content root for contextual consistency — only after exhausting the source files. Do not copy structure or prose from them.
 
 If the sources folder does not exist or is empty, ask the user where the inputs are before proceeding.
 
@@ -127,6 +133,7 @@ Rules:
 - **Status values:** UI status labels visible in the interface (Завершений, Відмінений, Помилка, Новий, В черзі, В роботі) must be **bold**. System/API status values not shown verbatim in the UI (`success`, `cancelled`, `new`, `in queue`, `in work`) must be in `code font`.
 - **"ви" not "Партнер" as subject:** when describing actions the reader can take, prefer «ви можете» over «Партнер може». Do not use «Партнер» as the grammatical subject in instructional phrases.
 - **UCP naming:** write the system name as **UCP** only. Never UCPay, UniComPay, or any variant.
+- **Follow the style-guide topical files loaded above** for anything not covered by the project-specific rules in this list (formula/notation formatting, code sample conventions, accessibility, etc.) — check the corpus rather than guessing.
 - **Mark writer decisions needing follow-up** with `{/* ToDo: ... */}`.
 
 ### Step 6 — Self-review before saving
@@ -147,6 +154,7 @@ Before writing to disk, check:
 - The overview is present and covers: what the concept is, why it exists, and why the reader needs it
 - All chosen sections are complete; bare placeholders are either filled or removed
 - Next steps links only to user guides; Related documents links to other concepts or references
+- The draft conforms to every rule in the style-guide topical files loaded per "Sources to load" (resolved via `style-guide-registry.md`) — check against those files directly, don't rely on memory of past drafts
 
 ### Step 7 — Reviewer pass
 
@@ -164,9 +172,9 @@ Fix every issue found before saving.
 
 ### Step 8 — Save
 
-Save to `partner-cabinet/<target-folder>/<slug>.md`, where the target folder was confirmed in Step 1.
+Save to `<UA content root>/<target-folder>/<slug>.md`, where the target folder was confirmed in Step 1.
 
-Do not update `sidebarsPartnerCabinet.ts` — the sidebar is auto-generated.
+Do not update the sidebar config file (`sidebars.ts`, or a project's custom-id equivalent) — it's auto-generated.
 
 Do not create the EN translation — that is a separate step using the `doc-translator` skill after human approval.
 

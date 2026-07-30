@@ -3,20 +3,18 @@ description: Scan all docs for ToDo and NEEDS CONFIRMATION comments, categorize 
 argument-hint: "[optional: path glob to limit scope, e.g. api-reference/create-payin-transactions]"
 ---
 
-You are resolving documentation TODOs for the UniComPay Docusaurus project. Both locales live in the same repo:
-- **UA docs:** `docs/`
-- **EN docs:** `i18n/en/docusaurus-plugin-content-docs/current/`
+You are resolving documentation TODOs for this Docusaurus project. Resolve the project's actual content roots via `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` before doing anything else — do not assume `docs/`. Both locales live in the same repo, at the project's declared **UA content root** and **EN i18n root**.
 
-**Link prefix rule:** UA doc links must start with `/docs/`; EN doc links must not include a `/docs/` prefix.
+**Link prefix rule:** internal doc links must use the project's declared **UA URL prefix** (also from `project-paths.md`) — e.g. no extra path segment at all when the prefix is `/`, or `/partner-cabinet/` for a project with a custom-id docs plugin instance. Never hardcode `/docs/` — that prefix is wrong for a project whose `routeBasePath` is `/`.
 
 ---
 
 ## Step 1 — Scan
 
-Run the following command to collect every TODO and NEEDS CONFIRMATION comment across all docs (or within the optional scope from $ARGUMENTS if provided):
+Run the following command to collect every TODO and NEEDS CONFIRMATION comment across all docs (or within the optional scope from $ARGUMENTS if provided), substituting this project's resolved roots:
 
 ```bash
-grep -rn "ToDo\|NEEDS CONFIRMATION" docs/ i18n/en/docusaurus-plugin-content-docs/current/ --include="*.md"
+grep -rn "ToDo\|NEEDS CONFIRMATION" <UA content root> <EN i18n root> --include="*.md"
 ```
 
 Read each matched line **in full context** — open the file and read the surrounding paragraph or table row so you understand exactly what the TODO is asking for and where it sits structurally.
@@ -25,9 +23,9 @@ Read each matched line **in full context** — open the file and read the surrou
 
 ## Step 2 — Inventory existing pages
 
-Run:
+Run, substituting this project's resolved roots:
 ```bash
-find docs/ i18n/en/docusaurus-plugin-content-docs/current/ -name "*.md" | sort
+find <UA content root> <EN i18n root> -name "*.md" | sort
 ```
 
 Use this list to determine which target pages already exist.
@@ -67,8 +65,7 @@ For each confirmed fix:
 
 - **Bucket A (inline):** Replace the TODO comment with the Markdown link. Preserve surrounding prose exactly.
 - **Bucket B (block comment):** Replace the entire `{/* ... */}` block with the user-approved prose. Polish punctuation and sentence flow to match the surrounding text, but do not rewrite beyond what is needed.
-- For UA files: use `/docs/<path>.md` link format.
-- For EN files: use `/<path>.md` link format (no `/docs/` prefix).
+- For both UA and EN files: use the project's declared **UA URL prefix** (from `project-paths.md`) + the doc's relative path, no `.md` extension — e.g. `/routing/pools` for a project whose prefix is `/`, or `/partner-cabinet/transactions/transactions` for a project whose prefix is `/partner-cabinet/`.
 
 ---
 
