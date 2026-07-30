@@ -22,6 +22,9 @@ relevant abbreviation in the link if readers might search for it.
 
 - Do not use a bare URL as link text when a descriptive phrase is possible.
 - Avoid **click here**, **learn more**, **this page**, and other vague labels.
+- Either sentence order works for a cross-reference — "For more information, see [X]" or
+  "See [X] for more information." — but put the reason for the reference near the link
+  itself.
 - Do not instruct readers to open a link in a new tab. Keep the default browsing behavior
   unless there is a documented product reason to override it.
 

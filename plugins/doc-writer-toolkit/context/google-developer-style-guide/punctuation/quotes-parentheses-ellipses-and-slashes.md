@@ -25,6 +25,8 @@ keywords: [quotation marks, apostrophe, parentheses, ellipsis, slash]
   quotation.
 - Do not put quotation marks around code-formatted text unless the marks are literal input.
 - Do not use quotation marks merely to emphasize a word or UI label.
+- Put quotation marks and any end punctuation outside link text: see [Product codes], not
+  see [Product codes.]
 
 ## Parentheses
 
@@ -44,6 +46,9 @@ label only when omitting it would make the label inaccurate or ambiguous.
 ## Slashes
 
 Avoid a slash in prose. Use words such as **and**, **or**, **per**, or a rewritten phrase.
-Do not use **and/or** or slash-formatted dates. A slash is acceptable when it is literal
-syntax in a URL, path, command, code expression, or other established notation.
+Do not use **and/or** or slash-formatted dates. Do not use a slash with fractions — it can
+be ambiguous — write a decimal or a percentage instead (0.75 or 75%, not 3/4). Do not use
+a slash-formed abbreviation such as *c/o* or *w/*; spell it out (*care of*, *with*). A
+slash is acceptable when it is literal syntax in a URL, path, command, code expression, or
+other established notation.
 

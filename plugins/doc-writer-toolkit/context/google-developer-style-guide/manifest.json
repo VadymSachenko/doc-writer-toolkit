@@ -6,7 +6,7 @@
   "source_pages": 70,
   "covered_source_pages": 70,
   "rule_families": 35,
-  "named_rules": 45,
+  "named_rules": 46,
   "terminology": {
     "entries": 598,
     "chunks": 46,
@@ -267,10 +267,14 @@
         {
           "id": "GDSG-FORMAT-002",
           "title": "Place examples naturally"
+        },
+        {
+          "id": "GDSG-FORMAT-003",
+          "title": "Titles and letters as letters"
         }
       ],
-      "bytes": 1671,
-      "sha256": "c62d711740c89ffec969234a9b488edcb8b310714b848de63eb19c26f81571ca"
+      "bytes": 2056,
+      "sha256": "29a4b339b6cc4cc454a1f340d1f82bba44b204e005b167645e66a7ca0a276bc5"
     },
     {
       "path": "language/abbreviations-and-capitalization.md",
@@ -480,8 +484,8 @@
         "deep link"
       ],
       "rules": [],
-      "bytes": 863,
-      "sha256": "03bb46b1bc66a7730f71d9848a1cf923147d1813cb08505a9c789428ec51b5d1"
+      "bytes": 1102,
+      "sha256": "e6644275095580ecd62a8a6518e2860bb904b06c16a4b5644f61ea1605aea46d"
     },
     {
       "path": "linking/links-and-cross-references.md",
@@ -515,8 +519,8 @@
           "title": "Link selectively"
         }
       ],
-      "bytes": 1390,
-      "sha256": "6cebb04bcddb5d1e9476f49110367ad83081cea83040776ba1aa6704e2d4fd82"
+      "bytes": 1580,
+      "sha256": "b76219777e729f718ec6f51d6cd89fa770fd1a61d6e907c531e99a9c23d9215e"
     },
     {
       "path": "names-and-naming/filenames-and-file-types.md",
@@ -833,8 +837,8 @@
           "title": "Write actionable steps"
         }
       ],
-      "bytes": 2475,
-      "sha256": "c06417c314432b0e87c029632c36e9590b64520b5d3a7f75d5d2ed77942ede10"
+      "bytes": 3239,
+      "sha256": "2907b62fe22b0c14f01e6ff79484f72c0d796651d1f99b9f0a66dd68add50330"
     },
     {
       "path": "punctuation/commas-and-colons.md",
@@ -954,8 +958,8 @@
         "slash"
       ],
       "rules": [],
-      "bytes": 2051,
-      "sha256": "7c5b2637a57c340b47dd35a7b42513de5ca3a5d7713f64966dde32e93b974282"
+      "bytes": 2386,
+      "sha256": "7be41cac7a5675cc784139654c24e6bb3c43dc4bd05376dbf90a5b555c2e7d2d"
     },
     {
       "path": "technical-content/api-reference-comments.md",
@@ -1478,8 +1482,8 @@
         "e"
       ],
       "rules": [],
-      "bytes": 7006,
-      "sha256": "48c842d72fa0376e7b2a2697b974552325e26c2915d5534200b8684b1def26e4"
+      "bytes": 7201,
+      "sha256": "97f1ba13178c71b22c7f3bd038f3595aae29880e4827791a2060a75b39f549b0"
     },
     {
       "path": "terminology/a-z/e-02.md",
@@ -2030,8 +2034,8 @@
         "s"
       ],
       "rules": [],
-      "bytes": 6608,
-      "sha256": "c6be3911ef7f8448fe54c315099ca134ee0b5e5464e87e7b18e0c8e71610985d"
+      "bytes": 6887,
+      "sha256": "487118a7a001cf5c2aa8be1ed05e76b54839ad576d2f1057bbcc23216f5ce2dd"
     },
     {
       "path": "terminology/a-z/s-03.md",
@@ -2346,6 +2350,11 @@
     {
       "id": "GDSG-FORMAT-002",
       "title": "Place examples naturally",
+      "file": "formatting/text-formatting.md"
+    },
+    {
+      "id": "GDSG-FORMAT-003",
+      "title": "Titles and letters as letters",
       "file": "formatting/text-formatting.md"
     },
     {

@@ -25,6 +25,12 @@ Load these files at the start of the task. Do not load others unless the user re
 **UA grammar:**
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/ua-grammar/00-cheatsheet.md` — always-loaded quick reference: UCPay terminology, formatting, and the most common UA errors.
 
+**Style guide (project-declared, resolved before drafting):**
+- Follow `${CLAUDE_PLUGIN_ROOT}/context/style-guide-registry.md` — "Resolving which guide a project uses" section — to find this project's declared `Style guide:` token (from its `CLAUDE.md`), then that file's "Loading procedure per guide" for the resolved token, mapping the content you're about to write (steps, tables, admonitions, screenshots' surrounding prose, etc.) to the matched topical files.
+- Apply every matched rule while drafting, not just at a later review pass.
+- If the project has no declared style guide, follow the registry's fallback: ask once, offer to persist the answer to that project's `CLAUDE.md`.
+- Do not hand-copy a guide name, corpus path, or individual rule into this skill file — the registry is the single source of truth and changes independently of this file.
+
 **Examples — voice and tone reference only:**
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/doc-examples/user-guide-examples/user-guide-example-create-branches.md`
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/doc-examples/user-guide-examples/user-guide-example-edit-links.md`
@@ -191,6 +197,7 @@ Apply `ua-user-guide-template.md`. Choose Операції or Етапи structu
   - Stages (ВАРІАНТ Б): `<Accordion title="N. {Назва}">` per stage (no `titleAs`), immediately after the intro sentence. No numbered list of stage names before the Accordion blocks. Reference to the next stage in the result block: «Перейдіть до **2. {Назва}**.»
 - **Attribute column text:** text in the **Атрибути** column of reference tables must not be bold.
 - **Colon over dash in bullet lists:** when labelling items, prefer `:` over `—`. Bolding rule: if the label is a UI element name, do not bold the colon (`**UI елемент**: опис`); if the label is plain text, bold both label and colon (`**Назва:** опис`).
+- **Follow the style-guide topical files loaded above** for anything not covered by the project-specific rules in this list (formatting, punctuation, accessibility, etc.) — check the corpus rather than guessing.
 - **Mark writer decisions needing follow-up** with `{/* ToDo: ... */}`.
 
 ### Step 7 — Self-review before saving
@@ -219,6 +226,7 @@ Before writing to disk, check:
 - References to Довідкова інформація in steps are inline links, not separate sentences
 - Single-operation pages: no `## Операції з {назва}` wrapper and no Accordion
 - Stages (Етапи): Accordion title is `"N. {Назва}"` (no `titleAs`, no "Етап" prefix); no numbered list before the Accordion blocks
+- The draft conforms to every rule in the style-guide topical files loaded per "Sources to load" (resolved via `style-guide-registry.md`) — check against those files directly, don't rely on memory of past drafts
 
 ### Step 8 — Reviewer pass
 

@@ -55,6 +55,7 @@ keyword, or path, and then load only the matching module.
 | `GDSG-UNIT-001` | Join values and units correctly | `formatting/numbers-and-units.md` |
 | `GDSG-FORMAT-001` | Introduce terms deliberately | `formatting/text-formatting.md` |
 | `GDSG-FORMAT-002` | Place examples naturally | `formatting/text-formatting.md` |
+| `GDSG-FORMAT-003` | Titles and letters as letters | `formatting/text-formatting.md` |
 | `GDSG-ABBR-001` | Introduce unfamiliar abbreviations | `language/abbreviations-and-capitalization.md` |
 | `GDSG-ABBR-002` | Preserve the term’s case and grammar | `language/abbreviations-and-capitalization.md` |
 | `GDSG-ABBR-003` | Prefer words to Latin shorthand | `language/abbreviations-and-capitalization.md` |

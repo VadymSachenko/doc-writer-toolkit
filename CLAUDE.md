@@ -59,18 +59,25 @@ Commands in `commands/*.md` are thin: they bind `$ARGUMENTS` to concrete paths a
 
 `doc-style-reviewer` is the one skill with four selectable modes (`gdsg`, `mssg-en`, `mssg-ua`, `ua-grammar`) chosen via a `guide:` argument; each mode reads a different combination of the two corpora plus `ua-grammar/`.
 
-### Two parallel doc trees in the host project
+### Content paths — and the style guide — are project-declared, not hardcoded
 
-Skills assume the host project has two independently-localized doc trees, each with its own i18n output path — this split explains why several skills hardcode different `i18n/en/...` paths:
+No skill hardcodes a UA content root, an EN i18n root, a URL prefix, or a style-guide name. Every skill that reads/writes doc files by path (`doc-translator`, `doc-alignment-checker`, `concept-doc-writer`, `user-guide-writer`, `api-doc-writer`) or that consults a style guide while drafting resolves both from the *host* project's own `CLAUDE.md`, under a "Documentation toolkit configuration" section:
 
-| Tree | UA/source path | EN path | Used by |
-|---|---|---|---|
-| API reference | `docs/` | `i18n/en/docusaurus-plugin-content-docs/current/` | `api-doc-writer` (EN-native), `fix-doc-todos` |
-| Partner cabinet | `partner-cabinet/` | `i18n/en/docusaurus-plugin-content-docs-partner-cabinet/current/` | `user-guide-writer`, `concept-doc-writer`, `doc-translator`, `doc-alignment-checker` (UA-native) |
+```md
+## Documentation toolkit configuration
 
-Note: `commands/check-doc-alignment.md` currently hardcodes the `docs/` / `docusaurus-plugin-content-docs/current/` pair in its argument-hint text, while the `doc-alignment-checker` skill it wraps hardcodes the `partner-cabinet/` pair in its own Path mapping section — these disagree. Check which one you actually need before relying on either, and reconcile them if you're touching this area.
+- **Style guide:** `gdsg`
+- **UA content root:** `docs/`
+- **EN i18n root:** `i18n/en/docusaurus-plugin-content-docs/current/`
+- **UA URL prefix:** `/`
+```
 
-Across both trees, unresolved content is marked with `{/* ToDo: ... */}` and `{/* NEEDS CONFIRMATION: ... */}` HTML comments — every writing/translation/alignment skill knows to preserve, carry over, or check for these markers rather than resolving them silently.
+- `context/project-paths.md` is the single source of truth for the path-resolution procedure (and the ask-once, offer-to-persist fallback when a project hasn't declared these fields yet).
+- `context/style-guide-registry.md` is the equivalent for the style-guide token, plus the corpus/router each token maps to.
+
+Host projects are free to differ in shape here, and none of that difference lives in a skill file: some split UA-first content and EN-native reference docs into two separate Docusaurus plugin instances with two i18n output paths (e.g. `partner-cabinet/` alongside a default-id `docs/`); others use a single tree. A skill never assumes which — it reads the declaration.
+
+Across any project's tree(s), unresolved content is marked with `{/* ToDo: ... */}` and `{/* NEEDS CONFIRMATION: ... */}` HTML comments — every writing/translation/alignment skill knows to preserve, carry over, or check for these markers rather than resolving them silently.
 
 ### SME video pipeline
 

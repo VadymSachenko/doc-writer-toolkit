@@ -17,13 +17,17 @@ keywords: [procedure, steps, instructions, imperative, prerequisite, optional]
 
 - Document the shortest accessible method that best serves the audience. Do not list
   alternatives that add no decision value.
+- If multiple ways genuinely need documentation, separate them into different pages,
+  headings, or tabs — don't mix them in a single list.
 - State prerequisites before the steps.
 - Keep the sequence short; link to a reusable procedure instead of repeating it.
-- Give one action or one closely coupled action group per step.
+- Give one action or one closely coupled action group per step. If a step starts to feel
+  long, split it into multiple steps.
 - Use a numbered list for a multistep sequence. A single-step procedure can be one
   sentence in a bullet.
 - Use lowercase letters for substeps and Roman numerals for a third level when the output
-  format supports that hierarchy.
+  format supports that hierarchy. Treat a step that introduces substeps like an
+  introductory sentence: end it with a colon or a period, as appropriate.
 
 ## GDSG-PROC-001 — Write actionable steps
 
@@ -39,7 +43,9 @@ option below and save it.
 
 ## Step details
 
-- Introduce the procedure with a complete sentence, but do not restate its heading.
+- Introduce the procedure with a complete sentence, but do not restate its heading. If a
+  set of procedures is split across multiple headings, restate the location in the first
+  step of each one, even if the context is the same as the previous procedure's.
 - Prefix a truly optional step with **Optional:**, not **(Optional)**.
 - Avoid **please** and directional words such as *above*, *below*, *left*, or *right*.
 - For sequential menu commands, use an accessible `>` sequence; see the UI rules.
@@ -49,6 +55,10 @@ option below and save it.
   shortcut itself is the task or audience need.
 - If a step contains a decision, make each branch explicit rather than asking the reader
   to infer it.
+- When a goal phrased as “To accomplish X” could be misread as making the step optional,
+  use a colon instead: **Enable the setting:** ...
+- Don't repeat a result in the next step if that step already names the dialog, page, or
+  element the result produced.
 
 ## Complex technical step order
 

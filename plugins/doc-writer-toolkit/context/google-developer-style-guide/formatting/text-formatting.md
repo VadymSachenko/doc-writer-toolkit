@@ -42,3 +42,10 @@ discussed as a word, but use quotation marks for an actual quotation.
 - Put a longer example after the claim it supports or in a separate block.
 - Rewrite a sentence if **for example** creates an awkward interruption or unclear scope.
 
+## GDSG-FORMAT-003 — Titles and letters as letters
+
+Italicize the title of a full-length work — a book, movie, or web series — unless the
+title doubles as link text. Put the title of a shorter work, such as an article or a
+single episode, in quotation marks instead, with the same link-text exception.
+Italicize a letter referred to as itself, such as the *'s* in a possessive.
+
