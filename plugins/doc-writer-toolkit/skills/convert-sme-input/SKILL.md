@@ -34,7 +34,7 @@ When converting or comparing information, use this order:
 1. Raw SME input for meeting-specific facts, intent, explanations, and unresolved questions.
 2. Existing processed source Markdown, if present, for current structure and previously accepted wording.
 3. API brief documents in `/api-docs/api-references/` if the topic covers API-facing behavior.
-4. Screenshots in `.sources/frames/{video-basename}-frames/` for self-checking visual/UI claims against the recording — see "Self-check via screenshots" below. This is **not** the same folder as `.assets/`, which holds only the curated screenshots someone already chose to embed in the published doc; don't confuse the two.
+4. `frames-index.json` inside `.sources/frames/{video-basename}-frames/` for self-checking visual/UI claims against the recording — see the self-check Workflow step below. This is **not** the same folder as `.assets/`, which holds only the curated screenshots someone already chose to embed in the published doc; don't confuse the two.
 5. Project glossary (`${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-ua.md`) for terminology consistency.
 
 If sources conflict, do not silently choose. Record the conflict under `### Питання або потребує уточнення`.
@@ -92,20 +92,16 @@ Always include `### Згадати у документації`. This section is
    - Dependencies on API calls, external systems, or configuration
    - Open questions and SME uncertainty
 4. Group extracted facts into sections by concept, not by transcript order.
-5. Preserve important SME nuance, but rewrite the text into concise documentation-source prose. For a fact tied to a specific visual/UI moment, self-check it against a screenshot first — see "Self-check via screenshots" below.
-6. Add a `### Згадати у документації` section with every item a guide writer must remember.
-7. If updating an existing Markdown file, add missing facts without removing useful accepted structure.
-8. After updating, summarize what was added and what remains uncertain.
-
-## Self-check via screenshots
-
-Before writing a fact tied to a specific visual/UI moment (the kind that gets a `(M:SS)` citation — see Writing rules), confirm it against a screenshot rather than trusting the transcript text alone:
-
-1. Note the moment's timestamp in seconds (for a range, the midpoint).
-2. List `.sources/frames/{video-basename}-frames/*.jpg` (see Source priority above — not `.assets/`) and parse each filename's `HH-MM-SS` into seconds.
-3. If one falls within 15 seconds of the target moment, read it directly to confirm or inform the finding before writing it.
-4. If none does, follow `extract-sme-screenshots`' "Targeted extraction" procedure to pull exactly what's missing — that procedure is documented once, in that skill; don't re-describe it here. **Batch this**: collect every timestamp that turns out to be missing while drafting, and make one targeted-extraction call with all of them together at the end of the pass, not one call per finding.
-5. If `.sources/frames/{video-basename}-frames/` doesn't exist yet and no raw video is available either, proceed without visual confirmation — note in the final response that visual claims weren't screenshot-verified.
+5. **Self-check every fact tied to a specific visual/UI moment against a screenshot before writing it down** — this step is mandatory and cannot be skipped or deferred to a later pass. For each such fact (the kind that will get a `(M:SS)` citation — see Writing rules):
+   1. Note the moment's timestamp in seconds (for a range, the midpoint).
+   2. Read `frames-index.json` in `.sources/frames/{video-basename}-frames/` (see Source priority above — not `.assets/`) — a single cheap text read, not a directory listing. Look for an entry whose `seconds` falls within 15 seconds of the target moment, using its `ocr_text`/`transcript_text` fields to find the right one by content rather than guessing from filenames alone.
+   3. If a matching entry exists, open that screenshot directly to confirm or inform the finding before writing it.
+   4. If none does, follow `extract-sme-screenshots`' "Targeted extraction" procedure to pull exactly what's missing — that procedure is documented once, in that skill; don't re-describe it here. **Batch this**: collect every timestamp that turns out to be missing while drafting, and make one targeted-extraction call with all of them together at the end of the pass, not one call per finding.
+   5. If `.sources/frames/{video-basename}-frames/` doesn't exist at all and no raw video is available either, proceed without visual confirmation — note in the final response that visual claims weren't screenshot-verified.
+6. Preserve important SME nuance, but rewrite the text into concise documentation-source prose, citing the timestamp for each fact confirmed in step 5.
+7. Add a `### Згадати у документації` section with every item a guide writer must remember.
+8. If updating an existing Markdown file, add missing facts without removing useful accepted structure.
+9. Before finishing, run the Output checklist below — including the per-section citation count — and only then summarize what was added and what remains uncertain.
 
 ## Comparison workflow
 
@@ -131,7 +127,7 @@ When the user asks to compare raw and processed files:
 - Status values in `code font`: `new`, `in queue`, `in work`, `success`, `cancelled` (UK spelling).
 - UI labels in **bold**: натисніть **Зберегти**.
 - Keep source-ticket identifiers when they help trace a fact (e.g., `UCP-277`).
-- **Cite a timestamp for facts tied to a specific visual/UI moment** — the SME shows, clicks, or points at something on screen, not just states a rule verbally. Use the format already in the raw transcript: `(M:SS)` for a moment, `(M:SS–M:SS)` for a range. Place it right after the sentence it supports: «Після оплати статус одразу змінюється на **Завершений** (14:32).» Don't cite a timestamp for a fact that's purely verbal (a business rule, a policy, an answer to a question) — only for something a screenshot could actually show. Before writing one of these facts, confirm it against an actual screenshot first — see "Self-check via screenshots" below; the citation is also what a later manual pass over `extract-sme-screenshots` reads to guarantee a screenshot exists at each one, so an uncited visual finding can silently end up without one.
+- **Cite a timestamp for facts tied to a specific visual/UI moment** — the SME shows, clicks, or points at something on screen, not just states a rule verbally. Use the format already in the raw transcript: `(M:SS)` for a moment, `(M:SS–M:SS)` for a range. Place it right after the sentence it supports: «Після оплати статус одразу змінюється на **Завершений** (14:32).» Don't cite a timestamp for a fact that's purely verbal (a business rule, a policy, an answer to a question) — only for something a screenshot could actually show. Before writing one of these facts, confirm it against an actual screenshot first — see Workflow step 5 (the self-check is mandatory, not optional); the citation is also what a later manual pass over `extract-sme-screenshots` reads to guarantee a screenshot exists at each one, so an uncited visual finding can silently end up without one.
 - Do not use raw transcript fillers, false starts, or personal chatter unless they explain a decision.
 - Do not invent behavior that is not in the raw SME input or supporting sources.
 - Do not over-polish into a final guide. Processed SME notes must remain source material, not user-facing instructions.
@@ -181,4 +177,5 @@ Before finishing:
 - Open questions are separated from confirmed facts.
 - UI labels, statuses, and exact messages are preserved where important.
 - Every fact tied to a specific visual/UI moment has a `(M:SS)` or `(M:SS–M:SS)` citation; purely verbal facts don't have one.
+- **Quantitative check, not just a presence check:** for every section that describes a screen, button, form, or other UI element, count its timestamp citations. Zero citations in a UI-describing section means the self-check step was skipped, not that the section happens to need none — say so plainly to the user rather than letting the file pass silently. (Calibration: a 42 KB `sme-interview.md` with a single timestamp citation total is a failure of this step, not a normal outcome.)
 - The final response explains what changed and whether anything needs SME follow-up.

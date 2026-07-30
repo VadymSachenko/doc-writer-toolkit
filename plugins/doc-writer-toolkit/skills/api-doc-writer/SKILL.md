@@ -22,6 +22,7 @@ Load these files at the start of the task. Do not load others unless the user re
 **Project rules:**
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-en.md` — canonical EN terminology.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/api-integration-context.md` — cross-cutting facts about the API (balances, transaction lifecycle, webhooks, disputes, auth, business rules). Always applicable background.
+- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` — rank-0 project formatting conventions (what bold/italic/code font mean here, placeholder form, one-entity-one-render, code-entity vs. human concept). Outranks everything else loaded for this task, including this skill's own body. API reference pages are always English, so only its Core section and English section apply.
 
 **Style guide (project-declared, resolved before drafting):**
 - Follow `${CLAUDE_PLUGIN_ROOT}/context/style-guide-registry.md` — "Resolving which guide a project uses" section — to find this project's declared `Style guide:` token (from its `CLAUDE.md`), then that file's "Loading procedure per guide" for the resolved token, mapping the content you're about to write (request/response tables, code samples, error lists, admonitions, formulas, terminology, etc.) to the matched topical files.
@@ -60,6 +61,16 @@ Read every available input file. Extract:
 - Any prerequisites (partner configuration, tokens, feature flags)
 - Any related endpoints or flows the user should know about
 
+**Screenshots (only if the brief includes any — most endpoint pages have none).** An API reference page occasionally needs a partner-cabinet screenshot (e.g., where to find a setting mentioned in Prerequisites). If `.assets/` or `.sources/frames/{video}-frames/` exist next to the input file, the same three-folder model as the other writers applies:
+
+| Folder | Role |
+|---|---|
+| `.sources/frames/{video}-frames/` | Full archive of extracted frames + `frames-index.json`. Evidence base. Never embedded directly. |
+| `.assets/` | Selected, renamed frames ready for embedding. The **only** folder the page links images from. |
+| `.assets/ref/` | Reference-only frames: read for context, **never** embed. |
+
+If `.assets/` is empty but `frames/` has an archive, do not silently draft with zero images if the brief implies one is needed — read `frames-index.json`, shortlist 3–8 candidates by matching the relevant prerequisite/step against `ocr_text`/`transcript_text` and `score`, open only those, then copy (not move) the confirmed ones into `.assets/` and rename them following the `{subject}-{ui-element-type}.png` pattern used by the other writer skills. If neither folder exists, this page simply has no screenshots — proceed without one.
+
 ### Step 3 — Compose a facts sheet
 
 Before asking questions, produce a short internal facts sheet organized as:
@@ -89,7 +100,7 @@ Apply the API reference template. Single endpoint per page.
 Rules:
 - **Never invent API facts.** Fields, headers, error codes, status values — if a fact is not in the sources, flag it with `{/* NEEDS CONFIRMATION: ... */}`, don't guess. **Exception:** adjust obviously malformed example values in JSON samples (e.g. `Test`, `7777777`) to realistic values that correlate with field names and types. Flag every such adjustment with `// NEEDS CONFIRMATION: original value was <ORIGINAL_VALUE>` as an inline JSON comment. Use Ukraine-based values where applicable (Ukrainian phone format, common Ukrainian names, etc.).
 - **Apply the glossary.** Replace synonyms with canonical EN terms (Partner, Transaction, Webhook, etc.).
-- **Apply style-guide rules.** Sentence case, active voice, present tense, second person, imperative for instructions.
+- **Sentence style, UI labels, status values, placeholders, code-vs-concept rendering:** follow `formatting-conventions.md`'s Core section (Ж1–Ж7) and its English section — do not restate them here.
 - **Match the template's section structure.** Prerequisites (if applicable), Authentication, endpoint action, Request, Response, Possible errors, Next steps.
 - **For code fences:** use `json` for JSON bodies, `bash` for cURL examples, `text` for plain strings.
 - **For long request or response samples:** wrap in `<details>` blocks.
@@ -106,9 +117,27 @@ Before writing to disk, check:
 - No stale links from example files (e.g., `/docs/wellfunnel-*`)
 - Every fact is traceable to an input source or a user answer from Step 4
 - All required template sections are present; optional ones are either filled or omitted (not left as empty placeholders)
+- UI labels, status values, placeholders, and code-vs-concept rendering follow `formatting-conventions.md` Ж1–Ж4
 - The draft conforms to every rule in the style-guide topical files loaded per "Sources to load" (resolved via `style-guide-registry.md`) — check against those files directly, don't rely on memory of past drafts
+- **P1 — Inherited wording normalized.** For every heading and every bolded fragment, confirm it is not lifted from the brief or `.sources/sme-interview.md` without normalization. Intermediate notes are a source of *facts*, not of *wording*.
+- **P2 — Heading language (Ж7).** Every heading is in English; a code entity inside one stays in `code font` but the surrounding words don't switch language.
+- **P3 — Bold only on visible UI labels (Ж1).** For every `**...**` span, confirm it is a UI element's visible label, not emphasis on a fact, a term, or a module name.
+- **P4 — Document as-is (Ж6).** No plans, upcoming changes, or "the team intends to..." in page body text (including inside admonitions) — only inside `{/* ToDo: ... */}`.
+- **P5 — One render per entity (Ж3).** List the document's technical entities (constants, query parameter values, field names) and confirm each is written exactly one way everywhere in the page — not split across a code-font, quoted, and plain-text rendering of the same thing.
 
-### Step 7 — Save
+### Step 7 — Reviewer pass
+
+After the self-review passes, do a focused second read:
+
+1. **P1 — Inherited wording.** Diff every heading and bolded phrase against the brief/`.sources/`; rewrite any that were copied without normalization.
+2. **P2 — Heading language.** Flag and rewrite any heading that mixes languages or leaves a glossary concept unglossaried.
+3. **P3 — Bold audit.** Re-walk every `**...**` span; strip bold from anything that isn't a visible UI label (request/response field names and constants are `code font`, not bold — Ж1/Ж4).
+4. **P4 — As-is audit.** Search the body (including admonitions) for future/planned-change language; move it to `{/* ToDo: ... */}`.
+5. **P5 — Render audit.** Build the entity list (field names, constants, enum values); fix every entity with more than one rendering in the document.
+
+Fix every issue found before saving.
+
+### Step 8 — Save
 
 Save the page to `docs/api-reference/<slug>/<slug>.md`. Create intermediate directories as needed.
 

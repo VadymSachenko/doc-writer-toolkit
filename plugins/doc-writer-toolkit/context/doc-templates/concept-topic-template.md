@@ -64,3 +64,46 @@ Common concept topic section types:
 
 - [{Document title}](/link/to/document.md)
 - [{Document title}](/link/to/document.md)
+
+{/*
+===========================================================================
+DESIGN RULES — DO NOT INCLUDE IN THE FINAL DOCUMENT
+===========================================================================
+*/}
+
+## Design rules
+
+### Purpose
+
+- A concept topic **explains**, it doesn't **instruct**. Step-by-step instructions belong in a user guide.
+- Only the overview is mandatory. Choose every other section by what the topic actually needs.
+- Don't duplicate a user guide's content — link out to it via Next steps or Related documents instead.
+
+### Admonitions
+
+| Type | When to use |
+|---|---|
+| `:::note` | Useful but non-critical information |
+| `:::info` | Process context, timing, clarifications |
+| `:::warning` | Irreversible or risky situations |
+| `:::tip` | An alternative path, a suggestion |
+
+Admonitions supplement the text; they don't replace it.
+
+### Diagrams
+
+- Multi-actor processes → Mermaid `sequenceDiagram`.
+- Decision trees → Mermaid `flowchart`.
+- Render diagrams in Docusaurus; don't paste in a screenshot of one instead.
+
+### "Next steps" vs. "Related documents"
+
+- **Next steps**: user guides the reader would naturally move to after understanding the concept.
+- **Related documents**: other concept topics, API references, architectural overviews.
+- If only one applies, don't create the other.
+
+### Terminology and formatting
+
+- Terms come from `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-en.md`.
+- Expand an abbreviation at its first mention: "API token (Application Programming Interface)"; use the short form after that.
+- UI labels, status values, placeholders, and code-vs-concept rendering follow `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` (Ж1–Ж7) — don't restate those rules here.
