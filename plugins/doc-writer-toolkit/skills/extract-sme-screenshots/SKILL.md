@@ -9,6 +9,10 @@ description: Extracts deduplicated screenshots (and, if needed, an auto-transcri
 
 Turns a raw meeting video sitting in a `.sources/` folder into a folder of selected screenshots, ready for `convert-sme-input` or a doc-writing skill to reference. This skill only produces screenshots (and a transcript when one didn't already exist) — it does not write the structured source note itself.
 
+**Two ways this skill is used:**
+1. **Standalone bulk pass** (Steps 1–5 below) — the normal case: a video just landed in `.sources/`, extract everything.
+2. **Targeted, invoked from inside `convert-sme-input`** — when that skill needs a screenshot for one specific moment and none exists nearby yet. This doesn't run the full pipeline; see "Targeted extraction" below. `convert-sme-input` follows this section directly rather than re-describing the procedure itself.
+
 ## Inputs
 
 A `.sources/` folder (e.g. `partner-cabinet/archive/.sources/`) containing:
@@ -55,13 +59,38 @@ Run into a scratch output directory (not directly into `.sources/`):
 
 ### Step 4 — Keep only what's needed
 
-- Move `<scratch-output-dir>/images/` to `.sources/{video-basename}-screenshots/`.
-- If there was no input transcript (Whisper ran), also move `<scratch-output-dir>/transcript.txt` to `.sources/{video-basename}-transcript.txt` — this is now the only record of what was said; don't let it get discarded with the rest of the scratch output.
-- Delete the scratch output directory and everything else in it (`context.md`, `ocr/`, `contact-sheet.jpg`, `frame-decisions.csv`, `transcript.json`, any partial `key/`/`transcript-key/`) — none of it is needed once the screenshots (and transcript, if freshly generated) are extracted.
+The destination is `.sources/frames/{video-basename}-frames/` (create it, including the `frames/` parent, if it doesn't exist yet). If it already has screenshots in it — e.g. `convert-sme-input` already pulled some via targeted extraction before this bulk pass ever ran — that's fine; the merge below is duplicate-aware and won't re-add anything already covered.
+
+- Merge `<scratch-output-dir>/images/` into the destination:
+  ```bash
+  "$VENV/bin/python" "${CLAUDE_PLUGIN_ROOT}/scripts/sme-video-context/sme_video_context.py" \
+    "<path-to-video>" ".sources/frames/{video-basename}-frames" --merge-from "<scratch-output-dir>/images"
+  ```
+- Merge `<scratch-output-dir>/transcript-key/images/` into the same destination the same way. The script's built-in transcript-relevance heuristic (Ukrainian/Russian keyword scoring — see the script's `transcript_relevance`) already guarantees a screenshot exists near every transcript moment it scores as significant, extracting a fresh frame via ffmpeg when the visual dedup pass alone would have skipped it. Don't skip this merge — it's exactly the "don't skip a critical moment" guarantee, already computed for free, and `--merge-from` will naturally skip anything the first merge already placed near the same moment.
+- Move `<scratch-output-dir>/transcript-key/coverage.json` to `.sources/frames/{video-basename}-frames/coverage.json` — it records which transcript segment (with its score and matched keyword categories) justified each guaranteed screenshot. Keep it as traceability.
+- If there was no input transcript (Whisper ran), also move `<scratch-output-dir>/transcript.txt` to `.sources/{video-basename}-transcript.txt` (sibling of `frames/`, not inside it) — this is now the only record of what was said; don't let it get discarded with the rest of the scratch output.
+- Delete the scratch output directory and everything else in it (`context.md`, `ocr/`, `contact-sheet.jpg`, `frame-decisions.csv`, `transcript.json`, `key/`, the rest of `transcript-key/`) — none of it is needed once the items above are pulled out.
 
 ### Step 5 — Report
 
-State how many screenshots were kept, where they landed, and whether a transcript was auto-generated (and if so, that it hasn't been human-reviewed — Whisper output can mis-hear names, numbers, and technical terms, so flag it as needing a pass before being treated as ground truth).
+State how many screenshots were kept (and how many were skipped as already-covered duplicates, if the destination wasn't empty), where they landed, and whether a transcript was auto-generated (and if so, that it hasn't been human-reviewed — Whisper output can mis-hear names, numbers, and technical terms, so flag it as needing a pass before being treated as ground truth).
+
+## Targeted extraction (used standalone or from convert-sme-input)
+
+Guarantees a screenshot near one or more specific moments in an **already-existing** `.sources/frames/{video-basename}-frames/` folder, without re-running the full pipeline:
+
+```bash
+"$VENV/bin/python" "${CLAUDE_PLUGIN_ROOT}/scripts/sme-video-context/sme_video_context.py" \
+  "<path-to-video>" ".sources/frames/{video-basename}-frames" \
+  --extract-at "<seconds-1>,<seconds-2>,..."
+```
+
+- Pass every needed timestamp in **one call**, comma-separated — don't call this once per timestamp. Each requested second is checked against what's already in the folder; a new frame is extracted via ffmpeg only for the ones not already covered.
+- `--tolerance` (default 15s) controls how close an existing screenshot must be to count as already covering a requested second.
+- This mode needs only `ffmpeg` on `PATH` — no Python packages, no persistent venv setup (Step 2 above doesn't apply here). That's what makes it cheap enough for `convert-sme-input` to call directly mid-workflow instead of only as a manual follow-up.
+- Report how many new screenshots were extracted versus already covered.
+
+This is also what a manual "second pass" after `convert-sme-input` finishes looks like: pull every `(M:SS)`/`(M:SS–M:SS)` citation out of the finished `sme-interview.md` (for a range, use the midpoint) and run this once with all of them.
 
 ## Out of scope
 

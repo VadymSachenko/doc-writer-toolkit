@@ -1,6 +1,6 @@
 ---
 name: cleanup-unused-screenshots
-description: Moves screenshots from a .sources/{video-name}-screenshots/ folder into a _unused/ subfolder if a target doc never ends up referencing them. Use after a doc has been written from extract-sme-screenshots output, to sweep up whichever candidate screenshots didn't get used. Never deletes anything - moves only.
+description: Moves screenshots from a .sources/frames/{video-name}-frames/ folder into a _unused/ subfolder if a target doc never ends up referencing them. Use after a doc has been written from extract-sme-screenshots output, to sweep up whichever candidate screenshots didn't get used. Never deletes anything - moves only.
 ---
 
 # cleanup-unused-screenshots
@@ -12,13 +12,13 @@ After `extract-sme-screenshots` produces a pool of candidate screenshots and som
 ## Inputs
 
 - A target doc file (e.g. `partner-cabinet/archive/archive.md`).
-- Optionally, which `.sources/*-screenshots/` folder to check. If omitted, look for a single such folder next to the doc's `.sources/`; if there's more than one, ask which one before proceeding.
+- Optionally, which `.sources/frames/*-frames/` folder to check. If omitted, look for a single such folder under the doc's `.sources/frames/`; if there's more than one, ask which one before proceeding.
 
 ## Workflow
 
 1. Read the target doc's full text.
 2. Collect every image filename referenced anywhere in it — match by **basename only**, not full path. The doc likely references a copy of a screenshot from `.assets/`, not the original in `.sources/`, so matching on the full relative path would falsely mark everything as unused.
-3. List every file directly inside the screenshots folder. Any file whose basename doesn't appear anywhere in the doc's text is unused.
+3. List every `screen-*.jpg` file directly inside the screenshots folder — not `coverage.json` (extraction traceability, not a screenshot) and not the `_unused/` subfolder itself. Any of those `.jpg` files whose basename doesn't appear anywhere in the doc's text is unused.
 4. Create `_unused/` inside the screenshots folder if it doesn't exist, and move (not delete) each unused file into it.
 5. Report exactly what moved and what stayed, e.g.:
 

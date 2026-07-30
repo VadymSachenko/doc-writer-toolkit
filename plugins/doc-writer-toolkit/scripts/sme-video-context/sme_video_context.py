@@ -13,10 +13,19 @@ import tempfile
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
-import imagehash
-from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+# imagehash/PIL are imported lazily, inside the functions that actually use them at
+# runtime (prepare_for_ocr, write_contact_sheet, select_frames, extract_missing_frame).
+# `from __future__ import annotations` above makes every `Image.Image`-style type hint
+# in this file a lazy string, so those signatures stay valid without a module-level
+# import too. This keeps --merge-from (no image library needed at all) and --extract-at
+# (ffmpeg only, no OCR) usable with a bare `python3` — no venv required for either —
+# which matters because convert-sme-input calls them directly without the full
+# ffmpeg+tesseract+Pillow+imagehash setup extract-sme-screenshots' bulk pass needs.
+if TYPE_CHECKING:
+    import imagehash
+    from PIL import Image
 
 
 @dataclass
@@ -45,6 +54,8 @@ def normalized_text(text: str) -> str:
 
 
 def prepare_for_ocr(image: Image.Image, content_width: float) -> Image.Image:
+    from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+
     # Remove the meeting participant rail, crop browser/OS chrome, then enlarge UI text.
     right = round(image.width * content_width)
     cropped = image.crop((round(image.width * 0.04), round(image.height * 0.07), right, round(image.height * 0.94)))
@@ -81,6 +92,8 @@ def extract_frames(video: Path, raw: Path, interval: float) -> list[Path]:
 
 
 def write_contact_sheet(output: Path) -> None:
+    from PIL import Image
+
     screenshots = sorted((output / "images").glob("*.jpg"))
     if not screenshots:
         return
@@ -100,6 +113,9 @@ def write_contact_sheet(output: Path) -> None:
 def select_frames(
     frames: list[Path], output: Path, interval: float, hash_threshold: int, ocr_language: str
 ) -> list[Candidate]:
+    import imagehash
+    from PIL import Image
+
     images = output / "images"
     ocr_dir = output / "ocr"
     images.mkdir(parents=True, exist_ok=True)
@@ -151,6 +167,11 @@ def select_frames(
             name = f"screen-{timestamp(seconds).replace(':', '-')}.jpg"
             shutil.copy2(frame, images / name)
             (ocr_dir / name.replace(".jpg", ".txt")).write_text(text + "\n", encoding="utf-8")
+            # Repoint source at the persisted copy: `frame` lives in the raw-frames temp
+            # directory, which main() deletes before write_key_package/
+            # write_transcript_driven_package run — reading `frame` after that point is
+            # the FileNotFoundError this used to hit.
+            candidate.source = images / name
             last_kept_hash = current_hash
             last_kept_text = clean_text
             retained_states.append((current_hash, clean_text))
@@ -335,21 +356,85 @@ def nearest_frame(frames: list[Candidate], seconds: float, tolerance: float) -> 
     return nearest if abs(nearest.seconds - seconds) <= tolerance else None
 
 
-def extract_missing_frame(
-    video: Path, output: Path, seconds: float, ocr_language: str
-) -> Candidate:
-    name = f"screen-{timestamp(seconds).replace(':', '-')}.jpg"
-    target = output / "transcript-extracted" / name
+def extract_frame_at(video: Path, target: Path, seconds: float) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     run([
         "ffmpeg", "-hide_banner", "-loglevel", "warning", "-ss", str(seconds),
         "-i", str(video), "-frames:v", "1", "-update", "1", "-q:v", "2", str(target),
     ])
+
+
+def extract_missing_frame(
+    video: Path, output: Path, seconds: float, ocr_language: str
+) -> Candidate:
+    from PIL import Image
+
+    name = f"screen-{timestamp(seconds).replace(':', '-')}.jpg"
+    target = output / "transcript-extracted" / name
+    extract_frame_at(video, target, seconds)
     scratch = output / ".ocr-transcript-frame.png"
     with Image.open(target) as image:
         text = read_ocr(image, scratch, ocr_language)
     scratch.unlink(missing_ok=True)
     return Candidate(target, seconds, None, text, None, True)
+
+
+def parse_existing_screenshots(folder: Path) -> list[tuple[float, Path]]:
+    """Read seconds back out of screen-HH-MM-SS.jpg filenames in a flat folder."""
+    found = []
+    for image in sorted(folder.glob("screen-*.jpg")):
+        match = re.fullmatch(r"screen-(\d{2})-(\d{2})-(\d{2})\.jpg", image.name)
+        if not match:
+            continue
+        hours, minutes, seconds = map(int, match.groups())
+        found.append((float(hours * 3600 + minutes * 60 + seconds), image))
+    return found
+
+
+def extract_at_timestamps(
+    video: Path, screenshots_dir: Path, timestamps: list[float], tolerance: float
+) -> list[dict]:
+    """Guarantee a screenshot near each requested second in a flat screenshots folder.
+
+    Used for a targeted second pass after convert-sme-input names specific moments —
+    does not touch anything already in screenshots_dir except add to it.
+    """
+    existing = parse_existing_screenshots(screenshots_dir)
+    report = []
+    for seconds in timestamps:
+        nearest = min(existing, key=lambda item: abs(item[0] - seconds), default=None)
+        if nearest is not None and abs(nearest[0] - seconds) <= tolerance:
+            report.append({"requested": seconds, "status": "already-covered", "screenshot": nearest[1].name})
+            continue
+        name = f"screen-{timestamp(seconds).replace(':', '-')}.jpg"
+        target = screenshots_dir / name
+        extract_frame_at(video, target, seconds)
+        existing.append((seconds, target))
+        report.append({"requested": seconds, "status": "extracted", "screenshot": name})
+    return report
+
+
+def merge_screenshots(source_dir: Path, destination_dir: Path, tolerance: float) -> list[dict]:
+    """Copy screen-*.jpg candidates from source_dir into destination_dir, skipping any
+    candidate whose timestamp already has a match within tolerance in destination_dir.
+
+    Used both to fold a fresh scratch run's images/ and transcript-key/images/ into a
+    project's persisted frames folder, and to re-run the bulk pass without duplicating
+    frames a targeted extract-at pass already placed there.
+    """
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    existing = parse_existing_screenshots(destination_dir)
+    report = []
+    for seconds, source in sorted(parse_existing_screenshots(source_dir)):
+        nearest = min(existing, key=lambda item: abs(item[0] - seconds), default=None)
+        if nearest is not None and abs(nearest[0] - seconds) <= tolerance:
+            report.append({"seconds": seconds, "status": "skipped-duplicate", "screenshot": nearest[1].name})
+            continue
+        target = destination_dir / source.name
+        shutil.copy2(source, target)
+        existing.append((seconds, target))
+        report.append({"seconds": seconds, "status": "copied", "screenshot": source.name})
+    return report
 
 
 def write_transcript_driven_package(
@@ -431,7 +516,42 @@ def main() -> None:
         help="import TurboScribe text instead of running Whisper; may be repeated",
     )
     parser.add_argument("--key-interval", type=int, default=30)
+    parser.add_argument(
+        "--extract-at", default=None, metavar="SECONDS[,SECONDS...]",
+        help=(
+            "skip the full pipeline; treat `output` as a flat folder of existing "
+            "screen-HH-MM-SS.jpg files and guarantee one near each listed second, "
+            "extracting a new frame only where none already falls within --tolerance"
+        ),
+    )
+    parser.add_argument("--tolerance", type=float, default=15.0)
+    parser.add_argument(
+        "--merge-from", type=Path, default=None, metavar="SOURCE_DIR",
+        help=(
+            "skip the full pipeline; copy screen-HH-MM-SS.jpg candidates from SOURCE_DIR "
+            "into `output`, skipping any whose timestamp is already covered there within "
+            "--tolerance (`output` is created if missing)"
+        ),
+    )
     args = parser.parse_args()
+
+    if args.merge_from is not None:
+        report = merge_screenshots(args.merge_from, args.output, args.tolerance)
+        for item in report:
+            print(f"{timestamp(item['seconds'])}: {item['status']} ({item['screenshot']})")
+        copied = sum(1 for item in report if item["status"] == "copied")
+        print(f"Copied {copied} screenshot(s); {len(report) - copied} already covered (skipped)")
+        return
+
+    if args.extract_at is not None:
+        timestamps = [float(part) for part in args.extract_at.split(",") if part.strip()]
+        args.output.mkdir(parents=True, exist_ok=True)
+        report = extract_at_timestamps(args.video, args.output, timestamps, args.tolerance)
+        for item in report:
+            print(f"{timestamp(item['requested'])}: {item['status']} ({item['screenshot']})")
+        extracted = sum(1 for item in report if item["status"] == "extracted")
+        print(f"Extracted {extracted} new screenshot(s); {len(report) - extracted} already covered")
+        return
 
     if not args.resume_visual and args.output.exists() and any(args.output.iterdir()):
         parser.error(f"output directory must be empty or new: {args.output}")
