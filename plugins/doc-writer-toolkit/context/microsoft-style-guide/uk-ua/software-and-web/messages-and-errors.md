@@ -2,6 +2,7 @@
 id: MWSG-UK-MESSAGES
 title: Повідомлення, помилки й тривалі операції
 languages: [uk-UA]
+scope: language-specific
 content_types: [ui, software, status-message, error-message]
 source_urls: [https://aka.ms/ukrainian-styleguide]
 source_sections: [5.6, 5.6.2, 5.6.5]

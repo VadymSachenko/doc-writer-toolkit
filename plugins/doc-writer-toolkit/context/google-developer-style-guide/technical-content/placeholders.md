@@ -2,6 +2,7 @@
 id: GDSG-TECH-PLACEHOLDERS
 title: Placeholders
 languages: [en-US]
+scope: structural
 content_types: [code, command-line, examples]
 source_urls:
   - https://developers.google.com/style/placeholders

@@ -2,6 +2,7 @@
 id: GDSG-NAMES-EXAMPLES
 title: Safe and inclusive example data
 languages: [en-US]
+scope: structural
 content_types: [examples, code, tutorials]
 source_urls:
   - https://developers.google.com/style/examples

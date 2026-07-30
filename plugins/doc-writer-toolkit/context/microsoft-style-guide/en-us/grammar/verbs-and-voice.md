@@ -2,6 +2,7 @@
 id: MWSG-EN-GRAMMAR-VERBS
 title: Verbs and voice
 languages: [en-US]
+scope: structural
 source_urls:
   - https://learn.microsoft.com/en-us/style-guide/grammar/verbs
   - https://learn.microsoft.com/en-us/style-guide/grammar/ing-words

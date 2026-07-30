@@ -2,6 +2,9 @@
 id: MWSG-SHARED-ALTERNATIVE-INPUT
 title: Alternative input methods
 languages: [shared]
+scope: mixed
+language_specific_sections:
+  - "Touch- and pen-specific terms"
 source_urls:
   - https://learn.microsoft.com/en-us/style-guide/procedures-instructions/describing-alternative-input-methods
 captured: 2026-07-16

@@ -2,6 +2,9 @@
 id: MWSG-SHARED-VOICE
 title: Microsoft voice and top principles
 languages: [shared]
+scope: mixed
+language_specific_sections:
+  - "English-specific quick checks"
 source_urls:
   - https://learn.microsoft.com/en-us/style-guide/brand-voice-above-all-simple-human
   - https://learn.microsoft.com/en-us/style-guide/top-10-tips-style-voice

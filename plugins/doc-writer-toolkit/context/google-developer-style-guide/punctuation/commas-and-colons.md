@@ -2,6 +2,9 @@
 id: GDSG-PUNCT-COMMAS-COLONS
 title: Commas and colons
 languages: [en-US]
+scope: mixed
+language_specific_sections:
+  - "Commas"
 content_types: [all]
 source_urls:
   - https://developers.google.com/style/commas

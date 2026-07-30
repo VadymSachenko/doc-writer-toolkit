@@ -2,6 +2,7 @@
 id: GDSG-LINKING-TARGETS
 title: Heading targets and anchors
 languages: [en-US]
+scope: structural
 content_types: [web, reference]
 source_urls:
   - https://developers.google.com/style/headings-targets

@@ -2,6 +2,7 @@
 id: MWSG-SHARED-HEADINGS
 title: Headings
 languages: [shared]
+scope: structural
 source_urls:
   - https://learn.microsoft.com/en-us/style-guide/scannable-content/headings
 captured: 2026-07-16

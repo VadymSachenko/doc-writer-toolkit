@@ -2,6 +2,7 @@
 id: MWSG-SHARED-ACCESSIBLE-WRITING
 title: Writing for all abilities
 languages: [shared]
+scope: structural
 source_urls:
   - https://learn.microsoft.com/en-us/style-guide/accessibility/accessibility-guidelines-requirements
   - https://learn.microsoft.com/en-us/style-guide/accessibility/writing-all-abilities

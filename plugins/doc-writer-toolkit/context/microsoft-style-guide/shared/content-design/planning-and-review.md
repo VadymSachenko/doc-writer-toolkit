@@ -2,6 +2,7 @@
 id: MWSG-SHARED-PLANNING
 title: Content and design planning
 languages: [shared]
+scope: structural
 source_urls:
   - https://learn.microsoft.com/en-us/style-guide/content-planning
   - https://learn.microsoft.com/en-us/style-guide/design-planning

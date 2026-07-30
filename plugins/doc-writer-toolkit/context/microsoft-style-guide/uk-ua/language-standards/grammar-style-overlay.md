@@ -2,6 +2,7 @@
 id: MWSG-UK-GRAMMAR-OVERLAY
 title: Стилістичні граматичні рішення для локалізації
 languages: [uk-UA]
+scope: language-specific
 content_types: [documentation, ui, software]
 source_urls: [https://aka.ms/ukrainian-styleguide]
 source_sections: [4.2.3-4.2.19]

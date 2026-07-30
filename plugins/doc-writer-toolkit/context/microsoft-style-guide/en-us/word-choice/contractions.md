@@ -2,6 +2,7 @@
 id: MWSG-EN-CONTRACTIONS
 title: Contractions
 languages: [en-US]
+scope: language-specific
 source_urls:
   - https://learn.microsoft.com/en-us/style-guide/word-choice/use-contractions
 captured: 2026-07-16

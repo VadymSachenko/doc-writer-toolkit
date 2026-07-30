@@ -2,6 +2,7 @@
 id: MWSG-SHARED-GLOBAL-WEB
 title: Global-ready web and software
 languages: [shared]
+scope: structural
 source_urls:
   - https://learn.microsoft.com/en-us/style-guide/global-communications/web-software-html-considerations
 captured: 2026-07-16

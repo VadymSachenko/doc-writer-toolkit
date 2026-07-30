@@ -2,6 +2,7 @@
 id: GDSG-TECH-CODE
 title: Code in text and code samples
 languages: [en-US]
+scope: structural
 content_types: [technical, api-reference, tutorial]
 source_urls:
   - https://developers.google.com/style/code-in-text

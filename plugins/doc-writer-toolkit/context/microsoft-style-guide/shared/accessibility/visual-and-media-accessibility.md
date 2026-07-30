@@ -2,6 +2,7 @@
 id: MWSG-SHARED-VISUAL-ACCESSIBILITY
 title: Accessible color, graphics, and media
 languages: [shared]
+scope: structural
 source_urls:
   - https://learn.microsoft.com/en-us/style-guide/accessibility/colors-patterns-text-graphics-design
   - https://learn.microsoft.com/en-us/style-guide/accessibility/graphics-design-media

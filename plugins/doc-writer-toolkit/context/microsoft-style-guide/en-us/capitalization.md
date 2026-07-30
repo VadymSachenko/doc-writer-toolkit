@@ -2,6 +2,7 @@
 id: MWSG-EN-CAPITALIZATION
 title: Capitalization
 languages: [en-US]
+scope: structural
 source_urls:
   - https://learn.microsoft.com/en-us/style-guide/capitalization
 captured: 2026-07-16

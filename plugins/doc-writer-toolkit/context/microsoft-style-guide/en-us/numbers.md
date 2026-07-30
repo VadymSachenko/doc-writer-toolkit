@@ -2,6 +2,7 @@
 id: MWSG-EN-NUMBERS
 title: Numbers
 languages: [en-US]
+scope: structural
 source_urls:
   - https://learn.microsoft.com/en-us/style-guide/numbers
 captured: 2026-07-16

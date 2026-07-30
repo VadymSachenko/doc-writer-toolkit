@@ -2,6 +2,7 @@
 id: MWSG-EN-PUNCTUATION-CORE
 title: Core punctuation
 languages: [en-US]
+scope: structural
 source_urls:
   - https://learn.microsoft.com/en-us/style-guide/punctuation/
   - https://learn.microsoft.com/en-us/style-guide/punctuation/formatting-punctuation

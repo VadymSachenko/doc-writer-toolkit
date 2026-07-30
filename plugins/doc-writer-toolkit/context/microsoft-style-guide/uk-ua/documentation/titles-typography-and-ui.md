@@ -2,6 +2,7 @@
 id: MWSG-UK-DOCUMENTATION
 title: Заголовки, типографіка й посилання на UI
 languages: [uk-UA]
+scope: language-specific
 content_types: [documentation, help]
 source_urls: [https://aka.ms/ukrainian-styleguide]
 source_sections: [5.5, 5.5.1-5.5.4]

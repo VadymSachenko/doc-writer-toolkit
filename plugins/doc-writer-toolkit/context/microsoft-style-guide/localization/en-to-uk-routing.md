@@ -2,6 +2,7 @@
 id: MWSG-LOC-EN-UK-ROUTER
 title: English-to-Ukrainian rule router
 languages: [en-US, uk-UA]
+scope: structural
 content_types: [localization]
 captured: 2026-07-16
 status: active

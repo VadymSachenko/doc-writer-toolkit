@@ -2,6 +2,7 @@
 id: MWSG-SHARED-TYPE-LAYOUT
 title: Type, layout, and titles
 languages: [shared]
+scope: structural
 source_urls:
   - https://learn.microsoft.com/en-us/style-guide/text-formatting/
   - https://learn.microsoft.com/en-us/style-guide/text-formatting/using-type

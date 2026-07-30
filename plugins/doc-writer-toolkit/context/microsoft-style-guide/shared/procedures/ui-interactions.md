@@ -2,6 +2,7 @@
 id: MWSG-SHARED-UI-INTERACTIONS
 title: Describing interactions with the UI
 languages: [shared]
+scope: language-specific
 source_urls:
   - https://learn.microsoft.com/en-us/style-guide/procedures-instructions/describing-interactions-with-ui
 captured: 2026-07-16

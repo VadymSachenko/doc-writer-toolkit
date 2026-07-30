@@ -2,6 +2,7 @@
 id: MWSG-TERM-COLLECTION-SPECIAL-CHARS
 title: Special characters
 languages: [shared]
+scope: language-specific
 source_urls: [https://learn.microsoft.com/en-us/style-guide/a-z-word-list-term-collections/term-collections/special-characters]
 captured: 2026-07-16
 status: active

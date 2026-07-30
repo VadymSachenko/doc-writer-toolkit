@@ -2,6 +2,7 @@
 id: MWSG-EN-WORD-CHOICE
 title: Plain and precise English
 languages: [en-US]
+scope: structural
 source_urls:
   - https://learn.microsoft.com/en-us/style-guide/word-choice/
   - https://learn.microsoft.com/en-us/style-guide/word-choice/use-simple-words-concise-sentences

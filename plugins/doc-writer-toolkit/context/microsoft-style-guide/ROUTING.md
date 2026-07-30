@@ -38,7 +38,10 @@ without opening every file.
   that language. This is the same split the `mssg-en` / `mssg-ua` tokens already make by
   directory; the column states it per row.
 - `mixed` — the row's files carry rules of both kinds. Load them and apply the ones that
-  fit; each rule file's own frontmatter `scope:` is authoritative.
+  fit; each rule file's own frontmatter `scope:` is authoritative. The exact boundary
+  between the two kinds is not a judgment call for the reader: it's the file's own
+  `language_specific_sections` list, naming the section headings that are
+  language-specific. Everything not named there is structural.
 
 The column is a routing hint, not a filter: a scope hint must never be the reason a rule
 goes unchecked. When it disagrees with a file's frontmatter, or you are unsure, load the

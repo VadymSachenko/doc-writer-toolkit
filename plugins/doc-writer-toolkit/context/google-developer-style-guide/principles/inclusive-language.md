@@ -2,6 +2,7 @@
 id: GDSG-PRINCIPLES-INCLUSIVE
 title: Write inclusive documentation
 languages: [en-US]
+scope: structural
 content_types: [all]
 source_urls: [https://developers.google.com/style/inclusive-documentation]
 captured: 2026-07-16

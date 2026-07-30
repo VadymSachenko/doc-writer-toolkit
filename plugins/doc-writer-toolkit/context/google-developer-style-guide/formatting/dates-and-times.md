@@ -2,6 +2,9 @@
 id: GDSG-FORMAT-DATES
 title: Dates and times
 languages: [en-US]
+scope: mixed
+language_specific_sections:
+  - "Times"
 content_types: [all]
 source_urls:
   - https://developers.google.com/style/dates-times

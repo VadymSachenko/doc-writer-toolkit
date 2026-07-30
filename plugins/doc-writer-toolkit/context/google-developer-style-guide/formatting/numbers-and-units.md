@@ -2,6 +2,7 @@
 id: GDSG-FORMAT-NUMBERS
 title: Numbers and units of measure
 languages: [en-US]
+scope: structural
 content_types: [all]
 source_urls:
   - https://developers.google.com/style/numbers

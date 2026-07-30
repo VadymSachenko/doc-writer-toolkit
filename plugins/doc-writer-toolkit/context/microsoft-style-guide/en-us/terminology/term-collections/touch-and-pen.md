@@ -2,6 +2,7 @@
 id: MWSG-TERM-COLLECTION-TOUCH
 title: Touch and pen interaction terms
 languages: [shared]
+scope: language-specific
 source_urls: [https://learn.microsoft.com/en-us/style-guide/a-z-word-list-term-collections/term-collections/touch-pen-interaction-terms]
 captured: 2026-07-16
 status: active

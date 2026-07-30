@@ -2,6 +2,7 @@
 id: MWSG-UK-INCLUSIVE
 title: Інклюзивна й доступна українська мова
 languages: [uk-UA]
+scope: language-specific
 content_types: [all]
 source_urls: [https://aka.ms/ukrainian-styleguide]
 source_sections: [3, 3.1, 3.2, 5.1]

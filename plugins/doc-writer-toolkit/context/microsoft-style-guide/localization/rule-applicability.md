@@ -2,6 +2,7 @@
 id: MWSG-LOC-APPLICABILITY
 title: Cross-language applicability matrix
 languages: [en-US, uk-UA]
+scope: structural
 content_types: [localization]
 captured: 2026-07-16
 status: active

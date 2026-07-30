@@ -2,6 +2,7 @@
 id: MWSG-SHARED-TABLES-CALLOUTS
 title: Tables, sidebars, and pull quotes
 languages: [shared]
+scope: structural
 source_urls:
   - https://learn.microsoft.com/en-us/style-guide/scannable-content/tables
   - https://learn.microsoft.com/en-us/style-guide/scannable-content/sidebars

@@ -2,6 +2,7 @@
 id: MWSG-LOC-TERMINOLOGY-MAPPING
 title: Compact English-to-Ukrainian terminology map
 languages: [en-US, uk-UA]
+scope: structural
 content_types: [localization, ui, software]
 source_urls: [https://aka.ms/ukrainian-styleguide]
 captured: 2026-07-16

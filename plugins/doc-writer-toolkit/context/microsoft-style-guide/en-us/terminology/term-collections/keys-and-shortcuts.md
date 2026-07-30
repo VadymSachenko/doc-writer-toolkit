@@ -2,6 +2,7 @@
 id: MWSG-TERM-COLLECTION-KEYS
 title: Keys and keyboard shortcuts
 languages: [shared]
+scope: language-specific
 source_urls: [https://learn.microsoft.com/en-us/style-guide/a-z-word-list-term-collections/term-collections/keys-keyboard-shortcuts]
 captured: 2026-07-16
 status: active

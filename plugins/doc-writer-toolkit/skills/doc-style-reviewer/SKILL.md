@@ -46,6 +46,8 @@ Follow the "Loading procedure per guide" section in `${CLAUDE_PLUGIN_ROOT}/conte
 
 Two things worth restating only as reminders, because getting them backwards silently changes what gets checked: on a profile whose `<lang>` matches the corpus language, **both** `scope:` categories load and nothing is filtered out; a scope hint in a routing table is never a reason to leave a rule unchecked — when in doubt, load the file and let the rule's own frontmatter decide.
 
+After opening any file whose frontmatter is `scope: mixed`, read its `language_specific_sections` list and, when `<lang>` does **not** match the corpus language, exclude exactly those sections from the review — the rest of the file still applies in full. Match a listed entry to the file's body by heading text. If a listed heading isn't found in the body, that's a desync between the frontmatter and the file's own content — don't guess which section was meant; note the mismatch in the report instead.
+
 ## Step 3 — Load the project rank-0 layer
 
 Load the project rules layer described in the registry's "Project rank-0 layer" section: `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` (always, for every profile) and the glossary matching the profile's `<lang>` — `glossary-ua.md` or `glossary-en.md` (every profile except `ua-grammar`, which takes no terminology opinions).
@@ -102,7 +104,7 @@ Do this **reactively** during the review pass, never speculatively:
 
 ### False-positive guards
 - In any `@uk` profile, Latin-script brand names, API abbreviations (UUID, JSON, HTTP, etc.), and UI labels kept in Latin script are **correct** per Український правопис §121 (foreign words) — do not flag them as spelling errors just for being non-Cyrillic.
-- In an `@uk` profile built on an English corpus (`gdsg@uk`, `mssg-en@uk`), never report a `scope: language-specific` rule of that corpus against Ukrainian prose — no missing articles, no contraction advice, no US-spelling or English word-list findings. Those rules are not in the profile; layer 3 covers the same ground for Ukrainian.
+- In an `@uk` profile built on an English corpus (`gdsg@uk`, `mssg-en@uk`), never report a rule from that corpus against Ukrainian prose when it comes from a `scope: language-specific` file **or** from a section listed in a `scope: mixed` file's `language_specific_sections` — no missing articles, no contraction advice, no US-spelling or English word-list findings, whether the whole file is language-specific or just the section the rule lives in. Those rules are not in the profile; layer 3 covers the same ground for Ukrainian.
 - Terms fixed by the project glossary and formatting choices fixed by `formatting-conventions.md` (both Step 3) must never be flagged, even when the loaded corpus prefers something different. Rank 0 is absolute: e.g., the glossary mandates «ендпоінт», so never suggest «кінцева точка» in its place — even though the Microsoft Ukrainian glossary localizes "endpoint" that way. When a corpus rule and a project rule conflict, the project rule wins silently (no finding). A document that *breaks* a project rule is still a normal finding, cited to the project file.
 
 ### Finding structure
@@ -138,6 +140,7 @@ Layers applied: <layer 1 corpus> → <layer 2, or "skipped — corpus language i
 Detected document language: <uk|en|mixed> (<percentage>% <script>)
 [+ note if the project declares no `Content language:` and the language came from detection alone]
 [+ language-mismatch note if the user was asked about a file/declaration conflict and chose to proceed]
+[+ note for every loaded file with an incomplete `scope: mixed` tag (no `language_specific_sections`), or a `language_specific_sections` heading not found in the body]
 Corpus files loaded: <bullet list of every file actually opened, for traceability>
 Project glossary consulted: <path, or "not present — skipped">
 Project formatting conventions consulted: <path, or "not present — skipped">

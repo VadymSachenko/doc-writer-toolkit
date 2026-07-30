@@ -2,6 +2,7 @@
 id: GDSG-LANGUAGE-NOUNS
 title: Articles, plurals, and possessives
 languages: [en-US]
+scope: language-specific
 content_types: [all]
 source_urls:
   - https://developers.google.com/style/articles

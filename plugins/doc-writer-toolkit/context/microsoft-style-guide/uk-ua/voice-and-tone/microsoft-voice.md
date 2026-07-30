@@ -2,6 +2,7 @@
 id: MWSG-UK-VOICE
 title: Голос і тон Microsoft українською
 languages: [uk-UA]
+scope: language-specific
 content_types: [all]
 source_urls: [https://aka.ms/ukrainian-styleguide]
 source_sections: [2, 2.1, 2.2]

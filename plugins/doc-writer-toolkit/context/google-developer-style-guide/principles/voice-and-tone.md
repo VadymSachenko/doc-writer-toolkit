@@ -2,6 +2,7 @@
 id: GDSG-PRINCIPLES-VOICE
 title: Voice and tone
 languages: [en-US]
+scope: structural
 content_types: [all]
 source_urls:
   - https://developers.google.com/style/highlights

@@ -2,6 +2,7 @@
 id: GDSG-NAMES-PRODUCTS
 title: Product names and trademarks
 languages: [en-US]
+scope: structural
 content_types: [all]
 source_urls:
   - https://developers.google.com/style/product-names

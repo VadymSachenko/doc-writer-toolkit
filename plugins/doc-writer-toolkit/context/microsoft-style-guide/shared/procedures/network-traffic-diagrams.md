@@ -2,6 +2,7 @@
 id: MWSG-SHARED-NETWORK-DIAGRAMS
 title: Network traffic diagrams
 languages: [shared]
+scope: structural
 source_urls:
   - https://learn.microsoft.com/en-us/style-guide/procedures-instructions/illustrating-network-traffic-flows
 captured: 2026-07-16

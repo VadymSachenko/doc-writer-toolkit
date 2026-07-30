@@ -2,6 +2,7 @@
 id: MWSG-UK-COPILOT-PROMPTS
 title: Готові запити Copilot українською
 languages: [uk-UA]
+scope: language-specific
 content_types: [copilot-prompt, ui]
 source_urls: [https://aka.ms/ukrainian-styleguide]
 source_sections: [5.3]

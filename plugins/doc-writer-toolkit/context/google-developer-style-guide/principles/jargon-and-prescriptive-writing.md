@@ -2,6 +2,9 @@
 id: GDSG-PRINCIPLES-JARGON-PRESCRIPTIVE
 title: Jargon and prescriptive documentation
 languages: [en-US]
+scope: mixed
+language_specific_sections:
+  - "Prescriptive documentation"
 content_types: [all, tutorial, guide, recommendation]
 source_urls:
   - https://developers.google.com/style/jargon

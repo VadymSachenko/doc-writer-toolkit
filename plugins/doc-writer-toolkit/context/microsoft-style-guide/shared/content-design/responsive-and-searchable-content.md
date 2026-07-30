@@ -2,6 +2,7 @@
 id: MWSG-SHARED-RESPONSIVE-SEARCH
 title: Scannable, responsive, and searchable content
 languages: [shared]
+scope: structural
 source_urls:
   - https://learn.microsoft.com/en-us/style-guide/scannable-content/
   - https://learn.microsoft.com/en-us/style-guide/responsive-content

@@ -2,6 +2,9 @@
 id: GDSG-PUNCT-MARKS
 title: Quotation marks, parentheses, ellipses, and slashes
 languages: [en-US]
+scope: mixed
+language_specific_sections:
+  - "Quotation marks"
 content_types: [all]
 source_urls:
   - https://developers.google.com/style/quotation-marks

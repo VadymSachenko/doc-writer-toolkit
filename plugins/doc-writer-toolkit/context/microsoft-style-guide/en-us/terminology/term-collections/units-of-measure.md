@@ -2,6 +2,7 @@
 id: MWSG-TERM-COLLECTION-UNITS
 title: Units of measure
 languages: [shared]
+scope: language-specific
 source_urls: [https://learn.microsoft.com/en-us/style-guide/a-z-word-list-term-collections/term-collections/units-of-measure-terms]
 captured: 2026-07-16
 status: active

@@ -2,6 +2,7 @@
 id: MWSG-EN-PUNCTUATION-MISC
 title: Quotation marks, apostrophes, ellipses, and slashes
 languages: [en-US]
+scope: structural
 source_urls:
   - https://learn.microsoft.com/en-us/style-guide/punctuation/apostrophes
   - https://learn.microsoft.com/en-us/style-guide/punctuation/quotation-marks

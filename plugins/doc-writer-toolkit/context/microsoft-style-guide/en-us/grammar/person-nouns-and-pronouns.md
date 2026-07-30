@@ -2,6 +2,7 @@
 id: MWSG-EN-GRAMMAR-PERSON
 title: Person, nouns, and pronouns
 languages: [en-US]
+scope: structural
 source_urls:
   - https://learn.microsoft.com/en-us/style-guide/grammar/person
   - https://learn.microsoft.com/en-us/style-guide/grammar/nouns-pronouns

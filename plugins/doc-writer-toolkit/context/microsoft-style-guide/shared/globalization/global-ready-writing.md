@@ -2,6 +2,7 @@
 id: MWSG-SHARED-GLOBAL-WRITING
 title: Global-ready writing
 languages: [shared]
+scope: structural
 source_urls:
   - https://learn.microsoft.com/en-us/style-guide/global-communications/
   - https://learn.microsoft.com/en-us/style-guide/global-communications/writing-tips

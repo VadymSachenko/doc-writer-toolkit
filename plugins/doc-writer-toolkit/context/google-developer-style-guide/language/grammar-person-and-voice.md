@@ -2,6 +2,10 @@
 id: GDSG-LANGUAGE-GRAMMAR
 title: Grammar, person, voice, and tense
 languages: [en-US]
+scope: mixed
+language_specific_sections:
+  - "GDSG-GRAM-003 — Use clear pronouns"
+  - "GDSG-GRAM-007 — Natural prepositions are acceptable"
 content_types: [all]
 source_urls:
   - https://developers.google.com/style/voice

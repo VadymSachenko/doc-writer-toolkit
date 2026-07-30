@@ -2,6 +2,7 @@
 id: MWSG-TERM-COLLECTION-CLOUD
 title: Cloud-computing terms
 languages: [shared]
+scope: language-specific
 source_urls: [https://learn.microsoft.com/en-us/style-guide/a-z-word-list-term-collections/term-collections/cloud-computing-terms]
 captured: 2026-07-16
 status: active

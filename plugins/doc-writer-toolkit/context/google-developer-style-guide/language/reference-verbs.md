@@ -2,6 +2,7 @@
 id: GDSG-LANGUAGE-REFERENCE-VERBS
 title: Reference-documentation verbs
 languages: [en-US]
+scope: structural
 content_types: [api-reference, code-reference]
 source_urls:
   - https://developers.google.com/style/reference-verbs

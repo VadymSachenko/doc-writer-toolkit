@@ -2,6 +2,11 @@
 id: GDSG-LANGUAGE-ABBREVIATIONS
 title: Abbreviations, contractions, and capitalization
 languages: [en-US]
+scope: mixed
+language_specific_sections:
+  - "GDSG-ABBR-002 — Preserve the term’s case and grammar"
+  - "GDSG-ABBR-003 — Prefer words to Latin shorthand"
+  - "GDSG-CONTRACT-001 — Use clear common contractions"
 content_types: [all]
 source_urls:
   - https://developers.google.com/style/abbreviations

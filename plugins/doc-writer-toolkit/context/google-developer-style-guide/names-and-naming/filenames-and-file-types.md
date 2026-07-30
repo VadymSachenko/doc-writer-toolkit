@@ -2,6 +2,7 @@
 id: GDSG-NAMES-FILES
 title: Filenames and file types
 languages: [en-US]
+scope: structural
 content_types: [web, technical]
 source_urls:
   - https://developers.google.com/style/filenames

@@ -2,6 +2,7 @@
 id: MWSG-TERM-COLLECTION-BITS
 title: Bits and bytes
 languages: [shared]
+scope: language-specific
 source_urls: [https://learn.microsoft.com/en-us/style-guide/a-z-word-list-term-collections/term-collections/bits-bytes-terms]
 captured: 2026-07-16
 status: active

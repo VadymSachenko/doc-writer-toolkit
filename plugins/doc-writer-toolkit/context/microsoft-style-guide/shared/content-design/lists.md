@@ -2,6 +2,7 @@
 id: MWSG-SHARED-LISTS
 title: Lists
 languages: [shared]
+scope: structural
 source_urls:
   - https://learn.microsoft.com/en-us/style-guide/scannable-content/lists
 captured: 2026-07-16

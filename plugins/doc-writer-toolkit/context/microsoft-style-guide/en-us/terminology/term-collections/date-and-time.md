@@ -2,6 +2,7 @@
 id: MWSG-TERM-COLLECTION-DATE-TIME
 title: Date and time terms
 languages: [en-US]
+scope: language-specific
 source_urls: [https://learn.microsoft.com/en-us/style-guide/a-z-word-list-term-collections/term-collections/date-time-terms]
 captured: 2026-07-16
 status: active

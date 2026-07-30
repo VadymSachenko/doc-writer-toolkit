@@ -2,6 +2,7 @@
 id: GDSG-PROCEDURES
 title: Procedures
 languages: [en-US]
+scope: structural
 content_types: [procedure, tutorial, user-guide]
 source_urls:
   - https://developers.google.com/style/procedures

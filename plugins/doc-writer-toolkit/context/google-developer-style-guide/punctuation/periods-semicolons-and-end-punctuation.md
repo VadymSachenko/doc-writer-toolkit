@@ -2,6 +2,9 @@
 id: GDSG-PUNCT-END
 title: Periods, semicolons, and end punctuation
 languages: [en-US]
+scope: mixed
+language_specific_sections:
+  - "Periods"
 content_types: [all]
 source_urls:
   - https://developers.google.com/style/periods

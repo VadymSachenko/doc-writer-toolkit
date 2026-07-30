@@ -2,6 +2,7 @@
 id: MWSG-SHARED-PROCEDURES
 title: Step-by-step instructions
 languages: [shared]
+scope: structural
 source_urls:
   - https://learn.microsoft.com/en-us/style-guide/procedures-instructions/
   - https://learn.microsoft.com/en-us/style-guide/procedures-instructions/writing-step-by-step-instructions

@@ -2,6 +2,7 @@
 id: MWSG-EN-PUNCTUATION-DASHES
 title: Em dashes, en dashes, hyphens, and minus signs
 languages: [en-US]
+scope: structural
 source_urls:
   - https://learn.microsoft.com/en-us/style-guide/punctuation/dashes-hyphens
   - https://learn.microsoft.com/en-us/style-guide/punctuation/em-dashes

@@ -2,6 +2,7 @@
 id: MWSG-SHARED-CODE
 title: Code examples and developer text formatting
 languages: [shared]
+scope: structural
 source_urls:
   - https://learn.microsoft.com/en-us/style-guide/developer-content/code-examples
   - https://learn.microsoft.com/en-us/style-guide/developer-content/formatting-developer-text-elements

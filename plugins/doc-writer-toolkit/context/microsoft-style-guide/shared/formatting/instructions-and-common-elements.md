@@ -2,6 +2,7 @@
 id: MWSG-SHARED-FORMATTING-COMMON
 title: Formatting instructions and common text elements
 languages: [shared]
+scope: structural
 source_urls:
   - https://learn.microsoft.com/en-us/style-guide/procedures-instructions/formatting-text-in-instructions
   - https://learn.microsoft.com/en-us/style-guide/text-formatting/formatting-common-text-elements

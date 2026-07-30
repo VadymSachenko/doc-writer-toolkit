@@ -2,6 +2,7 @@
 id: MWSG-UK-FREQUENT-CHOICES
 title: Часті лексичні рішення Microsoft українською
 languages: [uk-UA]
+scope: language-specific
 content_types: [documentation, ui, software]
 source_urls: [https://aka.ms/ukrainian-styleguide]
 source_sections: [4.3]

@@ -2,6 +2,7 @@
 id: MWSG-UK-VOICE-VIDEO
 title: Українське озвучення й відео
 languages: [uk-UA]
+scope: language-specific
 content_types: [video, voiceover]
 source_urls: [https://aka.ms/ukrainian-styleguide]
 source_sections: [5.7, 5.7.1-5.7.3]

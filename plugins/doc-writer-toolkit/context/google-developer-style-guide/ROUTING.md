@@ -37,7 +37,10 @@ applied to a document in another language, so the router can be read under a
 - `structural` — holds whatever the language of the prose is.
 - `language-specific (en-US)` — holds only for English prose.
 - `mixed` — the row's file carries rules of both kinds. Load it and apply the ones that
-  fit; each rule file's own frontmatter `scope:` is authoritative.
+  fit; each rule file's own frontmatter `scope:` is authoritative. The exact boundary
+  between the two kinds is not a judgment call for the reader: it's the file's own
+  `language_specific_sections` list, naming the section headings that are
+  language-specific. Everything not named there is structural.
 
 The column is a routing hint, not a filter: a scope hint must never be the reason a rule
 goes unchecked. When it disagrees with a file's frontmatter, or you are unsure, load the

@@ -2,6 +2,7 @@
 id: MWSG-SHARED-BOTS
 title: Bots and virtual agents
 languages: [shared]
+scope: structural
 source_urls:
   - https://learn.microsoft.com/en-us/style-guide/chatbots-virtual-agents/
   - https://learn.microsoft.com/en-us/style-guide/chatbots-virtual-agents/structural-technical-considerations

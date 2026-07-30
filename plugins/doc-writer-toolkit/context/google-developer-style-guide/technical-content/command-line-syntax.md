@@ -2,6 +2,7 @@
 id: GDSG-TECH-COMMAND-LINE
 title: Command-line syntax and output
 languages: [en-US]
+scope: structural
 content_types: [cli-reference, procedure, tutorial]
 source_urls:
   - https://developers.google.com/style/code-syntax

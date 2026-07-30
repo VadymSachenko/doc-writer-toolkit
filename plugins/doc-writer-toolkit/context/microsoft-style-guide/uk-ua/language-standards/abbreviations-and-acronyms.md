@@ -2,6 +2,7 @@
 id: MWSG-UK-ABBREVIATIONS
 title: Українські скорочення й акроніми
 languages: [uk-UA]
+scope: language-specific
 content_types: [documentation, ui, software]
 source_urls: [https://aka.ms/ukrainian-styleguide]
 source_sections: [4.2.1, 4.2.2]

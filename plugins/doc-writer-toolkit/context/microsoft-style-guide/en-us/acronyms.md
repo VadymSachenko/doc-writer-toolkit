@@ -2,6 +2,7 @@
 id: MWSG-EN-ACRONYMS
 title: Acronyms and abbreviations
 languages: [en-US]
+scope: language-specific
 source_urls:
   - https://learn.microsoft.com/en-us/style-guide/acronyms
 captured: 2026-07-16

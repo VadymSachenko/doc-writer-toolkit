@@ -2,6 +2,7 @@
 id: GDSG-TECH-API-REFERENCE
 title: API reference comments
 languages: [en-US]
+scope: structural
 content_types: [api-reference, code-comments]
 source_urls:
   - https://developers.google.com/style/api-reference-comments

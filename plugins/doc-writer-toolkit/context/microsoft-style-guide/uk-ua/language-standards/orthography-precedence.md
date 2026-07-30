@@ -2,6 +2,7 @@
 id: MWSG-UK-ORTHOGRAPHY-PRECEDENCE
 title: Межа правопису й локалізаційних правил
 languages: [uk-UA]
+scope: language-specific
 content_types: [all]
 source_urls: [https://aka.ms/ukrainian-styleguide]
 source_sections: [4.1]

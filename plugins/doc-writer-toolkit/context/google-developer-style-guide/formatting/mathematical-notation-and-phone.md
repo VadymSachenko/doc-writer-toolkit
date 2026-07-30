@@ -2,6 +2,7 @@
 id: GDSG-FORMAT-SPECIAL-NOTATION
 title: Mathematical notation and phone numbers
 languages: [en-US]
+scope: structural
 content_types: [technical, examples]
 source_urls:
   - https://developers.google.com/style/mathematical-notation

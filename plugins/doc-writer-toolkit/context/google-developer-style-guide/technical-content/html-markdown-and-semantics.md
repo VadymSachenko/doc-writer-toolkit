@@ -2,6 +2,7 @@
 id: GDSG-TECH-MARKUP
 title: HTML, Markdown, and semantic tagging
 languages: [en-US]
+scope: structural
 content_types: [web-source, markdown, html]
 source_urls:
   - https://developers.google.com/style/semantic-tagging

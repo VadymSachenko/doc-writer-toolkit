@@ -2,6 +2,10 @@
 id: GDSG-PUNCT-DASHES-HYPHENS
 title: Dashes, hyphens, and ranges
 languages: [en-US]
+scope: mixed
+language_specific_sections:
+  - "GDSG-HYPHEN-001 — Follow the compound hierarchy"
+  - "GDSG-HYPHEN-002 — Format number and unit compounds"
 content_types: [all]
 source_urls:
   - https://developers.google.com/style/dashes

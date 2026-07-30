@@ -2,6 +2,7 @@
 id: GDSG-PRINCIPLES-GLOBAL
 title: Write for a global audience
 languages: [en-US]
+scope: structural
 content_types: [all, localization-source]
 source_urls: [https://developers.google.com/style/translation]
 captured: 2026-07-16

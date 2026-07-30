@@ -2,6 +2,7 @@
 id: GDSG-PRINCIPLES-PRECISION
 title: Precision, claims, sources, and timelessness
 languages: [en-US]
+scope: structural
 content_types: [all, product-documentation]
 source_urls:
   - https://developers.google.com/style/excessive-claims

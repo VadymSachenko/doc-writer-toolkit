@@ -2,6 +2,7 @@
 id: MWSG-TERM-NUMBERS-SYMBOLS-01
 title: Microsoft terms NUMBERS-SYMBOLS 1
 languages: [en-US]
+scope: language-specific
 captured: 2026-07-16
 status: active
 ---

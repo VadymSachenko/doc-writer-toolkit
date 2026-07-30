@@ -2,6 +2,7 @@
 id: MWSG-SHARED-INCLUSIVE
 title: Bias-free and inclusive communication
 languages: [shared]
+scope: structural
 source_urls:
   - https://learn.microsoft.com/en-us/style-guide/bias-free-communication
   - https://learn.microsoft.com/en-us/style-guide/a-z-word-list-term-collections/term-collections/accessibility-terms

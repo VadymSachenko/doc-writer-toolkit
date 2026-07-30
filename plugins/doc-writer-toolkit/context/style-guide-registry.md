@@ -43,9 +43,18 @@ A profile resolves to four layers, loaded in this order. Later layers outrank ea
 
 `scope:` exists for exactly one purpose: to let a corpus be applied to text in a language it wasn't written for, without dragging in rules that cannot hold there. It is **not** a way of trimming a corpus down.
 
-- When `<lang>` matches the corpus language — `gdsg@en`, `mssg-en@en`, `mssg-ua@uk` — **both** scope categories load. Nothing is cut, nothing is filtered. `gdsg@en` is the whole Google Developer Style Guide, exactly as `guide:gdsg` was before profiles existed.
-- When `<lang>` differs — `gdsg@uk` — only layer 2 is set aside, and layer 3 supplies that language's own rules in its place. Every `scope: structural` rule still applies in full.
-- When a rule file's scope is unclear, or a routing table's scope hint disagrees with the file's own frontmatter, **load the file**. The frontmatter is authoritative, and any rule whose scope doesn't match the profile is simply not applied. A scope hint must never be the reason a rule goes unchecked.
+**The frontmatter `scope:` key has exactly three valid values** — this is a closed vocabulary, not an open one:
+
+- `structural` — the rule holds whatever the language of the prose is. Applied for every profile, always.
+- `language-specific` — the rule is bound to one language. Applied only when `<lang>` matches the corpus language in the Guide modes table above; otherwise not applied at all.
+- `mixed` — the file carries rules of both kinds, and pairs with a second frontmatter key, `language_specific_sections`: an array of the file's own section headings, verbatim, that carry the language-specific rules. Sections named there are applied only when `<lang>` matches the corpus language; every other section of the file — the unnamed remainder — is applied always, exactly like `structural`.
+
+Reading rule, one clause per value: `structural` → applies always. `language-specific` → applies only on a language match. `mixed` → the sections listed in `language_specific_sections` apply only on a language match; the rest of the file applies always.
+
+- When `<lang>` matches the corpus language — `gdsg@en`, `mssg-en@en`, `mssg-ua@uk` — **every** scope category loads in full, `mixed` files included, `language_specific_sections` and all. Nothing is cut, nothing is filtered. `gdsg@en` is the whole Google Developer Style Guide, exactly as `guide:gdsg` was before profiles existed.
+- When `<lang>` differs — `gdsg@uk` — layer 2 (`language-specific` files) is set aside, the `language_specific_sections` of `mixed` files are set aside along with it, and layer 3 supplies that language's own rules in their place. Every `structural` rule, and every section of a `mixed` file not named in `language_specific_sections`, still applies in full.
+- **`scope: mixed` without a `language_specific_sections` key is an incomplete tag.** It states that both kinds of rule are present without saying where the language-specific ones sit — which leaves the subfile boundary to a guess, and guessing here is not permitted. When this is what a loaded file's frontmatter actually says: apply the file's structural material as normal, but withhold a finding on anything ambiguous between the two kinds, and record the incomplete tag (file + row) wherever the skill reports what it consulted, so it gets fixed at the source rather than guessed around on every run.
+- When a rule file's scope is unclear, or a routing table's scope hint disagrees with the file's own frontmatter, **load the file**. The frontmatter — including its `language_specific_sections` list, when present — is authoritative, and any rule whose scope doesn't match the profile is simply not applied. A scope hint is a routing shortcut, never the reason a rule goes unchecked or the source of truth for which rules apply.
 
 ### Profile expansions
 

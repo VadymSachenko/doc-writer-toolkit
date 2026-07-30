@@ -2,6 +2,7 @@
 id: MWSG-SHARED-GLOBAL-ASSETS
 title: Global examples, art, names, time, and currency
 languages: [shared]
+scope: structural
 source_urls:
   - https://learn.microsoft.com/en-us/style-guide/global-communications/art
   - https://learn.microsoft.com/en-us/style-guide/global-communications/currency

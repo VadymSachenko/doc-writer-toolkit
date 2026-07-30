@@ -2,6 +2,7 @@
 id: MWSG-UK-KEYS-STATUS
 title: Клавіші, сполучення й рядок стану
 languages: [uk-UA]
+scope: language-specific
 content_types: [documentation, ui, software, status-message]
 source_urls: [https://aka.ms/ukrainian-styleguide]
 source_sections: [5.6.1, 5.6.3, 5.6.4, 5.6.6-5.6.8]

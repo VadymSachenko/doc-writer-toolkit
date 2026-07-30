@@ -2,6 +2,9 @@
 id: MWSG-EN-PUNCTUATION-COMMAS-COLONS
 title: Commas and colons
 languages: [en-US]
+scope: mixed
+language_specific_sections:
+  - "Commas"
 source_urls:
   - https://learn.microsoft.com/en-us/style-guide/punctuation/commas
   - https://learn.microsoft.com/en-us/style-guide/punctuation/colons

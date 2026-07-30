@@ -2,6 +2,7 @@
 id: MWSG-UK-GRAMMAR-AUTHORITY
 title: Авторитетне джерело правил української мови
 languages: [uk-UA]
+scope: language-specific
 status: active
 ---
 

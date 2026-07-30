@@ -2,6 +2,7 @@
 id: GDSG-TECH-UI
 title: UI elements and interaction
 languages: [en-US]
+scope: structural
 content_types: [procedure, user-guide, ui-reference]
 source_urls:
   - https://developers.google.com/style/ui-elements

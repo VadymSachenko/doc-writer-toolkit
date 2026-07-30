@@ -2,6 +2,7 @@
 id: MWSG-UK-PRODUCTS-FEATURES
 title: Продукти, функції, торговельні марки й файли
 languages: [uk-UA]
+scope: language-specific
 content_types: [documentation, ui, software, marketing]
 source_urls: [https://aka.ms/ukrainian-styleguide]
 source_sections: [5.2, 5.4]

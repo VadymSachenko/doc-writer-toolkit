@@ -2,6 +2,7 @@
 id: GDSG-PRINCIPLES-ACCESSIBILITY
 title: Write accessible documentation
 languages: [en-US]
+scope: structural
 content_types: [all, web, tutorial, reference]
 source_urls: [https://developers.google.com/style/accessibility]
 captured: 2026-07-16

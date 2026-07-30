@@ -2,6 +2,7 @@
 id: GDSG-LINKING-LINKS
 title: Links and cross-references
 languages: [en-US]
+scope: structural
 content_types: [all]
 source_urls:
   - https://developers.google.com/style/cross-references

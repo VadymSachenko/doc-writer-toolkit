@@ -2,6 +2,7 @@
 id: MWSG-UK-NUMBERS-PLACEHOLDERS
 title: Числа, одиниці та підстановки
 languages: [uk-UA]
+scope: language-specific
 content_types: [documentation, ui, software]
 source_urls: [https://aka.ms/ukrainian-styleguide]
 source_sections: [4.2.12, 5.6.2, 5.6.8]

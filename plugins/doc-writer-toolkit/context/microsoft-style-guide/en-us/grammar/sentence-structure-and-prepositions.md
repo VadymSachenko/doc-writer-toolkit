@@ -2,6 +2,9 @@
 id: MWSG-EN-GRAMMAR-STRUCTURE
 title: Sentence structure, modifiers, and prepositions
 languages: [en-US]
+scope: mixed
+language_specific_sections:
+  - "UI prepositions"
 source_urls:
   - https://learn.microsoft.com/en-us/style-guide/grammar/grammar-and-parts-of-speech
   - https://learn.microsoft.com/en-us/style-guide/grammar/prepositions
