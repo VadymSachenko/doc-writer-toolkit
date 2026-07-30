@@ -2,7 +2,7 @@
 title: Unicompay glossary — bilingual alignment reference
 description: Bilingual EN↔UA term mapping for UCPay documentation. Language-specific glossaries for skills are in glossary-ua.md and glossary-en.md.
 last_update:
-  date: 4/19/2026
+  date: 7/30/2026
 ---
 
 **Language-specific glossaries (used by writer and reviewer skills):**
@@ -12,6 +12,7 @@ last_update:
 This file is the **bilingual alignment reference** — use it to verify EN↔UA term parity and to check "Don't use" synonyms in both languages. When Claude writes or reviews a page:
 - Use the EN column term in English docs. Reject synonyms listed in "EN — Don't use".
 - Use the UA column term in Ukrainian docs. Reject synonyms listed in "UA — Don't use".
+- **The render of a term is not here.** How a term is formatted — plain text, bold UI label, or code font — lives in the **Render** column of `glossary-ua.md` / `glossary-en.md`, governed by Ж1/Ж3/Ж4 in `formatting-conventions.md`. This file aligns *which word*, not *how it is set*.
 - Where a colloquial UA term is in common use, the formal term comes first with the colloquial in parentheses.
 - Rows with <!-- NEEDS CONFIRMATION --> require SME sign-off before use in published docs.
 - Rows with <!-- MY TRANSLATION --> use a UA term not attested in SME transcripts; confirm before use.
@@ -43,6 +44,16 @@ This file is the **bilingual alignment reference** — use it to verify EN↔UA 
 | Move | Переміщення | reassignment, transfer, routing change | перепризначення, переведення |
 | Endpoint | Ендпоінт | end point | Енд поінт, кінцева точка | 
 
+## Payment methods
+
+<!-- One concept, several entities: the human concept, the internal constant, and the request value are distinct and each keeps its own render (Ж3/Ж4 in formatting-conventions.md). Never mix them in prose. -->
+
+| EN | UA (formal, with colloquial if applicable) | EN — Don't use | UA — Don't use |
+|---|---|---|---|
+| Payment method (`paymentMethod`) | Платіжний метод | payment option, payment way, method of payment | метод оплати, спосіб оплати, payment method (англійською в прозі) |
+| Payment type (`paymentType`) | Тип платежу | payment subtype, method subtype | тип оплати, підтип методу, payment type (англійською в прозі) |
+| Quasi (constant `QUASI`, value `quasi`) | Квазі (константа `QUASI`, значення `quasi`) | QUASI in prose, quasi-method | QUASI у прозі, quasi у прозі, «квазі» в лапках, квазі-метод |
+
 ## Transaction status model
 
 <!-- Statuses are written in `code font` when referenced as system values. Capitalization in published docs follows sentence case when used as a noun phrase; code font when referenced as the literal system value. -->
@@ -65,6 +76,7 @@ This file is the **bilingual alignment reference** — use it to verify EN↔UA 
 | Webhook URL | URL вебхука | callback URL, notification endpoint | URL колбека |
 | IP whitelist | IP whitelist (білий список IP) | allowlist, IP filter, IP permissions | дозволений список IP, IP-фільтр |
 | Infogroup | Інфогрупа| info channel, error group, tech group | технічний канал |
+| `REST Proxy` | `REST Proxy` | RestProxy, rest proxy, REST Proxy in bold | рест-проксі, REST-проксі, **REST Proxy** жирним |
 
 ## Interfaces
 
@@ -74,3 +86,4 @@ This file is the **bilingual alignment reference** — use it to verify EN↔UA 
 | Admin (internal admin) | Адмінка (розм.) / Адміністративна панель (форм.) | admin panel, backoffice, internal tool | бекофіс, внутрішня панель |
 | Operator cabinet | Кабінет оператора | operator panel, ops dashboard | панель оператора, операторський дашборд |
 | Environment | Середовище | env, stage (unless naming a specific environment) | енв, стейдж (коли неоднозначно) |
+| Widget host (`WidgetHost`, `WidgetMonoHost`) | Віджет-хост (`WidgetHost`, `WidgetMonoHost`) | widget server, widget domain | віджетний сервер, хост віджету |
