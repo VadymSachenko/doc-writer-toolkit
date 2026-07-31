@@ -10,6 +10,20 @@ Run the full authoring pipeline for one documentation page, from a recorded SME 
 
 This command is **thin orchestration**. Every phase hands off to a skill that already knows its own job. Do not re-implement any skill's logic here, and do not load rule corpora directly — the skills route their own loading.
 
+## Where to split the run
+
+This command runs at whatever model and effort the session already has — it cannot change them for itself. The phases are uneven, so **tell the user this once, at the start, then continue**:
+
+> Phases 0–4 gather material: reading config, running a script, targeted code searches, capturing UI screenshots. Light reasoning, mostly tool work.
+>
+> Phases 5–6 write the page and check it against the style guide. That is where the judgement is, and where mistakes have historically slipped through.
+>
+> If you want to spend effort where it matters, stop after Phase 4 and start Phases 5–6 in a fresh run at a higher setting. The natural break is already there: the writer skill stops to interview you before drafting.
+
+Do not decide this for the user and do not stall waiting for an answer — mention it, then get on with Phase 0.
+
+If the user does split the run, Phase 5 needs only `.sources/sme-interview.md`, the screenshots, and the project config. It does not need Phases 0–4 in context, so a fresh session starts cheaply.
+
 ## Token discipline — applies to every phase
 
 This flow touches a video, a code repository, and a live web UI. Each can burn enormous context if handled carelessly. Hard rules:
