@@ -2,3 +2,6 @@
 
 # Робочі ТЗ для агентів — локальні, не комітяться
 _tasks/
+
+# Task run logs — local only
+test-results/

@@ -24,7 +24,7 @@ HEADING MOOD RULES:
 - Phase sub-section headings (inside a single-task guide with phases): bare infinitive, imperative mood (Enter branch details, Configure screen settings). Do not use noun phrases for phases.
 - Reference information headings: bare infinitive, imperative mood (Reference information: Create a branch).
 
-SCREENSHOTS: Place screenshots in `./assets/` next to the document. Reference them as `./assets/<screenshot-name>.png`. The filename comes from the uploaded screenshot name.
+SCREENSHOTS: Place screenshots in `./.assets/` next to the document. Reference them as `./.assets/<screenshot-name>.png`. The filename comes from the uploaded screenshot name.
 
 ICONS IN STEPS: Use the Docusaurus `<Icon>` component to represent UI buttons or actions that are shown as icons only (copy, delete, drag handle, edit pencil, expander arrow). Place the `<Icon>` immediately before the bold action name: `<Icon icon="ic:sharp-edit" height="24" style={{ color: '#9564ff' }} /> **Edit**`. When the UI element has a text label, use bold text alone without an icon. Don't describe icons in words ("the pencil icon") — either show the icon or use the action name.
 */}
@@ -64,7 +64,7 @@ To {task} a/an {entity}:
    2. {Substep.}
 3. {Step that references a screenshot.}
 
-   ![{Descriptive alt text}](./assets/{screenshot-name}.png)
+   ![{Descriptive alt text}](./.assets/{screenshot-name}.png)
 
 4. {Final step.}
 
@@ -102,7 +102,7 @@ This guide describes how to {task, for example, create} [{entity}s](/link/to/the
    1. {Substep.}
    2. {Substep.}
 
-   ![{Descriptive alt text}](./assets/{screenshot-name}.png)
+   ![{Descriptive alt text}](./.assets/{screenshot-name}.png)
 
 3. {Final step of phase 1.}
 
@@ -114,7 +114,7 @@ This guide describes how to {task, for example, create} [{entity}s](/link/to/the
 1. {First step of phase 2.}
 2. {Step that references a screenshot.}
 
-   ![{Descriptive alt text}](./assets/{screenshot-name}.png)
+   ![{Descriptive alt text}](./.assets/{screenshot-name}.png)
 
 3. {Final step of phase 2.}
 
@@ -154,7 +154,7 @@ To {task} a/an {entity}:
    1. {Substep.}
    2. {Substep.}
 
-   ![{Descriptive alt text}](./assets/{screenshot-name}.png)
+   ![{Descriptive alt text}](./.assets/{screenshot-name}.png)
 
 3. {Final step.}
 
@@ -259,9 +259,9 @@ Don't add a block with nothing substantive in it:
 
 ### Screenshots
 
-- Store screenshots in `./assets/` next to the document.
+- Store screenshots in `./.assets/` next to the document.
 - Add one only when it: (1) confirms a result, (2) helps locate a hard-to-find UI element, (3) illustrates a non-obvious screen.
-- Format: `![Descriptive alt text](./assets/{screenshot-name}.png)`.
+- Format: `![Descriptive alt text](./.assets/{screenshot-name}.png)`.
 
 ### Reference information (form attributes)
 

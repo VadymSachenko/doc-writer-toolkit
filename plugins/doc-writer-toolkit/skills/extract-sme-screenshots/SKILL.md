@@ -11,8 +11,10 @@ Turns a raw meeting video sitting in a `.sources/` folder into a folder of selec
 
 **Two named modes, equally valid — neither is "the normal case" or a fallback for the other:**
 
-- **Mode A — transcript-driven.** Transcript → `--plan-from-transcript` picks candidate seconds by scoring what the SME talked about → `--extract-at` pulls exactly those frames. No OCR pass, no full-video decode. Minutes, tens of frames. Covers what the SME **said**.
-- **Mode B — bulk sweep.** Full pipeline: ffmpeg frame extraction + OCR + pHash dedup. Roughly 10 minutes with `--jobs 7` (the script's own default is already `cpu_count-1`; pass `--jobs` explicitly only to throttle it if the machine is needed for something else). Typically a hundred-plus frames. Also covers what the SME **showed but never said out loud**.
+- **Mode A — transcript-driven.** Transcript → `--plan-from-transcript` picks candidate seconds by scoring what the SME talked about → `--extract-at` pulls exactly those frames. No full-video decode. Tens of frames, well under a minute of processing — roughly **3 seconds per minute of recording**, measured at about 2 minutes on a 41-minute 19-second recording (planning is negligible: 0.18 s for the whole transcript; the rest is frame extraction plus OCR of just those frames). Covers what the SME **said**.
+- **Mode B — bulk sweep.** Full pipeline: ffmpeg frame extraction + OCR + pHash dedup. Roughly **30 seconds of processing per 1 minute of recording**, on 8 cores (the script's own default is already `cpu_count-1`; pass `--jobs` explicitly only to throttle it if the machine is needed for something else) — measured at 27.4 s/min total, 24.3 s/min of that in the OCR/text-recognition stage, which works out to about 19 minutes for a 41-minute recording. Typically a hundred-plus frames. Also covers what the SME **showed but never said out loud**.
+
+Both figures were measured on a near-idle 8-core machine and scale linearly with recording length, so multiply by the length of the video rather than quoting them as absolutes. Mode B's per-minute cost depends on core count; Mode A's barely does, since it only touches the frames it picked.
 - **Combined path** (usually the cheapest overall): run Mode A first, write the doc, then use "Targeted extraction" below to pull frames for just the specific timestamps that turned out to be missing. This costs less than Mode B and closes most gaps a transcript-only pass leaves.
 
 **This skill is also invoked from inside `convert-sme-input`** for one-off targeted pulls mid-workflow — see "Targeted extraction" below, which `convert-sme-input` follows directly rather than this skill re-describing the procedure there.
@@ -92,6 +94,8 @@ The destination is `.sources/frames/{video-basename}-frames/` (create it, includ
 ### Step 6 — Report
 
 State how many screenshots were kept (and how many were skipped as already-covered duplicates, if the destination wasn't empty), where they landed, and whether a transcript was auto-generated (and if so, that it hasn't been human-reviewed — Whisper output can mis-hear names, numbers, and technical terms, so flag it as needing a pass before being treated as ground truth).
+
+**Warn every time: these frames are raw and unchecked.** Nothing in this skill crops, redacts, or inspects a frame's contents — a meeting recording routinely captures faces, names, internal hostnames/IPs, environment labels, and other sensitive material in the background. This output is evidence to read and select from, not embeddable material. State explicitly that none of these frames may be inserted into a document until they've gone through the screening/cropping step in the writer skill that consumes them (concept-doc-writer, user-guide-writer, or api-doc-writer — the mandatory step between selecting a frame and renaming it).
 
 ## Targeted extraction (used standalone or from convert-sme-input)
 

@@ -56,7 +56,7 @@ Both outrank the corpus. Both may be absent from a given install — when a file
 
 ## Step 4 — Run the review
 
-Walk the document top to bottom applying only the loaded rules.
+Walk the document top to bottom applying only the loaded rules. The `title` and `description` header fields are body text for this pass — read them as part of the walk, not just as entries in the skip list below; a term-level rule that fires in prose fires in the header the same way.
 
 ### Skip list
 Never flag content inside these — only check structural conformance where a rule genuinely covers it:
@@ -111,10 +111,25 @@ Do this **reactively** during the review pass, never speculatively:
 For each violation found, record:
 - The rule citation (rule ID / § number).
 - The source file it came from.
-- The location in the doc (line number + nearest heading for orientation).
+- The location in the doc (line number + nearest heading for orientation). When the occurrence sweep below adds more matches to this finding, the location field becomes a list of line numbers (+ nearest heading each), not a second card.
 - The offending text verbatim.
 - A one-line paraphrase of why (what the rule says).
 - A suggested (not applied) fix.
+
+### Occurrence sweep (after the main pass)
+
+The main pass reads top to bottom and stops at the first occurrence it notices. That leaves later repeats of the same problem unfound until a second review pass — which is a gap in the sweep, not a second class of finding.
+
+After the main pass finishes, revisit every finding whose rule identifies **a term or a named thing** — this includes:
+
+- a project glossary entry (Step 3),
+- rule Ж3 ("one thing, one way of writing it"),
+- rule Ж4 (code entity vs. human concept — e.g. whether a name should be in code font),
+- rule Ж5 (repository names).
+
+For each such finding, search the **whole document** (including the `title`/`description` header fields, per the note above) for every other occurrence of that same term — same spelling/casing/form the rule is about, not just the same topic. Add every match found to that **same finding's** location field as a list of line numbers, instead of opening a new finding card per occurrence. This search runs regardless of Step 0 signals; it is triggered by the finding itself, not by the document's topic.
+
+Do **not** run this sweep for a finding whose rule is tied to one specific place in the document — nested brackets in a particular sentence, an idiom in one paragraph ("під капотом", "по суті"), a single passage about future plans, or any other rule that judges a location rather than a term. Searching the whole file for those has no target to search for. If it's unclear whether a rule is term-level or place-level, treat it as place-level and leave it as a single-location finding.
 
 ## Step 5 — Classify and report
 
@@ -151,6 +166,13 @@ Project formatting conventions consulted: <path, or "not present — skipped">
    - Offending text: "<verbatim excerpt>"
    - Why: <one-line paraphrase of the rule>
    - Suggested fix: "<corrected text>"
+
+For a term-level finding the occurrence sweep matched elsewhere in the file, the location field lists every occurrence — still one card:
+2. **[TAG] Short title** — <rule ID or § ref> — `<source file>`
+   - Location: line <N> (near "<heading>"); also line <N2> (near "<heading 2>"); line <N3> (near "<heading 3>")
+   - Offending text: "<verbatim excerpt from the first occurrence>"
+   - Why: <one-line paraphrase of the rule>
+   - Suggested fix: "<corrected text — applies at every listed location>"
 
 ### Style Deviations (N)
 (same card shape)

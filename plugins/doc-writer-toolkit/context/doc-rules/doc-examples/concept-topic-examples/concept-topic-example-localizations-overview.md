@@ -9,7 +9,7 @@ Text on the onboarding and payment [screens](/docs/wellfunnel-builder/screens/sc
 
 The Localizations feature supports translations into several languages: English (EN), German (DE), French (FR), Italian (IT), Portuguese (PT), Spanish (ES), Japanese (JA), Korean (KO), Turkish (TR), and Polish (PL). The following example shows how the same screen looks for users from different locales:
 
-![Same screen, different locales](./assets/screen-with-different-localizations.png)
+![Same screen, different locales](./.assets/screen-with-different-localizations.png)
 
 ## Localization page
 
@@ -30,7 +30,7 @@ The table has the following fields:
 <details>
 <summary>Localization page in WellFunnel</summary>
 
-![Localization page](./assets/localization-page.png)
+![Localization page](./.assets/localization-page.png)
 
 </details>
 

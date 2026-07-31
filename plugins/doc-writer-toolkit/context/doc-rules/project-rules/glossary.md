@@ -53,6 +53,7 @@ This file is the **bilingual alignment reference** — use it to verify EN↔UA 
 | Payment method (`paymentMethod`) | Платіжний метод | payment option, payment way, method of payment | метод оплати, спосіб оплати, payment method (англійською в прозі) |
 | Payment type (`paymentType`) | Тип платежу | payment subtype, method subtype | тип оплати, підтип методу, payment type (англійською в прозі) |
 | Quasi (constant `QUASI`, value `quasi`) | Квазі (константа `QUASI`, значення `quasi`) | QUASI in prose, quasi-method | QUASI у прозі, quasi у прозі, «квазі» в лапках, квазі-метод |
+| Phone (constant `PHONE`, value `phone`) | Телефон (розм.: фон) (константа `PHONE`, значення `phone`) | PHONE in prose, phone in prose, "phone" in quotation marks | PHONE у прозі, phone у прозі, «телефон» у лапках |
 
 ## Transaction status model
 

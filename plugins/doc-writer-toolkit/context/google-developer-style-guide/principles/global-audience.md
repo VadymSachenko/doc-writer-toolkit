@@ -2,7 +2,9 @@
 id: GDSG-PRINCIPLES-GLOBAL
 title: Write for a global audience
 languages: [en-US]
-scope: structural
+scope: mixed
+language_specific_sections:
+  - "US English"
 content_types: [all, localization-source]
 source_urls: [https://developers.google.com/style/translation]
 captured: 2026-07-16
@@ -12,8 +14,11 @@ keywords: [global audience, translation, localization, ambiguity]
 
 # Write for a global audience
 
+## US English
+
 - Use US English, but write so that readers and translators do not need US cultural
   knowledge.
+
 - Prefer short sentences, simple verbs, active voice, present tense, and common word
   order.
 - Avoid phrasal verbs when a single clear verb works: prefer **start** to **spin up**.

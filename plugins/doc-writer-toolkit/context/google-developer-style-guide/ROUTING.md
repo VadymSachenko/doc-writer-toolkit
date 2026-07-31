@@ -12,12 +12,12 @@ Load this file first. Then open only the smallest matching set.
 | Articles, plurals, possessives | `language/articles-plurals-and-possessives.md` | language-specific (en-US) |
 | Abbreviation or capitalization | `language/abbreviations-and-capitalization.md` | mixed |
 | Punctuation | one matching file in `punctuation/` | mixed |
-| Text styling, dates, numbers, units, math | one matching file in `formatting/` | mixed |
+| Text styling, dates, numbers, units, math | one matching file in `formatting/` | structural (dates-and-times.md: mixed) |
 | Headings, paragraphs, lists, tables, notices | one matching file in `content-structure/` | structural |
 | Task instructions or tutorial | `procedures/procedures.md` plus relevant UI/code rules | structural |
 | Diagram, screenshot, figure, or alt text | `visuals/images-and-media.md` | structural |
 | Link, cross-reference, or anchor | `linking/` | structural |
-| API reference | `technical-content/api-reference-comments.md` | mixed |
+| API reference | `technical-content/api-reference-comments.md` | structural |
 | Inline code or code sample | `technical-content/code-in-text-and-samples.md` | structural |
 | Command line or command output | `technical-content/command-line-syntax.md` | structural |
 | Placeholder | `technical-content/placeholders.md` | structural |

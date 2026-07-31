@@ -30,7 +30,7 @@ In the **Link** section, edit link details:
 5. From **Platform**, select the platform the link is meant for.
 6. To make the link universal, switch **Universal link** to the on position. We recommend creating or assigning a unique branch for the universal link to avoid unintended changes in other branches.
 
-![Link editing: Link section](./assets/link-editing-page-link-section.png)
+![Link editing: Link section](./.assets/link-editing-page-link-section.png)
 
 ### Edit flows and add screens
 
@@ -55,14 +55,14 @@ To edit flows, follow these steps:
    2. To remove existing screens or add new ones, in the **Onboarding** and **Payment** sections, use the <Icon icon="ic:baseline-minus" height="24" style={{ color: '#868686' }} />**Remove** and <Icon icon="ic:baseline-plus" height="24" style={{ color: '#868686' }} />**Add screen** buttons.
 3. For each flow, in **Split traffic**, set the split traffic values so that all flows have 100% of the traffic in total.
 
-![Link creation: Flows, Onboarding, and Payment sections](./assets/link-editing-flows-onboarding-and-payment-sections.png)
+![Link creation: Flows, Onboarding, and Payment sections](./.assets/link-editing-flows-onboarding-and-payment-sections.png)
 
 4. Adjust flow details for each flow:
    1. Click the flow you want to adjust.
    2. In the **Flow details** section, from **Theme**, select a theme you want to apply to the flow.
    3. From **Payment**, select a payment provider you want to use within the flow.
 
-![Link editing: Flow details section](./assets/link-editing-flow-details-section.png)
+![Link editing: Flow details section](./.assets/link-editing-flow-details-section.png)
 
 5. To save changes, click <Icon icon="material-symbols:save" height="18" style={{ color: '#868686' }} />**SAVE**.
 

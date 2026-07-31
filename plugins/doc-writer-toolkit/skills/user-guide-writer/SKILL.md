@@ -95,9 +95,15 @@ Decide which case applies:
 3. **`.assets/` is empty and there is no `frames/` folder** (older run, or none extracted) — fall back to the plain "list `.assets/`" behavior and tell the user no `frames-index.json` exists, so they know why you can't do index-driven selection.
 4. **Neither folder exists** — ask the user where screenshots are before proceeding, per Step 1.
 
-For every file that ends up in `.assets/` (root), whichever case applied:
+For every file that ends up in `.assets/` (root), whichever case applied, work through these steps **in order** — do not rename or embed a file that hasn't passed step 1, even if it "looks clean" on a first glance:
 
-1. **Rename** — if the filename is non-descriptive (e.g., `image.png`, `image copy.png`, a random string, or a numeric timestamp — this includes the `screen-HH-MM-SS.jpg`-style names frames arrive with), rename it following the pattern `{subject}-{ui-element-type}.png` in kebab-case:
+1. **Screen for sensitive content (required — never skip this, and never skip it because the frame looks clean).** A frame pulled from a meeting recording is raw evidence, not embeddable material — it was never composed as a screenshot for a public page. Before anything else:
+   - **Crop to the part that matters.** Participant bars, toolbars, the dock, browser tabs, side panels — none of that is the subject. Isolate only the UI area the step actually needs.
+   - **Check the cropped result against this list** — faces and people's names; usernames and logins; hostnames, domains, IP addresses; environment labels (`PROD`, `TEST`); internal URLs; tokens, keys, session IDs; card and account numbers; customer personal data; other apps and personal desktop items. Look in toolbars and corners, not just the center of the frame — a sensitive label sitting in a place nobody looks is still disqualifying.
+   - **If cropping can't remove something on the list** — for example a sensitive label sitting inside a table you need — **do not decide alone**. Ask the person you're working with and do not insert the image until they answer.
+   - **Save the cropped result as PNG**, regardless of the source frame's format (frames arrive as `screen-HH-MM-SS.jpg`). Cropping already rewrites the file, so converting at this step costs nothing extra, and PNG suits UI screenshots better — this is also what keeps the `.png` extension in the rename pattern below accurate.
+   - These checks implement `GDSG-VISUALS` and `GDSG-EXAMPLE-001` from the loaded style guide corpus — consult those entries directly for the underlying rules; they are not repeated here.
+2. **Rename** — if the filename is non-descriptive (e.g., `image.png`, `image copy.png`, a random string, or a numeric timestamp — this includes the `screen-HH-MM-SS.jpg`-style names frames arrive with), rename it following the pattern `{subject}-{ui-element-type}.png` in kebab-case:
 
    | UI element type | Suffix | Example |
    |---|---|---|
@@ -108,7 +114,7 @@ For every file that ends up in `.assets/` (root), whichever case applied:
    | Confirmation banner / toast | `-banner` | `receipt-uploaded-banner.png` |
 
    Use the Bash tool: `mv "./.assets/old-name.png" "./.assets/new-name.png"`. Rename before drafting so all embed references use the final filename.
-2. **Classify** as **full-page** or **compact**:
+3. **Classify** as **full-page** or **compact**:
    - **Full-page** — whole menu, dashboard, or table spanning the full content area.
    - **Compact** — dialog window, modal, or narrow panel that visually occupies significantly less than the full content width.
 
@@ -178,8 +184,8 @@ Apply the template resolved in "Sources to load". Choose the structure decided i
 - Place a screenshot after the step it illustrates, not before.
 - Alt text must describe what is shown, not repeat the step.
 - Choose the embed syntax based on the classification from Step 2:
-  - **Full-page**: `![Descriptive alt text](./assets/image.png)`
-  - **Compact** (dialog, modal, narrow panel): `<img src={require('./assets/image.png').default} width="480" alt="Descriptive alt text" />`
+  - **Full-page**: `![Descriptive alt text](./.assets/image.png)`
+  - **Compact** (dialog, modal, narrow panel): `<img src={require('./.assets/image.png').default} width="480" alt="Descriptive alt text" />`
 - **Blank line rules — follow exactly to avoid unwanted spacing in the UI:**
   - **No blank line** between a step and the screenshot that immediately follows it.
   - **No blank line** between a screenshot and the next step that follows it.

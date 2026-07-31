@@ -50,7 +50,7 @@ The fix requires rewriting a phrase, and more than one phrasing could satisfy th
 
 Examples: splitting nested parentheses into two sentences, removing an idiom ("під капотом", "по суті") and rephrasing around it, moving a paragraph about future plans into a `{/* ToDo: ... */}` comment, restructuring a sentence to drop a filler phrase.
 
-These are shown and confirmed **one at a time**, never batched — the point is that the user is choosing among viable rewrites, not rubber-stamping a mechanical substitution.
+Every bucket 2 finding gets its own explicit decision — the point is that the user is choosing among viable rewrites, not rubber-stamping a mechanical substitution. Whether those decisions are collected one exchange at a time or together is decided in Step 3's "Bucket 2 — approval form".
 
 ### Bucket 3 — Judgment-required
 
@@ -68,9 +68,20 @@ For this bucket, **do not propose a single fix** — ask a question instead, and
 - For every group, show a **diff** (before → after) before asking for confirmation — never apply first and show the result after.
 - Offer, per group: apply the whole group, pick individual findings within it, or skip the group entirely.
 - Bucket 1 groups can be confirmed and applied together in one exchange.
-- Bucket 2 findings are shown and confirmed **one at a time**, each with its diff.
 - Bucket 3 findings are asked as questions, one at a time; no default action, no fix applied without an explicit answer.
 - **Never apply a fix that hasn't been confirmed**, no matter how obvious it looks.
+
+### Bucket 2 — approval form
+
+Per-fix consent is mandatory for every bucket 2 finding — that does not change. What can change is how many rounds of back-and-forth it takes to collect it.
+
+**Default, when there are four or more bucket 2 findings:** show every bucket 2 finding's diff together, numbered, in a single message, then collect approval for all of them in a single reply — e.g. "apply 1, 3 and 5; skip 2; rewrite 4 as follows: …". Each finding still gets its own explicit disposition (apply / skip / rewrite-differently); what's batched is the number of exchanges, not the granularity of consent. If the reply leaves a finding's disposition ambiguous, ask about that one finding specifically before applying anything in the group.
+
+**Still go one at a time when:**
+- there are only two or three bucket 2 findings — showing them together saves nothing worth the setup;
+- the findings change meaning enough that each genuinely needs its own discussion (e.g. removing an idiom where the rewrite could shift the sentence's claim) rather than a quick yes/no.
+
+Use judgment at the boundary; the four-or-more default is a starting point, not a hard trigger — a document with five very small, very similar rewrites (e.g. the same filler phrase removed in five sentences) can still go one-at-a-time if that reads more clearly than a five-item batch, and three substantial rewrites can be batched if the user signals they'd rather review together.
 
 ## Step 4 — Apply
 

@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections import deque
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -21,14 +22,16 @@ from typing import TYPE_CHECKING, Optional
 
 # imagehash/PIL are imported lazily, inside the functions that actually use them at
 # runtime (prepare_for_ocr, write_contact_sheet, select_frames and its worker,
-# extract_missing_frame). `from __future__ import annotations` above makes every
-# `Image.Image`-style type hint in this file a lazy string, so those signatures stay
-# valid without a module-level import too. This keeps --merge-from (no image library
-# needed at all), --extract-at (ffmpeg only, no OCR), and --plan-from-transcript (no
-# ffmpeg, no OCR, no image library) usable with a bare `python3` — no venv required
-# for any of them — which matters because convert-sme-input calls them directly
-# without the full ffmpeg+tesseract+Pillow+imagehash setup extract-sme-screenshots'
-# bulk pass needs.
+# extract_missing_frame, extract_at_timestamps). `from __future__ import annotations`
+# above makes every `Image.Image`-style type hint in this file a lazy string, so those
+# signatures stay valid without a module-level import too. This keeps --merge-from (no
+# image library needed at all) and --plan-from-transcript (no ffmpeg, no OCR, no image
+# library) usable with a bare `python3` — no venv required for either — which matters
+# because convert-sme-input calls them directly without the full
+# ffmpeg+tesseract+Pillow+imagehash setup extract-sme-screenshots' bulk pass needs.
+# --extract-at now needs Pillow (imported lazily inside it) and the system `tesseract`
+# binary too, since D-5 made it OCR each newly extracted frame instead of leaving
+# ocr_text empty — see the README's "ocr_text decision" note.
 if TYPE_CHECKING:
     import imagehash
     from PIL import Image
@@ -49,6 +52,13 @@ class Progress:
     single-line \\r progress bar on stderr. stdout is left alone — that's where the
     final summary lines the calling skill reads still live."""
 
+    # Number of recent (time, done) samples `eta_s` is computed from (D-11). `_write`
+    # only ever appends at most once a second, so this is roughly a 20-second moving
+    # window — long enough to smooth out a single slow frame, short enough to react
+    # within a few writes when throughput actually changes (e.g. swap pressure
+    # kicking in), instead of an eta averaged over the whole stage since its start.
+    _WINDOW_SAMPLES = 20
+
     def __init__(self, path: Path):
         self.path = path
         self.stage = ""
@@ -56,6 +66,7 @@ class Progress:
         self.total = 0
         self._stage_start = 0.0
         self._last_write = 0.0
+        self._window: deque[tuple[float, int]] = deque(maxlen=self._WINDOW_SAMPLES)
 
     def start_stage(self, stage: str, total: int) -> None:
         self.stage = stage
@@ -63,6 +74,8 @@ class Progress:
         self.total = total
         self._stage_start = time.monotonic()
         self._last_write = 0.0
+        self._window.clear()
+        self._window.append((self._stage_start, 0))
         self._write(force=True)
 
     def update(self, done: int) -> None:
@@ -76,6 +89,21 @@ class Progress:
         self._write(force=True)
         print(file=sys.stderr)
 
+    def _eta(self, now: float, elapsed: float) -> float:
+        window_time, window_done = self._window[0]
+        window_elapsed = now - window_time
+        window_done = self.done - window_done
+        if window_elapsed > 0 and window_done > 0:
+            rate = window_done / window_elapsed
+        elif self.done > 0:
+            # Not enough of a window yet (start of stage, or throughput just stalled
+            # completely) — fall back to the whole-stage average rather than divide
+            # by zero or report a stale rate.
+            rate = self.done / elapsed
+        else:
+            return 0.0
+        return max(0.0, (self.total - self.done) / rate)
+
     def _write(self, force: bool = False) -> None:
         now = time.monotonic()
         if not force and now - self._last_write < 1.0:
@@ -83,7 +111,8 @@ class Progress:
         self._last_write = now
         elapsed = now - self._stage_start
         pct = round(100 * self.done / self.total, 1) if self.total else 0.0
-        eta = elapsed / self.done * (self.total - self.done) if self.done else 0.0
+        eta = self._eta(now, elapsed)
+        self._window.append((now, self.done))
         payload = {
             "stage": self.stage,
             "done": self.done,
@@ -155,12 +184,18 @@ def prepare_for_ocr(image: Image.Image, content_width: float) -> Image.Image:
 def read_ocr(image: Image.Image, scratch: Path, language: str) -> str:
     prepared = prepare_for_ocr(image, 0.88)
     prepared.save(scratch)
+    # tesseract starts its own OpenMP thread pool per invocation regardless of how many
+    # worker processes are already running it in parallel (D-10) — capping it to 1
+    # thread here is what makes `--jobs N` actually mean N-way parallelism instead of
+    # N processes each fanning out further and oversubscribing the machine.
+    env = {**os.environ, "OMP_THREAD_LIMIT": "1"}
     result = subprocess.run(
         ["tesseract", str(scratch), "stdout", "-l", language, "--psm", "11"],
         check=True,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
+        env=env,
     )
     return re.sub(r"\n{3,}", "\n\n", result.stdout).strip()
 
@@ -213,23 +248,31 @@ def write_contact_sheet(output: Path) -> None:
     sheet.save(output / "contact-sheet.jpg", quality=88)
 
 
-def _extract_frame_features(payload: tuple[int, str, str]) -> tuple[int, str, str]:
-    """Picklable worker: phash + OCR text for one frame, independent of every other
-    frame. Used both from a plain loop (--jobs 1) and from a multiprocessing.Pool
-    (--jobs>1) — same function either way, so phase B below sees identical input
-    regardless of --jobs."""
-    index, frame_path, ocr_language = payload
+def _phash_worker(payload: tuple[int, str]) -> tuple[int, str]:
+    """Picklable worker: perceptual hash of one frame. Cheap (no tesseract), and
+    needed for every frame, so phase (a) below runs it over the whole set."""
+    index, frame_path = payload
     import imagehash
     from PIL import Image
 
-    frame = Path(frame_path)
-    with Image.open(frame) as image:
+    with Image.open(frame_path) as image:
         shared = image.crop((0, 0, round(image.width * 0.88), image.height))
-        current_hash = imagehash.phash(shared)
-        scratch = frame.with_name(frame.stem + ".ocr-scratch.png")
+        return index, str(imagehash.phash(shared))
+
+
+def _ocr_worker(payload: tuple[int, str, str]) -> tuple[int, str]:
+    """Picklable worker: OCR text of one frame. A pure function of (frame, language) —
+    it reads no shared state — which is what makes it safe to compute out of order, or
+    speculatively ahead of the sequential walk in phase (b)."""
+    index, frame_path, ocr_language = payload
+    from PIL import Image
+
+    frame = Path(frame_path)
+    scratch = frame.with_name(frame.stem + ".ocr-scratch.png")
+    with Image.open(frame) as image:
         text = read_ocr(image, scratch, ocr_language)
     scratch.unlink(missing_ok=True)
-    return index, str(current_hash), text
+    return index, text
 
 
 def select_frames(
@@ -242,48 +285,92 @@ def select_frames(
     ocr_dir = output / "ocr"
     images.mkdir(parents=True, exist_ok=True)
     ocr_dir.mkdir(parents=True, exist_ok=True)
+    gate = max(4, hash_threshold // 2)
 
-    # Phase (a): phash + OCR text for every frame, computed independently — safe to
-    # parallelize. Phase (b) below re-applies the same should-OCR gate the original
-    # single-pass loop used (based on distance to the *last kept* frame, which is
-    # sequential and can't be parallelized), consuming this phase's output instead of
-    # computing on demand. Because phase (a) always computes the real OCR text for
-    # every frame and phase (b) decides afterwards whether to use it or discard it in
-    # favor of "", results are identical no matter how many workers computed phase (a).
-    payloads = [(index, str(frame), ocr_language) for index, frame in enumerate(frames)]
-    features: list[Optional[tuple[imagehash.ImageHash, str]]] = [None] * len(frames)
-    progress.start_stage("ocr", len(frames))
+    # Phase (a): perceptual hash for every frame. Independent per frame, no tesseract,
+    # so it parallelizes cleanly and finishes fast even on a long recording.
+    hashes: list[Optional[imagehash.ImageHash]] = [None] * len(frames)
+    progress.start_stage("hash", len(frames))
+    hash_payloads = [(index, str(frame)) for index, frame in enumerate(frames)]
     if jobs <= 1:
-        for payload in payloads:
-            index, hash_hex, text = _extract_frame_features(payload)
-            features[index] = (imagehash.hex_to_hash(hash_hex), text)
-            progress.update(index + 1)
+        for done, payload in enumerate(hash_payloads, start=1):
+            index, hash_hex = _phash_worker(payload)
+            hashes[index] = imagehash.hex_to_hash(hash_hex)
+            progress.update(done)
     else:
         with multiprocessing.Pool(jobs) as pool:
-            done = 0
-            for index, hash_hex, text in pool.imap_unordered(_extract_frame_features, payloads):
-                features[index] = (imagehash.hex_to_hash(hash_hex), text)
-                done += 1
+            for done, (index, hash_hex) in enumerate(
+                pool.imap_unordered(_phash_worker, hash_payloads, chunksize=8), start=1
+            ):
+                hashes[index] = imagehash.hex_to_hash(hash_hex)
                 progress.update(done)
     progress.finish_stage()
 
-    # Phase (b): sequential decision walk — cannot be parallelized, each decision
-    # depends on the hash/text of the last *kept* frame, not just the previous frame.
-    gate = max(4, hash_threshold // 2)
+    # Phase (b): the sequential decision walk. It can't be parallelized — each decision
+    # depends on the hash and text of the last *kept* frame, not the previous frame —
+    # and, critically, it OCRs only frames whose distance from the last kept frame
+    # clears `gate`. That gate is a large saving (well under half the frames on a
+    # typical screencast), so OCRing everything up front to make the work embarrassingly
+    # parallel would cost more than the parallelism wins back.
+    #
+    # Instead the walk pulls OCR from a cache that worker processes fill *ahead* of it:
+    # whenever it needs a frame's text it first tops up the pool with the next frames
+    # that currently look like they'll need OCR too. Because _ocr_worker is a pure
+    # function of the frame, a speculatively computed result is always valid if it's
+    # later needed, and simply unused if it isn't — so the selection is identical for
+    # any --jobs, and each frame is OCR'd at most once no matter how the walk unfolds.
+    ocr_cache: dict[int, str] = {}
+    pending: dict[int, multiprocessing.pool.AsyncResult] = {}
+    pool = multiprocessing.Pool(jobs) if jobs > 1 else None
+    lookahead = max(64, jobs * 8)
+
+    def needs_ocr(index: int, reference: Optional[imagehash.ImageHash]) -> bool:
+        return reference is None or (hashes[index] - reference) >= gate
+
+    def top_up(start: int, reference: Optional[imagehash.ImageHash]) -> None:
+        if pool is None:
+            return
+        # Drop speculation the walk has already moved past. Those frames turned out not
+        # to need OCR after all (the last kept frame changed under them), and since the
+        # walk only ever moves forward they can never be asked for again — without this,
+        # they'd sit in `pending` forever, hold the window full, and starve the pool.
+        for stale in [index for index in pending if index < start]:
+            pending.pop(stale)
+        for index in range(start, min(len(frames), start + lookahead)):
+            if len(pending) >= jobs * 2:
+                return
+            if index in ocr_cache or index in pending:
+                continue
+            if needs_ocr(index, reference):
+                pending[index] = pool.apply_async(
+                    _ocr_worker, ((index, str(frames[index]), ocr_language),)
+                )
+
+    def ocr_text(index: int, reference: Optional[imagehash.ImageHash]) -> str:
+        if index not in ocr_cache:
+            top_up(index, reference)
+            if index in pending:
+                _, text = pending.pop(index).get()
+            else:
+                _, text = _ocr_worker((index, str(frames[index]), ocr_language))
+            ocr_cache[index] = text
+        return ocr_cache[index]
+
     candidates: list[Candidate] = []
     last_kept_hash = None
     last_kept_text = ""
     retained_states: list[tuple[imagehash.ImageHash, str]] = []
 
+    progress.start_stage("ocr", len(frames))
     for index, frame in enumerate(frames):
         seconds = index * interval
-        current_hash, raw_text = features[index]
+        current_hash = hashes[index]
         distance = None if last_kept_hash is None else current_hash - last_kept_hash
 
         # OCR borderline changes as well as obvious visual changes. This catches
         # field edits that occupy too little of the screen to move pHash strongly.
         should_ocr = distance is None or distance >= gate
-        text = raw_text if should_ocr else ""
+        text = ocr_text(index, last_kept_hash) if should_ocr else ""
 
         clean_text = normalized_text(text)
         similarity = None
@@ -322,6 +409,17 @@ def select_frames(
             last_kept_hash = current_hash
             last_kept_text = clean_text
             retained_states.append((current_hash, clean_text))
+        progress.update(index + 1)
+
+    if pool is not None:
+        # Speculative results the walk never asked for are simply dropped here.
+        pool.terminate()
+        pool.join()
+    progress.finish_stage()
+    print(
+        f"OCR ran on {len(ocr_cache)} of {len(frames)} candidate frames",
+        file=sys.stderr,
+    )
 
     with (output / "frame-decisions.csv").open("w", newline="", encoding="utf-8") as file:
         writer = csv.writer(file)
@@ -534,22 +632,37 @@ def nearest_frame(frames: list[Candidate], seconds: float, tolerance: float) -> 
     return nearest if abs(nearest.seconds - seconds) <= tolerance else None
 
 
-def extract_frame_at(video: Path, target: Path, seconds: float) -> None:
+def extract_frame_at(video: Path, target: Path, seconds: float) -> bool:
+    """Pull a single frame. Returns False instead of raising when ffmpeg can't produce
+    one — most often because `seconds` lands past the end of the recording, which is
+    what a transcript carrying the wrong --source-offset (or a transcript paired with a
+    shorter clip) looks like. A missable frame shouldn't abort a whole pipeline run.
+    """
     target.parent.mkdir(parents=True, exist_ok=True)
-    run([
-        "ffmpeg", "-hide_banner", "-loglevel", "warning", "-ss", str(seconds),
-        "-i", str(video), "-frames:v", "1", "-update", "1", "-q:v", "2", str(target),
-    ])
+    try:
+        subprocess.run(
+            [
+                "ffmpeg", "-hide_banner", "-loglevel", "error", "-ss", str(seconds),
+                "-i", str(video), "-frames:v", "1", "-update", "1", "-q:v", "2", str(target),
+            ],
+            check=True, stderr=subprocess.DEVNULL,
+        )
+    except subprocess.CalledProcessError:
+        target.unlink(missing_ok=True)
+        print(f"warning: no frame available at {timestamp(seconds)}", file=sys.stderr)
+        return False
+    return target.exists()
 
 
 def extract_missing_frame(
     video: Path, output: Path, seconds: float, ocr_language: str
-) -> Candidate:
+) -> Optional[Candidate]:
     from PIL import Image
 
     name = f"screen-{timestamp(seconds).replace(':', '-')}.jpg"
     target = output / "transcript-extracted" / name
-    extract_frame_at(video, target, seconds)
+    if not extract_frame_at(video, target, seconds):
+        return None
     scratch = output / ".ocr-transcript-frame.png"
     with Image.open(target) as image:
         text = read_ocr(image, scratch, ocr_language)
@@ -600,17 +713,25 @@ def append_frames_index(folder: Path, new_entries: list[dict]) -> None:
     write_frames_index(folder, existing)
 
 
-def nearby_transcript_text(transcript: list[dict], seconds: float, window: float = 20.0) -> str:
-    segments = [
+def frames_index_entry(
+    item: Candidate, transcript: list[dict], source: str, window: float = 20.0
+) -> dict:
+    nearby = [
         segment for segment in transcript
-        if segment["end"] >= seconds - window and segment["start"] <= seconds + window
+        if segment["end"] >= item.seconds - window and segment["start"] <= item.seconds + window
     ]
-    return collapse_whitespace(" ".join(segment["text"] for segment in segments))
-
-
-def frames_index_entry(item: Candidate, transcript: list[dict], source: str) -> dict:
-    transcript_text = nearby_transcript_text(transcript, item.seconds)
-    score, reasons = transcript_relevance(transcript_text) if transcript_text else (0, [])
+    transcript_text = collapse_whitespace(" ".join(segment["text"] for segment in nearby))
+    # Score the single most relevant thing said near this frame, not the whole window
+    # concatenated together: concatenating sweeps up every keyword category spoken in
+    # 40 seconds, so nearly every frame would come out at the top of the scale and the
+    # number would stop telling a reader which frames are actually worth opening. This
+    # also keeps `score`/`reasons` meaning what they meant in the old coverage.json,
+    # which scored one transcript segment at a time.
+    score, reasons = 0, []
+    for segment in nearby:
+        segment_score, segment_reasons = transcript_relevance(segment["text"])
+        if segment_score > score:
+            score, reasons = segment_score, segment_reasons
     return {
         "screenshot": item.source.name,
         "seconds": item.seconds,
@@ -624,16 +745,26 @@ def frames_index_entry(item: Candidate, transcript: list[dict], source: str) -> 
 
 
 def extract_at_timestamps(
-    video: Path, screenshots_dir: Path, timestamps: list[float], tolerance: float
+    video: Path, screenshots_dir: Path, timestamps: list[float], tolerance: float,
+    transcript: list[dict], ocr_language: str,
 ) -> list[dict]:
     """Guarantee a screenshot near each requested second in a flat screenshots folder.
 
     Used for a targeted second pass after convert-sme-input names specific moments —
-    does not touch anything already in screenshots_dir except add to it.
+    does not touch anything already in screenshots_dir except add to it. Each newly
+    extracted frame is OCR'd and scored against `transcript` the same way the bulk
+    pipeline does (frames_index_entry/transcript_relevance), so frames-index.json
+    entries from this mode carry real ocr_text/transcript_text/score/reasons instead
+    of coming out empty (D-5) — this mode only ever pulls a handful of frames, so the
+    OCR pass stays cheap. `transcript` is `[]` when the caller has none to pass, in
+    which case score/reasons/transcript_text are correctly 0/[]/"" for every frame.
     """
+    from PIL import Image
+
     existing = parse_existing_screenshots(screenshots_dir)
     report = []
     new_entries = []
+    scratch = screenshots_dir / ".ocr-extract-at-scratch.png"
     for seconds in timestamps:
         nearest = min(existing, key=lambda item: abs(item[0] - seconds), default=None)
         if nearest is not None and abs(nearest[0] - seconds) <= tolerance:
@@ -641,21 +772,16 @@ def extract_at_timestamps(
             continue
         name = f"screen-{timestamp(seconds).replace(':', '-')}.jpg"
         target = screenshots_dir / name
-        extract_frame_at(video, target, seconds)
+        if not extract_frame_at(video, target, seconds):
+            report.append({"requested": seconds, "status": "unavailable", "screenshot": "-"})
+            continue
         existing.append((seconds, target))
         report.append({"requested": seconds, "status": "extracted", "screenshot": name})
-        # No OCR/transcript context here on purpose — this mode stays ffmpeg-only so
-        # it's cheap enough for convert-sme-input to call mid-workflow.
-        new_entries.append({
-            "screenshot": name,
-            "seconds": seconds,
-            "timestamp": timestamp(seconds),
-            "ocr_text": "",
-            "transcript_text": "",
-            "score": 0,
-            "reasons": [],
-            "source": "targeted",
-        })
+        with Image.open(target) as image:
+            text = read_ocr(image, scratch, ocr_language)
+        candidate = Candidate(target, seconds, None, text, None, True)
+        new_entries.append(frames_index_entry(candidate, transcript, "targeted"))
+    scratch.unlink(missing_ok=True)
     if new_entries:
         append_frames_index(screenshots_dir, new_entries)
     return report
@@ -726,7 +852,8 @@ def write_transcript_driven_package(
             selected = nearest_frame(all_frames, target_time, 20)
         if selected is None:
             selected = extract_missing_frame(video, output, target_time, ocr_language)
-        must_have.append(selected)
+        if selected is not None:
+            must_have.append(selected)
 
     combined = {round(item.seconds): item for item in visual_key_frames}
     combined.update({round(item.seconds): item for item in must_have})
@@ -824,7 +951,10 @@ def main() -> None:
             parser.error("video and output are required with --extract-at")
         timestamps = [float(part) for part in args.extract_at.split(",") if part.strip()]
         args.output.mkdir(parents=True, exist_ok=True)
-        report = extract_at_timestamps(args.video, args.output, timestamps, args.tolerance)
+        transcript = parse_turboscribe(args.transcript)[0] if args.transcript else []
+        report = extract_at_timestamps(
+            args.video, args.output, timestamps, args.tolerance, transcript, args.ocr_language
+        )
         for item in report:
             print(f"{timestamp(item['requested'])}: {item['status']} ({item['screenshot']})")
         extracted = sum(1 for item in report if item["status"] == "extracted")

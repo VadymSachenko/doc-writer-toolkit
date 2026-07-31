@@ -4,14 +4,14 @@ Load this file first. Then open only the matching topic files.
 
 | Task or signal | Load | Scope |
 |---|---|---|
-| Voice, tone, clarity, concision | `shared/voice/` | structural |
-| Bias, accessibility, inclusive language | `shared/accessibility/`, `shared/inclusive-content/` | mixed |
+| Voice, tone, clarity, concision | `shared/voice/` | mixed |
+| Bias, accessibility, inclusive language | `shared/accessibility/`, `shared/inclusive-content/` | structural |
 | Planning, titles, headings, lists, tables | `shared/content-design/` | structural |
-| Steps, prerequisites, UI interactions | `shared/procedures/` | structural |
+| Steps, prerequisites, UI interactions | `shared/procedures/` | structural (alternative-input-methods.md, ui-interactions.md: mixed) |
 | Formatting UI, code, keys, messages, titles | `shared/formatting/` | structural |
 | API, reference, code examples | `shared/developer-content/` | structural |
-| Chatbots, bots, conversational UI | `shared/conversational-content/` | mixed |
-| Localization and global readiness | `shared/globalization/` | mixed |
+| Chatbots, bots, conversational UI | `shared/conversational-content/` | structural |
+| Localization and global readiness | `shared/globalization/` | structural |
 | English grammar or punctuation | `en-us/grammar/`, `en-us/punctuation/` | language-specific (en-US) |
 | English spelling or exact term | Search `en-us/terminology/INDEX.md`, then load its mapped file | language-specific (en-US) |
 | Ukrainian voice or natural translation | `uk-ua/voice-and-tone/`, `localization/` | language-specific (uk-UA) |

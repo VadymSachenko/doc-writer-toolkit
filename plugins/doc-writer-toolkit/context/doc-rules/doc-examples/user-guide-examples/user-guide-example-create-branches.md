@@ -19,7 +19,7 @@ Before you start, read the [reference information](#reference-information-create
 
 1. Navigate to the **Branches** page and click **+CREATE NEW**.
 
-![Branches page: Create new button](./assets/branches-page-create-new-button.png)
+![Branches page: Create new button](./.assets/branches-page-create-new-button.png)
 
 2. On the **Create new branch** page that opens, on the **INFO** tab, enter and select the necessary values:
    * From **Project**, select the project to assign the branch to.
@@ -34,7 +34,7 @@ Before you start, read the [reference information](#reference-information-create
 
       :::
 
-      ![Create new branch page: Info tab](./assets/create-new-branch-page-info-tab.png)
+      ![Create new branch page: Info tab](./.assets/create-new-branch-page-info-tab.png)
 
 ## Configure screen settings
 
@@ -57,7 +57,7 @@ Before you start, read the [reference information](#reference-information-create
    2. In the box that appears, enter the payment screen key and select the necessary one from the search results.
    3. To add multiple onboarding screens, repeat steps 3.1-3.2.
 
-   ![Create new branch page: Screens tab](./assets/create-new-branch-page-screens-tab.png)
+   ![Create new branch page: Screens tab](./.assets/create-new-branch-page-screens-tab.png)
 
 :::warning
 
