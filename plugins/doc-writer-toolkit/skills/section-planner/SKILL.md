@@ -29,7 +29,7 @@ Do not load templates — this skill proposes page types, it does not write page
 1. Confirm `.sources/section-readiness.json` exists. If not, stop: "Run section-readiness on this section first."
 2. Read the readiness report fully. Note: verdict, page list with states and docTypes, marker counts, sources present, app-access.
 3. Load optional sources in order: `app-notes.md` → `sme-interview.md` → existing page stubs.
-4. If no `app-notes.md` exists and `Admin UI: playwright` is declared, do a lightweight app navigation pass now — enough to understand what screens and flows the section covers. Do not capture screenshots (that is `app-explorer`'s job) — just observe and note the flows.
+4. If no `app-notes.md` exists and `Admin UI: playwright` is declared, do a lightweight app navigation pass now — enough to understand what screens and flows the section covers. Do not capture screenshots (that is `app-explorer`'s job) — just observe and note the flows. Apply the value-realism rule from `app-explorer`: every value entered into the UI must look like real operator activity — no test markers, no placeholder strings, no obviously synthetic amounts. Read `app-explorer`'s "Value realism rule" section before entering any data.
 
 ## Step 1 — Understand what the section actually covers
 
