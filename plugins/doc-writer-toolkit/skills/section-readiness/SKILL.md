@@ -1,11 +1,11 @@
 ---
 name: section-readiness
-description: Read-only diagnostic that scans one documentation section folder and reports what exists — every page classified stub vs complete, all .sources/ inputs and screenshots inventoried, and whether app-access (live UI, API test collection) is declared. Emits a machine-consumable JSON report that the section-writing pipeline consumes. Makes no edits and asks no questions beyond path resolution. Use explicitly ("section-readiness", "check readiness of <folder>").
+description: Read-only diagnostic that scans one documentation section folder and reports what exists — every page classified stub vs complete, all .sources/ inputs and screenshots inventoried, and whether app-access (live UI, API test collection) is declared. Emits a machine-consumable JSON report that the later section steps (`section-planner`, `app-explorer`) consume. Makes no edits and asks no questions beyond path resolution. Use explicitly ("section-readiness", "check readiness of <folder>").
 ---
 
 # section-readiness
 
-You are producing a **readiness report** for one documentation section folder: a factual, machine-consumable inventory of what already exists and what the pipeline has to work with. This is the first phase of the section-writing pipeline (`document-section`) and its output is the contract every later phase reads.
+You are producing a **readiness report** for one documentation section folder: a factual, machine-consumable inventory of what already exists and what later steps have to work with. This is the first step in documenting a section — run via `/check-section-readiness` — and its JSON output is the contract the later steps read: `app-explorer` (`/explore-and-resolve`) reads it to know which pages and markers exist, then `section-planner` (`/plan-section`) consumes it (plus the `app-notes.md` app-explorer produced) to propose structure. These steps are separate commands you run in sequence; there is no single orchestrator command today.
 
 This skill **only reports facts**. It makes no edits, writes no doc pages, and asks the user nothing except the path-resolution fallback that `project-paths.md` already defines. It does not decide what pages *should* exist — that is `section-planner`'s job, which consumes this report.
 
@@ -30,7 +30,7 @@ Load only these at task start. Do not load rule corpora, templates, or glossarie
 2. Resolve the project's content root(s), content language, and UA URL prefix via `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`. If a needed field is undeclared, follow that file's ask-once/offer-to-persist fallback — this is the *only* interaction this skill performs.
 3. Read the **Documentation toolkit configuration** section for the two app-access fields:
    - `Admin UI:` — `playwright` if live-UI capture is available, or `none`.
-   - `API test collection:` — a path to a Postman/newman collection for seeding test-env scenarios, or `none`. *(This field may not exist yet in a given project. If absent, report it as `not declared` — do not ask, do not persist. Reporting its absence is the signal the orchestrator needs.)*
+   - `API test collection:` — a path to a Postman/newman collection for seeding test-env scenarios, or `none`. *(This field may not exist yet in a given project. If absent, report it as `not declared` — do not ask, do not persist. Reporting its absence is the signal the later steps need.)*
 
 ## Step 1 — Confirm the folder exists
 
@@ -38,13 +38,16 @@ If the named folder does not exist under the resolved content root, stop and say
 
 ## Step 2 — Inventory, reading cheaply
 
-Token discipline: this is a diagnostic scan, not a content pass. **Never** paste full page bodies into your reasoning. For each page, read only the frontmatter and enough of the body to classify it (see Step 3). Read `.sources/frames-index.json` (text, cheap) rather than opening images.
+Token discipline: this is a diagnostic scan, not a content pass. **Never** paste full page bodies into your reasoning. For each page, read only the frontmatter and enough of the body to classify it (see Step 3). To count screenshots, read each `.sources/frames/{video-basename}-frames/frames-index.json` (text, cheap) rather than opening images — note the index lives inside each per-video `*-frames/` subfolder, **not** directly under `.sources/`.
 
 Collect:
 
 - **Pages** — every `.md`/`.mdx` file in the section folder (recurse into subfolders; a section is one menu area with many pages). Record each page's relative path.
 - **Sources** — contents of `.sources/`: video files, `.txt` transcripts, an existing `sme-interview.md`, an existing `app-notes.md`, a `frames/` folder, `section-plan.md`, `section-state.json`.
-- **Screenshots** — images in `.assets/` and in any `.sources/frames/*-frames/` folder. Prefer counting via `frames-index.json` where present; fall back to a directory listing.
+- **Screenshots** — count from two independent locations and sum them:
+  1. **Video frames.** Enumerate every `.sources/frames/*-frames/` subfolder (there is one per source video, so there may be several). For each, read its `frames-index.json` (at `.sources/frames/{video-basename}-frames/frames-index.json`) and count its entries — that is the authoritative per-video screenshot count. Only if a given `*-frames/` folder has no `frames-index.json` (an older or partial run), fall back to listing its `screen-*.jpg` files, excluding any `_unused/` subfolder. Record each folder in `framesFolders`.
+  2. **Curated/app-explorer screenshots.** Independently count image files in `.assets/` folders (excluding any `.assets/ref/` subfolder). A section has one `.assets/` per page (co-located with each page file) plus possibly a section-level `.assets/` from `app-explorer` — sum across all of them. A section may have screenshots here with no video at all — the app-explorer path — so this count stands on its own even when there are zero `*-frames/` folders.
+  `screenshotCount` is the sum of (1) and (2). If neither location exists, it is 0.
 - **Markers** — count `{/* ToDo: … */}` and `{/* NEEDS CONFIRMATION: … */}` markers per page (a grep, not a full read).
 
 ## Step 3 — Classify each page
@@ -60,7 +63,7 @@ Record, per page: the state, a one-line reason for the classification, the marke
 
 ## Step 4 — Assess app-access readiness
 
-Report a small readiness verdict the orchestrator can branch on:
+Report a small readiness verdict the later steps (`section-planner`, `app-explorer`) can branch on:
 
 - `liveUI`: `available` if `Admin UI: playwright` is declared, else `none`.
 - `apiSeed`: `available` if `API test collection:` points at an existing file, `declared-but-missing` if the field names a path that isn't there, else `not-declared`.
@@ -70,7 +73,7 @@ This skill does **not** launch Playwright or call the collection — it only rep
 
 ## Step 5 — Judge the section's overall state
 
-Beyond the per-page facts, assign the section exactly one **verdict** — a one-line read on what starting state the section is in. This tells the caller (and later pipeline phases) which path the section is on:
+Beyond the per-page facts, assign the section exactly one **verdict** — a one-line read on what starting state the section is in. This tells the caller (and the later steps — `section-planner`, `app-explorer`) which path the section is on:
 
 | Verdict | Criteria |
 |---|---|
@@ -78,7 +81,7 @@ Beyond the per-page facts, assign the section exactly one **verdict** — a one-
 | `skeleton` | Pages exist but (nearly) all are `stub` — a structure was set up but not filled in. The structure itself may be wrong and can only be validated against the app UI and sources. |
 | `needs-revision` | Some or all pages are `complete` — real content exists that likely needs adjustment (merging guides, filling gaps, updating stale info, style review) rather than writing from nothing. |
 
-Record a one-line reason for the verdict. This verdict is a signal, not an instruction — it does **not** tell later phases what to do, only what they're starting from.
+Record a one-line reason for the verdict. This verdict is a signal, not an instruction — it does **not** tell the later steps what to do, only what they're starting from.
 
 ## Step 6 — Write the report
 
@@ -139,12 +142,13 @@ Before finishing, verify:
 3. No page was read in full and pasted into reasoning — classification used frontmatter + a bounded body sample only.
 4. `appAccess` reflects the *declared* config, and no Playwright run or API call was actually performed.
 5. No `missing` verdicts were emitted (out of scope — that's `section-planner`).
-6. The JSON validates (well-formed, matches the schema keys) and was written to `.sources/section-readiness.json`.
-7. Nothing outside `.sources/section-readiness.json` was created or edited, and no question was asked beyond the `project-paths.md` fallback.
+6. `screenshotCount` was derived by reading each `.sources/frames/*-frames/frames-index.json` (not `.sources/frames-index.json`, which never exists) plus counting `.assets/` images — not from a bare directory listing when an index was available.
+7. The JSON validates (well-formed, matches the schema keys) and was written to `.sources/section-readiness.json`.
+8. Nothing outside `.sources/section-readiness.json` was created or edited, and no question was asked beyond the `project-paths.md` fallback.
 
 ## Explicit invocation examples
 
-This skill triggers only when named explicitly, or as the first phase of the `document-section` pipeline. Examples:
+This skill triggers only when named explicitly, or via its wrapper command `/check-section-readiness`. It is the first step you run when documenting a section, before `/explore-and-resolve` and `/plan-section`. Examples:
 
 - "section-readiness: scan docs/transactions"
 - "Use section-readiness to check what exists in the transactions folder"

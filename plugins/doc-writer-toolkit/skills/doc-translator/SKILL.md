@@ -27,7 +27,11 @@ Example, for a project whose declared UA content root is `partner-cabinet/` and 
 
 Load these files at the start of the task.
 
+**Project paths (resolve first):**
+- Follow `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` to resolve this project's **UA content root** and **EN i18n root**. Do not assume `partner-cabinet/` or any other default. If either is undeclared, follow that file's fallback (ask once, offer to persist to the project's `CLAUDE.md`).
+
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-en.md` — canonical EN terminology. Use it to replace UA terms with their correct EN equivalents.
+- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` — rank-0 project formatting conventions. Core section and English section apply. Outranks this skill's own body for any rule both cover.
 - The Ukrainian source file, at the path resolved above.
 
 **Style guide (project-declared, resolved before translating):**
@@ -139,7 +143,7 @@ Carry all `{/* ToDo: … */}` and `{/* NEEDS CONFIRMATION: … */}` markers thro
 
 ### Word choices
 
-Apply `word-list.md` throughout. Common translation traps:
+Common translation traps:
 
 | UA pattern | Avoid | Use instead |
 |---|---|---|
@@ -156,19 +160,6 @@ Apply `word-list.md` throughout. Common translation traps:
 | `натисніть **X**` | "**X** the settings" (UI name as verb) | "Click **X**" |
 
 Also avoid: `please`, `e.g.`, `i.e.`, `etc.`, `and/or`, `above` or `below` for document position.
-
-### Numbers
-
-- Spell out zero through nine in prose: "You can add up to **five** files."
-- Use numerals for 10 and greater: "up to **10** transactions."
-- Always use numerals for measurements regardless of value: "5 MB", "50 MB".
-- Always use numerals for technical quantities (version numbers, memory, query limits) even if less than 10.
-
-### Abbreviations
-
-- On first mention, spell out the full term and add the abbreviation in parentheses. Italicize both: *two-factor authentication (2FA)*.
-- On subsequent mentions, use the abbreviation alone.
-- If the source uses an abbreviation whose expansion is not in the glossary or source material, flag it in the Step 6 report as an unresolved abbreviation. Do not invent an expansion.
 
 ### Accordion titles
 
@@ -286,8 +277,7 @@ Before saving, check:
 - `ви можете виконувати такі операції` → `you can do the following` (never "perform the following operations")
 - No "side menu" (use "sidebar"); no "allows you to" (use "lets you"); no "via" (use "through" or "by using"); no "type" for text input (use "enter")
 - No "in order to" (use "to"); no "may" for possibility (use "might" or "can"); no "once" when meaning "after"
-- Numbers zero through nine spelled out in prose; measurements and technical quantities use numerals regardless of value
-- Abbreviations spelled out on first mention with italics: *term (ABBR)*
+- Number and abbreviation formatting follows `formatting-conventions.md` English section
 - All `<Accordion title="...">` attribute values are translated; task-based titles use bare infinitive, not gerund
 - `**Результат:**` → `**Result:**`; `Детальніше дивіться` → `For more information, see`
 - Cross-reference link text does not repeat the subject when it matches the link label

@@ -9,8 +9,14 @@ You are resolving documentation markers — `{/* NEEDS CONFIRMATION: ... */}` an
 
 ## Scope
 
-- **In scope:** resolving `{/* NEEDS CONFIRMATION */}` and `{/* ToDo */}` markers in all doc pages of one section, using all available evidence sources. Editing the pages in place. Reporting what was resolved and what remains.
-- **Out of scope:** running full app exploration (`app-explorer`'s job). Writing new pages. Style review. Translation.
+- **In scope:** resolving `{/* NEEDS CONFIRMATION */}` and `{/* ToDo */}` markers in all doc pages of one section, using all available evidence sources. **Targeted, read-only observation of a single screen via Playwright to confirm one specific marker** (see "Full vs. targeted app access" below). Editing the pages in place. Reporting what was resolved and what remains.
+- **Out of scope:** running full app exploration — systematic multi-screen navigation, scenario seeding, or screenshot sweeps (`app-explorer`'s job; see "Full vs. targeted app access" below). Writing new pages. Style review. Translation.
+
+### Full vs. targeted app access
+
+- **Full app exploration** — a systematic pass over a section: seeding test-env scenarios via the API collection, navigating every relevant screen, capturing labeled screenshots of each state, and recording it all into `.sources/app-notes.md`. This is **`app-explorer`'s sole job**.
+- **Targeted observation** — navigating to one already-identified screen to confirm a single fact for a specific marker; no scenario seeding, no systematic sweep, no new screenshots unless a specific `{/* ToDo: add a screenshot */}` marker needs one. **This skill may do this** (Step 0, source 4) when no other evidence answers a marker.
+- It reads `app-notes.md` when present but **does not require it** — a live targeted check is its fallback.
 
 ## Sources to load
 
@@ -19,6 +25,7 @@ You are resolving documentation markers — `{/* NEEDS CONFIRMATION: ... */}` an
 3. The section's `.sources/sme-interview.md` — **optional**. Load if present.
 4. The section's `.assets/` folder — list what screenshots already exist there.
 5. The doc pages in the section — read each one to find markers.
+6. If `Admin UI: playwright` is declared in the project's `CLAUDE.md` — also load `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/value-realism.md`.
 
 Do not load style-guide corpora. This skill edits markers only — it does not rewrite prose beyond filling in the confirmed fact.
 
@@ -29,7 +36,7 @@ Collect every source of evidence available. Work through them in order — later
 1. **`app-notes.md`** (if present) — answers to specific questions, screenshot descriptions, observed UI labels. Best source: direct observation.
 2. **`sme-interview.md`** (if present) — confirmed facts from SME or transcript. Good for conceptual and business-rule questions.
 3. **`.assets/` contents** — screenshots already saved. A screenshot of the right UI state can answer a `{/* ToDo: add a screenshot */}` marker directly without needing `app-notes.md`.
-4. **Live app via Playwright** (if `Admin UI: playwright` is declared in `CLAUDE.md`) — for markers that none of the above answer, navigate to the relevant screen, observe directly, and record the answer. Do not capture new screenshots unless a `{/* ToDo: add a screenshot */}` marker specifically needs one. Read credentials from `.env` — never hardcode them, never use production.
+4. **Live app via Playwright** (if `Admin UI: playwright` is declared in `CLAUDE.md`) — for markers that none of the above answer, navigate to the relevant screen, observe directly, and record the answer. Do not capture new screenshots unless a `{/* ToDo: add a screenshot */}` marker specifically needs one. Read credentials from `.env` — never hardcode them, never use production. Apply the **"Value realism rule — mandatory"** from `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/value-realism.md` for any values entered into the UI.
 
 Build an internal index:
 - Every confirmed answer → source + answer text
@@ -43,7 +50,9 @@ If none of these sources exist and `Admin UI:` is `none`, continue — the skill
 Scan every `.md`/`.mdx` file in the section folder for:
 - `{/* NEEDS CONFIRMATION: ... */}` — a fact that was uncertain when the page was written
 - `{/* ToDo: add a screenshot — ... */}` — a missing screenshot
-- `{/* ToDo: ... */}` — any other outstanding writer task
+- `{/* ToDo: ... */}` — any other outstanding writer task that needs a *fact or observation* to resolve (a missing UI label, an unconfirmed step, a value to check in the app)
+
+This skill owns fact/observation markers. It does **not** handle pure cross-link TODOs — a `{/* ToDo: link to ... */}` whose only need is a link to another existing page belongs to `fix-doc-todos` (its Buckets A–C). If you encounter such a link-only ToDo, leave it and note it for `fix-doc-todos` rather than resolving it here.
 
 For each marker, record: the file, the line, the full marker text, and the surrounding sentence or step.
 

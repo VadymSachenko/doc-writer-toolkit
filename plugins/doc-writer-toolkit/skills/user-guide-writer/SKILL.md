@@ -26,7 +26,9 @@ Load these files at the start of the task. Do not load others unless the user re
 
 **Project rules:**
 - `uk` → `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-ua.md`; `en` → `glossary-en.md` — canonical terminology for the resolved language.
+- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/api-integration-context.md` — cross-cutting facts about the API (balances, transaction lifecycle, webhooks, disputes, auth, business rules). Always applicable background.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` — rank-0 project formatting conventions (what bold/italic/code font mean here, placeholder form, one-entity-one-render, code-entity vs. human concept). Outranks everything else loaded for this task, including this skill's own body. Loaded regardless of resolved language.
+- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-selection.md` — shared screenshot selection procedure: three-folder model, four selection cases, sensitive-content screening, rename pattern, full-page vs. compact classification.
 
 **UA grammar — only when the resolved language is `uk`:**
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/ua-grammar/00-cheatsheet.md` — always-loaded quick reference for UA orthography. Do not load this on an `en` page; English sentence-style rules live in `formatting-conventions.md`'s English section instead.
@@ -54,8 +56,9 @@ Resolve this project's UA content root (or, on an `en` page, its EN i18n root �
 **Each user guide page has its own `.assets/` folder**, co-located with the page file (e.g., `filter-transactions/.assets/`). If the folder does not exist, create it before copying any screenshots into it. Never place a page's screenshots in a parent folder's `.assets/` or in a shared assets directory — every page owns its own copy of the screenshots it embeds, even if those screenshots duplicate files from another page.
 
 List the files present. Expected contents:
-- `.sources/sme-interview.md` — primary source; SME brief or interview transcript. If absent, notify the user and request an alternative.
-- `.sources/notes.md` — writer's own notes; treat as authoritative.
+- `.sources/app-notes.md` — **optional**; structured evidence written by `app-explorer` when it has run. Load if present; skip if absent — do not require it. Direct app observation, so the highest-confidence source for UI facts (exact screen names, button labels, column headers, status values, and answers to previously open questions). When it and `sme-interview.md` disagree on a UI detail, prefer `app-notes.md`. **Primary source whenever it is present.**
+- `.sources/sme-interview.md` — SME brief or interview transcript. Primary source only when `app-notes.md` is absent. Notify the user and request an alternative **only if both `app-notes.md` and `sme-interview.md` are absent** — if either is present, proceed without asking.
+- `.sources/notes.md` — writer's own notes; treat as authoritative. If `notes.md` and `app-notes.md` disagree, `notes.md` wins — it is the writer's deliberate override of a raw observation.
 - `.sources/frames/{video-basename}-frames/` — the full archive of frames extracted from a source recording, plus a `frames-index.json` alongside them. This is evidence, not embeddable material — never insert a file from here directly into the page. See "Selecting screenshots" in Step 2.
 - `.assets/*.png` — screenshots already selected and ready to embed in the doc.
 - `.assets/ref/*.png` — reference-only screenshots (read for context; never embed in the doc). This folder is optional. If it does not exist or is empty, treat all files directly in `.assets/` as both context and embeddable.
@@ -77,50 +80,13 @@ Read every file in `.sources/`. Extract:
 - Webhook events or API calls triggered by the action (if relevant to the partner)
 - Whether this page has one procedure or multiple that together form a workflow
 
-**Selecting screenshots.** Three folders, three distinct roles — do not conflate them:
-
-| Folder | Role |
-|---|---|
-| `.sources/frames/{video}-frames/` | Full archive of extracted frames + `frames-index.json`. Evidence base. Never embedded directly. |
-| `.assets/` | Selected, renamed frames ready for embedding. The **only** folder the page links images from. |
-| `.assets/ref/` | Reference-only frames: read for context, **never** embed (existing rule). |
-
-Decide which case applies:
-
-1. **`.assets/` (root) already has files** — these are the curated set. Skip to the rename/classify steps below and use them as-is; do not re-derive from `frames/`.
-2. **`.assets/` is empty and `.sources/frames/{video}-frames/` exists** — do not draft without images and do not silently proceed with zero screenshots. Run the selection procedure:
-   1. Read `frames-index.json` (schema: `screenshot`, `seconds`, `timestamp`, `ocr_text`, `transcript_text`, `score`, `reasons`, `source`). It's text — tens of KB even for ~100 frames — read the whole thing, not a sample.
-   2. For each step or procedure you plan to write, find candidates by matching against `ocr_text` (what's visibly on screen) and `transcript_text` (what the SME was saying), prioritizing higher `score`.
-   3. **Open only the shortlisted candidates** — aim for 3–8 images for the whole page, not all of them. Confirm each one actually shows what the step needs before using it.
-   4. **Copy** (not move) the confirmed files into `.assets/` — `frames/` must stay a complete archive for `cleanup-unused-screenshots` to sweep later.
-   5. Continue to the rename/classify steps below on the copied files.
-3. **`.assets/` is empty and there is no `frames/` folder** (older run, or none extracted) — fall back to the plain "list `.assets/`" behavior and tell the user no `frames-index.json` exists, so they know why you can't do index-driven selection.
-4. **Neither folder exists** — ask the user where screenshots are before proceeding, per Step 1.
-
-For every file that ends up in `.assets/` (root), whichever case applied, work through these steps **in order** — do not rename or embed a file that hasn't passed step 1, even if it "looks clean" on a first glance:
-
-1. **Screen for sensitive content (required — never skip this, and never skip it because the frame looks clean).** A frame pulled from a meeting recording is raw evidence, not embeddable material — it was never composed as a screenshot for a public page. Before anything else:
-   - **Crop to the part that matters.** Participant bars, toolbars, the dock, browser tabs, side panels — none of that is the subject. Isolate only the UI area the step actually needs.
-   - **Check the cropped result against this list** — faces and people's names; usernames and logins; hostnames, domains, IP addresses; environment labels (`PROD`, `TEST`); internal URLs; tokens, keys, session IDs; card and account numbers; customer personal data; other apps and personal desktop items. Look in toolbars and corners, not just the center of the frame — a sensitive label sitting in a place nobody looks is still disqualifying.
-   - **If cropping can't remove something on the list** — for example a sensitive label sitting inside a table you need — **do not decide alone**. Ask the person you're working with and do not insert the image until they answer.
-   - **Save the cropped result as PNG**, regardless of the source frame's format (frames arrive as `screen-HH-MM-SS.jpg`). Cropping already rewrites the file, so converting at this step costs nothing extra, and PNG suits UI screenshots better — this is also what keeps the `.png` extension in the rename pattern below accurate.
-   - These checks implement `GDSG-VISUALS` and `GDSG-EXAMPLE-001` from the loaded style guide corpus — consult those entries directly for the underlying rules; they are not repeated here.
-2. **Rename** — if the filename is non-descriptive (e.g., `image.png`, `image copy.png`, a random string, or a numeric timestamp — this includes the `screen-HH-MM-SS.jpg`-style names frames arrive with), rename it following the pattern `{subject}-{ui-element-type}.png` in kebab-case:
-
-   | UI element type | Suffix | Example |
-   |---|---|---|
-   | Full-page menu or table | `-page` or `-page-{tab}` | `transactions-page-payout-tab.png` |
-   | Dialog / modal window | `-dialog` | `transaction-receipts-dialog.png` |
-   | Side panel / filter panel | `-pane` | `filters-pane.png` |
-   | Standalone form | `-form` | `add-receipt-form.png` |
-   | Confirmation banner / toast | `-banner` | `receipt-uploaded-banner.png` |
-
-   Use the Bash tool: `mv "./.assets/old-name.png" "./.assets/new-name.png"`. Rename before drafting so all embed references use the final filename.
-3. **Classify** as **full-page** or **compact**:
-   - **Full-page** — whole menu, dashboard, or table spanning the full content area.
-   - **Compact** — dialog window, modal, or narrow panel that visually occupies significantly less than the full content width.
+**Selecting screenshots:** follow `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-selection.md` — it covers the three-folder model, the four selection cases, the sensitive-content screening requirement, the rename pattern, and the full-page vs. compact classification. Apply every rule in that file before embedding or renaming any screenshot.
 
 Note the final filename and classification per file; both are used in Step 6.
+
+Choose the embed syntax based on the classification:
+- **Full-page**: `![Descriptive alt text](./.assets/image.png)`
+- **Compact** (dialog, modal, narrow panel): `<img src={require('./.assets/image.png').default} width="480" alt="Descriptive alt text" />`
 
 ### Step 3 — Choose the structure
 
@@ -151,9 +117,9 @@ Do not show this sheet to the user unless asked. It is scaffolding for Step 5.
 Ask 3–5 targeted questions in one batch. Rules:
 
 - **Maximum 5 questions.** If more real gaps exist, pick the 5 most blocking and save the rest for a follow-up round after drafting.
-- **Each question must cite evidence.** Reference the source of the uncertainty: "The interview mentions clicking a button but doesn't name it. What is the exact label?"
+- **Each question must cite evidence, then propose an answer.** Cite the source of the uncertainty, state your best-guess resolution from the available evidence, and ask the user to confirm or correct: "The interview mentions clicking a button but doesn't name it — based on app-notes.md the label is 'Submit'; confirm or correct?" Do not ask an open question where the user must make the choice from scratch.
 - **No generic questions.** Style, tone, and structure are answered by the template and, for a `uk` page, the cheatsheet. Questions must be about facts or UI details the inputs don't resolve.
-- **If the inputs are complete and unambiguous, skip the interview.** Say: "Inputs are complete. Drafting now." Do not invent questions for ritual.
+- **If the inputs are complete and unambiguous, skip the interview.** Say: "Inputs are complete. Drafting now." Do not invent questions for ritual. Treat a fact answered in `app-notes.md` as resolved — do not ask a question the app already answered.
 - **If the user explicitly says "skip questions" or "draft with your best guess," proceed without interview** but flag every assumption with `{/* NEEDS CONFIRMATION: ... */}`.
 
 Wait for the user's answers before Step 6.
@@ -218,7 +184,7 @@ Apply the template resolved in "Sources to load". Choose the structure decided i
 - **Never invent facts.** Unconfirmed UI labels, field names, or behavior → `{/* NEEDS CONFIRMATION: ... */}`.
 - **Apply the glossary** resolved in "Sources to load".
 - **UCP naming, UI-label/status/placeholder rendering:** follow `formatting-conventions.md`'s Core section (Ж1–Ж7) and the Names/brands entry for the resolved language — do not restate them here.
-- **Prerequisites content:** the Prerequisites section must always be present. If no special prerequisites exist beyond reviewing reference information, use the template's own standard reference-information sentence (Variant A/B in the `en` template; the equivalent full-sentence form in the `uk` template) rather than inventing new wording.
+- **Prerequisites content:** the Prerequisites section must always be present. If no special prerequisites exist beyond reviewing reference information, use the template's own standard reference-information sentence (Variant A/B in the `en` template; Варіант А/Б from the Prerequisites section of `ua-user-guide-template.md`) rather than inventing new wording.
 - **Field reference order:** when a step involves a field inside a card or other named container, state the container first, then the field, then the action: "In the **X** card, in the **Y** field, enter the value." — not "In the **Y** field in the **X** card, enter the value."
 - **Active voice, second person — not the product as subject:** in procedural steps and Result blocks, always use the imperative or the second person; never a system/product noun ("the Partner", "Партнер") as the grammatical subject. See `formatting-conventions.md`'s sentence-style section for the resolved language.
 - **No concept explanations in procedure steps.** If background context is needed, link to a concept topic instead.
@@ -254,7 +220,7 @@ Before writing to disk, check:
 - No concept explanations embedded in procedure steps
 - Every unconfirmed fact has `{/* NEEDS CONFIRMATION: ... */}`
 - "You're signed in to the partner cabinet" does not appear in Prerequisites
-- Prerequisites section is present; if no special prerequisites exist, the template's own standard reference-information sentence is used
+- Prerequisites section is present and handled per the resolved language: `en` page — if no special prerequisites exist, Variant A or Variant B standard sentence from `user-guide-template.md` is used (not invented wording); `uk` page — if no special prerequisites exist, Варіант А or Варіант Б from `ua-user-guide-template.md` Prerequisites section is used
 - No product/system noun used as the grammatical subject in steps or Result blocks (active voice, second person instead)
 - UI labels, status values, placeholders, and code-vs-concept rendering follow `formatting-conventions.md` Ж1–Ж4
 - No UI element is the subject of an action in steps or Result blocks
@@ -284,7 +250,7 @@ After the self-review passes, do a focused second read that targets the project-
 9. Steps and Result blocks — if a UI element is the grammatical subject, rewrite so the action happens to the object instead.
 10. `uk`, Етапи — if there is a numbered list of stage names before Accordion blocks, remove it. Ensure Accordion title format is `"N. {Назва}"` with no `titleAs` attribute.
 11. Steps and Result blocks — if a product/system noun appears as the grammatical subject, rewrite as imperative or second person.
-12. Prerequisites section — if the standard sentence is missing and no special prerequisites are listed, add it.
+12. Prerequisites section — if no special prerequisites are listed: `en` page — add Variant A or Variant B standard sentence from the template; `uk` page — add Варіант А or Варіант Б from `ua-user-guide-template.md`.
 13. Adjacent steps — if one step only locates/selects an item and the next step clicks a button on that same item, merge them into one step with the location stated first.
 14. Confirmation-dialog steps — if a step opens with "To confirm..., ...", rewrite so the click comes first and the reason comes last.
 15. **P1 — Inherited wording.** Diff every heading and bolded phrase against `.sources/`; rewrite any that were copied without normalization.

@@ -28,6 +28,7 @@ Load these files at the start of the task. Do not load others unless the user re
 - `uk` → `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-ua.md`; `en` → `glossary-en.md` — canonical terminology for the resolved language.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/api-integration-context.md` — cross-cutting facts about the API (balances, transaction lifecycle, webhooks, disputes, auth, business rules). Always applicable background.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` — rank-0 project formatting conventions (what bold/italic/code font mean here, placeholder form, one-entity-one-render, code-entity vs. human concept). Outranks everything else loaded for this task, including this skill's own body. Loaded regardless of resolved language — it carries both a language-neutral core and a per-language section.
+- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-selection.md` — shared screenshot selection procedure: three-folder model, four selection cases, sensitive-content screening, rename pattern, full-page vs. compact classification.
 
 **UA grammar — only when the resolved language is `uk`:**
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/ua-grammar/00-cheatsheet.md` — always-loaded quick reference for UA orthography. Do not load this on an `en` page; it is Ukrainian-specific and has no EN counterpart (English sentence-style rules live in `formatting-conventions.md`'s English section instead).
@@ -52,9 +53,12 @@ Execute the steps in order. Do not skip the interview.
 
 Resolve this project's UA content root (or, on an `en` page, its EN i18n root — see `project-paths.md`) for the target location; do not assume `partner-cabinet/`. Ask the user for the target doc folder if not provided (e.g., `<content root>/transactions/transaction-lifecycle/`). Sources live inside that folder.
 
+**Each concept page has its own `.assets/` folder**, co-located with the page file. If the folder does not exist, create it before copying any screenshots into it. Never place a page's screenshots in a parent folder's `.assets/` or in a shared assets directory — every page owns its own copy of the screenshots it embeds, even if those screenshots duplicate files from another page.
+
 List the files present. Expected contents:
-- `.sources/sme-interview.md` — primary source; SME brief or interview transcript. If absent, notify the user and request an alternative.
-- `.sources/notes.md` — writer's own notes; treat as authoritative.
+- `.sources/app-notes.md` — **optional**; structured evidence written by `app-explorer` when it has run. Load if present; skip if absent — do not require it. Direct app observation, so the highest-confidence source for UI facts (exact screen names, button labels, column headers, status values). When it and `sme-interview.md` disagree on a UI detail, prefer `app-notes.md`. For a concept page the conceptual backbone still comes from `sme-interview.md`/`notes.md` — `app-notes.md` grounds only the UI-fact details, it is not the primary source for the page's explanation.
+- `.sources/sme-interview.md` — SME brief or interview transcript; the primary source for a concept page's explanation (how something works, lifecycle, rules). Notify the user and request an alternative **only if both `app-notes.md` and `sme-interview.md` are absent** — if either is present, proceed without asking.
+- `.sources/notes.md` — writer's own notes; treat as authoritative. If `notes.md` and `app-notes.md` disagree, `notes.md` wins — it is the writer's deliberate override of a raw observation.
 - `.sources/frames/{video-basename}-frames/` — the full archive of frames extracted from a source recording, plus a `frames-index.json` alongside them. This is evidence, not embeddable material — never insert a file from here directly into the page. See "Selecting screenshots" in Step 2.
 - `.assets/*.png` — screenshots already selected and ready to embed in the doc.
 - `.assets/ref/*.png` — reference-only screenshots (read for context; never embed in the doc). This folder is optional. If it does not exist or is empty, treat all files directly in `.assets/` as both context and embeddable.
@@ -75,50 +79,13 @@ Read every file in `.sources/`. Extract:
 - Any prerequisites a reader needs before this page makes sense
 - Natural next steps or related documents a reader would want after this page
 
-**Selecting screenshots.** Three folders, three distinct roles — do not conflate them:
-
-| Folder | Role |
-|---|---|
-| `.sources/frames/{video}-frames/` | Full archive of extracted frames + `frames-index.json`. Evidence base. Never embedded directly. |
-| `.assets/` | Selected, renamed frames ready for embedding. The **only** folder the page links images from. |
-| `.assets/ref/` | Reference-only frames: read for context, **never** embed (existing rule). |
-
-Decide which case applies:
-
-1. **`.assets/` (root) already has files** — these are the curated set. Skip to the rename/classify steps below and use them as-is; do not re-derive from `frames/`.
-2. **`.assets/` is empty and `.sources/frames/{video}-frames/` exists** — do not draft without images and do not silently proceed with zero screenshots. Run the selection procedure:
-   1. Read `frames-index.json` (schema: `screenshot`, `seconds`, `timestamp`, `ocr_text`, `transcript_text`, `score`, `reasons`, `source`). It's text — tens of KB even for ~100 frames — read the whole thing, not a sample.
-   2. For each section you plan to write, find candidates by matching the section's subject against `ocr_text` (what's visibly on screen) and `transcript_text` (what the SME was saying), prioritizing higher `score`.
-   3. **Open only the shortlisted candidates** — aim for 3–8 images for the whole page, not all of them. Confirm each one actually shows what the section needs before using it.
-   4. **Copy** (not move) the confirmed files into `.assets/` — `frames/` must stay a complete archive for `cleanup-unused-screenshots` to sweep later.
-   5. Continue to the rename/classify steps below on the copied files.
-3. **`.assets/` is empty and there is no `frames/` folder** (older run, or none extracted) — fall back to the plain "list `.assets/`" behavior and tell the user no `frames-index.json` exists, so they know why you can't do index-driven selection.
-4. **Neither folder exists** — ask the user where screenshots are before proceeding, per Step 1.
-
-For every file that ends up in `.assets/` (root), whichever case applied, work through these steps **in order** — do not rename or embed a file that hasn't passed step 1, even if it "looks clean" on a first glance:
-
-1. **Screen for sensitive content (required — never skip this, and never skip it because the frame looks clean).** A frame pulled from a meeting recording is raw evidence, not embeddable material — it was never composed as a screenshot for a public page. Before anything else:
-   - **Crop to the part that matters.** Participant bars, toolbars, the dock, browser tabs, side panels — none of that is the subject. Isolate only the UI area the section actually needs.
-   - **Check the cropped result against this list** — faces and people's names; usernames and logins; hostnames, domains, IP addresses; environment labels (`PROD`, `TEST`); internal URLs; tokens, keys, session IDs; card and account numbers; customer personal data; other apps and personal desktop items. Look in toolbars and corners, not just the center of the frame — a sensitive label sitting in a place nobody looks is still disqualifying.
-   - **If cropping can't remove something on the list** — for example a sensitive label sitting inside a table you need — **do not decide alone**. Ask the person you're working with and do not insert the image until they answer.
-   - **Save the cropped result as PNG**, regardless of the source frame's format (frames arrive as `screen-HH-MM-SS.jpg`). Cropping already rewrites the file, so converting at this step costs nothing extra, and PNG suits UI screenshots better — this is also what keeps the `.png` extension in the rename pattern below accurate.
-   - These checks implement `GDSG-VISUALS` and `GDSG-EXAMPLE-001` from the loaded style guide corpus — consult those entries directly for the underlying rules; they are not repeated here.
-2. **Rename** — if the filename is non-descriptive (e.g., `image.png`, `image copy.png`, a random string, or a numeric timestamp — this includes the `screen-HH-MM-SS.jpg`-style names frames arrive with), rename it following the pattern `{subject}-{ui-element-type}.png` in kebab-case:
-
-   | UI element type | Suffix | Example |
-   |---|---|---|
-   | Full-page menu or table | `-page` or `-page-{tab}` | `transactions-page-payout-tab.png` |
-   | Dialog / modal window | `-dialog` | `transaction-receipts-dialog.png` |
-   | Side panel / filter panel | `-pane` | `filters-pane.png` |
-   | Standalone form | `-form` | `add-receipt-form.png` |
-   | Confirmation banner / toast | `-banner` | `receipt-uploaded-banner.png` |
-
-   Use the Bash tool: `mv "./.assets/old-name.png" "./.assets/new-name.png"`. Rename before drafting so all embed references use the final filename.
-3. **Classify** as **full-page** or **compact**:
-   - **Full-page** — whole menu, dashboard, or table spanning the full content area.
-   - **Compact** — dialog window, modal, or narrow panel that visually occupies significantly less than the full content width.
+**Selecting screenshots:** follow `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-selection.md` — it covers the three-folder model, the four selection cases, the sensitive-content screening requirement, the rename pattern, and the full-page vs. compact classification. Apply every rule in that file before embedding or renaming any screenshot.
 
 Note the final filename and classification per file; both are used in Step 5.
+
+Choose the embed syntax based on the classification:
+- **Full-page**: `![Descriptive alt text](./.assets/image.png)`
+- **Compact** (dialog, modal, narrow panel): `<img src={require('./.assets/image.png').default} width="480" alt="Descriptive alt text" />`
 
 ### Step 3 — Compose a facts sheet
 
@@ -135,9 +102,9 @@ Do not show this sheet to the user unless asked. It is scaffolding for Step 4.
 Ask 3–5 targeted questions in one batch. Rules:
 
 - **Maximum 5 questions.** If more real gaps exist, pick the 5 most blocking and save the rest for a follow-up round after drafting.
-- **Each question must cite evidence.** Reference the source of the uncertainty: "The interview says X, but the notes say Y. Which is correct?"
+- **Each question must cite evidence, then propose an answer.** Cite the source of the uncertainty, state your best-guess resolution from the available evidence, and ask the user to confirm or correct: "sme-interview.md says X, but app-notes.md shows Y — I'll use Y since it's the direct observation; confirm or correct?" Do not ask an open question where the user must make the choice from scratch.
 - **No generic questions.** Style and tone are answered by the template and, for a `uk` page, the cheatsheet. Questions must be about facts or concepts the inputs don't resolve.
-- **If the inputs are complete and unambiguous, skip the interview.** Say: "Inputs are complete. Drafting now." Do not invent questions for ritual.
+- **If the inputs are complete and unambiguous, skip the interview.** Say: "Inputs are complete. Drafting now." Do not invent questions for ritual. Treat a fact answered in `app-notes.md` as resolved — do not ask a question the app already answered.
 - **If the user explicitly says "skip questions" or "draft with your best guess," proceed without interview** but flag every assumption with `{/* NEEDS CONFIRMATION: ... */}`.
 
 Wait for the user's answers before Step 5.

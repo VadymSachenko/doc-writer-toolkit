@@ -9,10 +9,12 @@ You are applying fixes for a `doc-style-reviewer` findings report against exactl
 
 ## Scope
 
-- **In scope:** applying findings from one `doc-style-reviewer` report (Step 5's numbered-card format, contract K6) to the one file that report was written against. Classifying each finding by fix-applicability, showing diffs, and confirming before every edit.
+- **In scope:** applying findings from one `doc-style-reviewer` report (its Step 5 numbered-card format) to the one file that report was written against. Classifying each finding by fix-applicability, showing diffs, and confirming before every edit.
 - **Out of scope:**
   - The style review itself — that's `doc-style-reviewer`'s job. This skill never invents a finding; it only acts on findings that skill already produced. If no report exists yet, this skill calls `doc-style-reviewer` and waits for its output rather than reviewing the file itself.
-  - Resolving `{/* ToDo: ... */}` or `{/* NEEDS CONFIRMATION: ... */}` markers — that's `fix-doc-todos`'s job. This skill leaves every such marker untouched, even ones a finding happens to sit near.
+  - Resolving `{/* ToDo: ... */}` or `{/* NEEDS CONFIRMATION: ... */}` markers — this skill leaves every such marker untouched, even ones a finding happens to sit near. For marker resolution, use the correct handler:
+    - Link and prose-block TODOs (Buckets A–C in its categorization) → `fix-doc-todos`.
+    - Content-gap TODOs and all `{/* NEEDS CONFIRMATION: ... */}` markers → `resolve-markers` (it uses app-notes.md, sme-interview.md, and Playwright to answer these directly). Note the granularity difference: `resolve-markers` operates on a whole **section folder**, not a single page — running it to clear markers on this one page will also process every sibling page in the section. That's expected; just don't invoke it expecting a single-file edit.
   - UA/EN structural alignment — `doc-alignment-checker`'s job.
   - Any file other than the one the report was written against. No neighboring file, no "while I'm here" cleanup.
   - Rewriting or "polishing" anything the report didn't flag. Finding → fix. No finding → no touch.
@@ -88,7 +90,7 @@ Use judgment at the boundary; the four-or-more default is a starting point, not 
 - Edit only the file named in the report. Never a neighboring file.
 - Never touch the contents of fenced code blocks or inline code spans — unless the finding itself says the code formatting is the violation (e.g. a formula rendered in code font, per `GDSG-FORMAT-SPECIAL-NOTATION`), in which case the fix is exactly what the finding specifies and nothing more.
 - Never touch frontmatter except `title`/`description`, and only when a finding names one of those two fields specifically.
-- Never resolve a `{/* ToDo: ... */}` or `{/* NEEDS CONFIRMATION: ... */}` marker, even one adjacent to an applied fix. Point the user at `fix-doc-todos` if they want those handled.
+- Never resolve a `{/* ToDo: ... */}` or `{/* NEEDS CONFIRMATION: ... */}` marker, even one adjacent to an applied fix. See the Scope section for the correct handler for each type.
 - Apply exactly what the confirmed finding specifies. Do not extend a fix to cover similar-looking text the report didn't flag, even in the same sentence.
 
 ## Step 5 — Final report

@@ -1,26 +1,31 @@
 ---
 name: section-planner
-description: Reads a section's readiness report and app-notes.md (if available), cross-checks existing pages against the live app's actual flows, and proposes a page inventory — what to keep, merge, split, add, or delete — with a doc type and one-line rationale per page. Writes a section-plan.md for human approval. Nothing is written or deleted until you confirm. Use explicitly ("section-planner: docs/balance", "use section-planner on the archive section").
+description: Reads a section's readiness report and app-notes.md (required when a live Admin UI is declared, produced by app-explorer), cross-checks existing pages against the app's actual flows as recorded in app-notes.md, and proposes a page inventory — what to keep, merge, split, add, or delete — with a doc type and one-line rationale per page. Writes a section-plan.md for human approval. Nothing is written or deleted until you confirm. Use explicitly ("section-planner: docs/balance", "use section-planner on the archive section").
 ---
 
 # section-planner
 
-You are proposing the documentation structure for one section. You read what already exists, cross-check it against what the app actually does, and produce a plan: a proposed page inventory with a type and rationale per page. You write that plan to `.sources/section-plan.md` and stop — nothing is created, merged, or deleted until the user approves.
+You are proposing the documentation structure for one section. You read what already exists, cross-check it against what the app actually does — using the app-notes.md that app-explorer recorded — and produce a plan: a proposed page inventory with a type and rationale per page. You write that plan to `.sources/section-plan.md` and stop — nothing is created, merged, or deleted until the user approves.
 
 ## Scope
 
 - **In scope:** proposing the page inventory (what pages should exist, their types, their slugs, keep/merge/split/add/delete decisions). Writing `.sources/section-plan.md`. Nothing else.
-- **Out of scope:** writing doc pages (`user-guide-writer`, `concept-doc-writer`, `api-doc-writer`). Resolving markers (`resolve-markers`). Style review. App exploration (`app-explorer`). Editing existing pages.
+- **Out of scope:** writing doc pages (`user-guide-writer`, `concept-doc-writer`, `api-doc-writer`). Resolving markers (`resolve-markers`). Style review. Editing existing pages. **Any interaction with the live app.** This skill never launches Playwright, reads credentials, or navigates the UI. App flows come from `app-notes.md`, which `app-explorer` produces — see "Full vs. targeted app access" below. If `app-notes.md` is missing and a live UI is available, this skill defers to `app-explorer` rather than exploring itself.
+
+### Full vs. targeted app access
+
+- **Full app exploration** — a systematic pass over a section: seeding test-env scenarios via the API collection, navigating every relevant screen, capturing labeled screenshots of each state, and recording all of it into `.sources/app-notes.md`. This is **`app-explorer`'s sole job**.
+- **Targeted observation** — navigating to one already-identified screen to confirm a single fact for a specific marker; no scenario seeding, no systematic sweep, no new screenshots unless a specific `{/* ToDo: add a screenshot */}` marker needs one. This is what **`resolve-markers`** may do.
+- **`section-planner` does neither.** It reads `app-notes.md` — the recorded result of a full exploration — and never touches the live app.
 
 ## Sources to load
 
 1. `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — resolve content root and language.
 2. `${CLAUDE_PLUGIN_ROOT}/context/style-guide-registry.md` — resolve the project's declared style guide token, then load **only the naming and titles topic file** from that corpus (via its ROUTING.md). Do not load the full corpus — only the file(s) that cover filename conventions, page title conventions, and topic-type naming rules (e.g. imperative mood for task-based titles). This is the only style-guide loading this skill does.
 3. The section's `.sources/section-readiness.json` — **required**. If absent, tell the user to run `section-readiness` first.
-4. The section's `.sources/app-notes.md` — **optional**. Load if present — it's the richest source for understanding real app flows.
+4. The section's `.sources/app-notes.md` — **required when `Admin UI: playwright` is declared** (it is the app-flow evidence this skill plans from), **optional otherwise**. Load if present. If it is absent and a live UI is available, stop and run `app-explorer` first (see Step 0).
 5. The section's `.sources/sme-interview.md` — **optional**. Load if present — good for business-rule context.
 6. Existing pages in the section folder — read each stub lightly (frontmatter + comment blocks) to understand the intended structure already captured there. Do not read complete pages in full — skim only.
-7. Live app via Playwright (if `Admin UI: playwright` is declared and neither `app-notes.md` nor sufficient evidence exists) — navigate to the section's screens to understand the real flows before proposing structure. Read credentials from `.env`. Test env only.
 
 Do not load templates — this skill proposes page types, it does not write pages. Templates are the writers' concern.
 
@@ -29,7 +34,7 @@ Do not load templates — this skill proposes page types, it does not write page
 1. Confirm `.sources/section-readiness.json` exists. If not, stop: "Run section-readiness on this section first."
 2. Read the readiness report fully. Note: verdict, page list with states and docTypes, marker counts, sources present, app-access.
 3. Load optional sources in order: `app-notes.md` → `sme-interview.md` → existing page stubs.
-4. If no `app-notes.md` exists and `Admin UI: playwright` is declared, do a lightweight app navigation pass now — enough to understand what screens and flows the section covers. Do not capture screenshots (that is `app-explorer`'s job) — just observe and note the flows. Apply the value-realism rule from `app-explorer`: every value entered into the UI must look like real operator activity — no test markers, no placeholder strings, no obviously synthetic amounts. Read `app-explorer`'s "Value realism rule" section before entering any data.
+4. If no `app-notes.md` exists and `Admin UI: playwright` is declared, **stop**: "No `app-notes.md` for this section. Run `app-explorer` on it first, then re-run `section-planner`." Do not navigate the app yourself — structure decisions must rest on `app-explorer`'s recorded flows. If `Admin UI:` is `none`, there is no app to explore: continue, and base the plan on existing stubs, `sme-interview.md`, and the readiness report, flagging app-unbacked proposals as `inferred`.
 
 ## Step 1 — Understand what the section actually covers
 
@@ -59,7 +64,7 @@ For each page that should exist in the final section, propose:
 | `rationale` | one line — why this page exists and why this action was chosen |
 | `mergesFrom` | (if `merge`) list of existing slugs being merged |
 | `splitsFrom` | (if `split`) the existing slug being split |
-| `sourceEvidence` | what the proposal is based on: `app-notes` / `app-observed` / `sme-interview` / `existing-stub` / `inferred` |
+| `sourceEvidence` | what the proposal is based on: `app-notes` / `sme-interview` / `existing-stub` / `inferred` |
 
 ### Slug rules (apply to every proposed slug)
 
@@ -82,7 +87,7 @@ For each page that should exist in the final section, propose:
 - **`split`** — one existing page covers multiple independent flows that would be clearer as separate pages.
 - **`add`** — a flow or concept exists in the app but has no page yet.
 - **`delete`** — an existing page covers a flow that doesn't exist in the app, or is a duplicate. Never delete without a clear reason.
-- **`inferred`** — only use when neither app-notes nor direct observation backs the proposal. Flag it clearly.
+- **`inferred`** — only use when neither `app-notes.md` nor `sme-interview.md` backs the proposal. Flag it clearly.
 
 For user guides specifically: the decision between keeping separate vs. merging follows the flow structure in the app. If a user can complete goal A without ever touching goal B, they are separate pages. If the flows share prerequisites, the same screen, or are always done together, propose a merge with a default recommendation.
 
@@ -90,7 +95,7 @@ For user guides specifically: the decision between keeping separate vs. merging 
 
 List anything the plan cannot decide from available evidence:
 
-- Flows that were not observed in the app and have no SME backing (mark as `inferred`)
+- Flows not present in `app-notes.md` and with no SME backing (mark as `inferred`)
 - Pages where the merge/split decision is genuinely ambiguous — present both options with a default
 - Anything that requires a human or SME decision before writing can start
 

@@ -11,6 +11,7 @@ Several skills (`doc-translator`, `doc-alignment-checker`, `concept-doc-writer`,
 - **UA content root** — where Ukrainian source pages live (e.g. `docs/`, or `partner-cabinet/` in a project that splits API reference and partner-facing content into two Docusaurus plugin instances).
 - **EN i18n root** — where the English translation of that content is published (e.g. `i18n/en/docusaurus-plugin-content-docs/current/`, or the `-partner-cabinet`-suffixed equivalent for a project with a custom-id docs plugin instance).
 - **UA URL prefix** — the live route the UA content root resolves to (Docusaurus `routeBasePath`), needed by any skill that validates or generates internal links (e.g. `/` for a default-id docs plugin, `/partner-cabinet/` for a custom-id instance mounted there). Not always identical to the folder name — resolve it from the declaration, never infer it from the folder path.
+- **API reference root** — where API reference pages are written (e.g. `docs/api-reference/`). Only skills that author API reference pages (`api-doc-writer`) need it. If a project doesn't declare it, fall back to `docs/api-reference/` and offer to persist the declaration — do not treat its absence as a hard stop.
 
 None of these is safe to hardcode in a skill file — different projects installing this plugin use different Docusaurus plugin layouts and write in different languages, and a path or a language baked into a skill silently breaks (or silently writes to the wrong place) the moment that skill runs in a project shaped differently than the one it was written against.
 
@@ -32,6 +33,7 @@ None of these is safe to hardcode in a skill file — different projects install
 - **UA content root:** `docs/`
 - **EN i18n root:** `i18n/en/docusaurus-plugin-content-docs/current/`
 - **UA URL prefix:** `/`
+- **API reference root:** `docs/api-reference/`
 ```
 
 `Content language:` describes the language(s) the project's pages are **authored** in — `uk`, `en`, or `uk,en`. Content published under the EN i18n root is a translation of UA-authored pages, not a second authored language: a project that writes in Ukrainian and translates to English declares `uk`, and only a project that authors pages natively in both declares `uk,en`.

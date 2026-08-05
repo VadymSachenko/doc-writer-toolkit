@@ -177,5 +177,7 @@ Before finishing:
 - Open questions are separated from confirmed facts.
 - UI labels, statuses, and exact messages are preserved where important.
 - Every fact tied to a specific visual/UI moment has a `(M:SS)` or `(M:SS–M:SS)` citation; purely verbal facts don't have one.
-- **Quantitative check, not just a presence check:** for every section that describes a screen, button, form, or other UI element, count its timestamp citations. Zero citations in a UI-describing section means the self-check step was skipped, not that the section happens to need none — say so plainly to the user rather than letting the file pass silently. (Calibration: a 42 KB `sme-interview.md` with a single timestamp citation total is a failure of this step, not a normal outcome.)
+- **Quantitative check, not just a presence check:**
+  - **If the input was a video transcript:** for every section that describes a screen, button, form, or other UI element, count its timestamp citations. Zero citations in a UI-describing section means the self-check step was skipped — say so plainly. (Calibration: a 42 KB `sme-interview.md` with a single timestamp citation total is a failure.)
+  - **If the input was `app-notes.md` or no `.sources/frames/` folder exists:** timestamps are not applicable. Instead confirm that every UI fact cites a screenshot filename or "observed directly" as its source. Zero sourced facts in a UI section is the failure condition here, not zero timestamps.
 - The final response explains what changed and whether anything needs SME follow-up.

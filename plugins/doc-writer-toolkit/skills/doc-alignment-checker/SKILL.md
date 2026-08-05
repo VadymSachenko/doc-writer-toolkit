@@ -12,6 +12,14 @@ You are checking whether a Ukrainian documentation page and its English counterp
 - **In scope:** any Markdown/MDX page that exists in both the project's UA content root and its EN i18n root (see Path mapping).
 - **Out of scope:** content quality review, translation accuracy, style-guide compliance beyond the rules listed below. English-only reference sections with no UA counterpart (e.g. an API reference `docs/` tree in a project that splits UA and EN content into separate roots) are not checked here.
 
+## Sources to load
+
+Load these files at the start of the task. Do not load others unless the user references them explicitly.
+
+- Follow `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` to resolve this project's **UA content root**, **EN i18n root**, and **UA URL prefix**. Do not assume `partner-cabinet/` or any other default.
+- The UA page being checked (at the path resolved above).
+- The EN counterpart page (at the path resolved above).
+
 ## Path mapping
 
 Resolve the project's actual roots via `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` before doing anything else — do not assume `partner-cabinet/`.

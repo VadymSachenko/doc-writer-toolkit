@@ -96,6 +96,13 @@ Admonitions supplement the text; they don't replace it.
 - Decision trees → Mermaid `flowchart`.
 - Render diagrams in Docusaurus; don't paste in a screenshot of one instead.
 
+### Screenshots
+
+- Store screenshots in `./.assets/` next to the document.
+- **Two embed syntaxes — choose by classification (skill is authoritative):**
+  - **Full-page** (whole menu, dashboard, or table spanning the full content area): `![Descriptive alt text](./.assets/{screenshot-name}.png)`
+  - **Compact** (dialog window, modal, or narrow panel that visually occupies significantly less than the full content width): `<img src={require('./.assets/{screenshot-name}.png').default} width="480" alt="Descriptive alt text" />`
+
 ### "Next steps" vs. "Related documents"
 
 - **Next steps**: user guides the reader would naturally move to after understanding the concept.

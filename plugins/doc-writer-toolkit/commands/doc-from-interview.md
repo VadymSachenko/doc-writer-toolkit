@@ -53,7 +53,10 @@ For the last two: if either is missing, **ask once**, and offer to write the ans
 
 Then check the doc folder:
 
-- `.sources/` must exist and contain at least a video **or** a transcript. If neither, stop and say so.
+- `.sources/` must exist and contain one of:
+  - A **video or transcript** → run all phases (1 → 2 → 3 → 4 → 5 → 6).
+  - An **`app-notes.md`** (written by `app-explorer`) → skip Phases 1 and 2; start at Phase 3 (code verification, if declared) or Phase 5 (writer skill) directly. `app-notes.md` is a complete evidence source — the writers accept it as a first-class input. Say so to the user: "No video or transcript found. Using app-notes.md as the evidence source — skipping Phases 1 and 2."
+  - If **neither** exists, stop and say so.
 - List what's present: video, `.txt` transcripts, an existing `sme-interview.md`, an existing `frames/` folder, an existing `.assets/`.
 - If a finished page already exists at the target path, **stop and ask** whether to overwrite, write alongside, or abort. Never silently overwrite someone's page.
 
@@ -62,6 +65,8 @@ Report what you found and what you plan to run, then continue.
 ---
 
 ## Phase 1 — Screenshots from the recording
+
+Skip this phase if the folder has no video and no transcript (i.e., the app-notes.md path was chosen in Phase 0).
 
 Hand off to the **`extract-sme-screenshots`** skill.
 
@@ -74,6 +79,8 @@ Long runs go in the background; read the progress file when the user asks, not i
 ---
 
 ## Phase 2 — Structured source notes
+
+Skip this phase if the folder has no video and no transcript. `app-notes.md` already serves as the structured source; no `sme-interview.md` is needed in this path.
 
 Hand off to the **`convert-sme-input`** skill to produce `.sources/sme-interview.md` from the transcripts, using the frames for visual verification.
 
@@ -166,7 +173,7 @@ State plainly what was **not** verified. A phase that was skipped, or a check th
 
 Stop and ask, rather than guessing, when:
 
-- `.sources/` has neither a video nor a transcript;
+- `.sources/` has neither a video, a transcript, nor an `app-notes.md`;
 - a page already exists at the target path;
 - UI credentials are missing or a URL might be production;
 - the code contradicts the SME on a material fact — that is a question for the SME, not something to resolve silently;

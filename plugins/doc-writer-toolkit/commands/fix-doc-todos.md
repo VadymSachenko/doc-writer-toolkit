@@ -42,7 +42,7 @@ Group every TODO into one of four buckets:
 
 **C — Ambiguous:** The TODO asks for a link but multiple candidate pages exist (e.g. "create a transaction" when both payin and payout pages are candidates). You need the user to pick.
 
-**D — Cannot fix:** The target page does not exist yet, or the TODO asks for content/SME clarification (not a link). Leave these untouched.
+**D — Cannot fix:** The target page does not exist yet, or the TODO asks for content/SME clarification (not a link). Leave these untouched. This command only resolves link TODOs (Buckets A–C); it never fills in facts. Content-gap TODOs and every `{/* NEEDS CONFIRMATION: ... */}` marker are `resolve-markers`' job — it answers them from app-notes.md, sme-interview.md, and direct app observation. Report them in Bucket D so the user knows to run `resolve-markers` on the section.
 
 ---
 

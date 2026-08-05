@@ -261,7 +261,9 @@ Don't add a block with nothing substantive in it:
 
 - Store screenshots in `./.assets/` next to the document.
 - Add one only when it: (1) confirms a result, (2) helps locate a hard-to-find UI element, (3) illustrates a non-obvious screen.
-- Format: `![Descriptive alt text](./.assets/{screenshot-name}.png)`.
+- **Two embed syntaxes — choose by classification (skill is authoritative):**
+  - **Full-page** (whole menu, dashboard, or table spanning the full content area): `![Descriptive alt text](./.assets/{screenshot-name}.png)`
+  - **Compact** (dialog window, modal, or narrow panel that visually occupies significantly less than the full content width): `<img src={require('./.assets/{screenshot-name}.png').default} width="480" alt="Descriptive alt text" />`
 
 ### Reference information (form attributes)
 
