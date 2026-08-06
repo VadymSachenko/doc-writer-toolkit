@@ -25,7 +25,7 @@ You are resolving documentation markers — `{/* NEEDS CONFIRMATION: ... */}` an
 3. The section's `.sources/sme-interview.md` — **optional**. Load if present.
 4. The section's `.assets/` folder — list what screenshots already exist there.
 5. The doc pages in the section — read each one to find markers.
-6. If `Admin UI: playwright` is declared in the project's `CLAUDE.md` — also load `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/value-realism.md`.
+6. If `Admin UI: playwright` is declared in the project's `CLAUDE.md` — also load `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/value-realism.md` and `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-capture.md`.
 
 Do not load style-guide corpora. This skill edits markers only — it does not rewrite prose beyond filling in the confirmed fact.
 
@@ -36,7 +36,7 @@ Collect every source of evidence available. Work through them in order — later
 1. **`app-notes.md`** (if present) — answers to specific questions, screenshot descriptions, observed UI labels. Best source: direct observation.
 2. **`sme-interview.md`** (if present) — confirmed facts from SME or transcript. Good for conceptual and business-rule questions.
 3. **`.assets/` contents** — screenshots already saved. A screenshot of the right UI state can answer a `{/* ToDo: add a screenshot */}` marker directly without needing `app-notes.md`.
-4. **Live app via Playwright** (if `Admin UI: playwright` is declared in `CLAUDE.md`) — for markers that none of the above answer, navigate to the relevant screen, observe directly, and record the answer. Do not capture new screenshots unless a `{/* ToDo: add a screenshot */}` marker specifically needs one. Read credentials from `.env` — never hardcode them, never use production. Apply the **"Value realism rule — mandatory"** from `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/value-realism.md` for any values entered into the UI.
+4. **Live app via Playwright** (if `Admin UI: playwright` is declared in `CLAUDE.md`) — for markers that none of the above answer, navigate to the relevant screen, observe directly, and record the answer. Do not capture new screenshots unless a `{/* ToDo: add a screenshot */}` marker specifically needs one. When capturing a screenshot, apply the scope, annotation, and blur rules from `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-capture.md`. Read credentials from `.env` — never hardcode them, never use production. Apply the **"Value realism rule — mandatory"** from `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/value-realism.md` for any values entered into the UI.
 
 Build an internal index:
 - Every confirmed answer → source + answer text
@@ -58,12 +58,13 @@ For each marker, record: the file, the line, the full marker text, and the surro
 
 ## Step 2 — Classify each marker
 
-For each marker, assign one of three verdicts using the evidence index:
+For each marker, assign one of four verdicts using the evidence index:
 
 | Verdict | Meaning |
 |---|---|
 | `resolvable` | The answer is clearly in the evidence — apply it now, no question needed |
-| `screenshot-available` | The marker asks for a screenshot and a matching one exists in `.assets/` |
+| `screenshot-available` | The marker asks for a new screenshot and a matching one exists in `.assets/` |
+| `screenshot-recapture` | The marker explicitly asks to recapture — always re-capture and overwrite, regardless of what is already in `.assets/` |
 | `unresolvable` | No evidence source answers this — leave the marker, report it |
 
 Rules for `resolvable`:
@@ -71,9 +72,17 @@ Rules for `resolvable`:
 - If two sources conflict, classify as `unresolvable` and note the conflict.
 
 Rules for `screenshot-available`:
+- Applies only to `{/* ToDo: add a screenshot — ... */}` markers (not `recapture`).
 - Match by what the screenshot shows against what the marker needs.
 - Only classify as `screenshot-available` if the screenshot genuinely shows the right UI state.
 - If the marker needs a screenshot and none exists but `Admin UI: playwright` is declared, capture it now (read `.env` for credentials, test env only) and then classify as `screenshot-available`.
+
+Rules for `screenshot-recapture`:
+- Applies only to `{/* ToDo: recapture screenshot — ... */}` markers. This marker is **authored by hand** for now (e.g. when you know a screen changed) — no skill emits it automatically yet; a future `doc-freshness-checker` will become its producer. Treat it as a valid, expected input even though the writers never generate it.
+- Always re-capture via Playwright regardless of what is already in `.assets/` — overwrite the existing file.
+- Use the context around the marker (alt text of the existing image, step text, `app-notes.md` navigation path and selectors) to determine what screen to navigate to and what element to capture.
+- Apply all rules from `screenshot-capture.md`: scope ladder (Section 1), two-shot pattern if the marker is adjacent to a dialog step (Section 2), annotation (Section 3), blur (Section 4).
+- If `Admin UI: playwright` is not declared, classify as `unresolvable` and report it.
 
 ## Step 3 — Apply resolutions
 
@@ -89,6 +98,12 @@ For each `screenshot-available` marker:
   - Full-page: `![{descriptive alt}](./.assets/{filename})`
   - Dialog/modal (compact): `<img src={require('./.assets/{filename}').default} width="480" alt="{descriptive alt}" />`
 - No blank line between a step and its screenshot; no blank line between a screenshot and the next step.
+
+For each `screenshot-recapture` marker:
+- Re-capture the screenshot via Playwright (see Rules for `screenshot-recapture` above).
+- Overwrite the existing file in `.assets/` with the new capture.
+- Remove the `{/* ToDo: recapture screenshot */}` comment.
+- Leave the existing image embed in place — the filename stays the same, the file on disk is now the fresh capture.
 
 For `unresolvable` markers: leave them exactly as they are.
 

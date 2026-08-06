@@ -145,7 +145,8 @@ Apply the template resolved in "Sources to load". Choose the structure decided i
 - UI labels in **bold**: click **Save**, select **Transactions**.
 - Imperative mood, present tense for system reactions — see `formatting-conventions.md`'s sentence-style section for the resolved language.
 - No "you should" or "you need to" — just the imperative.
-- **Filter panel steps:** when the procedure involves selecting filters, do not enumerate each filter as a separate step. Use a single general step with an inline link to the reference section: "In the filter panel, select the [filters](#reference-information) you need." Do not add a separate sentence pointing the reader at the reference section.
+- **Filter panel steps:** when the procedure involves selecting filters, do not enumerate each filter as a separate step. Use a single general step with an inline link to the reference section: "In the filter panel, select the [filters](#reference-information-<slug>) you need." Do not add a separate sentence pointing the reader at the reference section.
+- **Reference-information anchors:** the Reference information heading must carry an explicit ID so inline links resolve deterministically. Give it `{#reference-information-<slug>}` (uk: `{#довідкова-інформація-<slug>}`), where `<slug>` is the page's kebab-case slug (the same slug used for the output filename). On a page with multiple Reference information sections, give each its own id using that task's slug (`#reference-information-<task-slug>`) and link each inline where its fields are first mentioned. Every inline reference-information link must match the target heading's explicit id exactly — never a bare `#reference-information`.
 
 **Screenshot rules:**
 - Only embed screenshots from `.assets/` (root). Never embed from `.assets/ref/` — those exist for your context only.
@@ -224,7 +225,7 @@ Before writing to disk, check:
 - No product/system noun used as the grammatical subject in steps or Result blocks (active voice, second person instead)
 - UI labels, status values, placeholders, and code-vs-concept rendering follow `formatting-conventions.md` Ж1–Ж4
 - No UI element is the subject of an action in steps or Result blocks
-- References to the reference-information section in steps are inline links, not separate sentences
+- References to the reference-information section in steps are inline links, not separate sentences — and each link's anchor matches the target heading's explicit `{#reference-information-<slug>}` id (never a bare `#reference-information`)
 - `uk`, single-operation pages: no `## Операції з {назва}` wrapper and no Accordion
 - `uk`, Етапи: Accordion title is `"N. {Назва}"` (no `titleAs`, no "Етап" prefix); no numbered list before the Accordion blocks
 - `en`: heading levels match the resolved Variant's own rules (single task, phases, or multiple tasks)

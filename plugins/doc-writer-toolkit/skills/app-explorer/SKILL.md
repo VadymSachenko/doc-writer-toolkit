@@ -18,9 +18,10 @@ This skill does **not** write documentation pages. It does not plan structure. I
 
 1. `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — resolve content root and language.
 2. `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/value-realism.md` — mandatory rules for all values entered into the UI via Playwright. Load before any UI interaction step.
-3. The host project's `CLAUDE.md` — for `Admin UI:`, `API test collection:`, and credentials (via `.env`).
-4. The section's `.sources/section-readiness.json` — to know which pages exist, their states, and marker counts.
-5. The section's existing `.sources/sme-interview.md` if present — to know what questions are already open.
+3. `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-capture.md` — scope ladder, two-shot pattern, annotation patterns, blur patterns. Load before any screenshot step.
+4. The host project's `CLAUDE.md` — for `Admin UI:`, `API test collection:`, and credentials (via `.env`).
+5. The section's `.sources/section-readiness.json` — to know which pages exist, their states, and marker counts.
+6. The section's existing `.sources/sme-interview.md` if present — to know what questions are already open.
 
 Do not load style-guide corpora or templates — this skill writes no documentation.
 
@@ -76,12 +77,12 @@ For each screen in the plan:
    - What happens in each state (empty, loaded, success, error)
    - Any warnings, banners, or contextual messages
    - The exact wording of any label you are unsure about
-3. Capture screenshots:
-   - Name each file descriptively: `{subject}-{ui-element-type}.png` (e.g. `transactions-page-payin-tab.png`, `accept-transaction-dialog.png`)
-   - Save directly to `.assets/` in the section folder
-   - Capture each relevant state separately — one screenshot per state
-   - For dialogs and modals: capture open state (with content visible)
-4. Answer the specific questions from the exploration plan:
+3. Before capturing, identify sensitive fields on the screen (financial amounts, IDs, card/account numbers, customer names and emails, internal hostnames). Apply blur per `screenshot-capture.md` Section 4 before shooting; restore after.
+4. Capture screenshots following `screenshot-capture.md`:
+   - **Dialogs, modals, drawers, dropdowns:** use the two-shot pattern (Section 2). Shot 1 = trigger context (clipped to containing section via the scope ladder in Section 1, trigger annotated red). Shot 2 = the dialog/dropdown itself (clipped to bounding box + 24 px). Name Shot 1 `{subject}-trigger.png`, Shot 2 `{subject}-dialog.png` or `{subject}-dropdown.png`.
+   - **Direct state captures (no overlay):** one screenshot per state. Annotate the primary interactive element (Section 3, red border). Apply the scope ladder from Section 1 to decide crop.
+   - Save all files to `.assets/` in the section folder.
+5. Answer the specific questions from the exploration plan:
    - For each `{/* NEEDS CONFIRMATION */}` question, record the exact answer you observed: "The Accept button appears only on the Payins tab, not on Payouts."
    - If a question cannot be answered from what you can see (e.g. requires a specific permission level you don't have), record it as `unanswered` with the reason.
 
@@ -154,9 +155,13 @@ Before finishing, verify:
 1. Every scenario from Step 1's plan was attempted — if skipped, noted with a reason.
 2. Every `{/* NEEDS CONFIRMATION */}` question from the existing pages has an answer or an `unanswered` entry in app-notes.md.
 3. Every screenshot saved to `.assets/` is named descriptively and represents a real UI state.
-4. No credentials appear anywhere in `app-notes.md` or in any screenshot filename.
-5. No production URL was accessed — only the test environment.
-6. `app-notes.md` is complete (no empty sections).
+4. Every dialog/modal/dropdown has two shots: a `-trigger.png` and a `-dialog.png` or `-dropdown.png`.
+5. Every screenshot that contains sensitive data (amounts, IDs, card numbers, customer names) had blur applied before shooting — no raw sensitive values visible in any saved file.
+6. Every trigger-context shot (Shot 1) has the trigger element annotated with a red outline.
+7. Any scope-ladder fallback to full viewport is logged in `app-notes.md` under the relevant screen.
+8. No credentials appear anywhere in `app-notes.md` or in any screenshot filename.
+9. No production URL was accessed — only the test environment.
+10. `app-notes.md` is complete (no empty sections).
 
 ## Step 6 — Report
 
