@@ -26,9 +26,35 @@ Group entries into numbered batches here, in the order they should be tackled. O
 -
 #### Issue 1
 
-Some user guides has an incomplete  References section when they are generated.
 
-The idea of references table is to descrie elements that users see, not just click or drag and drop. For example, is a user click a button in the table of transactions archive, it means all table fields must be included rather than the button. The button is already explained in the step, while all the fields remain unexplained.
+Some user guides has an incomplete кferences section when they are generated.
+
+The idea of references table is to describe elements that users see, not just click or drag and drop. For example, is a user click a button in the table of transactions archive, it means all table fields must be included rather than just that specific button. The button is already explained in the step, while all the fields remain unexplained. 
+
+Also sometimes AI includes references directly into a step, which mst the step cumpbersome. References must alway stay in the deidacted section.
+
+Приклад пробелми, де таблиця присутня безпосередньо у самому кроці
+
+```markdown
+<Accordion title="7. Сума">
+
+На цьому, останньому, етапі ви вказуєте суми, з якими працює картка. Цей етап містить кілька полів із подібними назвами — таблиця нижче описує кожне з них:
+
+| Атрибут | Опис |
+|---|---|
+| Сума транзакції (мінімальна – максимальна) | Два поля: мінімальна та максимальна сума однієї вхідної транзакції, яку картка може прийняти. |
+| Максимальний баланс на карті | Сума, після досягнення якої картка перестає отримувати нові вхідні заявки. |
+| Сума | Поточний баланс картки. Під час додавання нової картки поле порожнє (баланс ще відсутній) і доступне для редагування. |
+| Коментар | Коментар до картки. |
+
+1. Заповніть поля **Сума транзакції (мінімальна – максимальна)** і **Максимальний баланс на карті**.
+2. У полі **Коментар** введіть коментар до картки.
+3. Натисніть **Зберегти**.
+
+**Результат:** На цьому додавання картки завершено. Нова картка з'являється на вкладці **Поточні** в меню **Картки**.
+
+</Accordion>
+```
 
 #### Issue 2
 
