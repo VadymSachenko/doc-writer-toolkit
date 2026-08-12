@@ -5,7 +5,7 @@ last_update:
   date: 2/20/2025
 ---
 
-Text on the onboarding and payment [screens](/docs/wellfunnel-builder/screens/screens-overview.md) needs to appear in the corresponding language based on the user's browser location settings. To achieve this, WellFunnel (WF) has the *Localizations* feature, which lets you create localization keys for translating texts into the required languages. After creation, these keys are sent to Crowdin—a third-party tool used by translation managers—through API calls for translation. Upon completion of the translations in Crowdin, they are imported back into WF Builder for use on various screens.
+Text on the onboarding and payment [screens](/docs/wellfunnel-builder/screens/screens-overview) needs to appear in the corresponding language based on the user's browser location settings. To achieve this, WellFunnel (WF) has the *Localizations* feature, which lets you create localization keys for translating texts into the required languages. After creation, these keys are sent to Crowdin—a third-party tool used by translation managers—through API calls for translation. Upon completion of the translations in Crowdin, they are imported back into WF Builder for use on various screens.
 
 The Localizations feature supports translations into several languages: English (EN), German (DE), French (FR), Italian (IT), Portuguese (PT), Spanish (ES), Japanese (JA), Korean (KO), Turkish (TR), and Polish (PL). The following example shows how the same screen looks for users from different locales:
 
@@ -131,13 +131,13 @@ sequenceDiagram
     WFB->>Crowdin: Remove key in Crowdin if no active references
 ```
 
-1. A PGM [creates a new key](/docs/wellfunnel-builder/localizations/manage-in-wellfunnel/create-localization-keys.md) in WellFunnel (WF) Builder: 
+1. A PGM [creates a new key](/docs/wellfunnel-builder/localizations/manage-in-wellfunnel/create-localization-keys) in WellFunnel (WF) Builder: 
    - The key enters the `IN_PROGRESS` status.
    - WellFunnel attempts to create the key in Crowdin through the Crowdin API.  
    - On success, the status changes to `CREATED`; if it fails, the status is `FAILED`, requiring manual intervention.
 2. Crowdin receives the new key, and the translation manager coordinates all necessary translations, working with translation specialists.
 3. Once translated, Crowdin sends newly approved translations back to WellFunnel through a webhook, and WF Builder updates local data automatically.
-4. The PGM [updates the key](/docs/wellfunnel-builder/localizations/manage-in-wellfunnel/update-localization-keys.md) in WF Builder, triggering WellFunnel to fetch translated keys from Crowdin.
+4. The PGM [updates the key](/docs/wellfunnel-builder/localizations/manage-in-wellfunnel/update-localization-keys) in WF Builder, triggering WellFunnel to fetch translated keys from Crowdin.
 5. If the translations are ready, WellFunnel uploads them and displays the updated translations in WF Builder.
 6. If the user removes a key from WellFunnel, WellFunnel also deletes that key in Crowdin, provided it's not used in any active screens.  
 7. If a key is deleted directly in Crowdin, a webhook notifies WellFunnel. WellFunnel logs the event but doesn't automatically remove the key from its database; an administrator can review this event and proceed accordingly.
@@ -159,7 +159,7 @@ If the **EN value** field has the `let's see what this post request does` value,
 
 Sometimes, a complex key containing a variable or data from the onboarding sequence is necessary. These keys are created for specific templates and must adhere to pre-established logic—for example, `"{ discount }% discount reserved for"`.
 
-This key on the payment timer displays a dynamic discount based on selected products. Although you can't create such values independently, they can be used in other translations for the same template—for example, `If you skip the trial and start your plan today, we'll refund your trial payment and take an extra {discount}% off your total`. For details about Translations wrapper keys, see [Translations wrapper](/docs/wellfunnel-studio/templates/translations-wrapper/translations-wrapper.md) and [Translation key variables](https://welltech.atlassian.net/wiki/spaces/WD/pages/5118853246/Translation+key+variables).
+This key on the payment timer displays a dynamic discount based on selected products. Although you can't create such values independently, they can be used in other translations for the same template—for example, `If you skip the trial and start your plan today, we'll refund your trial payment and take an extra {discount}% off your total`. For details about Translations wrapper keys, see [Translations wrapper](/docs/wellfunnel-studio/templates/translations-wrapper/translations-wrapper) and [Translation key variables](https://welltech.atlassian.net/wiki/spaces/WD/pages/5118853246/Translation+key+variables).
 
 :::warning
 

@@ -17,7 +17,7 @@ You are writing a procedural user guide page for the UniComPay partner cabinet, 
 Load these files at the start of the task. Do not load others unless the user references them explicitly.
 
 **Content language (resolve first — decides which of the remaining bullets apply):**
-- Follow `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` to resolve this project's declared `Content language:` (`uk`, `en`, or `uk,en`) for the target file. For `uk,en`, the target file's location relative to the declared UA content root / EN i18n root decides which language you're drafting in. If undeclared, follow that file's fallback (ask once, offer to persist).
+- Follow `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` to resolve this project's declared `Content language:` (`uk`, `en`, or `uk,en`) for the target file, plus its **UA URL prefix** (needed to build absolute links to other doc pages — see the internal-link rule in Step 6). For `uk,en`, the target file's location relative to the declared UA content root / EN i18n root decides which language you're drafting in. If undeclared, follow that file's fallback (ask once, offer to persist).
 
 **Templates (load the one matching the resolved language):**
 - `uk` → `${CLAUDE_PLUGIN_ROOT}/context/doc-templates/ua-user-guide-template.md` — Операції/Етапи structure.
@@ -86,7 +86,7 @@ Note the final filename and classification per file; both are used in Step 6.
 
 Choose the embed syntax based on the classification:
 - **Full-page**: `![Descriptive alt text](./.assets/image.png)`
-- **Compact** (dialog, modal, narrow panel): `<img src={require('./.assets/image.png').default} width="480" alt="Descriptive alt text" />`
+- **Compact** (dialog, modal, narrow panel): `<img src={require('./.assets/image.png').default} width="{compact-width}" alt="Descriptive alt text" />` — `{compact-width}` is the project's resolved `Compact image width:` (default `480`); see `screenshot-selection.md`.
 
 ### Step 3 — Choose the structure
 
@@ -94,7 +94,7 @@ Based on the analysis, decide before drafting, using the vocabulary of the templ
 
 - **`uk` (ua-user-guide-template.md) — Операції vs Етапи:**
   - **Операції** — one or more discrete, independent procedures. Single operation: no `## Операції з {назва}` wrapper and no `<Accordion>`, use `## {Назва операції}` directly. Multiple operations: wrap each in `<Accordion titleAs="h3" title="{Назва}">` under `## Операції з {назва}`.
-  - **Етапи** — a sequential multi-step workflow where each stage must be completed in order. Each stage is `<Accordion title="N. {Назва}">` (no `titleAs`, no numbered list of stage names before the Accordion blocks).
+  - **Етапи** — a sequential multi-step workflow where each stage must be completed in order. Each stage is `<Accordion title="N. {Дія}">` (no `titleAs`, no numbered list of stage names before the Accordion blocks). Each stage title is an **imperative verb phrase** (`1. Створіть рахунок`), never a bare noun (`1. Рахунок`); read top to bottom, the titles alone must convey the whole flow before the reader expands any stage.
 - **`en` (user-guide-template.md) — Variant 1/2/3:**
   - **Variant 1 (single task, single phase)** — one task, no distinct phases.
   - **Variant 2 (single task, multiple phases)** — one task split into ordered configuration phases (e.g., separate Info/Settings/Permissions tabs during creation).
@@ -143,6 +143,10 @@ Apply the template resolved in "Sources to load". Choose the structure decided i
   - This is narrower than the goal → action rule below: goal → action applies when the "to" clause states the operation's actual goal (e.g., applying a filter). Use action-first-reason-last only for a secondary confirmation of something already stated in a previous step.
 - Beyond locate+click and confirm+reason, keep one independent action per step — don't merge two unrelated clicks.
 - UI labels in **bold**: click **Save**, select **Transactions**.
+- **Icon-only buttons — decision tree:**
+  1. Button has a text label → bold text only.
+  2. No text label + Iconify icon name is known → `<Icon icon="..." height="24" style={{ color: '#9564ff' }} />` before the bold action name: `<Icon icon="ic:sharp-edit" height="24" style={{ color: '#9564ff' }} /> **Редагувати**`.
+  3. No text label + icon name unknown → descriptive text: «натисніть кнопку із зображенням олівця» / «натисніть кнопку видалення».
 - Imperative mood, present tense for system reactions — see `formatting-conventions.md`'s sentence-style section for the resolved language.
 - No "you should" or "you need to" — just the imperative.
 - **Filter panel steps:** when the procedure involves selecting filters, do not enumerate each filter as a separate step. Use a single general step with an inline link to the reference section: "In the filter panel, select the [filters](#reference-information-<slug>) you need." Do not add a separate sentence pointing the reader at the reference section.
@@ -154,7 +158,7 @@ Apply the template resolved in "Sources to load". Choose the structure decided i
 - Alt text must describe what is shown, not repeat the step.
 - Choose the embed syntax based on the classification from Step 2:
   - **Full-page**: `![Descriptive alt text](./.assets/image.png)`
-  - **Compact** (dialog, modal, narrow panel): `<img src={require('./.assets/image.png').default} width="480" alt="Descriptive alt text" />`
+  - **Compact** (dialog, modal, narrow panel): `<img src={require('./.assets/image.png').default} width="{compact-width}" alt="Descriptive alt text" />` — `{compact-width}` is the resolved `Compact image width:` (default `480`); see `screenshot-selection.md`.
 - **Blank line rules — follow exactly to avoid unwanted spacing in the UI:**
   - **No blank line** between a step and the screenshot that immediately follows it.
   - **No blank line** between a screenshot and the next step that follows it.
@@ -189,15 +193,19 @@ Apply the template resolved in "Sources to load". Choose the structure decided i
 - **Field reference order:** when a step involves a field inside a card or other named container, state the container first, then the field, then the action: "In the **X** card, in the **Y** field, enter the value." — not "In the **Y** field in the **X** card, enter the value."
 - **Active voice, second person — not the product as subject:** in procedural steps and Result blocks, always use the imperative or the second person; never a system/product noun ("the Partner", "Партнер") as the grammatical subject. See `formatting-conventions.md`'s sentence-style section for the resolved language.
 - **No concept explanations in procedure steps.** If background context is needed, link to a concept topic instead.
+- **Internal links to other doc pages must be absolute.** Form every link to another page as the project's declared **UA URL prefix** (resolved via `project-paths.md` in "Sources to load") + the target page's path relative to the content root, **with no `.md`/`.mdx` extension** — e.g. `/balance/add-cards/add-cards`, or `/partner-cabinet/transactions/transactions` for a project whose prefix is `/partner-cabinet/`. Append an anchor as `#slug` when linking to a section (e.g. `/balance/add-cards/add-cards#reference-information-add-cards`). **Never** write a document-relative link (`./…`, `../…`) to another page, and never hardcode `/docs/`. This governs page-to-page links only — screenshot/asset links stay document-relative (`./.assets/…`), and intra-page anchors stay bare (`#довідкова-інформація-{slug}`).
 - **No "you're signed in to the partner cabinet" as a prerequisite.** That is always assumed.
 - **Do not name the partner-cabinet context explicitly in page body text.** The reader is already in it. `uk`: avoid «кабінет партнера», use «меню» — wrong: «в розділі X у кабінеті партнера», right: «в меню X». `en`: avoid explicit "in the partner cabinet"; use "the menu" or the feature's own name instead.
 - **Voice:** the UI element must not be the subject of an action. The action happens to/in the object. ✅ "Transactions appear in the table." ⛔ "The table displays transactions." Applies to Result blocks too.
 - **Structure-specific containers:**
   - `uk`, single operation: no Accordion, no `## Операції з {назва}`. Use `## {Назва операції}` with steps directly.
   - `uk`, multiple operations: `<Accordion titleAs="h3" title="{Назва}">` per operation, under `## Операції з {назва}`.
-  - `uk`, Етапи: `<Accordion title="N. {Назва}">` per stage (no `titleAs`), immediately after the intro sentence. No numbered list of stage names before the Accordion blocks. Reference to the next stage in the result block: «Перейдіть до **2. {Назва}**.»
+  - `uk`, Етапи: `<Accordion title="N. {Дія}">` per stage (no `titleAs`), immediately after the intro sentence. No numbered list of stage names before the Accordion blocks. Each stage title is an **imperative verb phrase** describing what the reader does at that stage (`1. Створіть рахунок`, `2. Вкажіть банківську інформацію`, `7. Задайте суму`), never a bare noun (`1. Рахунок`, `2. Банк інфо`, `7. Сума`). Titles are the flow map: reading titles 1→N in order, without expanding any Accordion, must make the overall process clear. Reference to the next stage in the result block: «Перейдіть до **2. {Назва}**.»
   - `en`: follow the template's own Variant 1/2/3 heading-level rules — no Accordion component is used; each task or phase is its own heading at the level the template specifies.
 - **Attribute column text:** text in a reference table's attribute-description column (**Атрибути** / **Attribute**) must not be bold.
+- **Reference table placement:** never embed an Атрибут/Опис reference table inside a numbered step, inside an Accordion stage body, or anywhere in the procedure flow. If a step involves a form or table with many fields, write the action normally and add an inline link to the Довідкова інформація section (e.g., «заповніть [поля](#довідкова-інформація-{slug})»). The table always belongs in the dedicated section.
+- **Reference information completeness:** the Довідкова інформація table must cover every field, column, and control *visible* on each screen or form the user encounters — not only the elements directly acted upon in steps. Read-only fields, status columns, display-only labels, and informational rows all belong in the table. An interactive control already fully described in a step (e.g., a button whose sole purpose is clear from "click **Save**") does not need a separate row.
+- **Enum / multi-value cells:** when an attribute accepts a defined set of values (status codes, enum options, dropdown choices, etc.), list them in the description cell using HTML `<ul><li>` tags — not as comma-separated prose. Use the format `Можливі значення:<ul><li>\`VALUE\`: опис;</li><li>\`VALUE\`: опис.</li></ul>` The last `<li>` ends with a full stop; all others end with a semicolon.
 - **Colon over dash in bullet lists:** when labelling items, prefer `:` over `—`. Bolding rule: if the label is a UI element name, do not bold the colon (`**UI element**: description`); if the label is plain text, bold both label and colon (`**Label:** description`).
 - **Follow the style-guide topical files loaded above** for anything not covered by the project-specific rules in this list (formatting, punctuation, accessibility, etc.) — check the corpus rather than guessing.
 - **Mark writer decisions needing follow-up** with `{/* ToDo: ... */}`.
@@ -226,8 +234,12 @@ Before writing to disk, check:
 - UI labels, status values, placeholders, and code-vs-concept rendering follow `formatting-conventions.md` Ж1–Ж4
 - No UI element is the subject of an action in steps or Result blocks
 - References to the reference-information section in steps are inline links, not separate sentences — and each link's anchor matches the target heading's explicit `{#reference-information-<slug>}` id (never a bare `#reference-information`)
+- Every link to another doc page is absolute (project UA URL prefix + path, no `.md`); no `./`/`../` page links, no hardcoded `/docs/` (asset links `./.assets/…` and intra-page anchors `#…` are exempt)
+- No Атрибут/Опис reference table appears inside a numbered step or Accordion stage body
+- The Довідкова інформація table covers every visible field on each screen/form/table the user encounters, not only directly-interacted elements; read-only and display-only fields are included
+- Every attribute with a defined set of values uses `<ul><li>` in its description cell, not comma-separated prose
 - `uk`, single-operation pages: no `## Операції з {назва}` wrapper and no Accordion
-- `uk`, Етапи: Accordion title is `"N. {Назва}"` (no `titleAs`, no "Етап" prefix); no numbered list before the Accordion blocks
+- `uk`, Етапи: Accordion title is `"N. {Назва}"` (no `titleAs`, no "Етап" prefix); no numbered list before the Accordion blocks; every stage title is an imperative verb phrase (`1. Створіть рахунок`), not a bare noun (`1. Рахунок`), and reading titles 1→N conveys the whole flow without expanding any stage
 - `en`: heading levels match the resolved Variant's own rules (single task, phases, or multiple tasks)
 - The draft conforms to every rule in the style-guide topical files loaded per "Sources to load" (resolved via `style-guide-registry.md`) — check against those files directly, don't rely on memory of past drafts
 - **P1 — Inherited wording normalized.** For every heading and every bolded fragment, confirm it is not lifted from `.sources/` without normalization. The interview/notes are a source of *facts*, not of *wording*.
@@ -249,7 +261,7 @@ After the self-review passes, do a focused second read that targets the project-
 7. Filter-related steps — replace per-filter enumeration with a single general step using an inline link.
 8. UI labels and status values — reconcile against `formatting-conventions.md` Ж1/Ж4.
 9. Steps and Result blocks — if a UI element is the grammatical subject, rewrite so the action happens to the object instead.
-10. `uk`, Етапи — if there is a numbered list of stage names before Accordion blocks, remove it. Ensure Accordion title format is `"N. {Назва}"` with no `titleAs` attribute.
+10. `uk`, Етапи — if there is a numbered list of stage names before Accordion blocks, remove it. Ensure Accordion title format is `"N. {Назва}"` with no `titleAs` attribute. For each stage title, if it is a bare noun (`1. Рахунок`, `2. Банк інфо`), rewrite it as an imperative verb phrase describing the action (`1. Створіть рахунок`, `2. Вкажіть банківську інформацію`). Then read the titles 1→N in order: if the overall flow isn't clear from titles alone, sharpen the verbs until it is.
 11. Steps and Result blocks — if a product/system noun appears as the grammatical subject, rewrite as imperative or second person.
 12. Prerequisites section — if no special prerequisites are listed: `en` page — add Variant A or Variant B standard sentence from the template; `uk` page — add Варіант А or Варіант Б from `ua-user-guide-template.md`.
 13. Adjacent steps — if one step only locates/selects an item and the next step clicks a button on that same item, merge them into one step with the location stated first.
@@ -259,6 +271,7 @@ After the self-review passes, do a focused second read that targets the project-
 17. **P3 — Bold audit.** Re-walk every `**...**` span; strip bold from anything that isn't a visible UI label.
 18. **P4 — As-is audit.** Search the body (including admonitions) for future/planned-change language; move it to `{/* ToDo: ... */}`.
 19. **P5 — Render audit.** Build the entity list; fix every entity with more than one rendering in the document.
+20. **Reference tables and completeness.** If an Атрибут/Опис table appears inside a step or Accordion stage body, move it to the Довідкова інформація section and replace the step content with the appropriate action plus an inline link. Verify the table covers all visible fields on every screen/form/table the user encounters — add any missing read-only, status, or display-only fields. Convert any comma-separated list of enum values to `<ul><li>` format with semicolons after each entry except the last (which ends with a full stop).
 
 Fix every issue found before saving.
 

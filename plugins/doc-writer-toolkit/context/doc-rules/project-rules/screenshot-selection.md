@@ -63,6 +63,8 @@ Classify each file as **full-page** or **compact**:
 Use the embed syntax that matches the classification (note the leading dot on `./.assets/` — images embed from `./.assets/`, not `./assets/`):
 
 - **Full-page:** `![{descriptive alt}](./.assets/{filename})`
-- **Compact:** `<img src={require('./.assets/{filename}').default} width="480" alt="{descriptive alt}" />`
+- **Compact:** `<img src={require('./.assets/{filename}').default} width="{compact-width}" alt="{descriptive alt}" />`
+
+`{compact-width}` is the project's declared **`Compact image width:`** — resolve it from the "Documentation toolkit configuration" section of the host project's `CLAUDE.md` (see `screenshot-capture.md` Section 0). If undeclared, use `480` and offer once to persist the declaration. Do not hardcode a width other than this resolved value.
 
 This is the single source of truth for the embed markup — consuming skills reference this file rather than restating the JSX/width.

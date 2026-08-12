@@ -9,7 +9,7 @@ This document shows you how to create branches.
 
 Branch creation involves several steps:
 1. **Entering branch details**: On the **INFO** tab, you need to define the URL part, associate a theme, and set the branch as default if required.
-2. **Configuring screen settings**: On the **SCREENS** tab, you need to create a flow by adding required [screens](/docs/wellfunnel-builder/screens/screens-overview.md) to the onboarding and payment parts.
+2. **Configuring screen settings**: On the **SCREENS** tab, you need to create a flow by adding required [screens](/docs/wellfunnel-builder/screens/screens-overview) to the onboarding and payment parts.
 
 ## Prerequisites
 
@@ -71,7 +71,7 @@ WellFunnel *doesn't* notify you about conflicts between screens you add. Therefo
 
 You *can't* test a branch independently; it *must* be tested through link creation. For this, when generating links, include the branch flow.
 
-To simulate [Plan B](/docs/wellfunnel-builder/branches/branches-overview.md#wellfunnel-contingency-plans), in the URL, replace the real value of the `link-id` parameter with an invalid one.
+To simulate [Plan B](/docs/wellfunnel-builder/branches/branches-overview#wellfunnel-contingency-plans), in the URL, replace the real value of the `link-id` parameter with an invalid one.
 
 :::
 
@@ -83,11 +83,11 @@ This section describes the attributes you define when creating a branch.
 
 | Attribute | Description |
 |---|---|
-| Project | [Project](/docs/wellfunnel-builder/projects/projects-overview.md) that the branch will be related to. Each branch must be associated with a specific project. |
+| Project | [Project](/docs/wellfunnel-builder/projects/projects-overview) that the branch will be related to. Each branch must be associated with a specific project. |
 | URL segment | Part of the URL visible to users. |
-| Theme | [Theme](/docs/wellfunnel-builder/themes/themes-overview.md) applied to the branch. Any theme can be associated with any branch. |
+| Theme | [Theme](/docs/wellfunnel-builder/themes/themes-overview) applied to the branch. Any theme can be associated with any branch. |
 | Description | Branch purpose description. |
-| Default branch | Indicates whether the branch is the default for the associated project, corresponding to [Plan C](/docs/wellfunnel-builder/branches/branches-overview.md#wellfunnel-contingency-plans) in the system. |
+| Default branch | Indicates whether the branch is the default for the associated project, corresponding to [Plan C](/docs/wellfunnel-builder/branches/branches-overview#wellfunnel-contingency-plans) in the system. |
 
 ### Screens tab
 

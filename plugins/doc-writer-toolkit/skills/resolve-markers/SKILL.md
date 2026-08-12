@@ -96,7 +96,7 @@ For each `screenshot-available` marker:
 - Remove the `{/* ToDo: add a screenshot */}` comment.
 - Insert the image embed using the correct syntax:
   - Full-page: `![{descriptive alt}](./.assets/{filename})`
-  - Dialog/modal (compact): `<img src={require('./.assets/{filename}').default} width="480" alt="{descriptive alt}" />`
+  - Dialog/modal (compact): `<img src={require('./.assets/{filename}').default} width="{compact-width}" alt="{descriptive alt}" />` — `{compact-width}` is the resolved `Compact image width:` (default `480`); see `screenshot-selection.md`.
 - No blank line between a step and its screenshot; no blank line between a screenshot and the next step.
 
 For each `screenshot-recapture` marker:

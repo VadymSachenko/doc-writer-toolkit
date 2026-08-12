@@ -24,12 +24,13 @@ State the purpose of the document. Explain how the reader will benefit from read
 {Overview}
 
 {/* Optional: Include Prerequisites only if readers need to understand other concepts or features before this one makes sense. Use cross-references, not duplicated content. */}
+{/* Internal page links are absolute (project URL prefix + path, no `.md`); the skill is authoritative — see its internal-link rule. */}
 ## Prerequisites
 
 Before reading this document, review the following:
 
-- [{Document title}](/link/to/document.md): {one-line reason the reader needs this context}
-- [{Document title}](/link/to/document.md): {one-line reason the reader needs this context}
+- [{Document title}](/link/to/document): {one-line reason the reader needs this context}
+- [{Document title}](/link/to/document): {one-line reason the reader needs this context}
 
 {/*
 SECTION MENU: Choose the sections that fit the topic. All are optional. Use as many or as few as the topic needs. Apply admonition rules from the style guide (`formatting-and-organization.md`) for any :::note, :::info, :::warning, or :::tip blocks.
@@ -56,14 +57,14 @@ Common concept topic section types:
 {/* Optional: Include Next steps if the reader, after understanding this concept, would naturally move on to a related user guide to get started with the feature. */}
 ## Next steps
 
-- [{User guide title}](/link/to/user-guide.md)
-- [{User guide title}](/link/to/user-guide.md)
+- [{User guide title}](/link/to/user-guide)
+- [{User guide title}](/link/to/user-guide)
 
 {/* Optional: Include Related documents for laterally relevant documents that are not user guides — other concept topics, reference pages, or architectural overviews. Use Next steps for user guides; use Related documents for everything else. Don't create both sections if only one applies. */}
 ## Related documents
 
-- [{Document title}](/link/to/document.md)
-- [{Document title}](/link/to/document.md)
+- [{Document title}](/link/to/document)
+- [{Document title}](/link/to/document)
 
 {/*
 ===========================================================================
@@ -101,7 +102,7 @@ Admonitions supplement the text; they don't replace it.
 - Store screenshots in `./.assets/` next to the document.
 - **Two embed syntaxes — choose by classification (skill is authoritative):**
   - **Full-page** (whole menu, dashboard, or table spanning the full content area): `![Descriptive alt text](./.assets/{screenshot-name}.png)`
-  - **Compact** (dialog window, modal, or narrow panel that visually occupies significantly less than the full content width): `<img src={require('./.assets/{screenshot-name}.png').default} width="480" alt="Descriptive alt text" />`
+  - **Compact** (dialog window, modal, or narrow panel that visually occupies significantly less than the full content width): `<img src={require('./.assets/{screenshot-name}.png').default} width="{compact-width}" alt="Descriptive alt text" />` — `{compact-width}` is the project's declared `Compact image width:` (default `480`); see `screenshot-selection.md`.
 
 ### "Next steps" vs. "Related documents"
 

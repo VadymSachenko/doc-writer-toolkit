@@ -17,7 +17,7 @@ You are writing a concept topic page for the UniComPay partner cabinet, in the c
 Load these files at the start of the task. Do not load others unless the user references them explicitly.
 
 **Content language (resolve first — decides which of the remaining bullets apply):**
-- Follow `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` to resolve this project's declared `Content language:` (`uk`, `en`, or `uk,en`) for the target file. For `uk,en`, the target file's location relative to the declared UA content root / EN i18n root decides which language you're drafting in. If undeclared, follow that file's fallback (ask once, offer to persist).
+- Follow `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` to resolve this project's declared `Content language:` (`uk`, `en`, or `uk,en`) for the target file, plus its **UA URL prefix** (needed to build absolute links to other doc pages — see the internal-link rule in Step 5). For `uk,en`, the target file's location relative to the declared UA content root / EN i18n root decides which language you're drafting in. If undeclared, follow that file's fallback (ask once, offer to persist).
 
 **Templates (load the one matching the resolved language):**
 - `uk` → `${CLAUDE_PLUGIN_ROOT}/context/doc-templates/ua-concept-topic-template.md`
@@ -85,7 +85,7 @@ Note the final filename and classification per file; both are used in Step 5.
 
 Choose the embed syntax based on the classification:
 - **Full-page**: `![Descriptive alt text](./.assets/image.png)`
-- **Compact** (dialog, modal, narrow panel): `<img src={require('./.assets/image.png').default} width="480" alt="Descriptive alt text" />`
+- **Compact** (dialog, modal, narrow panel): `<img src={require('./.assets/image.png').default} width="{compact-width}" alt="Descriptive alt text" />` — `{compact-width}` is the resolved `Compact image width:` (default `480`); see `screenshot-selection.md`.
 
 ### Step 3 — Compose a facts sheet
 
@@ -119,10 +119,11 @@ Rules:
 - **Never invent facts.** If a fact is not in the sources or user answers, flag it with `{/* NEEDS CONFIRMATION: what's unclear */}` — don't guess.
 - **Apply the glossary** resolved in "Sources to load". Replace synonyms with the canonical term for the resolved language.
 - **No step-by-step procedures.** Instructions belong in user guides. Concept topics explain; they do not instruct.
+- **Internal links to other doc pages must be absolute.** Form every link (in Prerequisites, Next steps, Related documents, or inline) as the project's declared **UA URL prefix** (resolved via `project-paths.md` in "Sources to load") + the target page's path relative to the content root, **with no `.md`/`.mdx` extension** — e.g. `/balance/add-cards/add-cards`, or `/partner-cabinet/transactions/transactions` for a project whose prefix is `/partner-cabinet/`. Append an anchor as `#slug` when linking to a section. **Never** write a document-relative link (`./…`, `../…`) to another page, and never hardcode `/docs/`. This governs page-to-page links only — screenshot/asset links stay document-relative (`./.assets/…`).
 - **For flows and lifecycles:** prefer a Mermaid `sequenceDiagram` for multi-actor flows and a Mermaid `flowchart` for decision trees or status transitions.
 - **For screenshots:** only embed from `.assets/` (root) — never from `.assets/ref/`. Choose syntax based on the classification from Step 2:
   - **Full-page**: `![Descriptive alt text](./.assets/image.png)`
-  - **Compact** (dialog, modal, narrow panel): `<img src={require('./.assets/image.png').default} width="480" alt="Descriptive alt text" />`
+  - **Compact** (dialog, modal, narrow panel): `<img src={require('./.assets/image.png').default} width="{compact-width}" alt="Descriptive alt text" />` — `{compact-width}` is the resolved `Compact image width:` (default `480`); see `screenshot-selection.md`.
 - **For tables:** use them for structured comparisons, field definitions, or status lists.
 - **Section headings:** noun phrases in sentence case, in the resolved content language (Ж7 in `formatting-conventions.md` — a heading is never mixed-language; a code entity inside one may stay in `code font`). No numbered headings.
 - **Do not name the partner-cabinet context explicitly in page body text.** The reader is already in it. `uk`: avoid «кабінет партнера», use «меню» for navigation references — wrong: «в розділі X у кабінеті партнера», right: «в меню X». `en`: avoid explicit "in the partner cabinet"; use "the menu" or the feature's own name instead.
@@ -150,6 +151,7 @@ Before writing to disk, check:
 - The overview is present and covers: what the concept is, why it exists, and why the reader needs it
 - All chosen sections are complete; bare placeholders are either filled or removed
 - Next steps links only to user guides; Related documents links to other concepts or references
+- Every link to another doc page is absolute (project UA URL prefix + path, no `.md`); no `./`/`../` page links, no hardcoded `/docs/` (asset links `./.assets/…` are exempt)
 - The draft conforms to every rule in the style-guide topical files loaded per "Sources to load" (resolved via `style-guide-registry.md`) — check against those files directly, don't rely on memory of past drafts
 - **P1 — Inherited wording normalized.** For every heading and every bolded fragment, confirm it is not lifted from `.sources/` (a heading, a bold label, an entire phrase) without normalization. The interview/notes are a source of *facts*, not of *wording* — a heading or emphasis pattern copied verbatim from `sme-interview.md` is a defect even if the fact itself is correct.
 - **P2 — Heading language (Ж7).** Every heading is in the resolved content language; a code entity inside one stays in `code font` but the surrounding words don't switch language.

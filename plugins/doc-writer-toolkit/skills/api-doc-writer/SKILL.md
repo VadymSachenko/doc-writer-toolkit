@@ -17,7 +17,7 @@ You are writing an English API reference page for UniComPay. The authoring contr
 Load these files at the start of the task. Do not load others unless the user references them explicitly.
 
 **Project paths (resolve first):**
-- Follow `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` to resolve this project's **API reference root** (where API pages are written). Do not hardcode `docs/api-reference/`; if the project doesn't declare it, use that file's fallback (default `docs/api-reference/`, offer to persist).
+- Follow `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` to resolve this project's **API reference root** (where API pages are written) and its **UA URL prefix** (needed to build absolute links to other doc pages — see the internal-link rule in Step 5). Do not hardcode `docs/api-reference/`; if the project doesn't declare it, use that file's fallback (default `docs/api-reference/`, offer to persist).
 
 **Templates:**
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-templates/api-reference-template.md` — the authoritative structure. When the template and examples disagree, the template wins.
@@ -71,7 +71,7 @@ Read every available input file. Extract:
 
 Choose the embed syntax based on the classification:
 - **Full-page**: `![Descriptive alt text](./.assets/image.png)`
-- **Compact** (dialog, modal, narrow panel): `<img src={require('./.assets/image.png').default} width="480" alt="Descriptive alt text" />`
+- **Compact** (dialog, modal, narrow panel): `<img src={require('./.assets/image.png').default} width="{compact-width}" alt="Descriptive alt text" />` — `{compact-width}` is the resolved `Compact image width:` (default `480`); see `screenshot-selection.md`.
 
 Note the leading dot on `./.assets/` — images embed from `./.assets/`, not `./assets/`.
 
@@ -106,6 +106,7 @@ Rules:
 - **Apply the glossary.** Replace synonyms with canonical EN terms (Partner, Transaction, Webhook, etc.).
 - **Sentence style, UI labels, status values, placeholders, code-vs-concept rendering:** follow `formatting-conventions.md`'s Core section (Ж1–Ж7) and its English section — do not restate them here.
 - **Match the template's section structure.** Prerequisites (if applicable), Authentication, endpoint action, Request, Response, Possible errors, Next steps.
+- **Internal links to other doc pages must be absolute.** Form every link (Authentication page, Next steps, Other management options, error-codes page, etc.) as the project's declared **UA URL prefix** (resolved via `project-paths.md` in "Sources to load") + the target page's path relative to the content root, **with no `.md`/`.mdx` extension** — e.g. `/api-reference/authentication/authentication`, or `/partner-cabinet/transactions/transactions` for a project whose prefix is `/partner-cabinet/`. Append an anchor as `#slug` when linking to a section. **Never** write a document-relative link (`./…`, `../…`) to another page, and never hardcode `/docs/`. This governs page-to-page links only — screenshot/asset links stay document-relative (`./.assets/…`).
 - **For code fences:** use `json` for JSON bodies, `bash` for cURL examples, `text` for plain strings.
 - **For long request or response samples:** wrap in `<details>` blocks.
 - **For reader-replaced placeholders:** `*`\``UPPER_CASE`\``*`.
@@ -119,6 +120,7 @@ Before writing to disk, check:
 - No future tense (`will`, `would`) in descriptions of current behavior
 - No marketing adjectives (`powerful`, `seamless`, `robust`)
 - No stale links from example files (e.g., `/docs/wellfunnel-*`)
+- Every link to another doc page is absolute (project UA URL prefix + path, no `.md`); no `./`/`../` page links, no hardcoded `/docs/` (asset links `./.assets/…` are exempt)
 - Every fact is traceable to an input source or a user answer from Step 4
 - All required template sections are present; optional ones are either filled or omitted (not left as empty placeholders)
 - UI labels, status values, placeholders, and code-vs-concept rendering follow `formatting-conventions.md` Ж1–Ж4

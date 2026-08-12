@@ -13,6 +13,8 @@ PLACEHOLDER CONVENTIONS:
 - *`UPPER_CASE`*       = placeholders that remain in the published page for the reader to replace (per the style guide).
 
 UNRESOLVED CONTENT: Use {/* ToDo: EXPLANATION */} for anything missing, unclear, or pending SME confirmation.
+
+INTERNAL LINKS: Links to other doc pages are absolute — the project's URL prefix + the target's path relative to the content root, with no `.md` extension (e.g. `/api-reference/authentication/authentication`). The skill is authoritative — see its internal-link rule. Never hardcode `/docs/`. Asset links stay relative (`./.assets/…`).
 */}
 
 This document {resource description. Example: describes how to retrieve shipments and shipment methods when submitting checkout data.}
@@ -38,7 +40,7 @@ Check the brief's authentication field:
 
 This endpoint requires {token type, for example, an API token} passed in the `{header name, for example, X-API-Token}` header.
 
-For details, see [{Authentication page title}](/link/to/authentication-page.md).
+For details, see [{Authentication page title}](/link/to/authentication-page).
 
 ## {Endpoint action} {/* in imperative mood, for example, Retrieve all products */}
 
@@ -171,8 +173,8 @@ For the attributes of the included resources, see:
 |---|---|
 | `{Error reason}` {/* application-level error code, for example, `field [Bank] must have value`. Do not list HTTP status codes here. */} | {/*Brief explanation of the code, for example, Invalid password.*/} |
  
-For HTTP error codes and troubleshooting guidance, see [Error codes](/docs/error-codes/error-codes.md) 
+For HTTP error codes and troubleshooting guidance, see [Error codes](/link/to/error-codes) 
 
 ## Next steps
 
-{/* Briefly describe what the user can do after completing this task and link to relevant documents. Example: After submitting checkout data, you can place the order. For more information, see [Check out purchases](/link/to/check-out-purchases.md). */}
+{/* Briefly describe what the user can do after completing this task and link to relevant documents. Example: After submitting checkout data, you can place the order. For more information, see [Check out purchases](/link/to/check-out-purchases). */}

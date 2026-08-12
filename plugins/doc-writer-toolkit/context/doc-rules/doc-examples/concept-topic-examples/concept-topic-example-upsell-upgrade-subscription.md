@@ -8,12 +8,12 @@ last_update:
 The *Upsell upgrade subscription* feature manages subscription logic when users upgrade their main subscription by purchasing an upsell. Although the process appears seamless to users, it involves several behind-the-scenes steps, including subscription cancellation, re-creation, and price recalculation. This document explains how the feature works, including the user experience, system behavior, configuration requirements, and a representative use case for implementing upsell-based subscription upgrades.
 
 Before proceeding, review the following documents to understand the core components involved in the upgrade flow:
-- [Product codes](/docs/wellfunnel-builder/product-codes/product-codes-overview.md): Explains the role of unique product identifiers, which are critical for feature entitlement and correct subscription management when transitioning between plans.
-- [Product plans](/docs/wellfunnel-builder/product-plans/product-plans-overview.md): Describes subscription configuration specifics, including plan durations, pricing, and more.
+- [Product codes](/docs/wellfunnel-builder/product-codes/product-codes-overview): Explains the role of unique product identifiers, which are critical for feature entitlement and correct subscription management when transitioning between plans.
+- [Product plans](/docs/wellfunnel-builder/product-plans/product-plans-overview): Describes subscription configuration specifics, including plan durations, pricing, and more.
 
 ## User-side upgrade flow
 
-When users purchase an [upsell](/docs/wellfunnel-builder/product-plans/product-plans-overview.md#product-tags), the process is straightforward:
+When users purchase an [upsell](/docs/wellfunnel-builder/product-plans/product-plans-overview#product-tags), the process is straightforward:
 
 - After purchasing the main product, users are directed to the upsell screen, which suggests subscribing to extra features—such as breathing exercises or a meal plan—as a recurring add-on to their existing subscription.
 - Users accept the offer and purchase the upsell as a recurring add-on to the current subscription.
@@ -123,5 +123,5 @@ sequenceDiagram
 
 ## Related documents
 
-- [Product codes](/docs/wellfunnel-builder/product-codes/product-codes-overview.md)
-- [Product plans](/docs/wellfunnel-builder/product-plans/product-plans-overview.md)
+- [Product codes](/docs/wellfunnel-builder/product-codes/product-codes-overview)
+- [Product plans](/docs/wellfunnel-builder/product-plans/product-plans-overview)

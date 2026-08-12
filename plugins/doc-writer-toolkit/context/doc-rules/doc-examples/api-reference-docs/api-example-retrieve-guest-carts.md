@@ -11,14 +11,14 @@ This endpoint lets you manage guest carts.
 
 For detailed information on the modules that provide the API functionality and related installation instructions, see:
 
-* [Install the Cart Glue API](/docs/pbc/all/cart-and-checkout/latest/base-shop/install-and-upgrade/install-glue-api/install-the-cart-glue-api.md)
-* [Install the Promotions & Discounts feature Glue API](/docs/pbc/all/discount-management/latest/base-shop/install-and-upgrade/install-features/install-the-promotions-and-discounts-glue-api.md)
-* [Install the Product Options Glue API](/docs/pbc/all/product-information-management/latest/base-shop/install-and-upgrade/install-glue-api/install-the-product-options-glue-api.md)
-* [Install the Product Labels Glue API](/docs/pbc/all/product-information-management/latest/base-shop/install-and-upgrade/install-glue-api/install-the-product-image-sets-glue-api.md)
+* [Install the Cart Glue API](/docs/pbc/all/cart-and-checkout/latest/base-shop/install-and-upgrade/install-glue-api/install-the-cart-glue-api)
+* [Install the Promotions & Discounts feature Glue API](/docs/pbc/all/discount-management/latest/base-shop/install-and-upgrade/install-features/install-the-promotions-and-discounts-glue-api)
+* [Install the Product Options Glue API](/docs/pbc/all/product-information-management/latest/base-shop/install-and-upgrade/install-glue-api/install-the-product-options-glue-api)
+* [Install the Product Labels Glue API](/docs/pbc/all/product-information-management/latest/base-shop/install-and-upgrade/install-glue-api/install-the-product-image-sets-glue-api)
 
 ## Create a guest cart
 
-To create a guest cart as an unauthenticated user, [add items to a guest cart](/docs/pbc/all/cart-and-checkout/latest/base-shop/manage-using-glue-api/manage-guest-carts/glue-api-manage-guest-cart-items.md#add-items-to-a-guest-cart).
+To create a guest cart as an unauthenticated user, [add items to a guest cart](/docs/pbc/all/cart-and-checkout/latest/base-shop/manage-using-glue-api/manage-guest-carts/glue-api-manage-guest-cart-items#add-items-to-a-guest-cart).
 
 ## Retrieve a guest cart
 
@@ -520,7 +520,7 @@ class CartsRestApiConfig extends SprykerCartsRestApiConfig
 }
 ```
 
-Upon login, the behavior depends on whether your project is a single cart or [multiple cart](/docs/pbc/all/cart-and-checkout/latest/base-shop/feature-overviews/multiple-carts-feature-overview.md) environment:
+Upon login, the behavior depends on whether your project is a single cart or [multiple cart](/docs/pbc/all/cart-and-checkout/latest/base-shop/feature-overviews/multiple-carts-feature-overview) environment:
 
 - In a single cart environment, the products in the guest cart are added to the customers' own cart.
 - In a multiple cart environment, the guest cart is converted to a regular user cart and added to the list of the customers' own carts.
@@ -610,7 +610,7 @@ The following is an exemplary workflow of converting a guest cart into a regular
 
    | Header key | Header value | Required | Description |
    | --- | --- | --- | --- |
-   | `Authorization` | `string` | ✓ | Alphanumeric string that authenticates the customer you want to change the password of. Get it by [authenticating as a customer](/docs/pbc/all/identity-access-management/latest/manage-using-glue-api/glue-api-authenticate-as-a-customer.md). |
+   | `Authorization` | `string` | ✓ | Alphanumeric string that authenticates the customer you want to change the password of. Get it by [authenticating as a customer](/docs/pbc/all/identity-access-management/latest/manage-using-glue-api/glue-api-authenticate-as-a-customer). |
 
    In the multiple cart environment, the guest cart has been converted to a regular cart. You can see it in the list of carts with the id `9183f604-9b2c-53d9-acbf-cf59b9b2ff9f`.
 
@@ -675,4 +675,4 @@ The following is an exemplary workflow of converting a guest cart into a regular
 | `118` | Price mode is missing. |
 | `119` | Price mode is incorrect. |
 
-For generic errors that originate from the Glue Application, see [Reference information: GlueApplication errors](/docs/integrations/spryker-glue-api/storefront-api/api-references/reference-information-storefront-application-errors.md).
+For generic errors that originate from the Glue Application, see [Reference information: GlueApplication errors](/docs/integrations/spryker-glue-api/storefront-api/api-references/reference-information-storefront-application-errors).

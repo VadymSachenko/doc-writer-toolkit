@@ -39,7 +39,7 @@ In the **Link** section, edit link details:
 The **Flow details** section displays settings for each flow. When you add multiple flows, you can adjust details for each one separately.
 
 When **Payment** is selected for **Split traffic mode**, onboarding screens can't be edited during flow configuration.  
-This ensures changes don't affect the validity of the traffic split and test results. Refer to [Resplit logic](/docs/wellfunnel-builder/links/links-overview.md#split-traffic-mode-parameter) for more details.
+This ensures changes don't affect the validity of the traffic split and test results. Refer to [Resplit logic](/docs/wellfunnel-builder/links/links-overview#split-traffic-mode-parameter) for more details.
 
 :::
 
@@ -72,9 +72,9 @@ To edit flows, follow these steps:
 |---|---|
 | Link: ID | Unique identifier for the link. |
 | Link: Experiment | Name of the experiment associated with the link. For more details, see [Experiment name and its usage for analytics](/docs/wellfunnel-builder/links/links-overview#experiment-name-and-its-usage-for-analytics). |
-| Link: Project | [Project](/docs/wellfunnel-builder/projects/projects-overview.md) associated with the link. |
-| Link: Branch | [Branch](/docs/wellfunnel-builder/branches/branches-overview.md) tied to the link. The default flow is based on the flow configured in the selected branch. |
-| Link: Split traffic | Determines the split point for traffic: <ul><li>**Onboarding**: Divides traffic between onboarding flows and directs it to respective payment flows.</li><li>**Payment**: Divides traffic between payment flows only.</li></ul> For more details, see [Resplit logic](/docs/wellfunnel-builder/links/links-overview.md#resplit-logic). |
+| Link: Project | [Project](/docs/wellfunnel-builder/projects/projects-overview) associated with the link. |
+| Link: Branch | [Branch](/docs/wellfunnel-builder/branches/branches-overview) tied to the link. The default flow is based on the flow configured in the selected branch. |
+| Link: Split traffic | Determines the split point for traffic: <ul><li>**Onboarding**: Divides traffic between onboarding flows and directs it to respective payment flows.</li><li>**Payment**: Divides traffic between payment flows only.</li></ul> For more details, see [Resplit logic](/docs/wellfunnel-builder/links/links-overview#resplit-logic). |
 | Link: Confluence | Optional field for a Confluence document link describing the link. |
 | Link: Description | Internal description of the link in WellFunnel Builder. |
 | Link: Platform | Specifies the platform for the link: <ul><li>**Web**: For laptops or desktops.</li><li>**Mobile**: For mobile phones or tablets.</li></ul> |

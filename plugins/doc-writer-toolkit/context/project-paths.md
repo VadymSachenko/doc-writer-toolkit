@@ -34,7 +34,15 @@ None of these is safe to hardcode in a skill file — different projects install
 - **EN i18n root:** `i18n/en/docusaurus-plugin-content-docs/current/`
 - **UA URL prefix:** `/`
 - **API reference root:** `docs/api-reference/`
+- **Screenshot frame:** `rectangular, 3px, #CC0000`
+- **Screenshot scope:** `container`
+- **Screenshot padding:** `24`
+- **Compact image width:** `480`
+- **Blur radius:** `8`
+- **Doc content width:** `840`
 ```
+
+The last six fields configure screenshot capture and embedding. They are resolved and documented by `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-capture.md` (Section 0) — that file is their authority, including defaults and the ask-once/persist fallback. They live in this same declaration block so a project declares everything in one place; do not restate their meaning or defaults here.
 
 `Content language:` describes the language(s) the project's pages are **authored** in — `uk`, `en`, or `uk,en`. Content published under the EN i18n root is a translation of UA-authored pages, not a second authored language: a project that writes in Ukrainian and translates to English declares `uk`, and only a project that authors pages natively in both declares `uk,en`.
 

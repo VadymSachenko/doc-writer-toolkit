@@ -26,10 +26,15 @@ HEADING MOOD RULES:
 
 SCREENSHOTS: Place screenshots in `./.assets/` next to the document. Reference them as `./.assets/<screenshot-name>.png`. The filename comes from the uploaded screenshot name.
 
-ICONS IN STEPS: Use the Docusaurus `<Icon>` component to represent UI buttons or actions that are shown as icons only (copy, delete, drag handle, edit pencil, expander arrow). Place the `<Icon>` immediately before the bold action name: `<Icon icon="ic:sharp-edit" height="24" style={{ color: '#9564ff' }} /> **Edit**`. When the UI element has a text label, use bold text alone without an icon. Don't describe icons in words ("the pencil icon") — either show the icon or use the action name.
+INTERNAL LINKS: Links to other doc pages are absolute — the project's URL prefix + the target's path relative to the content root, with no `.md` extension (e.g. `/balance/add-cards/add-cards`). The skill is authoritative — see its internal-link rule. Asset links stay relative (`./.assets/…`).
+
+ICONS IN STEPS: For buttons and UI elements, apply this decision tree:
+1. UI element has a text label → bold text alone: click **Save**.
+2. No text label + the Iconify icon name is known → place the `<Icon>` component immediately before the bold action name: `<Icon icon="ic:sharp-edit" height="24" style={{ color: '#9564ff' }} /> **Edit**`.
+3. No text label + the icon name can't be determined → descriptive text for where to click: "click the pencil icon" / "click the delete button".
 */}
 
-This guide describes how to {task, for example, manage} [{entity}s](/link/to/the/feature-overview.md).
+This guide describes how to {task, for example, manage} [{entity}s](/link/to/the/feature-overview).
 
 {/* Replace "a/an {entity}" throughout the document with the correct article and entity name when filling in the template. */}
 
@@ -89,7 +94,7 @@ Delete the other variants if using this one.
 ===========================================================================
 */}
 
-This guide describes how to {task, for example, create} [{entity}s](/link/to/the/feature-overview.md).
+This guide describes how to {task, for example, create} [{entity}s](/link/to/the/feature-overview).
 
 {Task} creation involves several steps:
 
@@ -196,8 +201,8 @@ END OF STRUCTURE VARIANTS
 
 {/* List related user guides the reader can use next. For laterally related non-user-guide documents, use a concept topic's Related documents pattern instead. */}
 
-- [{User guide title}](/link/to/user-guide.md)
-- [{User guide title}](/link/to/user-guide.md)
+- [{User guide title}](/link/to/user-guide)
+- [{User guide title}](/link/to/user-guide)
 
 {/*
 ===========================================================================
@@ -265,7 +270,7 @@ Don't add a block with nothing substantive in it:
 - Add one only when it: (1) confirms a result, (2) helps locate a hard-to-find UI element, (3) illustrates a non-obvious screen.
 - **Two embed syntaxes — choose by classification (skill is authoritative):**
   - **Full-page** (whole menu, dashboard, or table spanning the full content area): `![Descriptive alt text](./.assets/{screenshot-name}.png)`
-  - **Compact** (dialog window, modal, or narrow panel that visually occupies significantly less than the full content width): `<img src={require('./.assets/{screenshot-name}.png').default} width="480" alt="Descriptive alt text" />`
+  - **Compact** (dialog window, modal, or narrow panel that visually occupies significantly less than the full content width): `<img src={require('./.assets/{screenshot-name}.png').default} width="{compact-width}" alt="Descriptive alt text" />` — `{compact-width}` is the project's declared `Compact image width:` (default `480`); see `screenshot-selection.md`.
 
 ### Reference information (form attributes)
 
