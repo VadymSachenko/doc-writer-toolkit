@@ -1,0 +1,8 @@
+{
+  "name": "doc-writer-toolkit",
+  "version": "0.1.0",
+  "description": "Skills and commands for writing product documentation (API reference pages, user guides, concept topics, translations, alignment checks), plus bundled content rules: style guide, grammar rules, glossary, and page templates.",
+  "author": {
+    "name": "Vadym Sachenko"
+  }
+}

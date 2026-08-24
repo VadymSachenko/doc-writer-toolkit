@@ -43,17 +43,17 @@ flowchart TD
     end
 
     %% Gap annotations
-    STRUCT -.->|GAP: no skill| GAP1["⚠ section-readiness-check\nnot yet built"]
-    APPEXP -.->|GAP: manual today| GAP2["⚠ live-app exploration\nrequires MCP/browser tool access"]
-    STYLE_F -.->|FUTURE: orchestrator| GAP3["⚠ write-section command\ncould chain all steps above"]
+    STRUCT -.->|now: skills| DONE1["✓ section-readiness / section-planner\nbuilt — /check-section-readiness, /plan-section"]
+    APPEXP -.->|built| GAP2["app-explorer built ✓ driving tool defined\n(Playwright MCP / collection runner) named + preflight-checked;\nhost project declares/connects it in config"]
+    STYLE_F -.->|built| GAP3["✓ /document-section built\nfull section pipeline with resumable ledger"]
 
     classDef skill fill:#d4edda,stroke:#28a745,color:#000
     classDef gap fill:#fff3cd,stroke:#ffc107,color:#000
     classDef stage fill:#e8f4fd,stroke:#0d6efd,color:#000
     classDef terminal fill:#f8f9fa,stroke:#6c757d,color:#000
 
-    class WRITE_C,WRITE_G,WRITE_A,STYLE_R,STYLE_F,TRANSLATE,ALIGN,CLEANUP skill
-    class GAP1,GAP2,GAP3 gap
+    class WRITE_C,WRITE_G,WRITE_A,STYLE_R,STYLE_F,TRANSLATE,ALIGN,CLEANUP,DONE1 skill
+    class GAP2,GAP3 gap
     class PLAN,EXPLORE,DRAFT,REVIEW,LOCALIZE,PUBLISH stage
     class START,DONE terminal
 ```
@@ -64,14 +64,24 @@ flowchart TD
 
 | Stage | Skill / Command | What it does |
 |---|---|---|
+| Readiness check | `section-readiness` | Classifies a section folder (skeleton / needs-revision / greenfield), emits a JSON verdict |
+| Explore app | `app-explorer` | Explores the live app + API-seeded state, writes `.sources/app-notes.md` |
+| Plan section | `section-planner` | Proposes IA (keep/merge/split/add) for a section, gated on approval |
 | Draft — concept | `concept-doc-writer` | Background topics: how a feature works, what a term means |
 | Draft — user guide | `user-guide-writer` | Task-based procedural docs for partner cabinet |
 | Draft — API | `api-doc-writer` | One endpoint per page, API reference format |
+| Resolve markers | `resolve-markers` | Batch-answers `{/* NEEDS CONFIRMATION */}` markers from evidence |
 | Review style | `doc-style-reviewer` | Read-only findings report (gdsg / mssg-ua / ua-grammar) |
 | Fix style | `doc-style-fixer` | Applies the reviewer's findings to the file |
 | Translate | `doc-translator` | UA → EN, preserves MDX, enforces EN glossary |
 | Alignment check | `doc-alignment-checker` | Checks UA and EN pages are structurally in sync |
 | Clean screenshots | `cleanup-unused-screenshots` | Moves unreferenced screenshots to `_unused/` |
+| Freshness check | `doc-freshness-checker` | Diffs an existing page against `app-notes.json`, reports stale steps/labels/screenshots |
+| Full page pipeline | `doc-from-interview` | Orchestrates the full per-page pipeline from SME video to style-reviewed draft |
+| Full section pipeline | `document-section` | Orchestrates the full section pipeline end-to-end with a resumable ledger and approval gate |
+| Fix link TODOs | `fix-doc-todos` | Resolves link-type `{/* ToDo */}` markers across the project |
+
+See [`SKILLS-INDEX.md`](plugins/doc-writer-toolkit/SKILLS-INDEX.md) for the canonical list with invocation examples.
 
 ## Commands quick reference
 
@@ -79,16 +89,18 @@ flowchart TD
 |---|---|
 | `/doc-from-interview` | `convert-sme-input` → `user-guide-writer` |
 | `/create-api-doc` | `api-doc-writer` |
+| `/check-section-readiness` | `section-readiness` |
+| `/plan-section` | `section-planner` |
+| `/explore-and-resolve` | `app-explorer` → `resolve-markers` |
 | `/review-doc-style` | `doc-style-reviewer` |
 | `/fix-doc-style` | `doc-style-fixer` |
 | `/fix-doc-todos` | resolves `{/* ToDo */}` markers |
 | `/translate-doc` | `doc-translator` |
 | `/check-doc-alignment` | `doc-alignment-checker` |
+| `/document-section` | `document-section` |
 
-## Gaps (not yet built)
+## Gaps (setup requirements)
 
-| Gap | Why it matters | What it would need |
+| Gap | Why it matters | What it needs |
 |---|---|---|
-| `section-readiness-check` | Step 1 is manual today — you eyeball the folder | Skill that reads a section folder, lists stubs vs. complete files, outputs a gap report |
-| Live-app exploration | `extract-sme-screenshots` only handles meeting recordings; app exploration is fully manual | MCP or browser tool access to the target app |
-| `write-section` orchestrator | Your eventual goal: one command → ready-to-publish | Coordination skill that chains readiness check → writer → style review → translate → align |
+| Live-app driving tool | `app-explorer` names its driving tool (Playwright MCP / collection runner) and preflight-checks it; what remains is wiring the actual MCP server + runner into the host project and declaring them in its config | Playwright MCP server + collection runner connected in the session and declared in the host project's "Documentation toolkit configuration" |

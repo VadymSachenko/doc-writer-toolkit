@@ -3,5 +3,9 @@
 # Робочі ТЗ для агентів — локальні, не комітяться
 _tasks/
 
+# Стан оркестратора та ledger-файли розділів — локальні, не комітяться
+# (_tasks/ = specs for agents; tasks/ = runtime state/section-state.json ledgers)
+tasks/
+
 # Task run logs — local only
 test-results/

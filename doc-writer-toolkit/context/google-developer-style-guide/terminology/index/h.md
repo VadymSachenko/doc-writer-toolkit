@@ -1,0 +1,27 @@
+# H terminology index
+
+Source: [https://developers.google.com/style/word-list](https://developers.google.com/style/word-list) · Snapshot: 2026-07-16
+
+- [`hamburger, hamburger menu`](../a-z/h-01.md#term-hamburger)
+- [`hands off, hands-off`](../a-z/h-01.md#term-hands-off)
+- [`hands on, hands-on`](../a-z/h-01.md#term-hands-on)
+- [`hang, hung`](../a-z/h-01.md#term-hang)
+- [`happiness and satisfaction`](../a-z/h-01.md#term-happiness)
+- [`hardcode (verb), hardcoded (adjective)`](../a-z/h-01.md#term-hardcode)
+- [`he, him, his`](../a-z/h-01.md#term-he)
+- [`healthcare`](../a-z/h-01.md#term-healthcare)
+- [`health check`](../a-z/h-01.md#term-health-check)
+- [`healthy`](../a-z/h-01.md#term-healthy)
+- [`high availability (noun), high-availability (adjective)`](../a-z/h-01.md#term-high-availability)
+- [`higher`](../a-z/h-01.md#term-higher)
+- [`high performance computing (HPC)`](../a-z/h-01.md#term-high-performance-computing)
+- [`hit`](../a-z/h-01.md#term-hit)
+- [`hold the pointer over`](../a-z/h-01.md#term-hold-the-pointer-over)
+- [`holiday, the holidays`](../a-z/h-01.md#term-holiday)
+- [`home screen`](../a-z/h-01.md#term-home-screen)
+- [`hostname`](../a-z/h-01.md#term-hostname)
+- [`hot`](../a-z/h-01.md#term-hot)
+- [`hotspot`](../a-z/h-01.md#term-hotspot)
+- [`housekeeping, house keeping, house-keeping`](../a-z/h-02.md#term-housekeeping)
+- [`hover`](../a-z/h-02.md#term-hover)
+- [`HTTPS`](../a-z/h-02.md#term-https)

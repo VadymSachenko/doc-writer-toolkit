@@ -89,6 +89,23 @@ Three skills form a linear pipeline turning a raw meeting recording into doc-rea
 
 All three operate on `.sources/` and `.assets/` folders that live *inside the host project*, next to the doc page being worked on — not inside this repo.
 
-### Unused templates
+### Section-authoring pipeline (v1 orchestration skills)
 
-`context/doc-templates/user-guide-template.md` and `concept-topic-template.md` (the non-`ua-` prefixed versions) are not referenced by any current skill — `user-guide-writer` and `concept-doc-writer` load `ua-user-guide-template.md` and `ua-concept-topic-template.md` respectively. Don't assume the EN-named templates are live; check what a skill actually loads before editing a template.
+Four skills move a whole menu *section* (not just one page) toward publish-ready. Each is invocable on its own and each has a thin command wrapper:
+
+1. `section-readiness` (`/check-section-readiness`) — inventories a section folder, classifies it `skeleton` / `needs-revision` / `greenfield`, and emits a machine-readable `section-readiness.json` verdict.
+2. `app-explorer` — explores the live app (navigation + API-seeded state) and writes `.sources/app-notes.md` evidence. The concrete driving tool (Playwright/collection-runner) is not yet wired — see the host project's `CLAUDE.md` config.
+3. `section-planner` (`/plan-section`) — reads the folder + app notes and proposes an IA structure (keep/merge/split/add), gated on human approval before anything is written.
+4. `resolve-markers` — batch-answers `{/* NEEDS CONFIRMATION */}` markers from app/interview evidence.
+
+`/explore-and-resolve` chains `app-explorer` → `resolve-markers`. There is **no single `/document-section` orchestrator yet** that chains readiness → explore → plan → write → review; that, plus a resumable `.sources/section-state.json` ledger, is the toolkit's headline unbuilt feature.
+
+### Templates and the `en` path
+
+All five templates in `context/doc-templates/` are live — none are dead code. The `ua-`-prefixed templates load when a project's resolved content language is `uk`; the EN-named twins load when it is `en`:
+
+- `user-guide-writer` loads `ua-user-guide-template.md` (`uk`) or `user-guide-template.md` (`en`).
+- `concept-doc-writer` loads `ua-concept-topic-template.md` (`uk`) or `concept-topic-template.md` (`en`).
+- `api-doc-writer` loads `api-reference-template.md` (language-agnostic).
+
+Do **not** delete the EN-named templates. Known gap: they are thinner than their `ua-` twins (the skill bodies encode far more UA-specific structure), so `en` output is currently under-supported — treat that as a parity gap to close, not as evidence the files are unused. Always check what a skill actually loads before editing a template.
