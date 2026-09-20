@@ -45,7 +45,7 @@ flowchart TD
     %% Gap annotations
     STRUCT -.->|now: skills| DONE1["✓ section-readiness / section-planner\nbuilt — /check-section-readiness, /plan-section"]
     APPEXP -.->|built| GAP2["app-explorer built ✓ driving tool defined\n(Playwright MCP / collection runner) named + preflight-checked;\nhost project declares/connects it in config"]
-    STYLE_F -.->|built| GAP3["✓ /document-section built\nfull section pipeline with resumable ledger"]
+    STYLE_F -.->|planned| GAP3["full section pipeline with a resumable ledger\nnot built yet"]
 
     classDef skill fill:#d4edda,stroke:#28a745,color:#000
     classDef gap fill:#fff3cd,stroke:#ffc107,color:#000
@@ -77,9 +77,7 @@ flowchart TD
 | Translate | `doc-translator` | UA → EN, preserves MDX, enforces EN glossary |
 | Alignment check | `doc-alignment-checker` | Checks UA and EN pages are structurally in sync |
 | Clean screenshots | `cleanup-unused-screenshots` | Moves unreferenced screenshots to `_unused/` |
-| Freshness check | `doc-freshness-checker` | Diffs an existing page against `app-notes.json`, reports stale steps/labels/screenshots |
 | Full page pipeline | `doc-from-interview` | Orchestrates the full per-page pipeline from SME video to style-reviewed draft |
-| Full section pipeline | `document-section` | Orchestrates the full section pipeline end-to-end with a resumable ledger and approval gate |
 | Fix link TODOs | `fix-doc-todos` | Resolves link-type `{/* ToDo */}` markers across the project |
 
 See [`SKILLS-INDEX.md`](plugins/doc-writer-toolkit/SKILLS-INDEX.md) for the canonical list with invocation examples.
@@ -99,7 +97,6 @@ See [`SKILLS-INDEX.md`](plugins/doc-writer-toolkit/SKILLS-INDEX.md) for the cano
 | `/translate-doc` | `doc-translator` |
 | `/check-doc-alignment` | `doc-alignment-checker` |
 | `/update-doc-page` | `doc-page-updater` |
-| `/document-section` | `document-section` |
 
 ## Gaps (setup requirements)
 
