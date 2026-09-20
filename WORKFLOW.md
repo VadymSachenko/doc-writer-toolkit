@@ -70,6 +70,7 @@ flowchart TD
 | Draft — concept | `concept-doc-writer` | Background topics: how a feature works, what a term means |
 | Draft — user guide | `user-guide-writer` | Task-based procedural docs for partner cabinet |
 | Draft — API | `api-doc-writer` | One endpoint per page, API reference format |
+| Update a page | `doc-page-updater` | Applies a change brief to an approved page with the smallest edit; writes update-report.md for the scoped review / sync translation that follow |
 | Resolve markers | `resolve-markers` | Batch-answers `{/* NEEDS CONFIRMATION */}` markers from evidence |
 | Review style | `doc-style-reviewer` | Read-only findings report (gdsg / mssg-ua / ua-grammar) |
 | Fix style | `doc-style-fixer` | Applies the reviewer's findings to the file |
@@ -97,6 +98,7 @@ See [`SKILLS-INDEX.md`](plugins/doc-writer-toolkit/SKILLS-INDEX.md) for the cano
 | `/fix-doc-todos` | resolves `{/* ToDo */}` markers |
 | `/translate-doc` | `doc-translator` |
 | `/check-doc-alignment` | `doc-alignment-checker` |
+| `/update-doc-page` | `doc-page-updater` |
 | `/document-section` | `document-section` |
 
 ## Gaps (setup requirements)

@@ -240,7 +240,19 @@ Do not capitalize after a colon that introduces a list, a code sample, or a UI e
 
 Read the Ukrainian source at `<UA content root>/<relative-path>.md`, using the root resolved from `project-paths.md`. If the file does not exist, stop and tell the user before doing anything else.
 
-Check whether an English version already exists at the target path. If it does, read it and note any content that has diverged from the Ukrainian source (e.g., manual edits). Report this to the user and ask whether to overwrite or merge.
+Check whether an English version already exists at the target path. If it does, read it and note any content that has diverged from the Ukrainian source (e.g., manual edits). Report this to the user and ask whether to overwrite or merge — **unless the caller asked for sync mode**, which answers that question by design (see "Sync mode" below).
+
+### Sync mode — `--sync [--base <ref> | sections:"…" | report:<update-report.md>]`
+
+Use when an EN page already exists and only part of the UA page changed. Nothing is asked; the default whole-page mode is untouched for callers that do not pass `--sync`.
+
+1. **No EN page at the target path** → say so and fall back to the normal full translation.
+2. **Find the changed UA blocks** through `${CLAUDE_PLUGIN_ROOT}/context/changed-blocks.md` (an `update-report.md` from `doc-page-updater`, else `git diff <base>...HEAD -- <page>` with `origin/main` as the default base, else the explicit `sections:` list). A base ref that does not exist → stop and name it. Nothing changed in the UA root → report and stop without touching files.
+3. **Map each block to its EN counterpart** by heading path (headings are matched by position within the parent section when the UA heading itself was renamed) and, inside a section, by block order — paragraph to paragraph, list item to list item, table row to table row. A block that cannot be mapped is reported with the UA text quoted — never translated into a guessed place.
+4. **Re-translate only the mapped blocks**, with every rule of this skill; leave every other EN byte identical. A UA section added / removed / moved → add / remove / move the EN section accordingly (translating an added one). A changed block inside an admonition or MDX component → the block boundary is that body. Frontmatter `title`/`description` changed → update only the mirrored EN values.
+5. **Manual EN edits inside a re-translated block are overwritten** — list them in the report under "EN edits overwritten" with the old EN text.
+6. Steps 4 (self-review, applied to the re-translated blocks) and 5 (save, `last_update.date` in both files) run as usual; then run `doc-alignment-checker` on the pair and include its result in the report.
+7. Report: blocks replaced, added, removed; unmapped blocks; EN edits overwritten; the alignment result. State the source of "what changed" (report / diff base / list) as `changed-blocks.md` requires.
 
 ### Step 2 — Pre-translation scan
 

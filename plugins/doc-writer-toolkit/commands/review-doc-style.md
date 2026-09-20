@@ -1,12 +1,13 @@
 ---
 description: Review a documentation page against a style/grammar guide corpus and report findings (no edits).
-argument-hint: "<path> [guide:<gdsg|mssg-en|mssg-ua|ua-grammar>]"
+argument-hint: "<path> [guide:<gdsg|mssg-en|mssg-ua|ua-grammar>] [--changed [<base>] | sections:\"…\" | report:<update-report.md>]"
 ---
 
 Use the `doc-style-reviewer` skill to review a documentation page.
 
 - **Arguments:** $ARGUMENTS
-- Parse the leading path and, if present, a trailing `guide:<value>` token out of $ARGUMENTS.
+- Parse the leading path and, if present, a `guide:<value>` token out of $ARGUMENTS.
+- **Scope tokens (optional):** `--changed [<base>]`, `sections:"…"` or `report:<path>` switch the skill to scope mode — only the changed blocks are reviewed, plus the terms consistency pass. Pass them through unchanged; the skill resolves the blocks itself.
 
 The `guide:` argument is **optional**:
 

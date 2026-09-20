@@ -1,6 +1,6 @@
 ---
 name: doc-style-fixer
-description: Applies fixes for findings from a doc-style-reviewer report against a single documentation page — classifying each finding as mechanical (batch-applicable), substantive (rewrite, shown and confirmed one at a time), or judgment-required (asked as a question, never auto-resolved). Reads a report already in the conversation, or runs doc-style-reviewer itself if none exists. Never invoked implicitly — it edits files. Use explicitly ("fix-doc-style", "use doc-style-fixer to apply the findings for...").
+description: Applies fixes for findings from a doc-style-reviewer report against a single documentation page — classifying each finding as mechanical (batch-applicable), substantive (rewrite, shown and confirmed one at a time), or judgment-required (asked as a question, never auto-resolved). Reads a report already in the conversation, or runs doc-style-reviewer itself if none exists. An `apply:` argument lets a non-interactive caller pre-approve buckets (`apply:mechanical` or `apply:mechanical,substantive`); every applied substantive rewrite is then listed before → after in the final report, and judgment-required findings are still never applied. Honours a report's Scope block: nothing outside the listed blocks is edited. Never invoked implicitly — it edits files. Use explicitly ("fix-doc-style", "use doc-style-fixer to apply the findings for...").
 ---
 
 # doc-style-fixer
@@ -18,6 +18,13 @@ You are applying fixes for a `doc-style-reviewer` findings report against exactl
   - UA/EN structural alignment — `doc-alignment-checker`'s job.
   - Any file other than the one the report was written against. No neighboring file, no "while I'm here" cleanup.
   - Rewriting or "polishing" anything the report didn't flag. Finding → fix. No finding → no touch.
+
+## Arguments
+
+- `<path>` — the page the report was written against.
+- `guide:<token>` — passed through to `doc-style-reviewer` when this skill has to produce the report itself.
+- `apply:<buckets>` — **optional, non-interactive mode.** `apply:mechanical` pre-approves bucket 1; `apply:mechanical,substantive` pre-approves buckets 1 and 2. With this argument the skill asks no per-group or per-fix questions for the pre-approved buckets — it applies them, and lists **every** applied bucket 2 rewrite as `«before» → «after»` in the final report so a reviewer can see and revert any of them. Bucket 3 is never pre-approvable: it is listed as questions, unapplied. Use this only from a pipeline or when the user explicitly asks for it; without the argument, Step 3's interactive flow applies unchanged.
+- `--changed [<base>]`, `sections:`, `report:` — passed through to `doc-style-reviewer` when producing the report (scope mode).
 
 ## Sources to load
 
@@ -88,6 +95,7 @@ Use judgment at the boundary; the four-or-more default is a starting point, not 
 ## Step 4 — Apply
 
 - Edit only the file named in the report. Never a neighboring file.
+- If the report carries a `Scope` block (scope mode), edit only inside the listed blocks and at the locations the report's Consistency section names. A finding whose location falls outside them is a report defect — list it under "left unresolved" with that reason instead of applying it.
 - Never touch the contents of fenced code blocks or inline code spans — unless the finding itself says the code formatting is the violation (e.g. a formula rendered in code font, per `GDSG-FORMAT-SPECIAL-NOTATION`), in which case the fix is exactly what the finding specifies and nothing more.
 - Never touch frontmatter except `title`/`description`, and only when a finding names one of those two fields specifically.
 - Never resolve a `{/* ToDo: ... */}` or `{/* NEEDS CONFIRMATION: ... */}` marker, even one adjacent to an applied fix. See the Scope section for the correct handler for each type.
@@ -96,6 +104,7 @@ Use judgment at the boundary; the four-or-more default is a starting point, not 
 ## Step 5 — Final report
 
 - Counts: how many findings applied, how many skipped, how many still pending a human decision.
+- In `apply:` mode: a section **"Substantive rewrites applied"** with one line per bucket 2 fix — `«before» → «after»` (heading path) — even when there are many; this list is what a downstream PR body shows the reviewer.
 - A note recommending the user re-run `/review-doc-style` on the file to verify the result — do **not** invoke it yourself; this is a suggestion, not an automatic next step.
 - A list of every finding left unresolved (skipped, or bucket 3 with no answer given), each with the reason it wasn't applied.
 
