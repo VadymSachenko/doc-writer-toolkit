@@ -38,14 +38,15 @@ when a new document introduces a new term not yet listed here.
 |---|---|---|---|
 | Amount | `text` | | The declared value of a transaction at the time of initiation. Don't use: initial amount, original amount. |
 | API token | `text` | | A 128-character alphanumeric string used to authenticate requests to the UCPay API. Don't use: partner token, bearer token, auth key. |
+| Acquiring | `text` | `ACQUIRING` table, `ACQUIRING` group type, `AcquiringId` field | An external transaction-processing system connected to UCP through an acquiring record and an acquiring work group. The company behind it is the provider (separate term). Don't use: acquirer, payment service, integration (as a synonym). |
 | Archive | **bold** (UI) | | The partner cabinet section containing completed transactions. Don't use: completed transactions, closed items, history. |
-| `cancelled` | `code` | `cancelled` | Transaction status value. **UK spelling** — not `canceled` — because it is a literal code value. UI label: **Cancelled**. |
-| Dispute | `text` | | A transaction challenge raised by an end client. Don't use: complaint, claim, appeal. |
+| `cancelled` | `code` | `cancelled` | Transaction status value. **UK spelling** — not `canceled` — because it is a literal code value. UI label: **Cancelled** — **except in operator cabinet docs**, where the literal UI label uses US spelling: **Canceled**. |
+| Dispute | `text` | `CreateTicket`, `IsSupportTicket`, `TicketAcquiringIds` | A transaction challenge raised by an end client. The code calls it a ticket; prose keeps "dispute". Don't use: complaint, claim, appeal, ticket, dispute ticket. |
 | End client | `text` | | The individual or entity making a payment through a partner's product. Don't use: end user, customer, client (when ambiguous). |
 | Endpoint | `text` | | A specific API method address. Don't use: end point. |
 | Finished amount | `text` | | The final amount recorded after a transaction completes. Don't use: final amount, confirmed amount, actual amount. |
-| `in queue` | `code` | `in queue` | Transaction status value — queued for processing. UI label: **In queue**. |
-| `in work` | `code` | `in work` | Transaction status value — being processed. UI label: **In work**. |
+| `in queue` | `code` | `in queue` | Transaction status value — queued for processing. UI label: **In queue** — **except in operator cabinet docs**, where the literal UI label is **In Queue**. |
+| `in work` | `code` | `in work` | Transaction status value — being processed. UI label: **In work** — **except in operator cabinet docs**, where the literal UI label for this stage is **In Progress**. |
 | Inbound transaction | `text` | | A transaction that credits funds to the partner or end client account. Don't use: pay-in, incoming payment — **except in operator cabinet docs**, where **Payin** is the standard term (mirrors the product's Payin/Payout pairing and the operator-facing internal context). |
 | Monitoring | **bold** (UI) | | The partner cabinet section showing active (incomplete) transactions. Don't use: active transactions, live transactions, open items. |
 | Move | `text` | | Reassignment of a transaction to a different work group. Don't use: reassignment, transfer, routing change. |
@@ -55,10 +56,11 @@ when a new document introduces a new term not yet listed here.
 | Partner cabinet | `text` | | The UCPay web interface for managing transactions, settings, and reports. Don't use: client cabinet, dashboard, partner portal. |
 | Payment method | `text` | query parameter `paymentMethod`; constants `CARD`, `IBAN`, `LINK`, `QUASI`, `PHONE` | The type of payment requisite UCP returns in response to an inbound transaction: card, IBAN, link, quasi, or phone. Don't use: payment option, payment way, method of payment. |
 | Payment type | `text` | `paymentType`; values `HUMO`, `UZCARD`, `CLICK`, `PAYME`, `PAYNET` | A secondary filter applied on top of the payment method. Don't use: payment subtype, method subtype. |
+| Provider | `text` | | The company that supplies an acquiring system: issues API documentation and credentials, defines request and webhook formats. Don't use: vendor, supplier, partner (a different role). |
 | Phone | `text` | constant `PHONE`, value `phone`, marker `PHONE:` in the `Link` field | The payment method where UCP returns a phone number as the payment requisite. In prose write "the phone method" or "a phone requisite"; use the uppercase form only as a code entity. Don't use: PHONE in prose, phone in prose (as the code value), "phone" in quotation marks. |
 | Quasi | `text` | constant `QUASI`, value `quasi` | The payment method that hides the real receiving bank behind a UCP widget. In prose write "the quasi method" or "a quasi requisite"; use the Latin uppercase form only as a code entity. Don't use: QUASI in prose, "quasi" in quotation marks, quasi-method with a hyphen. |
 | `REST Proxy` | `code` | `REST Proxy` | The intermediary module between the UCP backend and the bank behind the quasi method. The module name stays English, in code font (Ж4, Ж5). Don't use: RestProxy, rest proxy, **REST Proxy** in bold. |
-| `success` | `code` | `success` | Transaction status value — completed successfully. UI label: **Success**. |
+| `success` | `code` | `success` | Transaction status value — completed successfully. UI label: **Success** — **except in operator cabinet docs**, where the literal UI label is **Completed**. |
 | Transaction | `text` | | A financial operation initiated through the UCPay payment gateway. Colloquial: request. Don't use: application, operation. |
 | UCP | `text` | | Abbreviation for UniComPay. Use after the first full reference: "UniComPay (UCP)". |
 | UniComPay | `text` | | The official platform name. Don't use: Unicompay, UCP Pay. |

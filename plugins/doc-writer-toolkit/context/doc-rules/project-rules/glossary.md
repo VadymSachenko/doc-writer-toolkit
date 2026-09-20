@@ -26,6 +26,8 @@ This file is the **bilingual alignment reference** — use it to verify EN↔UA 
 | Partner | Партнер | provider, client, merchant, customer | провайдер, клієнт, мерчант |
 | End client | Кінцевий клієнт | end user, customer, client (when ambiguous) | кінцевий користувач, клієнт (коли неоднозначно) |
 | Widget | Віджет | payment widget (unless disambiguation needed), component | віджит <!-- phonetic variant, reject --> |
+| Acquiring | Еквайринг | acquirer, payment service, integration (as a synonym) | еквайер, платіжний сервіс, інтеграція (як синонім) |
+| Provider | Провайдер | vendor, supplier, partner (a different role) | постачальник, вендор, партнер (інша роль) |
 
 ## Transaction concepts
 
@@ -34,7 +36,7 @@ This file is the **bilingual alignment reference** — use it to verify EN↔UA 
 | Transaction | Транзакція (розм.: заявка) | request, application, operation | запит, аплікація, операція |
 | Inbound transaction (operator cabinet: **Payin**) | Вхідна транзакція | pay-in, incoming payment — except operator cabinet docs, where Payin is standard | вхідна заявка, поповнення (коли неоднозначно) |
 | Outbound transaction (operator cabinet: **Payout**) | Вихідна транзакція (розм.: виплата) | payout, outgoing payment, withdrawal — except operator cabinet docs, where Payout is standard | виплата (як синонім у публічних доках) |
-| Dispute | Диспут | complaint, claim, appeal | скарга, апеляція |
+| Dispute | Диспут | complaint, claim, appeal, ticket, dispute ticket | скарга, апеляція, тікет, диспут-тікет |
 | Monitoring | Моніторинг | active transactions, live transactions, open items | активні транзакції, відкриті заявки |
 | Archive | Архів | completed transactions, closed items, history | завершені транзакції, історія |
 | Amount | Сума | initial amount, original amount | початкова сума, заявлена сума |
