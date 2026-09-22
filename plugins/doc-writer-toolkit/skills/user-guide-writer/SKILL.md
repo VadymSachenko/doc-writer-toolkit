@@ -26,9 +26,12 @@ Load these files at the start of the task. Do not load others unless the user re
 
 **Project rules:**
 - `uk` → `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-ua.md`; `en` → `glossary-en.md` — canonical terminology for the resolved language.
+- **`uk` only** → `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/native-ukrainian.md` — rank-0 natural-Ukrainian prose rules (literal-English syntax, ambiguous reference, mechanical repetition, «вікно» not «діалог», self-reference «ця сторінка» not «цей посібник», discretionary dashes). Load only on a `uk` page; it has no `en` counterpart. Drives the native-Ukrainian reread in Step 8.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/api-integration-context.md` — cross-cutting facts about the API (balances, transaction lifecycle, webhooks, disputes, auth, business rules). Always applicable background.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` — rank-0 project formatting conventions (what bold/italic/code font mean here, placeholder form, one-entity-one-render, code-entity vs. human concept). Outranks everything else loaded for this task, including this skill's own body. Loaded regardless of resolved language.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-selection.md` — shared screenshot selection procedure: three-folder model, four selection cases, sensitive-content screening, rename pattern, full-page vs. compact classification.
+- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` — the shared page-to-page link contract (see the link rule in Step 6).
+- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` — the shared slug/title/filename convention (used to name the output file and title in Step 9).
 
 **UA grammar — only when the resolved language is `uk`:**
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/ua-grammar/00-cheatsheet.md` — always-loaded quick reference for UA orthography. Do not load this on an `en` page; English sentence-style rules live in `formatting-conventions.md`'s English section instead.
@@ -138,10 +141,18 @@ Apply the template resolved in "Sources to load". Choose the structure decided i
 - **Merge a locate action with the click that acts on it.** When one step only finds/selects an item (a file, a row, a transaction) and the next step clicks a button to act on that same item, combine them into a single numbered step. Do not leave "find X" as its own step when the following step is "click Y" on that same X.
   - ✅ "In the receipts list, find the file and click **Upload**."
   - ⛔ "Find the file in the receipts list." *(as its own step)* / "Click **Upload**." *(as the next step)*
+- **Merge an input/selection with the commit click that immediately completes it — when all conditions hold.** When a step supplies input or makes a selection and the very next step commits it (**Save**, **Apply**, **OK**, **Submit**), combine them into one step. This project decision is **compatible with**, not directly mandated by, the routed source guides — cite both when this rule drives a change:
+  - Google Developer Style Guide — `${CLAUDE_PLUGIN_ROOT}/context/google-developer-style-guide/procedures/procedures.md`: "one action or one closely coupled action group per step… If pressing Enter is required, include it in the same step" (its own example combines a selection and the following **Save**).
+  - Microsoft Writing Style Guide — `${CLAUDE_PLUGIN_ROOT}/context/microsoft-style-guide/shared/procedures/step-by-step-instructions.md`: "Combine short actions only when they occur in the same place," and "Include the action that commits or completes the task, such as **Apply** or **OK**."
+  - **Merge only when every condition holds:** the actions occur in the same window, form, or panel (one uninterrupted UI context); together they complete one logical user action; the commit immediately follows the input/selection; no meaningful intermediate result, decision, warning, validation state, or explanation intervenes; and the combined step still scans easily.
+  - **Keep separate when any of these intervene:** the user moves to another location or phase; validation or review must happen before committing; the commit is destructive or needs a warning; an optional branch intervenes; the first step is already long or has complex substeps; or the commit produces a result that needs its own explanation or screenshot.
+  - ✅ (merge) "In the **Change password** window, enter the old and new password and click **Save**."
+  - ⛔ (needless split) "In the **Change password** window, enter the old and new password." *(step 3)* / "Click **Save**." *(step 4)*
+  - ✅ (keep separate — validation intervenes) "In the **Transfer** window, enter the amount." *(step 3)* / "Review the fee shown below the field, then click **Confirm**." *(step 4, a distinct review state before an irreversible commit)*
 - **State the location before the action**, inside a merged or single step alike: "In the **Receipts** window, find the file and click **Upload**." — not "Find the file and click **Upload** in the **Receipts** window."
 - **Confirmation clicks: action first, reason last.** When a step's whole job is confirming a prior action in a dialog (e.g., a "Delete file" confirmation), state the click first and the reason afterward: "In the **Delete file** window, click **Delete** to confirm." — not "To confirm the deletion, in the **Delete file** window, click **Delete**."
   - This is narrower than the goal → action rule below: goal → action applies when the "to" clause states the operation's actual goal (e.g., applying a filter). Use action-first-reason-last only for a secondary confirmation of something already stated in a previous step.
-- Beyond locate+click and confirm+reason, keep one independent action per step — don't merge two unrelated clicks.
+- Beyond locate+click, input+commit, and confirm+reason, keep one independent action per step — don't merge two unrelated clicks.
 - UI labels in **bold**: click **Save**, select **Transactions**.
 - **Icon-only buttons — decision tree:**
   1. Button has a text label → bold text only.
@@ -193,7 +204,7 @@ Apply the template resolved in "Sources to load". Choose the structure decided i
 - **Field reference order:** when a step involves a field inside a card or other named container, state the container first, then the field, then the action: "In the **X** card, in the **Y** field, enter the value." — not "In the **Y** field in the **X** card, enter the value."
 - **Active voice, second person — not the product as subject:** in procedural steps and Result blocks, always use the imperative or the second person; never a system/product noun ("the Partner", "Партнер") as the grammatical subject. See `formatting-conventions.md`'s sentence-style section for the resolved language.
 - **No concept explanations in procedure steps.** If background context is needed, link to a concept topic instead.
-- **Internal links to other doc pages must be absolute.** Form every link to another page as the project's declared **UA URL prefix** (resolved via `project-paths.md` in "Sources to load") + the target page's path relative to the content root, **with no `.md`/`.mdx` extension** — e.g. `/balance/add-cards/add-cards`, or `/partner-cabinet/transactions/transactions` for a project whose prefix is `/partner-cabinet/`. Append an anchor as `#slug` when linking to a section (e.g. `/balance/add-cards/add-cards#reference-information-add-cards`). **Never** write a document-relative link (`./…`, `../…`) to another page, and never hardcode `/docs/`. This governs page-to-page links only — screenshot/asset links stay document-relative (`./.assets/…`), and intra-page anchors stay bare (`#довідкова-інформація-{slug}`).
+- **Internal links to other doc pages follow the shared contract.** Build every page-to-page link exactly as `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` prescribes — site-root-relative, the declared UA URL prefix joined to the target's path relative to the content root, no `.md`/`.mdx`, anchors preserved (e.g. `#reference-information-add-cards`). That file is authoritative for what is and isn't a page link (asset links `./.assets/…` and intra-page anchors `#…` are exempt); do not restate its algorithm here.
 - **No "you're signed in to the partner cabinet" as a prerequisite.** That is always assumed.
 - **Do not name the partner-cabinet context explicitly in page body text.** The reader is already in it. `uk`: avoid «кабінет партнера», use «меню» — wrong: «в розділі X у кабінеті партнера», right: «в меню X». `en`: avoid explicit "in the partner cabinet"; use "the menu" or the feature's own name instead.
 - **Voice:** the UI element must not be the subject of an action. The action happens to/in the object. ✅ "Transactions appear in the table." ⛔ "The table displays transactions." Applies to Result blocks too.
@@ -222,6 +233,7 @@ Before writing to disk, check:
 - Attribute column values in reference tables are not bold
 - Filter selection steps use a general phrase, not per-filter enumeration
 - No "find/select X" step immediately followed by a "click Y" step on that same X — merged into one step with the location stated first
+- No input/selection step immediately followed by a bare commit step (**Save**/**Apply**/**OK**/**Submit**) when all merge conditions hold — merged into one step. Conversely, no commit wrongly merged in when validation, a warning, a branch, or a result-needing-its-own-explanation intervenes
 - Confirmation steps (e.g., a delete confirmation dialog) state the click first and the reason last
 - Screenshots are placed after, not before, the step they illustrate; absent screenshots have `{/* ToDo */}` placeholders
 - No description of current UI behavior uses future tense (`formatting-conventions.md`, sentence-style section for the resolved language)
@@ -234,7 +246,7 @@ Before writing to disk, check:
 - UI labels, status values, placeholders, and code-vs-concept rendering follow `formatting-conventions.md` Ж1–Ж4
 - No UI element is the subject of an action in steps or Result blocks
 - References to the reference-information section in steps are inline links, not separate sentences — and each link's anchor matches the target heading's explicit `{#reference-information-<slug>}` id (never a bare `#reference-information`)
-- Every link to another doc page is absolute (project UA URL prefix + path, no `.md`); no `./`/`../` page links, no hardcoded `/docs/` (asset links `./.assets/…` and intra-page anchors `#…` are exempt)
+- Every link to another doc page follows `internal-links.md` (declared UA URL prefix + path, no `.md`); no `./`/`../` page links, no hardcoded `/docs/` (asset links `./.assets/…` and intra-page anchors `#…` are exempt)
 - No Атрибут/Опис reference table appears inside a numbered step or Accordion stage body
 - The Довідкова інформація table covers every visible field on each screen/form/table the user encounters, not only directly-interacted elements; read-only and display-only fields are included
 - Every attribute with a defined set of values uses `<ul><li>` in its description cell, not comma-separated prose
@@ -265,19 +277,21 @@ After the self-review passes, do a focused second read that targets the project-
 11. Steps and Result blocks — if a product/system noun appears as the grammatical subject, rewrite as imperative or second person.
 12. Prerequisites section — if no special prerequisites are listed: `en` page — add Variant A or Variant B standard sentence from the template; `uk` page — add Варіант А or Варіант Б from `ua-user-guide-template.md`.
 13. Adjacent steps — if one step only locates/selects an item and the next step clicks a button on that same item, merge them into one step with the location stated first.
-14. Confirmation-dialog steps — if a step opens with "To confirm..., ...", rewrite so the click comes first and the reason comes last.
-15. **P1 — Inherited wording.** Diff every heading and bolded phrase against `.sources/`; rewrite any that were copied without normalization.
-16. **P2 — Heading language.** Flag and rewrite any heading that mixes languages or leaves a glossary concept in its source language.
-17. **P3 — Bold audit.** Re-walk every `**...**` span; strip bold from anything that isn't a visible UI label.
-18. **P4 — As-is audit.** Search the body (including admonitions) for future/planned-change language; move it to `{/* ToDo: ... */}`.
-19. **P5 — Render audit.** Build the entity list; fix every entity with more than one rendering in the document.
-20. **Reference tables and completeness.** If an Атрибут/Опис table appears inside a step or Accordion stage body, move it to the Довідкова інформація section and replace the step content with the appropriate action plus an inline link. Verify the table covers all visible fields on every screen/form/table the user encounters — add any missing read-only, status, or display-only fields. Convert any comma-separated list of enum values to `<ul><li>` format with semicolons after each entry except the last (which ends with a full stop).
+14. Adjacent steps — if one step supplies input or a selection and the next is a bare commit click (**Save**/**Apply**/**OK**/**Submit**) with no intervening validation, warning, branch, or result needing its own explanation, and both sit in the same UI context, merge them into one step (cite the GDSG/MSSG procedure rules named in Step 6). Do **not** merge when any keep-separate condition holds — flag a wrongly-merged commit and split it back out.
+15. Confirmation-dialog steps — if a step opens with "To confirm..., ...", rewrite so the click comes first and the reason comes last.
+16. **P1 — Inherited wording.** Diff every heading and bolded phrase against `.sources/`; rewrite any that were copied without normalization.
+17. **P2 — Heading language.** Flag and rewrite any heading that mixes languages or leaves a glossary concept in its source language.
+18. **P3 — Bold audit.** Re-walk every `**...**` span; strip bold from anything that isn't a visible UI label.
+19. **P4 — As-is audit.** Search the body (including admonitions) for future/planned-change language; move it to `{/* ToDo: ... */}`.
+20. **P5 — Render audit.** Build the entity list; fix every entity with more than one rendering in the document.
+21. **Reference tables and completeness.** If an Атрибут/Опис table appears inside a step or Accordion stage body, move it to the Довідкова інформація section and replace the step content with the appropriate action plus an inline link. Verify the table covers all visible fields on every screen/form/table the user encounters — add any missing read-only, status, or display-only fields. Convert any comma-separated list of enum values to `<ul><li>` format with semicolons after each entry except the last (which ends with a full stop).
+22. **Native-Ukrainian reread (`uk` pages only).** A distinct pass done *after* the meaning and structure are settled: reread the finished prose for naturalness against `native-ukrainian.md`, not for facts. Walk its §5 checklist — literal English word order, unnecessary nominalizations, anthropomorphic UI agency («Список показує…») vs. natural causality, «діалог» → «вікно»/«модальне вікно», self-reference «цей посібник»/«цей гайд» → «ця сторінка»/«цей документ», «проведе вас через» → direct purpose, and discretionary/double dashes (prefer splitting the sentence; preserve required dashes). Do not touch literal UI labels, code, selectors, links, or Markdown. Rewrite each unnatural sentence; leave negative-control cases (§4b) alone.
 
 Fix every issue found before saving.
 
 ### Step 9 — Save
 
-Save to `<content root>/<target-folder>/<slug>.md`, where the target folder was confirmed in Step 1.
+Save to `<content root>/<target-folder>/<slug>.md`, where the target folder was confirmed in Step 1 and the `<slug>` and page title follow `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` (canonical English title → kebab-case slug; folder and basename share the slug; UA/EN titles are semantic equivalents; imperative-verb-phrase title for a user guide). If this page already exists with a mismatched filename/title, do not silently rename it — report the mismatch per that file's "Existing pages" rule.
 
 Do not update the sidebar config file (`sidebars.ts`, or a project's custom-id equivalent) — it's auto-generated.
 

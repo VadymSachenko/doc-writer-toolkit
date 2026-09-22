@@ -19,6 +19,8 @@ STRUCTURE PRINCIPLE: Concept topics don't have a fixed spine. Pick sections from
 
 {/*
 State the purpose of the document. Explain how the reader will benefit from reading it. Explain the background about the topic: what is it? Why do we have it? Why do users need it? Keep this to one or two paragraphs.
+
+ORDER — ORIENT BEFORE YOU DEFINE: the first reader-visible prose paragraph (after frontmatter, imports, and these comments) must establish the page's scope, purpose, or reader benefit BEFORE the page moves into a standalone term definition or detailed explanation. Acceptable openings: "This page explains…", "This document describes…", or a direct topic-first construction — don't force one stock phrase. A definition may be folded into this opening ONLY if it also establishes scope and relevance. Do NOT lead with a bare definition and defer the real introduction to paragraph two. Do NOT add an introduction that merely repeats the title.
 */}
 
 {Overview}
@@ -78,6 +80,7 @@ DESIGN RULES — DO NOT INCLUDE IN THE FINAL DOCUMENT
 
 - A concept topic **explains**, it doesn't **instruct**. Step-by-step instructions belong in a user guide.
 - Only the overview is mandatory. Choose every other section by what the topic actually needs.
+- **Orient before you define.** The first reader-visible prose paragraph establishes scope/purpose/benefit before the page moves into a standalone definition. A definition-first opening is allowed only when the definition itself performs the complete introductory function (establishes scope and relevance). The opening must not merely repeat the title.
 - Don't duplicate a user guide's content — link out to it via Next steps or Related documents instead.
 
 ### Admonitions

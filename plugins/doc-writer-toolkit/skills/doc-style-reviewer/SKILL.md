@@ -55,7 +55,11 @@ After opening any file whose frontmatter is `scope: mixed`, read its `language_s
 
 Load the project rules layer described in the registry's "Project rank-0 layer" section: `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` (always, for every profile) and the glossary matching the profile's `<lang>` — `glossary-ua.md` or `glossary-en.md` (every profile except `ua-grammar`, which takes no terminology opinions).
 
-Both outrank the corpus. Both may be absent from a given install — when a file isn't there, skip it silently and record it as "not present" in the report header. Do not treat absence as an error, and do not substitute `ua-grammar/00-cheatsheet.md` for either one; the registry keeps it out of review deliberately.
+Also load `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` for the **title-form** rule only (every profile): in the Step 4 walk, check that the `title:` fits the page's doc type per that file — a user-guide title is an imperative phrase (not a gerund or "How to…"), a concept title is a noun phrase (not "Understanding…"), an API-reference title is a resource noun phrase — and report a form mismatch as a normal finding citing this file. This is a single-file review: do **not** attempt the slug/filename/locale-path agreement checks from that file (those are structural and belong to `doc-alignment-checker`).
+
+**On any profile whose `<lang>` is `uk`** (`gdsg@uk`, `mssg-ua@uk`, `ua-grammar@uk`), also load `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/native-ukrainian.md` — the rank-0 natural-Ukrainian prose layer (literal-English syntax, ambiguous reference, mechanical repetition, «діалог» → «вікно», self-reference «цей посібник» → «ця сторінка», «проведе вас через», and discretionary/double dashes). Apply it in the Step 4 walk: report each unnatural sentence, each «діалог» used as a generic modal name, each generic self-reference, and each decorative or doubled dash as a normal finding citing this file (the file's §5 checklist is the review checklist). Preserve its negative controls (§4b) — do not report an unambiguous pronoun, natural causality, a required dash, or a literal UI label. Never load it on an `@en` profile. Its dash rule is a project preference layered **on top of** — never a replacement for — the §161.I.14 number-range glyph check in "Glyph-level checks."
+
+Both outrank the corpus. All may be absent from a given install — when a file isn't there, skip it silently and record it as "not present" in the report header. Do not treat absence as an error, and do not substitute `ua-grammar/00-cheatsheet.md` for any of them; the registry keeps it out of review deliberately.
 
 ## Step 4 — Run the review
 
@@ -167,6 +171,7 @@ Detected document language: <uk|en|mixed> (<percentage>% <script>)
 Corpus files loaded: <bullet list of every file actually opened, for traceability>
 Project glossary consulted: <path, or "not present — skipped">
 Project formatting conventions consulted: <path, or "not present — skipped">
+Project natural-Ukrainian rules consulted: <path, or "not present — skipped", or "n/a — @en profile">   # @uk profiles only
 
 ### Errors (N)
 1. **[TAG] Short title** — <rule ID or § ref> — `<source file>`
@@ -204,7 +209,7 @@ Summary: X error(s), Y style deviation(s), Z suggestion(s).
 - Layer 1/2 of `gdsg`/`mssg-en`/`mssg-ua`: `[VOICE]`, `[GRAMMAR]`, `[PUNCTUATION]`, `[FORMATTING]`, `[STRUCTURE]`, `[TERMINOLOGY]`, `[ACCESSIBILITY]`, `[PROCEDURES]`, `[LINKING]`, `[NAMING]` (product names/trademarks/filenames).
 - For `mssg-ua` only (in addition): `[LOCALIZATION]`, `[LOCALE-FORMAT]` (numbers/date/time formats).
 - Layer 3 (`ua-grammar/`, in any `@uk` profile — including `gdsg@uk`): `[UA-SPELLING]`, `[UA-ENDINGS]`, `[UA-FOREIGN]`, `[UA-PROPER-NAMES]`, `[UA-PUNCTUATION]` (mirroring the corpus's own Parts I–V).
-- Layer 4 (project rules): the closest tag from the first list — usually `[TERMINOLOGY]` for a glossary breach and `[FORMATTING]` for a conventions breach. The citation, not the tag, is what identifies it as a project rule.
+- Layer 4 (project rules): the closest tag from the first list — usually `[TERMINOLOGY]` for a glossary breach and `[FORMATTING]` for a conventions breach. For a `native-ukrainian.md` finding pick the closest fit — `[VOICE]` for literal-English syntax/ambiguous-reference/self-reference, `[TERMINOLOGY]` for «діалог»→«вікно», `[PUNCTUATION]` for a discretionary/doubled dash. The citation, not the tag, is what identifies it as a project rule.
 
 **Citation format:**
 - MSSG/GDSG: rule ID + file path, e.g. `GDSG-PUNCT-COMMAS-COLONS` — `punctuation/commas-and-colons.md`.

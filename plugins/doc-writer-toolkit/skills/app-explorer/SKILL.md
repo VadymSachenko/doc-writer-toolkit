@@ -73,7 +73,7 @@ For each screen in the plan:
 1. Navigate to the screen using the credentials from `.env`.
 2. Observe and record:
    - Exact screen name (as shown in the UI, not guessed)
-   - All visible UI elements: button labels, field names, column headers, status values, dropdown options, tab names
+   - All visible UI elements: button labels, field names, column headers, status values, dropdown options, tab names. **Record every label exactly as the UI shows it — keep any decorative terminal punctuation (`Create!`, `Receiving:`, `What's new?`).** This is the "exact observed label" representation in `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` Ж1a: `app-notes.md` is evidence, so it preserves the literal wording. The writer applies Ж1a normalization (stripping decorative punctuation) when the label goes into prose — do **not** normalize here.
    - What happens in each state (empty, loaded, success, error)
    - Any warnings, banners, or contextual messages
    - The exact wording of any label you are unsure about

@@ -27,6 +27,8 @@ Load these files at the start of the task. Do not load others unless the user re
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/api-integration-context.md` — cross-cutting facts about the API (balances, transaction lifecycle, webhooks, disputes, auth, business rules). Always applicable background.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` — rank-0 project formatting conventions (what bold/italic/code font mean here, placeholder form, one-entity-one-render, code-entity vs. human concept). Outranks everything else loaded for this task, including this skill's own body. API reference pages are always English, so only its Core section and English section apply.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-selection.md` — shared screenshot selection procedure: three-folder model, four selection cases, sensitive-content screening, rename pattern, full-page vs. compact classification.
+- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` — the shared page-to-page link contract (see the link rule in Step 5).
+- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` — the shared slug/title/filename convention (used to name the output file in Step 8; API titles are noun phrases matching the endpoint's resource).
 
 **Style guide (project-declared, resolved before drafting):**
 - Follow `${CLAUDE_PLUGIN_ROOT}/context/style-guide-registry.md` — "Resolving which guide a project uses" section — to find this project's declared `Style guide:` token (from its `CLAUDE.md`), then that file's "Loading procedure per guide" for the resolved token, mapping the content you're about to write (request/response tables, code samples, error lists, admonitions, formulas, terminology, etc.) to the matched topical files.
@@ -106,7 +108,7 @@ Rules:
 - **Apply the glossary.** Replace synonyms with canonical EN terms (Partner, Transaction, Webhook, etc.).
 - **Sentence style, UI labels, status values, placeholders, code-vs-concept rendering:** follow `formatting-conventions.md`'s Core section (Ж1–Ж7) and its English section — do not restate them here.
 - **Match the template's section structure.** Prerequisites (if applicable), Authentication, endpoint action, Request, Response, Possible errors, Next steps.
-- **Internal links to other doc pages must be absolute.** Form every link (Authentication page, Next steps, Other management options, error-codes page, etc.) as the project's declared **UA URL prefix** (resolved via `project-paths.md` in "Sources to load") + the target page's path relative to the content root, **with no `.md`/`.mdx` extension** — e.g. `/api-reference/authentication/authentication`, or `/partner-cabinet/transactions/transactions` for a project whose prefix is `/partner-cabinet/`. Append an anchor as `#slug` when linking to a section. **Never** write a document-relative link (`./…`, `../…`) to another page, and never hardcode `/docs/`. This governs page-to-page links only — screenshot/asset links stay document-relative (`./.assets/…`).
+- **Internal links to other doc pages follow the shared contract.** Build every page-to-page link (Authentication page, Next steps, Other management options, error-codes page, etc.) exactly as `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` prescribes — site-root-relative, the declared UA URL prefix joined to the target's path relative to the content root, no `.md`/`.mdx`, anchors preserved. That file is authoritative for what is and isn't a page link (asset links `./.assets/…` are exempt); do not restate its algorithm here.
 - **For code fences:** use `json` for JSON bodies, `bash` for cURL examples, `text` for plain strings.
 - **For long request or response samples:** wrap in `<details>` blocks.
 - **For reader-replaced placeholders:** `*`\``UPPER_CASE`\``*`.
@@ -120,7 +122,7 @@ Before writing to disk, check:
 - No future tense (`will`, `would`) in descriptions of current behavior
 - No marketing adjectives (`powerful`, `seamless`, `robust`)
 - No stale links from example files (e.g., `/docs/wellfunnel-*`)
-- Every link to another doc page is absolute (project UA URL prefix + path, no `.md`); no `./`/`../` page links, no hardcoded `/docs/` (asset links `./.assets/…` are exempt)
+- Every link to another doc page follows `internal-links.md` (declared UA URL prefix + path, no `.md`); no `./`/`../` page links, no hardcoded `/docs/` (asset links `./.assets/…` are exempt)
 - Every fact is traceable to an input source or a user answer from Step 4
 - All required template sections are present; optional ones are either filled or omitted (not left as empty placeholders)
 - UI labels, status values, placeholders, and code-vs-concept rendering follow `formatting-conventions.md` Ж1–Ж4
@@ -145,7 +147,7 @@ Fix every issue found before saving.
 
 ### Step 8 — Save
 
-Save the page to `<API reference root>/<slug>/<slug>.md` (resolved in Sources to load). Create intermediate directories as needed.
+Save the page to `<API reference root>/<slug>/<slug>.md` (resolved in Sources to load), where `<slug>` follows `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` (canonical English title → kebab-case slug; folder and basename share the slug). Create intermediate directories as needed. If the page already exists with a mismatched filename/title, do not silently rename it — report the mismatch per that file's "Existing pages" rule.
 
 Do not update `sidebars.ts` — the sidebar is auto-generated.
 

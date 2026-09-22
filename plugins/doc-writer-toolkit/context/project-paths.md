@@ -34,7 +34,7 @@ None of these is safe to hardcode in a skill file — different projects install
 - **EN i18n root:** `i18n/en/docusaurus-plugin-content-docs/current/`
 - **UA URL prefix:** `/`
 - **API reference root:** `docs/api-reference/`
-- **Screenshot frame:** `rectangular, 3px, #CC0000`
+- **Screenshot frame:** `3px, #CC0000`
 - **Screenshot scope:** `container`
 - **Screenshot padding:** `24`
 - **Compact image width:** `480`

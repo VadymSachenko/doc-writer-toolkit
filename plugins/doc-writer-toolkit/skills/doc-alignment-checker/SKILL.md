@@ -17,6 +17,8 @@ You are checking whether a Ukrainian documentation page and its English counterp
 Load these files at the start of the task. Do not load others unless the user references them explicitly.
 
 - Follow `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` to resolve this project's **UA content root**, **EN i18n root**, and **UA URL prefix**. Do not assume `partner-cabinet/` or any other default.
+- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` — the shared page-to-page link contract. Check 5 checks links against this file's algorithm; do not restate it here.
+- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` — the shared slug/title/filename convention. Check 11 checks title form and slug/filename agreement against this file; do not restate it here.
 - The UA page being checked (at the path resolved above).
 - The EN counterpart page (at the path resolved above).
 
@@ -81,9 +83,7 @@ This check applies regardless of which file is main.
 
 ### Check 5 — Internal link prefixes
 
-Internal links within the UA content root must use this project's declared **UA URL prefix** (resolved in Path mapping above — e.g. `/partner-cabinet/`, or `/` for a project with no split instance). Flag any internal link that uses a bare relative path or an incorrect prefix.
-
-Check both files for this pattern.
+Every page-to-page link in both files must match the output of the route-building algorithm in `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` for this project's declared **UA URL prefix** (resolved in Path mapping above). Flag any page link that uses a bare relative path (`./`, `../`), a hardcoded prefix, a leftover `.md`/`.mdx` extension, or a prefix other than the declared one. Per that file, this is a **structural match check only** — do not verify the target page exists, and do not touch asset links (`./.assets/…`), external URLs, same-page anchors, or MDX imports.
 
 **Flag:** `[LINK — INCORRECT PREFIX]` — show the full offending link and line number.
 
@@ -120,6 +120,18 @@ Do not flag: inline code, technical terms that have no UA form (API, UUID, JSON,
 
 **Flag:** `[UNTRANSLATED PROSE IN UA FILE]` — show the line number and the English text found.
 
+### Check 11 — Title, slug, and filename agree
+
+A structural check only, against `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md`:
+
+- Both files share one relative path and filename basename (the two locales are the same page in two roots). Flag a divergent basename.
+- The filename basename is the kebab-case slug of the **canonical English title** (drop articles); an explicit `slug:` frontmatter field, if present, still names the same topic. Flag a basename that names a different topic than the EN title, or an EN/UA title that name different topics from each other.
+- The title form matches the doc type per that file (user guide = imperative phrase; concept = noun phrase; API reference = resource noun phrase). Flag a form mismatch.
+
+Per that file, **report the mismatch — never rename**. `index.md` and other generated files are exempt.
+
+**Flag:** `[NAMING — TITLE/SLUG MISMATCH]` — show the filename, both titles, and what disagrees.
+
 ## Step 3 — Report
 
 Format the report as follows:
@@ -145,7 +157,7 @@ Severity rules:
 | Severity | Checks |
 |---|---|
 | **Bug** | Type column not English; incorrect link prefix; code block mismatch; heading count/level mismatch; Cyrillic text in EN file |
-| **Warning** | Date mismatch; table row/column mismatch; `<details>` count mismatch; marker mismatch; untranslated prose in UA file; UA heading missing anchor |
+| **Warning** | Date mismatch; table row/column mismatch; `<details>` count mismatch; marker mismatch; untranslated prose in UA file; UA heading missing anchor; title/slug/filename mismatch |
 
 If no issues are found for a check, list it under **Passed**. Do not omit passed checks — a full green list is useful confirmation.
 

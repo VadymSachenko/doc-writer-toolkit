@@ -5,7 +5,7 @@ argument-hint: "[optional: path glob to limit scope, e.g. api-reference/create-p
 
 You are resolving documentation TODOs for this Docusaurus project. Resolve the project's actual content roots via `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` before doing anything else — do not assume `docs/`. Both locales live in the same repo, at the project's declared **UA content root** and **EN i18n root**.
 
-**Link prefix rule:** internal doc links must use the project's declared **UA URL prefix** (also from `project-paths.md`) — e.g. no extra path segment at all when the prefix is `/`, or `/partner-cabinet/` for a project with a custom-id docs plugin instance. Never hardcode `/docs/` — that prefix is wrong for a project whose `routeBasePath` is `/`.
+**Link rule:** every page-to-page link you insert must follow the route-building algorithm in `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` — the project's declared **UA URL prefix** (from `project-paths.md`) joined to the target's path relative to the content root, no `.md`/`.mdx`, anchors preserved, never `./`/`../`, never a hardcoded `/docs/`. That file is authoritative; do not restate its steps here.
 
 ---
 
@@ -65,7 +65,7 @@ For each confirmed fix:
 
 - **Bucket A (inline):** Replace the TODO comment with the Markdown link. Preserve surrounding prose exactly.
 - **Bucket B (block comment):** Replace the entire `{/* ... */}` block with the user-approved prose. Polish punctuation and sentence flow to match the surrounding text, but do not rewrite beyond what is needed.
-- For both UA and EN files: use the project's declared **UA URL prefix** (from `project-paths.md`) + the doc's relative path, no `.md` extension — e.g. `/routing/pools` for a project whose prefix is `/`, or `/partner-cabinet/transactions/transactions` for a project whose prefix is `/partner-cabinet/`.
+- For both UA and EN files: build the inserted link with the `internal-links.md` algorithm (declared **UA URL prefix** + the target's path relative to the content root, no `.md`) — e.g. `/routing/pools` for a project whose prefix is `/`, or `/partner-cabinet/transactions/transactions` for a project whose prefix is `/partner-cabinet/`.
 
 ---
 

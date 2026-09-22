@@ -1,36 +1,4 @@
-# Claude tasks for doc-writer-toolkit
 
-These 9 tasks consolidate the original 14 issue blocks. Copy the common execution contract together with one task when assigning work to Claude.
-
-## Common execution contract
-
-### Execution context
-
-Work only in /Users/vadym/Projects/doc-writer-toolkit. Host documentation repositories are unavailable. Do not search for, inspect, edit, or validate product docs, i18n directories, source pages, or screenshots. Treat every example in the task as a self-contained regression fixture.
-
-Before editing:
-
-1. Read the repository CLAUDE.md.
-2. Inspect .claude-plugin/marketplace.json and identify the plugin tree actually loaded at runtime.
-3. Make behavioral changes only in that runtime tree. It currently points to plugins/doc-writer-toolkit/.
-4. If the duplicate plugin trees disagree, report the packaging drift. Do not synchronize both trees or change the marketplace source unless explicitly requested.
-5. Preserve all unrelated working-tree changes.
-
-Use one authoritative shared rule for each behavior. Route relevant skills to it instead of copying the complete rule into multiple SKILL.md files. Keep commands thin.
-
-### Validation
-
-This repository has no general end-to-end skill test harness, and no host documentation project is available. Do not claim host-project or Playwright end-to-end validation.
-
-At minimum:
-
-- Run git diff --check.
-- Use targeted rg searches for stale or contradictory instructions.
-- Use self-contained fixtures or synthetic configuration where needed.
-- Validate JSON only if a manifest changes.
-- Report every changed file, the behavior it controls, and anything that still requires host-project validation.
-
----
 
 ## Task 1: Add one shared native-Ukrainian quality pass
 
@@ -144,7 +112,7 @@ Unnecessary:
 
 Preferred:
 
-«Статус online позначає стан сесії. Він не залежить від перемикачів».
+«Статус online відображає стан сесії. Він не залежить від перемикачів».
 
 Control cases that must remain valid:
 

@@ -26,9 +26,12 @@ Load these files at the start of the task. Do not load others unless the user re
 
 **Project rules:**
 - `uk` → `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-ua.md`; `en` → `glossary-en.md` — canonical terminology for the resolved language.
+- **`uk` only** → `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/native-ukrainian.md` — rank-0 natural-Ukrainian prose rules (literal-English syntax, ambiguous reference, mechanical repetition, «вікно» not «діалог», self-reference «ця сторінка» not «цей посібник», discretionary dashes). Load only on a `uk` page; it has no `en` counterpart. Drives the native-Ukrainian reread in Step 7.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/api-integration-context.md` — cross-cutting facts about the API (balances, transaction lifecycle, webhooks, disputes, auth, business rules). Always applicable background.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` — rank-0 project formatting conventions (what bold/italic/code font mean here, placeholder form, one-entity-one-render, code-entity vs. human concept). Outranks everything else loaded for this task, including this skill's own body. Loaded regardless of resolved language — it carries both a language-neutral core and a per-language section.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-selection.md` — shared screenshot selection procedure: three-folder model, four selection cases, sensitive-content screening, rename pattern, full-page vs. compact classification.
+- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` — the shared page-to-page link contract (see the link rule in Step 5).
+- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` — the shared slug/title/filename convention (used to name the output file and title in Step 8).
 
 **UA grammar — only when the resolved language is `uk`:**
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/ua-grammar/00-cheatsheet.md` — always-loaded quick reference for UA orthography. Do not load this on an `en` page; it is Ukrainian-specific and has no EN counterpart (English sentence-style rules live in `formatting-conventions.md`'s English section instead).
@@ -114,12 +117,12 @@ Wait for the user's answers before Step 5.
 Apply the template resolved in "Sources to load". Concept topics do not have a fixed spine — choose sections from the template's section menu that fit the topic.
 
 Rules:
-- **Overview is mandatory.** Every page must open with a lead paragraph that states: what this concept is, why it exists in the system, and why the partner needs to understand it.
+- **Overview is mandatory, and it must orient before it defines.** Every page must open with a lead paragraph that states: what this concept is, why it exists in the system, and why the partner needs to understand it. **The first reader-visible prose paragraph** (the first paragraph after frontmatter, imports, and template comments — not a heading, not a comment) must establish the page's scope, purpose, or reader benefit *before* the page drops into a standalone term definition or detailed explanation. Acceptable openings: «Ця сторінка пояснює…», «У цьому документі описано…», or a direct topic-first construction — do not force one stock phrase. A definition may be folded into that opening **only when the definition itself also establishes scope and relevance** (it performs the complete introductory function). Do **not** lead with a bare definition and defer the actual page introduction to paragraph two, and do **not** add an introduction that merely restates the title.
 - **Write in the resolved content language.** Follow the template's Design rules section, and the sentence-style, heading-language, and terminology rules for that language in `formatting-conventions.md` (imperative mood, present tense for current behavior, intro-sentence phrasing before numbered lists, UCP/UniComPay naming) — do not restate them here.
 - **Never invent facts.** If a fact is not in the sources or user answers, flag it with `{/* NEEDS CONFIRMATION: what's unclear */}` — don't guess.
 - **Apply the glossary** resolved in "Sources to load". Replace synonyms with the canonical term for the resolved language.
 - **No step-by-step procedures.** Instructions belong in user guides. Concept topics explain; they do not instruct.
-- **Internal links to other doc pages must be absolute.** Form every link (in Prerequisites, Next steps, Related documents, or inline) as the project's declared **UA URL prefix** (resolved via `project-paths.md` in "Sources to load") + the target page's path relative to the content root, **with no `.md`/`.mdx` extension** — e.g. `/balance/add-cards/add-cards`, or `/partner-cabinet/transactions/transactions` for a project whose prefix is `/partner-cabinet/`. Append an anchor as `#slug` when linking to a section. **Never** write a document-relative link (`./…`, `../…`) to another page, and never hardcode `/docs/`. This governs page-to-page links only — screenshot/asset links stay document-relative (`./.assets/…`).
+- **Internal links to other doc pages follow the shared contract.** Build every page-to-page link (in Prerequisites, Next steps, Related documents, or inline) exactly as `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` prescribes — site-root-relative, the declared UA URL prefix joined to the target's path relative to the content root, no `.md`/`.mdx`, anchors preserved. That file is authoritative for what is and isn't a page link (asset links `./.assets/…` and same-page anchors are exempt); do not restate its algorithm here.
 - **For flows and lifecycles:** prefer a Mermaid `sequenceDiagram` for multi-actor flows and a Mermaid `flowchart` for decision trees or status transitions.
 - **For screenshots:** only embed from `.assets/` (root) — never from `.assets/ref/`. Choose syntax based on the classification from Step 2:
   - **Full-page**: `![Descriptive alt text](./.assets/image.png)`
@@ -149,9 +152,10 @@ Before writing to disk, check:
 - No product/UI element used as the grammatical subject where the reader should be (active voice, second person — `formatting-conventions.md` sentence-style section)
 - Every fact in the page is traceable to an input source or a user answer from Step 4
 - The overview is present and covers: what the concept is, why it exists, and why the reader needs it
+- **Orient-before-define.** The first reader-visible prose paragraph (skip frontmatter, imports, and `{/* … */}` comments to find it) establishes scope/purpose/benefit before any standalone definition. A definition-first opening is allowed only when that definition also establishes scope and relevance. The opening does not merely repeat the title.
 - All chosen sections are complete; bare placeholders are either filled or removed
 - Next steps links only to user guides; Related documents links to other concepts or references
-- Every link to another doc page is absolute (project UA URL prefix + path, no `.md`); no `./`/`../` page links, no hardcoded `/docs/` (asset links `./.assets/…` are exempt)
+- Every link to another doc page follows `internal-links.md` (declared UA URL prefix + path, no `.md`); no `./`/`../` page links, no hardcoded `/docs/` (asset links `./.assets/…` are exempt)
 - The draft conforms to every rule in the style-guide topical files loaded per "Sources to load" (resolved via `style-guide-registry.md`) — check against those files directly, don't rely on memory of past drafts
 - **P1 — Inherited wording normalized.** For every heading and every bolded fragment, confirm it is not lifted from `.sources/` (a heading, a bold label, an entire phrase) without normalization. The interview/notes are a source of *facts*, not of *wording* — a heading or emphasis pattern copied verbatim from `sme-interview.md` is a defect even if the fact itself is correct.
 - **P2 — Heading language (Ж7).** Every heading is in the resolved content language; a code entity inside one stays in `code font` but the surrounding words don't switch language.
@@ -175,12 +179,13 @@ After the self-review passes, do a focused second read that targets the project-
 10. **P3 — Bold audit.** Re-walk every `**...**` span; strip bold from anything that isn't a visible UI label.
 11. **P4 — As-is audit.** Search the body (including admonitions) for future/planned-change language; move it to `{/* ToDo: ... */}`.
 12. **P5 — Render audit.** Build the entity list; fix every entity with more than one rendering in the document.
+13. **Native-Ukrainian reread (`uk` pages only).** This is a distinct pass, done *after* the meaning is settled: reread the finished prose for naturalness against `native-ukrainian.md`, not for facts. Walk its §5 checklist — literal English word order, unnecessary nominalizations, anthropomorphic UI agency («Список показує…») vs. natural causality, «діалог» → «вікно»/«модальне вікно», self-reference «цей посібник»/«цей гайд» → «ця сторінка»/«цей документ», «проведе вас через» → direct purpose, and discretionary/double dashes (prefer splitting the sentence; preserve required dashes). Do not touch literal UI labels, code, selectors, links, or Markdown. Rewrite each unnatural sentence; leave negative-control cases (§4b) alone.
 
 Fix every issue found before saving.
 
 ### Step 8 — Save
 
-Save to `<content root>/<target-folder>/<slug>.md`, where the target folder was confirmed in Step 1.
+Save to `<content root>/<target-folder>/<slug>.md`, where the target folder was confirmed in Step 1 and the `<slug>` and page title follow `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` (canonical English title → kebab-case slug; folder and basename share the slug; UA/EN titles are semantic equivalents). If this page already exists with a mismatched filename/title, do not silently rename it — report the mismatch per that file's "Existing pages" rule.
 
 Do not update the sidebar config file (`sidebars.ts`, or a project's custom-id equivalent) — it's auto-generated.
 

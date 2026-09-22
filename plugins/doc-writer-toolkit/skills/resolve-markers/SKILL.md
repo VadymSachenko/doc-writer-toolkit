@@ -26,8 +26,9 @@ You are resolving documentation markers — `{/* NEEDS CONFIRMATION: ... */}` an
 4. The section's `.assets/` folder — list what screenshots already exist there.
 5. The doc pages in the section — read each one to find markers.
 6. If `Admin UI: playwright` is declared in the project's `CLAUDE.md` — also load `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/value-realism.md` and `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-capture.md`.
+7. `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` — **only for Ж1a** (UI-label terminal-punctuation normalization), applied when a confirmed UI label is written into a bold span in prose (Step 4). Do not use it to rewrite surrounding prose.
 
-Do not load style-guide corpora. This skill edits markers only — it does not rewrite prose beyond filling in the confirmed fact.
+Do not load style-guide corpora (formatting-conventions.md is a project rank-0 file, not a corpus). This skill edits markers only — it does not rewrite prose beyond filling in the confirmed fact.
 
 ## Step 0 — Build the evidence index
 
@@ -90,7 +91,7 @@ For each `resolvable` marker:
 - Remove the `{/* NEEDS CONFIRMATION: ... */}` comment.
 - Replace the uncertain text with the confirmed answer.
 - Keep surrounding prose intact — only change what the marker flagged.
-- Use the exact UI label/term as observed, not a paraphrase.
+- Use the exact UI label/term as observed, not a paraphrase — but when it goes into **prose inside a bold span**, apply Ж1a of `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md`: strip decorative terminal punctuation (`Create!` → **Create**, `Receiving:` → **Receiving**, `What's new?` → **What's new**) while preserving internal symbols (`Save & close` stays **Save & close**). The observed literal (with punctuation) stays the evidence in `app-notes.md`; the normalized form is what the page shows. If normalization leaves no useful label, follow the icon-only-control workflow instead.
 
 For each `screenshot-available` marker:
 - Remove the `{/* ToDo: add a screenshot */}` comment.

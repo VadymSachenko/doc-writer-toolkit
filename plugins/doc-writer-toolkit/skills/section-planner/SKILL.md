@@ -21,11 +21,12 @@ You are proposing the documentation structure for one section. You read what alr
 ## Sources to load
 
 1. `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — resolve content root and language.
-2. `${CLAUDE_PLUGIN_ROOT}/context/style-guide-registry.md` — resolve the project's declared style guide token, then load **only the naming and titles topic file** from that corpus (via its ROUTING.md). Do not load the full corpus — only the file(s) that cover filename conventions, page title conventions, and topic-type naming rules (e.g. imperative mood for task-based titles). This is the only style-guide loading this skill does.
-3. The section's `.sources/section-readiness.json` — **required**. If absent, tell the user to run `section-readiness` first.
-4. The section's `.sources/app-notes.md` — **required when `Admin UI: playwright` is declared** (it is the app-flow evidence this skill plans from), **optional otherwise**. Load if present. If it is absent and a live UI is available, stop and run `app-explorer` first (see Step 0).
-5. The section's `.sources/sme-interview.md` — **optional**. Load if present — good for business-rule context.
-6. Existing pages in the section folder — read each stub lightly (frontmatter + comment blocks) to understand the intended structure already captured there. Do not read complete pages in full — skim only.
+2. `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` — the shared slug/title/filename convention. It is authoritative for every proposed slug and title (see "Slug rules" / "Title rules" below).
+3. `${CLAUDE_PLUGIN_ROOT}/context/style-guide-registry.md` — resolve the project's declared style guide token, then load **only the naming and titles topic file** from that corpus (via its ROUTING.md). Do not load the full corpus — only the file(s) that cover filename conventions, page title conventions, and topic-type naming rules (e.g. imperative mood for task-based titles). This is the only style-guide loading this skill does.
+4. The section's `.sources/section-readiness.json` — **required**. If absent, tell the user to run `section-readiness` first.
+5. The section's `.sources/app-notes.md` — **required when `Admin UI: playwright` is declared** (it is the app-flow evidence this skill plans from), **optional otherwise**. Load if present. If it is absent and a live UI is available, stop and run `app-explorer` first (see Step 0).
+6. The section's `.sources/sme-interview.md` — **optional**. Load if present — good for business-rule context.
+7. Existing pages in the section folder — read each stub lightly (frontmatter + comment blocks) to understand the intended structure already captured there. Do not read complete pages in full — skim only.
 
 Do not load templates — this skill proposes page types, it does not write pages. Templates are the writers' concern.
 
@@ -68,16 +69,16 @@ For each page that should exist in the final section, propose:
 
 ### Slug rules (apply to every proposed slug)
 
-- **Always lowercase.** No uppercase letters anywhere in the path.
-- **Words separated by hyphens** (`-`), never underscores or spaces.
-- **Folder name and filename match** — the page at `add-funds/add-funds.md`, not `add-funds/index.md` or `add-funds/addFunds.md`.
-- **Derived from the title** — convert the title to kebab-case and drop articles (a, an, the).
+Every slug follows the shared algorithm in `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` — do not restate it. In short: the canonical English title, lowercased, articles dropped, kebab-cased; folder name and filename basename share that slug (`add-funds/add-funds.md`, not `add-funds/index.md`). Load that file (see "Sources to load") before proposing any slug or title.
 
 ### Title rules (apply to every proposed title, using the loaded style-guide naming file)
+
+Title form by doc type comes from `naming-conventions.md` (loaded above), reconciled with the style-guide naming file:
 
 - **User guides (task-based):** imperative verb phrase — "Add funds", "Manage cards", "View account balances". Not "Adding funds", not "Fund addition", not "How to add funds".
 - **Concept topics (background knowledge):** noun phrase — "Balance overview", "Transaction lifecycle", "Card types". Not "Understanding balances", not "How balances work".
 - **API reference:** noun phrase matching the endpoint's resource — "Create payin transaction", "Retrieve transaction details".
+- The Ukrainian title is a natural, semantic equivalent of the English title; both locales share the path/filename (per `naming-conventions.md`).
 - Apply any additional title conventions from the loaded style-guide naming file. If the style guide conflicts with the rules above, the style guide wins — it is loaded precisely for this purpose.
 
 ### Action rules

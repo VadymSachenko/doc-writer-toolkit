@@ -8,13 +8,13 @@ These rules govern *how* to capture. For *which* screenshots to select and embed
 
 ## Section 0 — Resolve capture configuration (do this first)
 
-Frame style, default scope, compact-image width, and blur radius are **project-declared, not hardcoded** — a project's UI may need square frames, a different accent color, or a wider compact image than another's. Resolve them before the first capture.
+Frame **thickness and color**, default scope, compact-image width, and blur radius are **project-declared, not hardcoded** — a project's UI may need a different accent color or a wider compact image than another's. Resolve them before the first capture. **Frame shape is not configurable:** every annotation is a **rectangular, border-only** frame (`border-radius: 0`, transparent fill). This is an invariant — see the annotation invariant below and Section 3.
 
 1. Read the invoking project's `CLAUDE.md` — the same **"Documentation toolkit configuration"** section that declares the style guide and content roots (see `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`). Read these fields:
 
    | Field | Meaning | Default if undeclared |
    |---|---|---|
-   | `Screenshot frame:` | `{shape}, {thickness}, {color}` — shape is `rectangular`, `rounded`, or `match-element`; thickness in px; color as hex | `rectangular, 3px, #CC0000` |
+   | `Screenshot frame:` | `{thickness}, {color}` — thickness in px; color as hex. Shape is **always** `rectangular` and is not read from config (see below). | `3px, #CC0000` |
    | `Screenshot scope:` | default clip for a plain (non-overlay) capture: `container` (scope ladder, Section 1) or `full-page` (full viewport) | `container` |
    | `Screenshot padding:` | px of padding added around a clipped capture on all sides (Section 1) | `24` |
    | `Compact image width:` | width in px for compact embeds (dialogs, panels) | `480` |
@@ -23,14 +23,24 @@ Frame style, default scope, compact-image width, and blur radius are **project-d
 
 2. If a field is present, use its value for every capture in this run.
 3. If a field is missing, use the default above **and** offer once to persist the declaration into that project's `CLAUDE.md` under the same section — do not ask again on the next run. Do not stop for a missing field; the defaults are always safe.
-4. Never bake a shape, color, width, radius, or padding into a capture from memory — always resolve it from config or the documented default here.
+4. Never bake a color, width, radius, or padding into a capture from memory — always resolve it from config or the documented default here.
+
+### Annotation shape invariant (not overridable)
+
+The annotation frame is **always a rectangle with square corners and no fill**: `border-radius: 0`, `backgroundColor` unset (transparent), a solid border only. No rounded corners, no translucent region fill, no circles, arrows, or freehand marks. A project **cannot** override this through config.
+
+**Legacy shape config — deprecate, warn, normalize.** Older projects may still declare a three-part `Screenshot frame:` value like `rounded, 3px, #CC0000` or `match-element, 3px, #CC0000`, or a separate shape field. When you read a shape token other than `rectangular`:
+
+1. **Do not silently continue rendering rounded (or element-matched) frames.**
+2. **Warn** the user once: name the deprecated shape value found and state that annotations are now rectangular border-only.
+3. **Normalize:** ignore the shape token, take only the thickness and color from the value, and render the rectangular border-only frame. Offer once to rewrite the declaration to the two-part `{thickness}, {color}` form.
 
 Example declaration:
 
 ```md
 ## Documentation toolkit configuration
 
-- **Screenshot frame:** `rectangular, 3px, #CC0000`
+- **Screenshot frame:** `3px, #CC0000`
 - **Screenshot scope:** `container`
 - **Screenshot padding:** `24`
 - **Compact image width:** `480`
@@ -38,7 +48,7 @@ Example declaration:
 - **Doc content width:** `840`
 ```
 
-Throughout this file, `{frame.shape}`, `{frame.thickness}`, `{frame.color}`, `{padding}`, `{blur.radius}`, and `{doc.content.width}` refer to the resolved values.
+Throughout this file, `{frame.thickness}`, `{frame.color}`, `{padding}`, `{blur.radius}`, and `{doc.content.width}` refer to the resolved values. There is no `{frame.shape}` — the shape is always rectangular.
 
 ---
 
@@ -124,9 +134,9 @@ For state changes that do not open a separate overlay (e.g., a table refreshes i
 
 ## Section 3 — Annotations
 
-Draw the frame as a **separate overlay `<div>` positioned over the element**, not as an `outline`/`border` on the element itself. This is deliberate: an `outline` on the element inherits the element's own `border-radius`, so a rounded button gets a rounded frame — inconsistent across a page. A standalone overlay makes the frame shape depend only on the resolved `Screenshot frame:` config (Section 0), never on the element.
+Draw the frame as a **separate overlay `<div>` positioned over the element**, not as an `outline`/`border` on the element itself. This is deliberate: an `outline` on the element inherits the element's own `border-radius`, so a rounded button would get a rounded frame. A standalone overlay makes the frame a **rectangle with square corners regardless of the element** — which is the required shape (Section 0 invariant).
 
-Pass the resolved frame config into the injection. `shape` maps to the overlay's `border-radius`: `rectangular` → `0`; `rounded` → a fixed `6px`; `match-element` → the element's own computed `border-radius` (the only mode that follows the element).
+The overlay is **border-only and rectangular**: `border-radius: 0` and no background fill, always. Only the border's `thickness` and `color` come from config; the shape never does. Do not read a `{frame.shape}` value — there isn't one.
 
 **Visual-thickness normalization.** A full-page screenshot is displayed at roughly `{doc.content.width} / viewport_width` scale in the doc, while a compact screenshot is displayed at `{compact-width} / clip_width` scale. A fixed CSS `border-width` that looks correct in a compact clip will appear proportionally thinner on a full-page shot. To keep the perceived frame the same across both shot types, compute an `adjustedThickness` before injecting:
 
@@ -149,7 +159,7 @@ Use `adjustedThickness` in place of `{frame.thickness}` everywhere inside the in
 const scale = {compact-width} / clipWidth;          // or {doc.content.width} / viewportWidth for full-page
 const adjustedThickness = Math.round({frame.thickness} / scale);
 
-const frame = { shape: '{frame.shape}', thickness: adjustedThickness, color: '{frame.color}' };
+const frame = { thickness: adjustedThickness, color: '{frame.color}' };
 
 // inject
 await page.locator(selector).evaluate((el, frame) => {
@@ -163,9 +173,7 @@ await page.locator(selector).evaluate((el, frame) => {
     width:  r.width  + 'px',
     height: r.height + 'px',
     border: `${frame.thickness}px solid ${frame.color}`,
-    borderRadius: frame.shape === 'rectangular' ? '0'
-                : frame.shape === 'rounded'     ? '6px'
-                : getComputedStyle(el).borderRadius,   // match-element
+    borderRadius: '0',              // rectangular invariant — never rounded or element-matched
     boxSizing: 'content-box',
     pointerEvents: 'none',
     zIndex: '2147483647',
@@ -179,14 +187,14 @@ await page.locator(selector).evaluate((el, frame) => {
 await page.locator('[data-_annotation]').evaluateAll(els => els.forEach(el => el.remove()));
 ```
 
-**Region highlight — a panel, column, or area a concept page describes:** same overlay, plus a translucent fill (derive it from `{frame.color}` at ~6 % opacity):
+**Region highlight — a panel, column, or area a concept page describes:** the **same border-only rectangular overlay** as an interactive element — no translucent fill, no background. A region is distinguished by the area the frame encloses, not by a tint.
 
 ```javascript
 // Compute before injecting:
 const scale = {compact-width} / clipWidth;          // or {doc.content.width} / viewportWidth for full-page
 const adjustedThickness = Math.round({frame.thickness} / scale);
 
-const frame = { shape: '{frame.shape}', thickness: adjustedThickness, color: '{frame.color}', fill: '{frame.color}0F' };
+const frame = { thickness: adjustedThickness, color: '{frame.color}' };
 
 // inject
 await page.locator(selector).evaluate((el, frame) => {
@@ -200,11 +208,8 @@ await page.locator(selector).evaluate((el, frame) => {
     width:  r.width  + 'px',
     height: r.height + 'px',
     border: `${frame.thickness}px solid ${frame.color}`,
-    borderRadius: frame.shape === 'rectangular' ? '0'
-                : frame.shape === 'rounded'     ? '6px'
-                : getComputedStyle(el).borderRadius,
-    backgroundColor: frame.fill,   // 8-digit hex: color + alpha (0F ≈ 6 %)
-    boxSizing: 'content-box',
+    borderRadius: '0',              // rectangular invariant
+    boxSizing: 'content-box',       // no backgroundColor — border-only, transparent
     pointerEvents: 'none',
     zIndex: '2147483647',
   });
@@ -217,7 +222,7 @@ await page.locator(selector).evaluate((el, frame) => {
 await page.locator('[data-_annotation]').evaluateAll(els => els.forEach(el => el.remove()));
 ```
 
-The frame's shape, thickness, and color are the resolved config values (Section 0) — never a hardcoded shape or color. The `adjustedThickness` normalization ensures the frame renders at the declared `{frame.thickness}` in the final doc regardless of whether the shot is full-page or compact. `match-element` is available for a project that deliberately wants the frame to hug rounded elements; the default `rectangular` keeps every frame consistent.
+The frame's thickness and color are the resolved config values (Section 0); the shape is the fixed rectangular invariant — never a configured or hardcoded rounded/element-matched shape, and never a background fill. The `adjustedThickness` normalization ensures the frame renders at the declared `{frame.thickness}` in the final doc regardless of whether the shot is full-page or compact.
 
 **When to annotate:**
 - `app-explorer`: annotate the primary interactive element for every state captured. For Shot 1 of a two-shot capture and for the union shot of an anchored overlay, always annotate the trigger.

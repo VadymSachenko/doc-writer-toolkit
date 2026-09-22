@@ -32,6 +32,8 @@ Load these files at the start of the task.
 
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-en.md` — canonical EN terminology. Use it to replace UA terms with their correct EN equivalents.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` — rank-0 project formatting conventions. Core section and English section apply. Outranks this skill's own body for any rule both cover.
+- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` — the shared page-to-page link contract. Translation **preserves an already-correct route verbatim** (see "Never translate" and Step 4); do not re-derive or localize a path.
+- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` — the shared slug/title convention. The EN and UA pages share one path/filename; the EN `title:` is the semantic equivalent of the UA title. Never re-slug or move the page.
 - The Ukrainian source file, at the path resolved above.
 
 **Style guide (project-declared, resolved before translating):**
@@ -58,7 +60,7 @@ Load these files at the start of the task.
 - Reader-replaced placeholders: `*`\``UPPER_CASE`\``*`
 - MDX component names and attribute names (`<details>`, `<summary>`, `:::note`, `<Icon>`, etc.)
 - Frontmatter keys (`title`, `sidebar_position`, `slug`, etc.) — translate values only
-- URLs and `href` values — copy link paths verbatim from the Ukrainian source
+- URLs and `href` values — copy link paths verbatim from the Ukrainian source. Per `internal-links.md`, the two locales share one site-root-relative route; an already-correct UA page link is the EN page link unchanged. Do not re-derive, localize, or "fix" a path here.
 - Status values in code font: `new`, `in queue`, `in work`, `success`, `cancelled` — these are already English
 
 ## Translation rules
@@ -280,6 +282,8 @@ Before saving, check:
 - No marketing adjectives
 - All `{/* NEEDS CONFIRMATION */}` and `{/* ToDo */}` markers from the source are present in the output (translated)
 - Frontmatter keys are untouched; only translatable values are changed
+- The EN `title:` is the semantic equivalent of the UA title (`naming-conventions.md`); the output path, filename, and any `slug:` field are unchanged from the source's shared path — the page was not re-slugged or moved
+- Every page-to-page link path is byte-identical to the UA source (`internal-links.md`); no route was localized or "corrected"
 - All code blocks are byte-for-byte identical to the source
 - No `{/* #anchor */}` comments appear in EN headings
 - No "UCPay" or "UniComPay" in prose — only "UCP"
