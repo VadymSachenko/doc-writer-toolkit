@@ -132,7 +132,7 @@ Details:
 - A locale without a `current.json` yet is skipped silently, like a page that does not exist. A `current.json` without the category's entry is listed in `unpatched` ("run write-translations").
 - YAML category files (`_category_.yml`) are not patched.
 
-`--commit` stages the patched pages, state files and `ui-labels/`, and makes one commit: `Sync UI labels to <repo>@<sha7>`. Only those paths are committed. `--dry-run` writes nothing.
+`--commit` stages the patched pages, state files and `ui-labels/`, and makes one commit: `Sync UI labels to <repo>@<sha7>`. Only those paths are committed. When there is no diff to sync (a first import, or an import where only the overlay or the recorded commit moved), `--commit` still commits `ui-labels/` alone, so a new snapshot never stays uncommitted; the report is then `{ "status": "nothing-to-sync", "commit": <sha or null> }`. `--dry-run` writes nothing.
 
 The report lists:
 

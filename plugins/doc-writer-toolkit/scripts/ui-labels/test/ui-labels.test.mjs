@@ -231,6 +231,31 @@ test('import → change → check → import → sync (fixture repo, command ada
   assert.equal((await cli(dir, 'check')).code, 0);
 });
 
+test('sync --commit commits a snapshot that has no label diff, and only the snapshot', async () => {
+  const { dir, write } = await fixtureRepo();
+  assert.equal((await cli(dir, 'import')).code, 0);
+  await write('notes.md', 'unrelated work\n');
+  await git(dir, 'add', 'notes.md');
+
+  // A first import has no diff to sync, but its snapshot still gets the sync commit.
+  const first = await cli(dir, 'sync', '--commit');
+  assert.equal(first.code, 0, first.stderr);
+  assert.equal(first.out.status, 'nothing-to-sync');
+  assert.ok(first.out.commit);
+  assert.match(await git(dir, 'log', '-1', '--format=%s'), /^Sync UI labels to command@/);
+  const files = (await git(dir, 'show', '--name-only', '--format=', 'HEAD')).split('\n');
+  assert.ok(files.length && files.every((f) => f.startsWith('.doc-toolkit/ui-labels/')), files.join(', '));
+  assert.equal(await git(dir, 'status', '--porcelain', '--', '.doc-toolkit'), '');
+  assert.equal(await git(dir, 'diff', '--cached', '--name-only'), 'notes.md', 'unrelated staged work stays out of the commit');
+
+  // Nothing changed since: no commit. Without --commit, or with --dry-run, nothing is committed either.
+  assert.equal((await cli(dir, 'sync', '--commit')).out.commit, null);
+  await write('.doc-toolkit/ui-labels/meta.json', { ...JSON.parse(await fs.readFile(path.join(dir, '.doc-toolkit/ui-labels/meta.json'), 'utf8')), importedAt: 'later' });
+  assert.equal((await cli(dir, 'sync')).out.commit, undefined);
+  assert.equal((await cli(dir, 'sync', '--commit', '--dry-run')).out.commit, undefined);
+  assert.notEqual(await git(dir, 'status', '--porcelain', '--', '.doc-toolkit'), '');
+});
+
 test('diff command compares two snapshot directories', async () => {
   const { dir, write } = await fixtureRepo();
   await cli(dir, 'import');

@@ -717,6 +717,26 @@ test('check: a label missing for the locale needs an unverified entry; ru and tg
   assert.equal(r.out.results[0].failures[0].hits[0].letters, 'і');
 });
 
+test('check: a label may drop the trailing punctuation of the app string when the UA page drops it', async () => {
+  const f = await translatedFixture();
+  const store = (uk, tr) => Promise.all([f.write('.doc-toolkit/ui-labels/uk.json', { ...LABELS.uk, 'filters.status': uk }), f.write('.doc-toolkit/ui-labels/tr.json', { ...LABELS.tr, 'filters.status': tr })]);
+
+  // The app shows `Статус:` / `Durum:`, the UA page **Статус**: the translation may mirror it (**Durum**) or keep the colon.
+  await store('Статус:', 'Durum:');
+  let r = await cli(f.dir, 'check', 'filters', '--locales', 'tr');
+  assert.equal(r.code, 0, JSON.stringify(r.out.results[0].failures));
+  r = await checks(f, (t) => edit(t, '**Durum**', '**Durum:**'));
+  assert.equal(r.code, 0, JSON.stringify(r.failures));
+  r = await checks(f, (t) => edit(t, '**Durum**', '**Dur**'));
+  assert.deepEqual(r.checks, ['labels'], 'only the trailing punctuation may go');
+
+  // The UA page shows the app string as it is, so the translation must too.
+  await store('Статус', 'Durum:');
+  r = await checks(f, (t) => t);
+  assert.deepEqual(r.checks, ['labels']);
+  assert.equal(r.failures[0].labels[0].expected, '**Durum:**');
+});
+
 test('record: refuses and changes nothing when a check fails', async () => {
   const f = await translatedFixture();
   await f.write(`${TR_ROOT}/filters/filters.md`, edit(TR, '**Uygula**', '**Onayla**'));
@@ -907,6 +927,16 @@ test('categories: check enforces translation, label store first, Ukrainian lette
   assert.deepEqual([r.code, r.checks], [1, ['category']]);
   r = await check({ ...GOOD_CAT, 'sidebar.other.category.nope': 'x' });
   assert.deepEqual([r.code, r.checks], [1, ['category']]);
+
+  // The app shows `Фільтри:` / `Filtreler:` and the UA label drops the colon: the message may drop it too.
+  await f.write('.doc-toolkit/ui-labels/uk.json', { ...LABELS.uk, 'filters.title': 'Фільтри:' });
+  await f.write('.doc-toolkit/ui-labels/tr.json', { ...LABELS.tr, 'filters.title': 'Filtreler:' });
+  r = await check(GOOD_CAT);
+  assert.equal(r.code, 0, JSON.stringify(r.failures));
+  r = await check({ ...GOOD_CAT, [ENTRY_LABEL]: 'Filtreler:' });
+  assert.equal(r.code, 0, JSON.stringify(r.failures));
+  await f.write('.doc-toolkit/ui-labels/uk.json', LABELS.uk);
+  await f.write('.doc-toolkit/ui-labels/tr.json', LABELS.tr);
 
   // No current.json for the locale: tell the writer to run write-translations.
   const ru = await cli(f.dir, 'check', CAT_ID, '--locales', 'ru');

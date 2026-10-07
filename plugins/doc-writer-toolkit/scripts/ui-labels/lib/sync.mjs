@@ -79,10 +79,29 @@ async function isDirty(top, files) {
   return out.trim().length > 0;
 }
 
+// One commit holding only these paths: `Sync UI labels to <repo>@<sha7>`. Returns its SHA, or null when nothing changed.
+async function commitSync(top, store, paths) {
+  await git(top, ['add', '--', ...paths]);
+  const staged = (await git(top, ['diff', '--cached', '--name-only', '--', ...paths])).trim();
+  if (!staged) return null;
+  const repo = store.meta.source.repo ?? store.meta.source.type;
+  const message = `Sync UI labels to ${repo}@${store.meta.commit.replace(/^content:/, '').slice(0, 7)}`;
+  await git(top, ['commit', '-m', message, '--', ...paths]);
+  log(message);
+  return (await git(top, ['rev-parse', 'HEAD'])).trim();
+}
+
 export async function runSync(settings, { commit = false, dryRun = false, diffFile } = {}) {
   const pendingPath = path.join(settings.labelsDir, PENDING_DIFF);
   const diff = diffFile ? await readJson(path.resolve(diffFile)) : await readJson(pendingPath);
-  if (!diff) return { status: 'nothing-to-sync' };
+  if (!diff) {
+    // No label diff (a first import, or one where only the overlay or the recorded commit moved): `--commit` still
+    // commits the new snapshot, so it never lingers as uncommitted changes on the branch.
+    const store = commit && !dryRun ? await loadStore(settings.labelsDir) : null;
+    if (!store) return { status: 'nothing-to-sync' };
+    const top = (await git(settings.root, ['rev-parse', '--show-toplevel'])).trim();
+    return { status: 'nothing-to-sync', commit: await commitSync(top, store, [settings.labelsDir]) };
+  }
   const store = await loadStore(settings.labelsDir);
   if (!store) throw new CliError('No label snapshot found. Run `import` first.', { code: 2 });
   const roots = requireRoots(settings);
@@ -258,17 +277,6 @@ export async function runSync(settings, { commit = false, dryRun = false, diffFi
 
   if (!report.pendingRemains && !diffFile) await fs.rm(pendingPath, { force: true });
 
-  if (commit) {
-    const paths = [...touched, settings.labelsDir];
-    await git(top, ['add', '--', ...paths]);
-    const staged = (await git(top, ['diff', '--cached', '--name-only', '--', ...paths])).trim();
-    if (staged) {
-      const repo = store.meta.source.repo ?? store.meta.source.type;
-      const message = `Sync UI labels to ${repo}@${store.meta.commit.replace(/^content:/, '').slice(0, 7)}`;
-      await git(top, ['commit', '-m', message, '--', ...paths]);
-      report.commit = (await git(top, ['rev-parse', 'HEAD'])).trim();
-      log(message);
-    }
-  }
+  if (commit) report.commit = await commitSync(top, store, [...touched, settings.labelsDir]);
   return report;
 }

@@ -5,6 +5,7 @@ import { abs, readIfExists, readState } from './pages.mjs';
 import { cachedBlob } from './plan.mjs';
 import { localeRoot } from './settings.mjs';
 import { CYRILLIC, uaOnlyLetters } from './letters.mjs';
+import { acceptedLabels } from './labels.mjs';
 
 // Sidebar category labels. Docusaurus reads `_category_.json` from the UA content root only. A locale's text for it lives
 // in that locale's `current.json` (written by `write-translations`), as up to three entries per category:
@@ -109,7 +110,7 @@ export async function checkCategoryUnit(s, unit, locale, { candidate = null, unv
       if (!labels) fail('labels', 'No label store: run ui-labels import.', { ...where, key: decision.slice(6) });
       else if (expected === undefined) {
         if (!known.includes(e.ua)) fail('labels', `The label store has no '${locale}' string for this key, so the label must be recorded as unverified.`, { ...where, key: decision.slice(6) });
-      } else if (msg !== expected) fail('labels', 'The category label is not the app string for this locale.', { ...where, expected, message: msg });
+      } else if (!acceptedLabels(e.ua, labels.uk?.[decision.slice(6)], expected).includes(msg)) fail('labels', 'The category label is not the app string for this locale.', { ...where, expected, message: msg });
     }
   }
 

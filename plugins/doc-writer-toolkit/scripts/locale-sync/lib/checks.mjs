@@ -4,6 +4,7 @@ import { loadStore, mergedLabels } from '../../ui-labels/lib/store.mjs';
 import { structureMismatches } from './diff.mjs';
 import { CYRILLIC, uaOnlyLetters } from './letters.mjs';
 import { checkCategoryUnit } from './categories.mjs';
+import { acceptedLabels } from './labels.mjs';
 import { abs, localePagePath, readIfExists, readState } from './pages.mjs';
 import { cachedBlob } from './plan.mjs';
 import { assetRefs, boldSpans, canonicalTags, cleanRef, linkTargets, markerCount, otherCommentCount, parsePage, PROSE_FM_KEYS, sections, splitCode } from './parse.mjs';
@@ -192,7 +193,7 @@ export async function checkPage({ locale, uaText, targetText, targetFile, state,
       if (expected === undefined) {
         if (!labels) bad.push({ span, key, problem: 'no label store: run ui-labels import' });
         else if (!excused.has(span)) bad.push({ span, key, problem: `the label store has no '${locale}' string for this key, so the span must be recorded as unverified` });
-      } else if (!trProse.includes(`**${expected}**`)) {
+      } else if (!acceptedLabels(span, labels.uk?.[key], expected).some((form) => trProse.includes(`**${form}**`))) {
         bad.push({ span, key, expected: `**${expected}**`, problem: 'the UI label is not in bold, verbatim, in the translation' });
       }
     }
