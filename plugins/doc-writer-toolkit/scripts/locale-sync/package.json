@@ -1,0 +1,9 @@
+{
+  "name": "locale-sync",
+  "private": true,
+  "type": "module",
+  "description": "Find stale UA pages, extract the blocks to translate, link screenshots and check translated pages. No dependencies.",
+  "bin": { "locale-sync": "./locale-sync.mjs" },
+  "engines": { "node": ">=18.3" },
+  "scripts": { "test": "node --test test/locale-sync.test.mjs" }
+}
