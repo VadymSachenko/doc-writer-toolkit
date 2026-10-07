@@ -122,19 +122,22 @@ async function readStdin() {
   return Buffer.concat(chunks).toString('utf8');
 }
 
+// Set the exit code instead of calling process.exit(): exiting right after a large write to a pipe truncates the output.
 main().then(
-  (code) => process.exit(code),
+  (code) => {
+    process.exitCode = code;
+  },
   (e) => {
     if (e instanceof CliError) {
       log(`ui-labels: ${e.message}`);
       printJson({ error: e.message, ...e.data });
-      process.exit(e.exitCode);
-    }
-    if (e?.code === 'ERR_PARSE_ARGS_UNKNOWN_OPTION' || e?.code === 'ERR_PARSE_ARGS_INVALID_OPTION_VALUE') {
+      process.exitCode = e.exitCode;
+    } else if (e?.code === 'ERR_PARSE_ARGS_UNKNOWN_OPTION' || e?.code === 'ERR_PARSE_ARGS_INVALID_OPTION_VALUE') {
       log(`ui-labels: ${e.message}\n\n${USAGE}`);
-      process.exit(2);
+      process.exitCode = 2;
+    } else {
+      log(e);
+      process.exitCode = 1;
     }
-    log(e);
-    process.exit(1);
   },
 );

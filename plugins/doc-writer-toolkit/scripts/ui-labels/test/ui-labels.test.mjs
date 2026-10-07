@@ -43,6 +43,27 @@ test('diff: added / removed / changed / rekeyed', () => {
   assert.deepEqual(d.added.map((r) => r.key), ['a.new', 'b.dup3']);
 });
 
+test('large JSON output is not truncated when stdout is a pipe', async () => {
+  // process.exit() right after a big write to a pipe cuts the output off (the pipe buffer is 64 KB).
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ui-labels-big-'));
+  const snapshot = async (name, suffix) => {
+    const d = path.join(dir, name);
+    await fs.mkdir(d);
+    const uk = {};
+    for (let i = 0; i < 4000; i++) uk[`section.key${i}`] = `Значення ${i}${suffix}`;
+    await fs.writeFile(path.join(d, 'meta.json'), JSON.stringify({ commit: name, locales: ['uk'] }));
+    await fs.writeFile(path.join(d, 'uk.json'), JSON.stringify(uk));
+    return d;
+  };
+  const from = await snapshot('from', '');
+  const to = await snapshot('to', ' (нове)');
+  const r = await cli(dir, 'diff', from, to);
+  assert.equal(r.code, 0, r.stderr);
+  assert.ok(typeof r.out === 'object', 'stdout is complete, parseable JSON');
+  assert.equal(r.out.changed.length, 4000);
+  assert.ok(JSON.stringify(r.out).length > 200_000);
+});
+
 test('locale files match by language; overrides and ambiguity are explicit', () => {
   const files = ['ar.json', 'ua.json', 'tr.json', 'en.json', 'ru.json'];
   assert.throws(() => resolveLocaleFiles(['uk', 'es', 'tr'], files, {}), (e) => e.exitCode === 2 && e.data.unresolved.map((u) => u.locale).join() === 'uk,es');
