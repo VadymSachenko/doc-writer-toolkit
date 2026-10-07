@@ -965,3 +965,48 @@ test('categories: a page and its category are separate units; link-assets and re
   assert.equal((await cli(f.dir, 'link-assets', 'filters', '--locales', 'tr')).out.results.length, 1);
   assert.equal((await cli(f.dir, 'report', '--locales', 'tr')).out.pages.length, 1);
 });
+
+test('categories: after ui-labels sync patches a renamed label, locale-sync sees the category as current and passing', async () => {
+  const UI_LABELS = path.join(path.dirname(CLI), '..', 'ui-labels', 'ui-labels.mjs');
+  const uiLabels = async (cwd, ...args) => {
+    try {
+      const { stdout } = await run('node', [UI_LABELS, ...args], { cwd });
+      return { code: 0, out: JSON.parse(stdout) };
+    } catch (e) {
+      return { code: e.code, out: e.stdout ? JSON.parse(e.stdout) : null };
+    }
+  };
+  const f = await fixtureRepo({ category: true });
+  await f.write('CLAUDE.md', (await f.read('CLAUDE.md')).replace('- **UA content root:**', '- **UI label source:** `command cat labels/{locale}.json`\n- **UA content root:**'));
+  const release = (title) => Promise.all(Object.keys(LABELS).map((l) => f.write(`labels/${l}.json`, { ...LABELS[l], 'filters.title': title[l] })));
+  await release({ uk: 'Фільтри', en: 'Filters', tr: 'Filtreler', ru: 'Фильтры' });
+
+  // The category is translated and recorded for tr.
+  const uaCat = await f.read('docs/filters/_category_.json');
+  await f.write(`${TR_ROOT}.json`, { ...TR_CURRENT, [ENTRY_LABEL]: { ...TR_CURRENT[ENTRY_LABEL], message: 'Filtreler' }, [ENTRY_DESC]: { ...TR_CURRENT[ENTRY_DESC], message: 'Filtreleri görüntüleyin.' } });
+  await writeCatState(f, { tr: trEntry(uaBlob(uaCat)) });
+  await f.commit();
+  assert.equal((await uiLabels(f.dir, 'import')).code, 0);
+  await f.commit('labels');
+  let r = await cli(f.dir, 'status', '--locales', 'tr');
+  assert.equal(r.out.pages.find((p) => p.kind === 'category').locales.tr.state, 'current');
+
+  // App release: the label is renamed in every language.
+  await release({ uk: 'Усі фільтри', en: 'All filters', tr: 'Tüm filtreler', ru: 'Все фильтры' });
+  assert.equal((await uiLabels(f.dir, 'import')).code, 0);
+  const sync = await uiLabels(f.dir, 'sync', '--commit');
+  assert.equal(sync.code, 0);
+  assert.deepEqual(sync.out.skipped, []);
+  assert.equal(sync.out.pendingRemains, false);
+  assert.equal((await uiLabels(f.dir, 'import', '--dry-run')).code, 0, 'a later import is not blocked by a pending diff');
+
+  // locale-sync: the UA file changed, but the recorded tr translation was patched with it, so nothing needs translating,
+  // and the checks pass against the new app string.
+  assert.equal(JSON.parse(await f.read('docs/filters/_category_.json')).label, 'Усі фільтри');
+  assert.equal(JSON.parse(await f.read(`${TR_ROOT}.json`))[ENTRY_LABEL].message, 'Tüm filtreler');
+  r = await cli(f.dir, 'status', '--locales', 'tr');
+  assert.equal(r.out.pages.find((p) => p.kind === 'category').locales.tr.state, 'current');
+  r = await cli(f.dir, 'check', CAT_ID, '--locales', 'tr');
+  assert.equal(r.code, 0, JSON.stringify(r.out.results[0].failures));
+  assert.deepEqual(JSON.parse(await f.read(catStatePath)).spans['Усі фільтри'], 'label:filters.title');
+});

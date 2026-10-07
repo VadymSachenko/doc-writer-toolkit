@@ -162,7 +162,7 @@ Docusaurus reads `_category_.json` from the UA root only; a copy in the `i18n` t
 - **`blocks`** returns `entries[]` (`entryKey`, `field`, `ua`, `current`, and `binding` when the page state binds the label to an app string) and a `problem` if the entries do not exist yet.
 - **`check` / `record`** take `--candidate <file>`: a JSON object `{ "<entryKey>": "<translated message>" }`. `record` writes those messages into `current.json` and leaves every other entry, description and the file's layout alone. Without a candidate they check what is in `current.json`. Checks: `target-missing`, `category` (message empty, still the UA text, or a key that is not an entry of this category), `ukrainian-letters` (as for pages), `labels` (a label bound in the state `spans` must equal the app's string for the locale exactly, or be recorded as unverified).
 - **YAML** (`_category_.yml`) is not tracked: `status` warns. A category without a `label` has nothing to translate and is skipped.
-- **`ui-labels sync` does not know categories.** If a category label is bound to an app string that later changes, `sync` reports that state file as skipped ("UA page not found") and keeps the diff pending instead of patching `current.json`.
+- **`ui-labels sync` keeps categories in step.** When a category label bound to an app string is renamed, `sync` patches the UA `_category_.json` and the entry in each locale's `current.json` (renaming the entry keys of a category without `key`), and advances the category's state, so the cell stays `current` and the checks still pass. See the `ui-labels` README.
 
 ## Report (`report`)
 

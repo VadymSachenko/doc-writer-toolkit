@@ -73,6 +73,8 @@ One file per UA page: `<state root>/pages/<path of the UA page relative to the U
 
 `sync` only touches `spans` (rebinding and renaming keys) and, per locale, `sourceBlob` and `labelSnapshot`. It keeps every other field.
 
+A sidebar category has a state file too, named `<dir>/_category_` (`archive/_category_` → `.doc-toolkit/pages/archive/_category_.json`). Its `spans` bind the category's UA label to an app key, exactly like a bold label on a page.
+
 ## Diff
 
 `added` / `removed` / `changed` / `rekeyed`, with per-locale old and new strings:
@@ -113,6 +115,23 @@ span           class  key                 ru            tr            kk
 
 It never patches a page when any of its files has uncommitted changes (reported in `skipped`; the diff stays pending). Run it again after committing. It is idempotent: a string already at its new value is reported as `alreadyCurrent`.
 
+### Sidebar categories
+
+A state file named `…/_category_` is patched like a page, in these files:
+
+- **UA:** `<UA root>/<dir>/_category_.json`, its `label`.
+- **Every other locale (EN included):** the category's label entry in `<locale root>.json` (`current.json`), `sidebar.<sidebarId>.category.<key>`, `message`. `<key>` is the category's `key`, or its label when it has none. Entries for the category's other fields (generated-index title and description) are not bound to an app string and keep their messages.
+
+Details:
+
+- A category **without a `key`** is keyed by its UA label, so when the label changes `sync` also renames its entries (label, and generated-index title and description) in every locale's `current.json`. It does this only once the UA label has the new value; if the UA file could not be patched, the keys stay and the messages are still patched. They are listed in `renamedEntries` (`page`, `locale`, `file`, `from`, `to`).
+- An entry that was **never translated** (its message is still the UA text, as `write-translations` writes it) follows the new UA text, not the locale's own string. It stays untranslated, so the translation run still handles it. It is reported in `patched` with `untranslated: true`, and `old`/`new` are the UA texts.
+- The state's `spans` entry follows the UA label only after the UA file really has the new value. Each locale's `sourceBlob` advances to the patched UA file's blob under the same rule as for pages.
+- A `current.json` is shared by every category of that locale. Edits `sync` made earlier in the same run do not count as uncommitted changes.
+- JSON is rewritten only when its present layout is exactly what `JSON.stringify` writes (indent detected, trailing newline kept). Otherwise the file is left alone and listed in `unpatched` with the reason, for a writer to patch by hand.
+- A locale without a `current.json` yet is skipped silently, like a page that does not exist. A `current.json` without the category's entry is listed in `unpatched` ("run write-translations").
+- YAML category files (`_category_.yml`) are not patched.
+
 `--commit` stages the patched pages, state files and `ui-labels/`, and makes one commit: `Sync UI labels to <repo>@<sha7>`. Only those paths are committed. `--dry-run` writes nothing.
 
 The report lists:
@@ -121,9 +140,10 @@ The report lists:
 - `alreadyCurrent`
 - `notFound`: the page doesn't contain the old string in that locale, so it was not patched
 - `checkBinding` (Requirement 3, criterion 2a): a page is bound to a **sibling** of a changed key (an unchanged key that still has the changed key's old UA string) and still shows the old string in some locale. Each entry gives page, locale, `boundKey`, `changedKey`, old and new string and the lines. Nothing is patched, because only a writer knows whether the page meant the changed key. It is information only and doesn't keep the diff pending.
-- `unpatched`: an old or new string is missing for that locale, or the same old string was renamed differently by several keys, so a writer must decide
+- `unpatched`: an old or new string is missing for that locale, or the same old string was renamed differently by several keys, or a category file cannot be patched without reformatting it, so a writer must decide
 - `broken`: a bound key was removed, nothing patched
 - `rekeyed`
+- `renamedEntries`: `current.json` entry keys renamed for a category without a `key`
 - `undocumented`: new keys, information only
 - `skipped`
 - `pendingRemains`
@@ -133,4 +153,5 @@ The report lists:
 
 - Replacement is by exact bold string. A page that also uses the same string in bold as emphasis is patched at every occurrence, because spans are classified per page, not per occurrence.
 - Only `**bold**` labels are patched. Labels in inline code, quotes or `__bold__` are not.
+- Of a category, only the label is bound and patched, not its generated-index title or description.
 - Source files must be JSON (flat or nested). Other formats go through the `command` adapter.

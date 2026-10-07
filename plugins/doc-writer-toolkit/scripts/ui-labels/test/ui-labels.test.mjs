@@ -240,3 +240,113 @@ test('diff command compares two snapshot directories', async () => {
   const d = await cli(dir, 'diff', 'snap-a', '.doc-toolkit/ui-labels');
   assert.equal(d.out.summary.changed, 1);
 });
+
+test('sync patches sidebar category labels: UA _category_.json, each locale\'s current.json, and the category state', async () => {
+  const { dir, write } = await fixtureRepo();
+  const read = (rel) => fs.readFile(path.join(dir, rel), 'utf8');
+  const json = async (rel) => JSON.parse(await read(rel));
+  const TR = 'i18n/tr/docusaurus-plugin-content-docs/current.json';
+  const EN = 'i18n/en/docusaurus-plugin-content-docs/current.json';
+  const entry = (message, label) => ({ message, description: `The label for category '${label}' in sidebar 'tutorialSidebar'` });
+
+  // One more app string, used by a category whose file is laid out compactly.
+  for (const [l, v] of [['uk', 'Документи'], ['en', 'Documents'], ['tr', 'Belgeler']]) await write(`labels/${l}.json`, { ...(await json(`labels/${l}.json`)), 'menu.docs': v });
+
+  // A: no `key`, with a generated index. B: explicit `key`. C: compact JSON. D: no `key`, bound to the same string as A's sibling.
+  const A = { label: 'Назва', position: 2, link: { type: 'generated-index', description: 'Опис розділу.' } };
+  const B = { label: 'Статус', position: 3, key: 'status-section' };
+  await write('docs/section/_category_.json', A);
+  await write('docs/status-section/_category_.json', B);
+  await write('docs/loose/_category_.json', '{"label":"Документи","position":4}\n');
+  const state = (spans, ua) => ({ spans, locales: { tr: { sourceBlob: gitBlobHash(ua), labelSnapshot: 'old', translatedAt: '2026-10-01', unverified: [], assetFallbacks: [] } } });
+  const uaText = (o) => JSON.stringify(o, null, 2) + '\n';
+  await write('.doc-toolkit/pages/section/_category_.json', state({ Назва: 'label:x.title' }, uaText(A)));
+  await write('.doc-toolkit/pages/status-section/_category_.json', state({ Статус: 'label:col.status' }, uaText(B)));
+  await write('.doc-toolkit/pages/loose/_category_.json', state({ Документи: 'label:menu.docs' }, '{"label":"Документи","position":4}\n'));
+  const sid = 'sidebar.tutorialSidebar.category';
+  await write(TR, {
+    'version.label': { message: 'Sonraki', description: 'The label for version current' },
+    [`${sid}.Назва`]: entry('Başlık', 'Назва'),
+    [`${sid}.Назва.link.generated-index.description`]: entry('Bölüm açıklaması.', 'Назва'),
+    [`${sid}.status-section`]: entry('Durum', 'Статус'),
+    [`${sid}.Документи`]: entry('Belgeler', 'Документи'),
+  });
+  await write(EN, {
+    'version.label': { message: 'Next', description: 'The label for version current' },
+    [`${sid}.Назва`]: entry('Title', 'Назва'),
+    [`${sid}.Назва.link.generated-index.description`]: entry('Опис розділу.', 'Назва'), // never translated: still the UA text
+    [`${sid}.status-section`]: entry('Статус', 'Статус'), // never translated
+    [`${sid}.Документи`]: entry('Documents', 'Документи'),
+  });
+  await git(dir, 'add', '-A');
+  await git(dir, 'commit', '-qm', 'categories');
+  assert.equal((await cli(dir, 'import')).code, 0);
+  await git(dir, 'add', '-A');
+  await git(dir, 'commit', '-qm', 'labels');
+
+  // The release renames three strings in every language.
+  const release = { uk: { 'x.title': 'Заголовок', 'col.status': 'Стан', 'menu.docs': 'Матеріали' }, en: { 'x.title': 'Heading', 'col.status': 'State', 'menu.docs': 'Materials' }, tr: { 'x.title': 'Başlıklar', 'col.status': 'Durumu', 'menu.docs': 'Malzemeler' } };
+  for (const [l, v] of Object.entries(release)) await write(`labels/${l}.json`, { ...(await json(`labels/${l}.json`)), ...v });
+  assert.equal((await cli(dir, 'import')).code, 0);
+
+  const r = await cli(dir, 'sync', '--commit');
+  assert.equal(r.code, 0, r.stderr + JSON.stringify(r.out));
+  const mine = (list) => list.filter((p) => /_category_$/.test(p.page));
+
+  // Patched: the UA label and the message in each locale; an untranslated entry follows the UA text.
+  assert.deepEqual(
+    mine(r.out.patched).map((p) => [p.page, p.locale, p.old, p.new, p.untranslated ?? false, p.file]).sort(),
+    [
+      ['section/_category_', 'uk', 'Назва', 'Заголовок', false, 'docs/section/_category_.json'],
+      ['section/_category_', 'en', 'Title', 'Heading', false, EN],
+      ['section/_category_', 'tr', 'Başlık', 'Başlıklar', false, TR],
+      ['status-section/_category_', 'uk', 'Статус', 'Стан', false, 'docs/status-section/_category_.json'],
+      ['status-section/_category_', 'en', 'Статус', 'Стан', true, EN],
+      ['status-section/_category_', 'tr', 'Durum', 'Durumu', false, TR],
+      ['loose/_category_', 'en', 'Documents', 'Materials', false, EN],
+      ['loose/_category_', 'tr', 'Belgeler', 'Malzemeler', false, TR],
+    ].sort(),
+  );
+  for (const p of mine(r.out.patched)) assert.ok(p.line > 0 && p.text.includes(p.new), `line of the patched value: ${JSON.stringify(p)}`);
+
+  // UA files: only the label changed, layout untouched; the compact file was not reformatted.
+  assert.equal(await read('docs/section/_category_.json'), uaText({ ...A, label: 'Заголовок' }));
+  assert.equal(await read('docs/status-section/_category_.json'), uaText({ ...B, label: 'Стан' }));
+  assert.equal(await read('docs/loose/_category_.json'), '{"label":"Документи","position":4}\n');
+  assert.deepEqual(mine(r.out.unpatched).map((p) => [p.page, p.locale]), [['loose/_category_', 'uk']]);
+  assert.match(mine(r.out.unpatched)[0].reason, /cannot be patched without reformatting/);
+
+  // current.json: messages patched, other entries and descriptions kept, in the same order. Without a `key` the entry keys
+  // follow the UA label (label and generated-index description), so Docusaurus still finds the translation.
+  const tr = await json(TR);
+  assert.deepEqual(Object.keys(tr), ['version.label', `${sid}.Заголовок`, `${sid}.Заголовок.link.generated-index.description`, `${sid}.status-section`, `${sid}.Документи`]);
+  assert.deepEqual([tr[`${sid}.Заголовок`].message, tr[`${sid}.Заголовок.link.generated-index.description`].message, tr[`${sid}.status-section`].message], ['Başlıklar', 'Bölüm açıklaması.', 'Durumu']);
+  assert.equal(tr[`${sid}.Заголовок`].description, "The label for category 'Назва' in sidebar 'tutorialSidebar'");
+  assert.equal(tr['version.label'].message, 'Sonraki');
+  const en = await json(EN);
+  // The never-translated entry follows the new UA text (it stays "untranslated", so locale-sync still translates it later).
+  assert.deepEqual([en[`${sid}.Заголовок`].message, en[`${sid}.Заголовок.link.generated-index.description`].message, en[`${sid}.status-section`].message], ['Heading', 'Опис розділу.', 'Стан']);
+  // C's UA label could not be patched, so its entry keys were NOT renamed (the messages were).
+  assert.deepEqual([tr[`${sid}.Документи`].message, en[`${sid}.Документи`].message], ['Malzemeler', 'Materials']);
+  assert.deepEqual(r.out.renamedEntries.map((x) => [x.page, x.locale, x.from.replace(`${sid}.`, ''), x.to.replace(`${sid}.`, '')]).sort(), [
+    ['section/_category_', 'en', 'Назва', 'Заголовок'],
+    ['section/_category_', 'en', 'Назва.link.generated-index.description', 'Заголовок.link.generated-index.description'],
+    ['section/_category_', 'tr', 'Назва', 'Заголовок'],
+    ['section/_category_', 'tr', 'Назва.link.generated-index.description', 'Заголовок.link.generated-index.description'],
+  ].sort());
+
+  // State: the span follows the UA label, and tr is marked up to date with the patched UA file.
+  const s = await json('.doc-toolkit/pages/section/_category_.json');
+  assert.deepEqual([s.spans, s.locales.tr.sourceBlob, s.locales.tr.labelSnapshot], [{ Заголовок: 'label:x.title' }, gitBlobHash(uaText({ ...A, label: 'Заголовок' })), (await json('.doc-toolkit/ui-labels/meta.json')).commit]);
+  assert.equal((await json('.doc-toolkit/pages/status-section/_category_.json')).locales.tr.sourceBlob, gitBlobHash(uaText({ ...B, label: 'Стан' })));
+  // The compact file: its UA label could not be patched, so the span and tr's source blob stay as they were; tr's own message was patched.
+  const loose = await json('.doc-toolkit/pages/loose/_category_.json');
+  assert.deepEqual([loose.spans, loose.locales.tr.sourceBlob, loose.locales.tr.labelSnapshot !== 'old'], [{ Документи: 'label:menu.docs' }, gitBlobHash('{"label":"Документи","position":4}\n'), true]);
+
+  // The shared current.json did not block the second and third category, and everything went into one commit.
+  assert.equal(r.out.skipped.length, 0);
+  assert.deepEqual(r.out.skipped, []);
+  assert.ok(r.out.commit);
+  assert.equal(await git(dir, 'status', '--porcelain', '--', 'docs', 'i18n', '.doc-toolkit'), '');
+  assert.equal((await cli(dir, 'sync')).out.status, 'nothing-to-sync', 'the diff is no longer pending, so the next import can run');
+});

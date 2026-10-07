@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import { CliError, exists, gitBlobHash, log, readJson, writeJson } from './util.mjs';
 import { deriveLocaleRoot, requireRoots } from './config.mjs';
 import { isLib, loadStore, PENDING_DIFF } from './store.mjs';
+import { categoryContext, categoryFile, categoryShows, isCategoryId, patchCategory } from './categories.mjs';
 
 const run = promisify(execFile);
 const git = (cwd, args) => run('git', ['-C', cwd, ...args], { maxBuffer: 64 * 1024 * 1024 }).then((r) => r.stdout);
@@ -106,7 +107,7 @@ export async function runSync(settings, { commit = false, dryRun = false, diffFi
     }
   }
 
-  const report = { status: 'synced', from: diff.from, to: diff.to, patched: [], alreadyCurrent: [], notFound: [], unpatched: [], checkBinding: [], broken: [], rekeyed: [], undocumented: [], skipped: [], pagesTouched: 0, commit: null, pendingRemains: false };
+  const report = { status: 'synced', from: diff.from, to: diff.to, patched: [], alreadyCurrent: [], notFound: [], unpatched: [], checkBinding: [], broken: [], rekeyed: [], renamedEntries: [], undocumented: [], skipped: [], pagesTouched: 0, commit: null, pendingRemains: false };
   const touched = new Set();
   const brokenBy = new Map();
 
@@ -125,22 +126,39 @@ export async function runSync(settings, { commit = false, dryRun = false, diffFi
     if (!relevant.length && !siblingChecks.length) continue;
     for (const c of relevant) if (c.fromKey !== c.toKey) report.rekeyed.push({ from: c.fromKey, to: c.toKey, page: rel });
 
+    // A page is a markdown file per locale. A sidebar category is the UA `_category_.json` plus an entry in each locale's
+    // current.json, which every category of that locale shares.
+    const category = isCategoryId(rel);
     const files = {};
     for (const [locale, root] of Object.entries(localeRoots)) {
-      const file = await findPage(root, rel);
-      if (file) files[locale] = file;
+      const file = category ? categoryFile(localeRoots, locale, rel) : await findPage(root, rel);
+      if (file && (!category || (await exists(file)))) files[locale] = file;
     }
     if (!files.uk) {
-      report.skipped.push({ page: rel, reason: 'UA page not found' });
+      report.skipped.push({ page: rel, reason: category ? 'UA category file not found' : 'UA page not found' });
       continue;
     }
     const original = {};
     for (const [locale, file] of Object.entries(files)) original[locale] = await fs.readFile(file, 'utf8');
+    if (category && !categoryContext(original.uk)) {
+      report.skipped.push({ page: rel, reason: 'the UA category file is not valid JSON' });
+      continue;
+    }
+    // The entry keys of a category without `key` follow its UA label: they are only renamed once the UA label has the new value.
+    let uaLabelOk = true;
+    const categoryCtx = (c) => (category ? { ...categoryContext(original.uk, c.locales.uk), renameKeys: uaLabelOk } : null);
+    const shows = (text, locale, v, c) => (category ? categoryShows(text, locale, v.old, categoryCtx(c)) : replaceBold(text, v.old, v.new).hits);
+    // One change applied to one file: { text, hits, current, renamed, error }.
+    const apply = (text, locale, v, c) => {
+      if (category) return patchCategory(text, locale, v, categoryCtx(c));
+      const r = replaceBold(text, v.old, v.new);
+      return { ...r, current: !r.hits.length && replaceBold(text, v.new, v.new).hits.length > 0, renamed: [] };
+    };
 
     for (const { key, change } of siblingChecks) {
       for (const [locale, v] of Object.entries(change.locales)) {
         if (!v.old || !v.new || v.old === v.new || original[locale] === undefined) continue;
-        const hits = replaceBold(original[locale], v.old, v.new).hits;
+        const hits = shows(original[locale], locale, v, change);
         if (hits.length) {
           report.checkBinding.push({ page: rel, locale, boundKey: key, changedKey: change.toKey, old: v.old, new: v.new, lines: hits.map((h) => h.line) });
         }
@@ -148,7 +166,8 @@ export async function runSync(settings, { commit = false, dryRun = false, diffFi
     }
     if (!relevant.length) continue;
 
-    if (!dryRun && (await isDirty(top, Object.values(files)))) {
+    // Files written earlier in this run (a current.json shared by several categories) are ours, not uncommitted work.
+    if (!dryRun && (await isDirty(top, Object.values(files).filter((f) => !touched.has(f))))) {
       report.skipped.push({ page: rel, reason: 'uncommitted changes in the page or its translations; commit them and re-run sync' });
       continue;
     }
@@ -174,12 +193,18 @@ export async function runSync(settings, { commit = false, dryRun = false, diffFi
           results[locale] = false;
           continue;
         }
-        const r = replaceBold(text, v.old, v.new);
-        if (r.hits.length) {
+        const r = apply(text, locale, v, c);
+        if (category && locale === 'uk') uaLabelOk = uaLabelOk && !r.error && (Boolean(r.hits?.length) || r.current === true);
+        if (r.error) {
+          report.unpatched.push({ ...entry, old: v.old, new: v.new, reason: r.error });
+          results[locale] = false;
+        } else if (r.hits.length || r.renamed.length) {
           text = r.text;
           anyChange = true;
-          for (const h of r.hits) report.patched.push({ ...entry, file: path.relative(top, files[locale]), old: v.old, new: v.new, ...h });
-        } else if (replaceBold(text, v.new, v.new).hits.length) {
+          const file = path.relative(top, files[locale]);
+          for (const h of r.hits) report.patched.push({ ...entry, file, old: v.old, new: v.new, ...h });
+          for (const rn of r.renamed) report.renamedEntries.push({ page: rel, locale, file, ...rn });
+        } else if (r.current) {
           report.alreadyCurrent.push({ ...entry, new: v.new });
         } else {
           report.notFound.push({ ...entry, old: v.old });
@@ -194,7 +219,8 @@ export async function runSync(settings, { commit = false, dryRun = false, diffFi
     for (const c of relevant) {
       for (const text of bound.get(c.fromKey)) {
         const uk = c.locales.uk;
-        const renamed = uk?.old === text && uk.new ? uk.new : text;
+        // A category's span is its UA label: it only follows the label once the UA file really has the new value.
+        const renamed = uk?.old === text && uk.new && (!category || uaLabelOk) ? uk.new : text;
         if (renamed !== text) delete newSpans[text];
         newSpans[renamed] = `label:${c.toKey}`;
       }
