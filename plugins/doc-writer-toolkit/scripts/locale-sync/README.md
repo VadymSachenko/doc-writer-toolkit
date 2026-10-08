@@ -13,7 +13,10 @@ Run it from the docs repo root (or pass `--root`). Needs Node 18.3+ and `git`. T
 | Command | What it does |
 |---|---|
 | `status [<page>…]` | Stale pages and sidebar categories per locale, from one `git ls-tree` call and the per-unit state files. Adds the size estimate and the 10-page confirmation flag. |
-| `blocks <page>…` | The UA blocks to translate (blob A → B), each with its heading path and the matching translated block. For a category: the `current.json` entries to write. |
+| `blocks <page>…` | The UA blocks to translate (blob A → B), each with its heading path and the matching translated block, plus the label strings and term-memory rows for those blocks. For a category: the `current.json` entries to write. |
+| `apply <page>` | Writes a candidate file from the translations of the blocks that `blocks` returned. One page, one locale. |
+| `bind [<page>…]` | The binding pass: records the span decisions the script can make and lists the rest (`ask`) for the model. `bind --decisions <file>` records the model's answers. |
+| `terms <UA term>…` | Per locale, the recorded translation and the UI string of each term, and which terms still need a translation. `terms --add <file> --locales <locale>` appends entries. |
 | `link-assets <page>…` | Relative per-file symlinks from each locale's `.assets/` to the EN screenshots. Pages only. |
 | `check <page>…` | Every Requirement 8 check on a translated page, or the category checks. Exit `1` if any fails. |
 | `record <page>…` | Runs the checks, and only if they all pass advances the unit's state. |
@@ -25,10 +28,10 @@ Output is JSON on stdout and logs on stderr. A failure prints `{"error": …}`.
 
 **Exit codes:** `0` ok · `1` something failed (a check, a record, a build, a missing asset) · `2` configuration or input problem (ask the user).
 
-The worker flow for one page in one locale:
+The flow of a run: `status` → `bind` (once for all locales) → `terms` / `terms --add` (the terminology pass) → per page and locale:
 
 ```
-blocks → (write the translation to a candidate file) → link-assets → check --candidate → record --candidate
+blocks → (translate the blocks) → apply → link-assets → check --candidate → record --candidate
 ```
 
 `record --candidate` re-runs the checks itself, so the state cannot advance on a page that fails them, and a failing candidate never reaches the translation path (Requirement 8, criterion 2). Without `--candidate`, `check` and `record` read the translation where it is on disk; then a failing page stays on disk and the caller restores it (`git checkout -- <file>`, or removes it if it is new).
@@ -50,7 +53,7 @@ Flags override the `Documentation toolkit configuration` block of `<root>/CLAUDE
 
 ## Stale detection (`status`)
 
-State is one file per UA page, `<state root>/pages/<page id>.json` (the layout `ui-labels` documents). Only `locales.<locale>` is written here; `spans` belongs to the binding pass and is kept as it is.
+State is one file per UA page, `<state root>/pages/<page id>.json` (the layout `ui-labels` documents). `status`, `blocks`, `check` and `record` write only `locales.<locale>`; `spans` belongs to the binding pass (`bind`) and is kept as it is.
 
 For every page and locale, one cell:
 
@@ -95,9 +98,58 @@ A change:
 
 Lines are 1-based. Everything not listed stays untouched.
 
+Every `full` and `incremental` result (and every category) also carries what the translator needs for the spans and terms in the text it writes (the whole page, or the changed blocks), for that locale only:
+
+| Field | Meaning |
+|---|---|
+| `labels[]` | One row per bold span and Cyrillic inline-code span: `span`, `kind` (`bold`, `code`, `category`), `decision` from the page state. For `label:<key>`: `key` and `write`, the exact string to put between the `**` (the store string, overlay first, with its trailing `:` `.` `…` `!` `?` dropped when the UA span drops the UA string's). `missing: true` when the store has no string for the locale; with `UI label fallback: en` declared, `write` is then the EN string and `fallback: "en"`. A `term` or `unverified` span with markup inside (below) has `parts[]`: `{ ua, write }` for each part that is a UI string. |
+| `undecided[]` | Spans with no decision: the binding pass has not run on them. |
+| `terms[]` | Term-memory entries whose UA term occurs in the text, matched by prefix to cover inflection (a word of 4 letters without its last letter, longer words without their last two): `{ ua, target, source }`. When the term equals a UI string with one string in the locale, that string wins (`source: "ui"`, the memory's value in `recorded` if it differs). `term` and `unverified` spans that equal a UI string are added even without an entry. So is the plain first cell of a table body row (no markup, code or link) that equals a UI string: attribute tables name the app's columns and fields without bold, so no span covers them (`where: "table"`). |
+| `termConflicts[]` | A matched term recorded twice with different translations. The first line is used. |
+
 **How blocks are found.** Both pages are parsed into a tree of sections and blocks (`lib/parse.mjs`), the trees are diffed, and the changed units are expanded as `context/changed-blocks.md` says: a changed sentence → its paragraph, a list item → the item with its sub-items, a table cell → the row (header → the whole table), a heading → its whole section with its subsections, an admonition or MDX component → its whole body, frontmatter → the value. More than half of a section's blocks changed → its whole body (heading and subsections excluded). This is the unit set that expanding `git diff A B` hunks produces, found on parsed blocks instead of line numbers.
 
 **How blocks are mapped.** The translation was made from A, so the A tree is aligned with the translation's tree position by position (heading anchors must agree). If a container's children don't line up one to one, nothing below it is mapped: those changes go to `unmapped[]` with the UA text quoted and a reason. The translator never guesses a place. `check` rejects pages that do not mirror UA, so a recorded page always maps.
+
+## Writing the candidate (`apply`)
+
+`apply <page> --locales <locale> --translations <file.json> --out <candidate>` takes the translator's text and does the splicing, so no model edits a file by line numbers:
+
+- **`incremental`:** `{ "c1": "<translated block>", … }`, one entry per `replace` and `add` change id from `blocks` (a `verbatim` change may be left out: its UA text is copied). A replaced block takes the place of its `target` lines. An added block goes after its anchor (`insertAfter`, the previous addition for `insertAfterChange`, or the start of the file), preceded by as many blank lines as UA has before it. A removed block goes with the blank lines before it. Every other line of the translation is copied unchanged.
+- **`full`:** `{ "full": "<translated page>" }`.
+
+The file is JSON, or text with `@@@ <id>` lines (`@@@ c1`, `@@@ full`) each followed by that block's translation, which needs no escaping. The ids follow the current files, so run `blocks` and `apply` without changing anything in between. A missing or unknown id, or the wrong form for the mode, is an input error (exit `2`). `unmapped` changes are not applied; they are returned again for the report. The candidate is then checked and recorded as usual.
+
+## Binding pass (`bind`)
+
+Classifies every bold span (and every inline-code span holding Cyrillic) in the UA text that some target locale will translate (the whole page for a `full` cell, the changed blocks for an `incremental` one), **once for all locales**, and records one decision per span per page in the page state's `spans`. Spans are keyed by their exact text. Without page arguments it covers every in-scope unit; `--locales` and `--overwrite` narrow or widen it as for `blocks`. Needs the label store.
+
+| Decision | Meaning |
+|---|---|
+| `label:<key>` | A UI label: written as the store string, verbatim, in every locale. |
+| `unverified` | UI context, but in no dictionary (paraphrase, server text, hardcoded string). Translated as prose and listed as unverified. |
+| `term` | A domain term, translated through term memory. Also a UI text with markup inside. |
+| `emphasis` | Bold for emphasis only (a style-fixer hint). |
+
+What the script decides on its own (`resolved`, with a `why`):
+
+1. A span already decided on the page keeps its decision. An `unverified` span is looked up again and becomes a label when the store now has it (`now in the dictionary`).
+2. A span whose every occurrence is a definition item (`- **Термін:** …`, `- **Термін** — …`, `<li>**Термін**: …`) and that is in no dictionary is a `term`. A definition item that is a dictionary string names a UI element (the list describes controls or status values), so it counts as UI context and goes through rule 4.
+3. A span with markup inside (a link, `&nbsp;`, quotes, an `A > B` menu path) is a `term` when each part is a UI string with one string per locale: `blocks` then returns the parts to write. A link or a `&nbsp;` inside the bold can never pass the `labels` check as one label.
+4. A dictionary match (exact or normalized, not a placeholder pattern) next to a UI word (натисніть, оберіть, кнопка, поле, вкладка, меню, вікно, іконка, віджет, статус…, within 120 characters before the span) is a label. Several keys with **identical** strings in every locale are chosen by namespace: 2 points when the key's namespace matches the page path, 1 per key already bound on the page in that namespace (at most 2); the winner needs 2 points and no tie.
+5. A sidebar category label in the dictionary is a label; one that is not is a `term`.
+
+Everything else goes to `ask`, with the reason (`why`), up to three context lines, the lookup (key and EN string, or the candidates), and a `suggest` where the script has one: keys with **different** strings (never a `suggest`: there the key decides the translation, and a namespace that only mentions the page's area, such as a dialog's key, misleads), a dictionary match without UI context, no dictionary match, markup whose parts are not all UI strings (with `parts[]` and their lookups). When other pages already decided the same span text, the ask carries `seenOn` (`{ "<decision>": <pages> }`), and the most common decision that fits the lookup becomes the `suggest` if the script has none, so a span the docs repeat (`**Результат:**`) is decided the same way on every page.
+
+`bind --decisions <file>` records the model's answers, a JSON object `{ "<page id>": { "<span>": "label:<key>" | "unverified" | "term" | "emphasis" } }`. A page id that doesn't exist, a span that isn't on the committed UA page, a key that isn't in the store or an unknown decision is rejected (exit `1`) and the valid ones are still recorded. `--dry-run` writes nothing.
+
+## Term memory (`terms`)
+
+The file format is in `context/locale-translation.md` §5: `<state root>/terms/<locale>.tsv`, one `<UA term><TAB><translation>` per line, both in dictionary form, sorted by the UA term in byte order.
+
+- **`terms <UA term>…`** (dictionary form) returns, per term, `ui` (the key and each locale's string when the term equals a UI string, or `uiCandidates` when several keys disagree) and `recorded` per locale, plus `missing` per locale: the terms with no entry yet. A missing term with a `ui` string for the locale is recorded with that string, with no translation needed; `blocks` still prefers the UI string if the app later renames it. Matching is case-insensitive on the whole term.
+- **`terms --add <file> --locales <locale>`** appends entries from a TSV file in the same format or a JSON file (`{ "<UA term>": "<translation>" }` or `[{ ua, target }]`). A term already recorded with the same translation is `existing`; with a different one it is a `conflict` and is not written (a recorded term is never re-translated). The file is rewritten sorted. The first add also writes `<state root>/terms/*.tsv merge=union` into the repo's `.gitattributes` (not when the state root is outside the repo: `gitattributes: "outside-repo"`).
+- A UA term on two lines (two branches merged by `merge=union`) is reported as a conflict wherever it is read; the first line wins until a writer deletes one.
 
 ## Screenshots (`link-assets`)
 
@@ -140,7 +192,7 @@ Warning: a translation written mostly in Latin letters that still contains Cyril
 1. Runs `check`. On any failure it returns `recorded: false` with the failures and changes nothing.
 2. With `--candidate <file>`, writes the candidate to the translation path (atomically, creating folders).
 3. Sets `last_update.date` in the translation only, in the format the UA page uses (`9/8/2026` or ISO). The UA page is never modified.
-4. Writes `locales.<locale>` in the state file: `sourceBlob` (the committed UA blob), `labelSnapshot` (`meta.commit` of the label store), `translatedAt`, `unverified`, `assetFallbacks` (links that currently point at the UA tree).
+4. Writes `locales.<locale>` in the state file: `sourceBlob` (the committed UA blob), `labelSnapshot` (`meta.commit` of the label store), `translatedAt`, `unverified`, `assetFallbacks` (links that currently point at the UA tree). The state file is re-read and written under a lock file (`<state file>.lock`), so the workers of several locales can record the same page in parallel. `bind` and `terms --add` use the same lock.
 
 `--unverified-file <json>` is a JSON array of UA spans (or `{ "span", "reason" }`) for this run: spans with UI context but no dictionary match, and bound keys missing in the locale. They are merged with the earlier ones. An entry is dropped when its span left the UA page, or when its label now verifies. `--date YYYY-MM-DD` overrides today (tests).
 

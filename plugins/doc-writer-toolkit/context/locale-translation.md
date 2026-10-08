@@ -46,9 +46,9 @@ The UA page is never modified.
 
 ## 4. Bold spans and UI labels
 
-The binding pass classifies every bold span (and every Cyrillic inline-code span) once per page and records the decision in the page state's `spans`: `label:<key>`, `term` or `emphasis`. The worker follows the recorded decision and never reclassifies a span.
+The binding pass classifies every bold span (and every Cyrillic inline-code span) once per page and records the decision in the page state's `spans`: `label:<key>`, `unverified`, `term` or `emphasis`. The worker follows the recorded decision and never reclassifies a span.
 
-- **L1. A bound label is the store string, verbatim.** Write the target-locale string from the lookup row in bold. The ticket overlay wins over the base. Don't translate, inflect or recase it, and don't add quotes, even when the app's wording looks odd or uses another register. The reader sees that string on screen. One exception mirrors UA: when the UA span drops trailing decorative punctuation that the UA store string has (store `Статус:`, page `**Статус**`), drop it from the target string too.
+- **L1. A bound label is the store string, verbatim.** Write the target-locale string from the span's label row in bold. The ticket overlay wins over the base. Don't translate, inflect or recase it, and don't add quotes, even when the app's wording looks odd or uses another register. The reader sees that string on screen. One exception mirrors UA: when the UA span drops trailing decorative punctuation that the UA store string has (store `Статус:`, page `**Статус**`), drop it from the target string too.
 - **L2. Grammar goes on a generic noun, never on the label.** When the sentence would inflect the label or attach something to it (a case ending, a suffix, an apostrophe, a contracted article), add the generic noun for the element (button, field, tab, menu, window, column, checkbox…) and inflect that noun. Nothing touches the closing `**`: the next character is a space or sentence punctuation.
 
   | ⛔ | ✅ |
@@ -60,21 +60,23 @@ The binding pass classifies every bold span (and every Cyrillic inline-code span
   - Add no generic noun when the target language doesn't need one: es `Haz clic en **Guardar**.`
   - Generic nouns are terms (§5), so each locale uses one word per element type, on every page.
   - **Tajik:** the noun comes first (izofat: `тугмаи **…**`), so the object marker `-ро` would follow the label. Prefer a phrasing that needs no `-ро` after the label. Where none reads naturally, write `-ро` with a hyphen after the closing `**` (`тугмаи **…**-ро`). This is the only attachment these rules allow.
-- **L3. `term` and `emphasis` spans are prose.** Translate them like the text around them, and keep the bold (S4). A `term` follows term memory (§5). An `emphasis` span is reported as a hint for the style fixer. The worker doesn't rewrite it.
+- **L3. `term` and `emphasis` spans are prose.** Translate them like the text around them, and keep the bold (S4). A `term` follows term memory (§5). An `emphasis` span is reported as a hint for the style fixer. The worker doesn't rewrite it. A span that repeats a heading or title of the same page (`**2. Додайте запис**`) takes that heading's translation, word for word.
 - **L4. Unverified spans.** Two kinds of span are unverified:
-  - a span with UI context but no dictionary match (lookup `no match`: UA paraphrases the UI, or quotes server or hardcoded text), reason `no-match`
-  - a bound key that the store lacks in this locale (lookup `missingIn`), reason `missing-in-locale`
+  - a span recorded as `unverified`: UI context but no dictionary match (UA paraphrases the UI, or quotes server or hardcoded text), reason `no-match`
+  - a bound key that the store lacks in this locale (the label row says `missing`), reason `missing-in-locale`
 
   Translate both as prose, keep the bold, and go through term memory (§5) so they read the same on every page. List them in the run's `unverified` file with their reason. If the project declares `UI label fallback: en`, a `missing-in-locale` span is the EN store string verbatim instead, because that is what the screen shows. It is still listed as unverified. A guessed string is never presented as a confirmed label.
+- **L5. UI text with markup inside the bold is written part by part.** A link, `&nbsp;`, quotes or an `A > B` menu path inside the bold (`**[Налаштування](/settings/)**`, `**Файл&nbsp;>&nbsp;Експорт**`) is recorded as a `term`. Keep the markup exactly as UA has it, and write each part that the span's label row lists in `parts` as that store string, verbatim. Translate any other part as prose.
 
 ## 5. Terms
 
 A term is a domain noun phrase that must read the same on every page: an entity, a status, a role, a generic UI noun (L2), an unverified label (L4). Ordinary vocabulary isn't a term.
 
-- **T1. The UI wins.** A term that equals a UI string in the label store takes that locale's store string. Unlike a label (L1), a term in prose is inflected as the sentence needs.
+- **T1. The UI wins.** A term that equals a UI string in the label store takes that locale's store string. Unlike a label (L1), a term in prose is inflected as the sentence needs, and written in lowercase mid-sentence where the language writes that noun in lowercase (the store's `Makbuz` is `makbuz` in a tr sentence).
 - **T2. Term memory comes next.** A term with an entry in `<state root>/terms/<locale>.tsv` takes the recorded translation, inflected as needed. Never translate a recorded term differently. If a recorded translation looks wrong, use it anyway and report it.
 - **T3. A new term is recorded once.** The terminology pass translates the new terms of the run per locale, and the run appends them. A worker that meets a term with no entry translates it and returns it as a new entry. Later pages and runs reuse it.
 - **T4. Only the terms in the blocks.** Term lookup returns the entries whose UA term occurs in the blocks being translated, matched by stem or prefix to cover UA inflection. The whole file is never loaded.
+- **T5. Never reuse the app's word for another concept.** Before you record a translation, check it against the UI strings and term rows you have. When the app writes «транзакція» as tr `işlem`, «дії» is `eylemler`, not `işlemler`, which a reader takes as "transactions".
 
 **Format of `terms/<locale>.tsv`:**
 
@@ -149,7 +151,7 @@ The worker runs one pass over the blocks it translated, not over the unchanged r
 - [ ] No noun chain where a verb works, and no officialese (P3, P4).
 - [ ] Task headings use the locale's heading form (P7). A UA dash for a missing "is" follows the target's punctuation (P8).
 - [ ] Blocks still mirror UA one to one, and anchors, markers, code, links and formatting are untouched (S1–S5, §3).
-- [ ] Each bound label is the store string, verbatim, in bold (L1).
+- [ ] Each bound label is the store string, verbatim, in bold (L1). Each listed part of a markup span is its store string, with the markup kept (L5).
 - [ ] Nothing touches a label's closing `**` (L2): no letter, digit, apostrophe or hyphen right after it, except tg `-ро`.
 - [ ] Every term matches its store string or term-memory entry, and each generic UI noun has one translation (T1, T2, L2).
 - [ ] Every unverified span is listed with its reason (L4).

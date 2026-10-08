@@ -71,7 +71,7 @@ One file per UA page: `<state root>/pages/<path of the UA page relative to the U
 }
 ```
 
-`sync` only touches `spans` (rebinding and renaming keys) and, per locale, `sourceBlob` and `labelSnapshot`. It keeps every other field.
+`spans` holds one decision per UA span text: `label:<key>`, `unverified`, `term` or `emphasis`. `locale-sync bind` writes it (see its README). `sync` only touches `spans` (rebinding and renaming keys) and, per locale, `sourceBlob` and `labelSnapshot`. It keeps every other field.
 
 A sidebar category has a state file too, named `<dir>/_category_` (`archive/_category_` → `.doc-toolkit/pages/archive/_category_.json`). Its `spans` bind the category's UA label to an app key, exactly like a bold label on a page.
 
@@ -98,7 +98,7 @@ span           class  key                 ru            tr            kk
 ```
 
 - Matching is exact, then normalized (case, whitespace, trailing `:` `.` `…`), then placeholder patterns.
-- Application keys beat `lib.*` keys.
+- Application keys beat `lib.*` keys with the same strings. A `lib.*` key whose strings differ from every application key stays a candidate (`ambiguous`): the same UA text can be a library control, such as a date picker's OK, that the app's own button translates differently.
 - Several keys with identical strings in the requested locales are `label` (`status: identical-targets`; `key` is just the first of the candidates, the others are in `alsoKeys`). **`key` must not be used as the binding in that case.** Choosing among the candidates by the page's namespace is the binding pass's job (Requirement 3, criterion 2). Binding to whichever key sorts first would make a later rename of a sibling key skip the page, or patch it wrongly.
 - Several keys with different strings are `?` with `status: ambiguous` and the candidates. The binding pass chooses.
 - `--json` gives the full structure, including `overlay` (the branch a value came from) and `missingIn`.
@@ -132,7 +132,9 @@ Details:
 - A locale without a `current.json` yet is skipped silently, like a page that does not exist. A `current.json` without the category's entry is listed in `unpatched` ("run write-translations").
 - YAML category files (`_category_.yml`) are not patched.
 
-`--commit` stages the patched pages, state files and `ui-labels/`, and makes one commit: `Sync UI labels to <repo>@<sha7>`. Only those paths are committed. When there is no diff to sync (a first import, or an import where only the overlay or the recorded commit moved), `--commit` still commits `ui-labels/` alone, so a new snapshot never stays uncommitted; the report is then `{ "status": "nothing-to-sync", "commit": <sha or null> }`. `--dry-run` writes nothing.
+Without `--commit` (what the skills run: commits in a docs repo are the user's), the changes stay in the working tree and the report carries `suggestedCommit`: `{ message, paths }`, the commit message `Sync UI labels to <repo>@<sha7>` and the changed repo-relative paths (patched pages, state files, `ui-labels/`), or `null` when nothing changed. After an import with no diff to sync it lists the new snapshot alone: `{ "status": "nothing-to-sync", "suggestedCommit": … }`. Commit the sync before a locale translation runs: the translation reads committed UA only, and `sync` already advanced the locale state to the patched UA text.
+
+`--commit`, for hosts that want the script to commit, stages the patched pages, state files and `ui-labels/`, and makes one commit: `Sync UI labels to <repo>@<sha7>`. Only those paths are committed. When there is no diff to sync (a first import, or an import where only the overlay or the recorded commit moved), `--commit` still commits `ui-labels/` alone, so a new snapshot never stays uncommitted; the report is then `{ "status": "nothing-to-sync", "commit": <sha or null> }`. `--dry-run` writes nothing.
 
 The report lists:
 
@@ -140,6 +142,7 @@ The report lists:
 - `alreadyCurrent`
 - `notFound`: the page doesn't contain the old string in that locale, so it was not patched
 - `checkBinding` (Requirement 3, criterion 2a): a page is bound to a **sibling** of a changed key (an unchanged key that still has the changed key's old UA string) and still shows the old string in some locale. Each entry gives page, locale, `boundKey`, `changedKey`, old and new string and the lines. Nothing is patched, because only a writer knows whether the page meant the changed key. It is information only and doesn't keep the diff pending.
+- `markupParts`: a page has a `term` span with markup (a menu path such as `⋮&nbsp;>&nbsp;Переглянути`, a link or quotes) with a part equal to a changed key's old UA string. Such spans are written part by part from the store, so no key is bound to them and nothing is patched. Each entry gives page, span, `changedKey`, old and new UA string, for a writer to update the span in every language. Information only; it doesn't keep the diff pending.
 - `unpatched`: an old or new string is missing for that locale, or the same old string was renamed differently by several keys, or a category file cannot be patched without reformatting it, so a writer must decide
 - `broken`: a bound key was removed, nothing patched
 - `rekeyed`
@@ -147,7 +150,7 @@ The report lists:
 - `undocumented`: new keys, information only
 - `skipped`
 - `pendingRemains`
-- `commit`
+- `commit` (with `--commit`) or `suggestedCommit` (without)
 
 ## Limits
 

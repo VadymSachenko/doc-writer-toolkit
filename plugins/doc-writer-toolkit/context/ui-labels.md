@@ -25,6 +25,7 @@ Review, fix, alignment and UA → EN translation skills don't run it.
 | No `UI label source:` declared | Ask once and offer to persist the answer (`${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`). | Skip this procedure without comment: the project keeps no label store. |
 | `check` or `import` fails (exit `1`: network, `gh` auth, a locale file that doesn't parse or covers under 80% of the EN keys) | Stop. A translation never runs on an unchecked snapshot. | Report the error in one line and continue with the existing snapshot. |
 | `sync` leaves the diff pending (`pendingRemains`) | Stop until it is resolved (step 4). | Report it and continue. |
+| `sync` patched pages or categories (`suggestedCommit` lists paths outside the label store) | Stop: the user commits the sync first (step 6). | Continue. |
 
 ## Procedure
 
@@ -37,13 +38,16 @@ Run every command from the docs repo root. Pass `--ticket <n>` when the user sha
    - Exit `1`: see the table above.
 2. **Drain an earlier diff.** If `pendingSync` is `false`, go to step 3. If it is `true`, run step 4 first, because `import` refuses to run (exit `3`) while a diff is unsynced, so a diff is never lost. Then run `check` again: exit `0` → step 5, exit `10` → step 3.
 3. **Import.** Run `ui-labels.mjs import`. It writes the new snapshot, the ticket overlay and the diff for `sync`. On exit `1` the previous snapshot is untouched: see the table above.
-4. **Sync.** Run `ui-labels.mjs sync --commit`. For every page and sidebar category bound to a changed or rekeyed key, it patches the bold label in UA, EN and every locale on the current branch, and advances the state, so the patch doesn't trigger a re-translation. It then makes one commit, `Sync UI labels to <repo>@<sha7>`, with only those paths. When there is no diff to sync (`status: nothing-to-sync`, after a first import for example), it commits the new snapshot alone.
+4. **Sync.** Run `ui-labels.mjs sync`, without `--commit`: commits in the docs repo are the user's. For every page and sidebar category bound to a changed or rekeyed key, it patches the bold label in UA, EN and every locale on the current branch, and advances the state, so the patch doesn't trigger a re-translation once it is committed. The changes stay in the working tree. `suggestedCommit` gives the commit for the user to make: the message (`Sync UI labels to <repo>@<sha7>`) and the changed paths. After an import with no diff to sync (`status: nothing-to-sync`, a first import for example), it lists the new snapshot alone.
    - A page with uncommitted changes isn't patched (`skipped`), and the diff stays pending (`pendingRemains`). Ask the user to commit or stash those files, then run `sync` again. Never commit or stash them yourself.
 5. **Show the report** before the task continues:
    - **Patched:** the `uk` and `en` entries (page, old → new, line), which the PR reviewer checks, plus the number of locale entries. Read each patched `uk` line. If the label's grammar in the sentence depends on it (case, agreement), name that block for a fix, because `sync` patched it verbatim.
-   - **For a writer to decide** (nothing was changed): `checkBinding` (a page bound to a sibling key still shows the old string), `broken` (a bound key was removed from the app), and `unpatched`. Give the page and key for each.
-   - **For information:** `undocumented` (new UI text that no page documents yet), `renamedEntries`, `skipped`, and the commit SHA.
-6. **Continue the task.** The sync commit stays on the current branch and goes through the PR with the rest of the work. Never push it.
+   - **For a writer to decide** (nothing was changed): `checkBinding` (a page bound to a sibling key still shows the old string), `markupParts` (a menu path or other markup span contains a renamed string), `broken` (a bound key was removed from the app), and `unpatched`. Give the page and key for each.
+   - **For information:** `undocumented` (new UI text that no page documents yet), `renamedEntries` and `skipped`.
+   - **The commit to make:** `suggestedCommit`, its message and paths, as one block the user can run (`git add -- <paths>` and `git commit -m "<message>"`). Don't run it yourself.
+6. **Continue the task**, unless the table above says stop. The sync commit belongs on the current branch, separate from the rest of the work, and goes through the PR with it.
+   - **Why `locale-translator` stops after patching pages:** the translation reads committed UA only, while `sync` already advanced the locale state to the patched UA text. Until the user commits the sync, every patched page looks stale against a version that isn't in the repository and would be re-translated in full from the old text. After the commit, run the task again; the check then passes.
+   - A changed snapshot alone (only label-store paths in `suggestedCommit`) doesn't block anything: the scripts read the label store from the working tree. List its commit in the task's report.
 
 ## Looking up labels while writing
 

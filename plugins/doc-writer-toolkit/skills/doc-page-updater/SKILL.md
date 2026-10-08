@@ -33,6 +33,8 @@ Nothing else. Do not load style corpora; the reviewer does that afterwards.
 
 ## Step 1 — Read and plan
 
+Run the UI label check in `${CLAUDE_PLUGIN_ROOT}/context/ui-labels.md` before anything else.
+
 1. Read the brief. Every item under "What changed" must carry a source; an item without one, or marked unknown, becomes a marker (Step 2.3) — never prose.
 2. Read the page once, whole. Note its type, section order, table shapes, how it names the UI elements the brief mentions, and any existing markers.
 3. For each brief item decide: **already present** (no edit — the page already states it; report it), **extend** (add a row, item, sentence or paragraph inside an existing block), **replace** (the page says X, the brief says Y with a source — Y wins; report "replaced X with Y (source …)"), **add section** (no existing block fits; place it where the template puts that kind of content), or **marker** (unknown).
