@@ -183,7 +183,7 @@ Failures have a `check` name; warnings never block.
 
 | Check | Fails when |
 |---|---|
-| `frontmatter` | Keys differ (`last_update` excepted), a non-prose value changed, or `title` / `description` still equal the UA text. |
+| `frontmatter` | Keys differ (`last_update` excepted), a non-prose value changed, or `title` / `description` still equal the UA text (a `title` may equal it when the locale's term memory or label store has that string, as for a loanword). |
 | `headings` | Count, levels or `{/* #anchor */}` comments differ. |
 | `structure` | A section's sequence of blocks differs from UA (a paragraph split or merged). Sentences inside a block may move freely. This keeps later runs mappable. |
 | `counts` | List items, numbered steps, table rows or admonition types per section differ. |
@@ -200,7 +200,7 @@ Failures have a `check` name; warnings never block.
 Warnings:
 
 - A translation written mostly in Latin letters that still contains Cyrillic (an untranslated mermaid label, for example). It is not a failure because pages about the language picker legitimately list Cyrillic names.
-- A link whose UA text names the target page's title, and whose translated text doesn't name the target's translated title (same words, each one matched without its last letter, so an added case or possessive suffix still passes). Result field `linkTitles[]`: `line`, `text`, `url`, `title`.
+- A link whose UA text names the target page's title, and whose translated text doesn't name the target's translated title (same words, each one matched without its last letter, so an added case or possessive suffix still passes). Every mismatch is listed. Result field `linkTitles[]` (also in the `check` output): `line`, `text`, `url`, `title`.
 
 ## Recording (`record`)
 

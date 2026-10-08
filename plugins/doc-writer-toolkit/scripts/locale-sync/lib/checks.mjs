@@ -11,6 +11,7 @@ import { decidedOccurrences } from './spans.mjs';
 import { sectionMap } from './scope.mjs';
 import { offTitleLinks, titleLinks } from './links.mjs';
 import { nodeAt } from './redo.mjs';
+import { readTerms } from './terms.mjs';
 import { alignTrees } from './diff.mjs';
 import { assetRefs, canonicalTags, cleanRef, linkTargets, markerCount, otherCommentCount, parsePage, PROSE_FM_KEYS, sections, splitCode } from './parse.mjs';
 
@@ -66,6 +67,8 @@ function multisetDiff(a, b) {
   return { missing, extra };
 }
 
+const normString = (t) => t.normalize('NFC').replace(/\s+/g, ' ').trim().toLocaleLowerCase('uk');
+
 const head = (list, n = 8) => (list.length > n ? [...list.slice(0, n), `… and ${list.length - n} more`] : list);
 
 // Mermaid diagrams carry translatable labels. Flowcharts compare with their labels blanked; other diagram types only by
@@ -93,7 +96,7 @@ const frontmatterKeys = (fm) => new Map((fm?.entries ?? []).filter((e) => e.key 
 
 // Requirement 8: every deterministic check on one translated page. Pure: reads nothing but its arguments and the disk
 // (for asset links).
-export async function checkPage({ locale, uaText, targetText, targetFile, state, labels, meta, unverified = [], root, linkTitles = [] }) {
+export async function checkPage({ locale, uaText, targetText, targetFile, state, labels, meta, unverified = [], root, linkTitles = [], knownStrings = new Set() }) {
   const failures = [];
   const warnings = [];
   const fail = (check, message, detail = {}) => failures.push({ check, message, ...detail });
@@ -121,7 +124,8 @@ export async function checkPage({ locale, uaText, targetText, targetFile, state,
     for (const key of ['title', 'description']) {
       const a = ka.get(key);
       const t = kt.get(key);
-      if (a && t && CYRILLIC.test(a.value) && a.value === t.value) fail('frontmatter', `'${key}' is not translated.`, { value: t.value });
+      // A loanword title can legitimately equal the UA one (kk «Месенджер») when the locale's term memory or the app has it.
+      if (a && t && CYRILLIC.test(a.value) && a.value === t.value && !(key === 'title' && knownStrings.has(normString(t.value)))) fail('frontmatter', `'${key}' is not translated.`, { value: t.value });
       if (a && t && !t.value) fail('frontmatter', `'${key}' is empty.`);
     }
   }
@@ -275,8 +279,8 @@ export async function checkPage({ locale, uaText, targetText, targetFile, state,
   // as needed. Only a warning: the reader still reaches the page.
   const offTitle = offTitleLinks(linkTitles, tr.sc.prose);
   if (offTitle.length) {
-    const shown = offTitle.slice(0, 3).map((o) => `line ${o.line} "${o.text}" for "${o.title}"`).join('; ');
-    warnings.push(`${offTitle.length} link text${offTitle.length > 1 ? 's name their target pages' : ' names its target page'} differently from the page title: ${shown}${offTitle.length > 3 ? '; …' : ''}.`);
+    const shown = offTitle.map((o) => `line ${o.line} "${o.text}" for "${o.title}"`).join('; ');
+    warnings.push(`${offTitle.length} link text${offTitle.length > 1 ? 's name their target pages' : ' names its target page'} differently from the page title: ${shown}.`);
   }
 
   return { ok: failures.length === 0, failures, warnings, checks: [...new Set(failures.map((f) => f.check))], linkTitles: offTitle };
@@ -292,8 +296,10 @@ export async function checkTranslation(s, page, locale, { candidate = null, unve
   const state = await readState(s, page.id);
   const st = store === undefined ? await loadStore(s.labelsDir) : store;
   const labels = st ? mergedLabels(st).labels : null;
+  const terms = await readTerms(s, locale);
+  const knownStrings = new Set([...terms.entries.map((e) => e.target), ...Object.values(labels?.[locale] ?? {})].map(normString));
   const linkTitles = targetText === null ? [] : await titleLinks(s, page, uaText, locale);
-  const result = await checkPage({ locale, uaText, targetText, targetFile, state, labels, meta: st?.meta, unverified: [...unverified, ...(state.locales[locale]?.unverified ?? [])].filter(Boolean), root: s.root, linkTitles });
+  const result = await checkPage({ locale, uaText, targetText, targetFile, state, labels, meta: st?.meta, unverified: [...unverified, ...(state.locales[locale]?.unverified ?? [])].filter(Boolean), root: s.root, linkTitles, knownStrings });
   return { ...result, page: page.id, locale, file: targetFile, uaText, targetText, state, store: st, labels };
 }
 

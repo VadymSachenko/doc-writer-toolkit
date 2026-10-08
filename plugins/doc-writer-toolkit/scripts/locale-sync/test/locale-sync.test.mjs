@@ -684,6 +684,16 @@ test('check: inline code that holds Cyrillic UI text is translatable; the Ukrain
   assert.match(r.out.results[0].warnings.join('\n'), /Cyrillic text remains/, 'a leftover mermaid label is reported');
 });
 
+test('check: a title equal to the UA one passes only when it is a term-memory or app string of the locale', async () => {
+  const f = await translatedFixture();
+  const loan = (t) => edit(t, 'title: Filtreler', 'title: Фільтри');
+  let r = await checks(f, loan);
+  assert.ok(r.checks.includes('frontmatter'), 'an untranslated title still fails');
+  await f.write('.doc-toolkit/terms/tr.tsv', 'фільтри\tФільтри\n');
+  r = await checks(f, loan);
+  assert.ok(!r.checks.includes('frontmatter'), 'the term memory has it');
+});
+
 test('check: a dangling asset symlink fails; the translation missing fails', async () => {
   const f = await translatedFixture();
   await fs.rm(path.join(f.dir, EN_ROOT, 'filters/.assets/dialog.png'));
@@ -1467,6 +1477,17 @@ test('link titles: blocks gives the target page title per locale; check warns wh
   r = await cli(f.dir, 'check', 'filters', '--locales', 'tr');
   assert.equal(r.code, 0, 'a warning, not a failure');
   assert.match(r.out.results[0].warnings[0], /1 link text names its target page differently from the page title: line \d+ "Genel bakış" for "Kabine genel bakışı"/);
+  assert.deepEqual(r.out.results[0].linkTitles.map((o) => [o.text, o.url, o.title]), [['Genel bakış', '/overview/', 'Kabine genel bakışı']], 'the check result carries linkTitles[]');
+
+  // Every mismatch is listed, not just three per page.
+  const many = (n) => Array.from({ length: n }, () => '[Genel bakış](/overview/)').join(' ');
+  await f.write('docs/filters/filters.md', edit(UA, 'на сторінці [Огляд](/overview/)', `на сторінці ${Array.from({ length: 5 }, () => '[огляду кабінету](/overview/)').join(' ')}`));
+  await f.commit();
+  await f.write(`${TR_ROOT}/filters/filters.md`, trPage(`${many(5)} bölümüne`));
+  r = await cli(f.dir, 'check', 'filters', '--locales', 'tr');
+  assert.equal(r.out.results[0].linkTitles.length, 5);
+  assert.equal(r.out.results[0].warnings[0].match(/line \d+ "/g).length, 5);
+  assert.doesNotMatch(r.out.results[0].warnings[0], /…/);
   r = await cli(f.dir, 'report', '--md', '--locales', 'tr');
   assert.match(r.out, /### Link texts that name a page differently from its title\n\n- filters\/filters \[tr\] line \d+: "Genel bakış" → \/overview\/ is titled "Kabine genel bakışı"/);
 });

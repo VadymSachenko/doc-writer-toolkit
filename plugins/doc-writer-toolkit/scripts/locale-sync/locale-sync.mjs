@@ -176,8 +176,8 @@ async function main() {
       const results = [];
       for (const page of pages) {
         for (const locale of targets) {
-          const { ok, failures, warnings, checks, file } = await checkTranslation(s, page, locale, { candidate: values.candidate, unverified });
-          results.push({ page: page.id, locale, file, ok, checks, failures, warnings });
+          const { ok, failures, warnings, checks, file, linkTitles } = await checkTranslation(s, page, locale, { candidate: values.candidate, unverified });
+          results.push({ page: page.id, locale, file, ok, checks, failures, warnings, linkTitles });
         }
       }
       const ok = results.every((r) => r.ok);
