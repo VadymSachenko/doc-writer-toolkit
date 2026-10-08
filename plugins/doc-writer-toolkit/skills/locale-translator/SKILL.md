@@ -11,7 +11,7 @@ You are bringing the further locales of a documentation site up to date with its
 
 ## Scope
 
-- **In scope:** every in-scope UA page and sidebar category (`_category_.json`) that is new or changed for at least one target locale; writing the locale pages, the category entries in each locale's `current.json`, the screenshot symlinks, the page state and the term memory; the build and the report.
+- **In scope:** every in-scope UA page and sidebar category (`_category_.json`) that is new or changed for at least one target locale; writing the locale pages, the category entries in each locale's `current.json`, the screenshot symlinks, the page state and the term memory; the build and the report. Also corrections of recorded translations, block by block: a wrong term, a label that needs another key in one section, a link text or a task title (see "Corrections after a run").
 - **Out of scope:**
   - UA → EN: `doc-translator`. The EN page is never read, used as a reference or modified here.
   - Writing or fixing UA content. The UA page is never modified, and a suspected error in it is reported, not fixed.
@@ -78,6 +78,8 @@ The units of the run are every page and category row with at least one `new` or 
    - **`unverified`** — the span is meant as UI text, but no key fits or there is no match: UA paraphrases the screen, or quotes server text or a hardcoded string. Never bind a key that "almost" matches.
    - **`term`** — a domain concept (an entity, a role, a status named as a concept), a definition item, a fixed lead-in the docs repeat on many pages (`**Результат:**`), or UI text with markup whose parts are UI strings.
    - **`emphasis`** — bold that only stresses words, or that points to a heading or stage of the docs themselves (`**2. Додайте …**`). These are Ж1 hints in the report.
+
+   **One span, two controls on one page.** An ask among keys with different strings may list `sections`: the headings the span occurs under. When the contexts show the span naming different controls in different sections (a tab in one, a switch in another), decide the page-level span for the meaning most occurrences have, and add `"<span>@<heading>": "label:<other key>"` for each heading where the other control is meant (the heading's title or its `#anchor`, as `sections` gives them). A scoped decision covers that section and its subsections. If one section names both controls, a scoped decision can't separate them: decide for the meaning that section mostly has, and report it for a writer.
 3. Write `{ "<page>": { "<span>": "<decision>" } }` to `<run>/decisions.json` and run `LS bind --decisions <run>/decisions.json`. Fix and resubmit anything `rejected`.
 4. Run `LS bind` again (with the same narrowing): `summary.ask` must be 0.
 
@@ -102,7 +104,7 @@ The units of the run are every page and category row with at least one `new` or 
    Locale: <locale>
    Register: <the project's Locale register: value for this locale, or "default">
    Run folder: <absolute path of the run folder>/<locale>/
-   Units, in this order: <id> (<page|category>, <full|incremental>), …
+   Units, in this order: <id> (<page|category>, <full|incremental|redo <lines>>), …
    ```
 
 3. When a worker finishes, start that locale's next batch, until every queue is done. A locale whose worker fails or stops keeps its previous files and state; the other locales go on (Requirement 5, criterion 8).
@@ -134,6 +136,7 @@ Don't translate, check or record pages yourself, and don't read the workers' can
    - Unverified labels: page, span, reason (`no-match` | `missing-in-locale`).
    - Term conflicts, and terms whose recorded translation a worker thought wrong.
    - Orphaned and moved pages; manual-bootstrap pages skipped; asset fallbacks to UA (no EN screenshot yet).
+   - Link texts that name a page differently from its title (the `report --md` section of that name).
 
    ## Visual review
    <the `report --md` output: the ✓/✗ table and the URL list per locale, and the build result per locale>
@@ -144,10 +147,21 @@ Don't translate, check or record pages yourself, and don't read the workers' can
 
 Don't commit or push: commits in the docs repo are the user's. List the changed paths by kind (locale pages, symlinks, `current.json` files, state files, term files, `.gitattributes`) and suggest one commit, for example `Translate <n> pages into <locales>`. If Step 1 left a new snapshot uncommitted, suggest its commit (`suggestedCommit`) first, as its own commit.
 
+## Corrections after a run
+
+A run that is already recorded is corrected block by block, never by re-translating whole pages. The workers do the translating, as in Step 5: a unit `<id> (page, redo <lines>)` makes a worker run `LS blocks <id> --redo <lines>`, translate only those blocks, `apply --redo`, check and record. The page stays `current`. Batch the redo units per locale as in Step 5, then run Step 6 for the touched pages. A page that isn't `current` in that locale (`upToDate: false`) goes through a normal run first.
+
+- **A recorded term translation is wrong.** Write the corrected rows to `<run>/terms-fix-<locale>.json` and run `LS terms --add <file> --replace --locales <locale>` (`terms --drop <UA term>… --locales <locale>` for junk or superseded rows). For each `replaced` row, run `LS terms --usage <old translation> --locales <locale>` and save it to the run folder. Each page in it gives one unit, `<id> (page, redo <redo>)`, and each category gives `<id> (category, redo)`. Check the hits first: a match that is a different word with the same stem needs no redo, so leave its line out.
+- **A label needs another key in one section.** Record the scoped decisions (`"<span>@<heading>": "label:<key>"`, Step 3) with `LS bind --decisions`. Then run `LS check <pages>` for every locale: each `labels` failure carries `redo`, the translation lines to redo. The locales where both keys show the same string pass and need nothing.
+- **A link text names a page differently from its title.** The `check` warning (and `report --md`) gives the line. Redo it with the link row (P9). A mere inflection already passes the check.
+- **Task titles are not in the locale's title form (P7).** Redo the `title` line of the frontmatter and the task headings (`--redo <line>`; a heading line redoes the heading alone). Then run `LS check` on the pages that link to them, and redo the link texts it warns about.
+
+Tell each worker in its prompt which correction it applies (for example, "the term «Вхідна транзакція» is now `…`; rewrite only what that changes"), so it keeps the rest of each block's wording.
+
 ## Self-review before reporting
 
 - [ ] The label check ran before anything else, and the run didn't continue on a failed check, import or a pending diff.
-- [ ] Every `new` / `stale` cell from Step 2 has an outcome in a `results.jsonl` (translated, synced, skipped or failed). None is missing, and none was translated twice.
+- [ ] Every `new` / `stale` cell from Step 2 has an outcome in a `results.jsonl` (translated, synced, skipped or failed). None is missing, and none was translated twice. Each locale's `results.jsonl` has one line per unit given to its workers: a file with fewer lines was overwritten by a later batch, so report the lost lines.
 - [ ] `git status` shows no change in the UA content root, the EN i18n root, the label store or anywhere outside the locale roots, the locale `current.json` files, `<state root>/pages/`, `<state root>/terms/` and `.gitattributes`.
 - [ ] Nothing was deleted or moved.
 - [ ] Every failed cell kept its previous file and state.
@@ -174,5 +188,6 @@ This skill triggers only when the user names it or runs `/translate-locales`:
 - `/translate-locales --dry-run`
 - "Use locale-translator to update the locales for this branch."
 - "locale-translator: translate the settings section into kk only."
+- "locale-translator: correct the tg term «Вхідна транзакція» and redo the pages that use it."
 
 If the user asks to translate into "all languages" or names a non-EN locale without naming this skill, suggest it and wait for an explicit go-ahead.
