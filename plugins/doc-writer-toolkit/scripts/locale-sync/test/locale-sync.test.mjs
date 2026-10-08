@@ -1040,3 +1040,275 @@ test('categories: after ui-labels sync patches a renamed label, locale-sync sees
   assert.equal(r.code, 0, JSON.stringify(r.out.results[0].failures));
   assert.deepEqual(JSON.parse(await f.read(catStatePath)).spans['Усі фільтри'], 'label:filters.title');
 });
+
+// ------------------------------------------------------------------ binding pass, label rows, term memory, parallel record
+
+const STATE = '.doc-toolkit/pages/filters/filters.json';
+const readStateFile = async (f, rel = STATE) => JSON.parse(await f.read(rel));
+
+test('bind: records unique matches in a UI context, asks about the rest, and records the model decisions', async () => {
+  const f = await fixtureRepo();
+  let r = await cli(f.dir, 'bind', '--dry-run');
+  assert.equal(r.code, 0, r.stderr);
+  await assert.rejects(fs.stat(path.join(f.dir, STATE)), '--dry-run writes nothing');
+
+  r = await cli(f.dir, 'bind');
+  assert.equal(r.code, 0, r.stderr);
+  const page = r.out.pages.find((p) => p.page === 'filters/filters');
+  const auto = { 'В роботі': 'label:status.inwork', Фільтри: 'label:filters.title', Статус: 'label:filters.status', Застосувати: 'label:filters.apply' };
+  assert.deepEqual(Object.fromEntries(page.resolved.map((x) => [x.span, x.decision])), auto);
+  // «**Результат:**» is in no dictionary and has no UI context: the model decides.
+  assert.deepEqual(page.ask.map((x) => [x.span, x.lookup.status, x.why, x.suggest]), [['Результат:', 'no-match', 'no dictionary match', undefined]]);
+  assert.equal(page.ask[0].contexts[0].text, '**Результат:** Список оновлюється.');
+  assert.deepEqual((await readStateFile(f)).spans, auto);
+
+  await f.write('decisions.json', {
+    'filters/filters': { 'В роботі': 'label:status.inwork', 'Результат:': 'emphasis', 'Немає такого': 'term', Статус: 'label:no.such.key', Фільтри: 'maybe' },
+    'no/such/page': { X: 'term' },
+  });
+  r = await cli(f.dir, 'bind', '--decisions', 'decisions.json');
+  assert.equal(r.code, 1, 'rejections exit 1');
+  assert.deepEqual(r.out.written.map((w) => w.span), ['В роботі', 'Результат:']);
+  assert.deepEqual(r.out.rejected.map((x) => [x.span, x.reason]), [
+    ['Немає такого', 'the span is not on the committed UA page'],
+    ['Статус', 'the label store has no such key'],
+    ['Фільтри', 'a decision is label:<key>, unverified, term or emphasis'],
+    [undefined, 'no UA page or category with this id'],
+  ]);
+  assert.deepEqual((await readStateFile(f)).spans, SPANS, 'the valid decisions are recorded, the rest untouched');
+
+  r = await cli(f.dir, 'bind');
+  assert.deepEqual([r.out.pages, r.out.summary.ask], [[], 0], 'a second run has nothing left to decide');
+
+  // Another page repeats «**Результат:**»: still asked, with the decision the first page has as the suggestion.
+  await f.write('docs/other/other.md', `---\ntitle: Інше\n---\n\n**Результат:** Готово.\n`);
+  await f.commit();
+  r = await cli(f.dir, 'bind', 'other');
+  assert.deepEqual(r.out.pages[0].ask.map((x) => [x.span, x.suggest, x.seenOn]), [['Результат:', 'emphasis', { emphasis: 1 }]]);
+});
+
+test('bind: definition items are labels when the dictionary has them, otherwise terms; identical keys are chosen by namespace, unverified spans are re-checked', async () => {
+  const f = await fixtureRepo();
+  const same = (v) => ({ uk: 'Статус', en: 'Status', tr: 'Durum', ru: 'Статус' })[v];
+  for (const l of ['uk', 'en', 'tr', 'ru']) await f.write(`.doc-toolkit/ui-labels/${l}.json`, { ...LABELS[l], 'users.status': same(l), 'users.role': { uk: 'Роль', en: 'Role', tr: 'Rol', ru: 'Роль' }[l], 'groups.role': { uk: 'Роль', en: 'Role', tr: 'Görev', ru: 'Роль' }[l] });
+  await f.write('docs/users/users.md', `---\ntitle: Користувачі\n---\n\n- **Роль** — набір прав користувача.\n\n1. Оберіть **Статус** у списку.\n2. Натисніть **Роль**.\n3. Натисніть **Нове**.\n`);
+  await f.commit();
+  await f.write('.doc-toolkit/pages/users/users.json', { spans: { Нове: 'unverified' }, locales: {} });
+  let r = await cli(f.dir, 'bind', 'users');
+  assert.equal(r.code, 0, r.stderr);
+  let page = r.out.pages[0];
+  // «Статус» has two keys with identical strings: the page's area (users) picks users.status, not filters.status.
+  assert.deepEqual(page.resolved.map((x) => [x.span, x.decision]), [['Статус', 'label:users.status']]);
+  // «Роль» is a definition-list term and a UI label on the same page, with keys whose strings differ: the model decides.
+  assert.deepEqual(page.ask.map((x) => [x.span, x.lookup.status, x.why]), [['Роль', 'ambiguous', '2 keys with different strings']]);
+  assert.equal(page.ask[0].suggest, undefined, 'no namespace guess among keys whose strings differ');
+
+  // The app gains «Нове»: the earlier `unverified` decision becomes a label.
+  for (const l of ['uk', 'en', 'tr', 'ru']) {
+    const cur = JSON.parse(await f.read(`.doc-toolkit/ui-labels/${l}.json`));
+    await f.write(`.doc-toolkit/ui-labels/${l}.json`, { ...cur, 'users.new': { uk: 'Нове', en: 'New', tr: 'Yeni', ru: 'Новое' }[l] });
+  }
+  r = await cli(f.dir, 'bind', 'users');
+  page = r.out.pages[0];
+  assert.deepEqual(page.resolved.map((x) => [x.span, x.decision, x.why]), [['Нове', 'label:users.new', 'now in the dictionary']]);
+
+  // A definition item that is a dictionary string names a UI element (a control the list describes): a label. One the
+  // dictionary doesn't know is a term. Several identical keys with no namespace fit: the model decides.
+  await f.write('docs/defs/defs.md', `---\ntitle: Терміни\n---\n\n- **Фільтри**: відкриває панель фільтрів.\n- **Статус:** поточний стан запису.\n- **Дата** — дата створення.\n\nЗаписи **Застосувати** зберігаються.\n`);
+  await f.commit();
+  r = await cli(f.dir, 'bind', 'defs');
+  assert.deepEqual(r.out.pages[0].resolved.map((x) => [x.span, x.decision, x.why]), [['Фільтри', 'label:filters.title', 'definition item naming a UI string'], ['Дата', 'term', 'definition list']]);
+  assert.deepEqual(r.out.pages[0].ask.map((x) => [x.span, x.why, x.suggest]), [
+    ['Застосувати', 'dictionary match without UI context', 'label:filters.apply'],
+    ['Статус:', '2 keys with the same strings, no namespace fits', undefined],
+  ]);
+});
+
+test('blocks: label rows give the exact string to write; term rows come from term memory, the UI string winning', async () => {
+  const f = await fixtureRepo();
+  await writeState(f);
+  await f.write('.doc-toolkit/ui-labels/uk.json', { ...LABELS.uk, 'filters.status': 'Статус:' });
+  await f.write('.doc-toolkit/ui-labels/tr.json', { ...LABELS.tr, 'filters.status': 'Durum:', 'filters.apply': undefined });
+  await f.write('.doc-toolkit/terms/tr.tsv', 'запис\tkayıt\nробоча група\tçalışma grubu\nстатус\tstatü\n');
+  const r = (await cli(f.dir, 'blocks', 'filters', '--locales', 'tr')).out.results[0];
+  const rows = Object.fromEntries(r.labels.map((x) => [x.span, x]));
+  assert.equal(rows['Фільтри'].write, 'Filtreler');
+  assert.equal(rows['Статус'].write, 'Durum', 'the UA page drops the colon of the app string, so the translation does too');
+  assert.deepEqual([rows['Застосувати'].missing, rows['Застосувати'].write], [true, undefined]);
+  assert.equal(rows['Результат:'].decision, 'emphasis');
+  assert.deepEqual(r.undecided, []);
+  // «записи» matches «запис»; «робоча група» is not on the page; «статус» equals a UI string, so the app's wins.
+  assert.deepEqual(r.terms, [
+    { ua: 'запис', target: 'kayıt', source: 'memory' },
+    { ua: 'статус', target: 'Durum', source: 'ui', recorded: 'statü' },
+  ]);
+
+  await f.write('CLAUDE.md', (await f.read('CLAUDE.md')).replace('## Other', '- **UI label fallback:** `en`\n\n## Other'));
+  const r2 = (await cli(f.dir, 'blocks', 'filters', '--locales', 'tr')).out.results[0];
+  assert.deepEqual(r2.labels.find((x) => x.span === 'Застосувати'), { span: 'Застосувати', kind: 'bold', decision: 'label:filters.apply', key: 'filters.apply', missing: true, write: 'Apply', fallback: 'en' });
+
+  await writeState(f, {}, {});
+  const r3 = (await cli(f.dir, 'blocks', 'filters', '--locales', 'tr')).out.results[0];
+  assert.equal(r3.undecided.length, 5, 'without a binding pass every span is undecided');
+});
+
+test('blocks: plain first cells of table body rows that are UI strings get the app string as a term row', async () => {
+  const f = await fixtureRepo();
+  await f.write('docs/cols/cols.md', `---\ntitle: Колонки\n---\n\n| Фільтри | Опис |\n|---|---|\n| Фільтри | Панель фільтрів. |\n| **Статус** | Стан запису. |\n| Невідоме | Немає в застосунку. |\n`);
+  await f.commit();
+  const r = (await cli(f.dir, 'blocks', 'cols', '--locales', 'tr')).out.results[0];
+  // The header row is skipped, a cell with markup is a span (not a table term), and an unknown cell has no row.
+  assert.deepEqual(r.terms, [{ ua: 'Фільтри', target: 'Filtreler', source: 'ui', where: 'table' }]);
+});
+
+test('terms: a library string is not a UI string for T1', async () => {
+  const f = await fixtureRepo();
+  for (const l of ['uk', 'tr', 'ru']) {
+    const cur = JSON.parse(await f.read(`.doc-toolkit/ui-labels/${l}.json`));
+    await f.write(`.doc-toolkit/ui-labels/${l}.json`, { ...cur, 'lib.antd.Icon.icon': { uk: 'іконка', tr: 'simgesi', ru: 'иконка' }[l] });
+  }
+  const r = await cli(f.dir, 'terms', 'іконка');
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.out.terms[0].ui, null);
+  assert.deepEqual(r.out.missing.tr, ['іконка'], 'the term needs a translation of its own');
+});
+
+test('terms: lookup per locale, append sorted with conflicts kept out, .gitattributes union merge', async () => {
+  const f = await fixtureRepo();
+  await f.write('.doc-toolkit/terms/tr.tsv', 'робоча група\tçalışma grubu\n');
+  let r = await cli(f.dir, 'terms', 'Статус', 'робоча група', 'запис');
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(r.out.terms[0].ui, { key: 'filters.status', values: { tr: 'Durum', ru: 'Статус' } });
+  assert.deepEqual(r.out.terms[1].recorded, { tr: 'çalışma grubu', ru: null });
+  assert.deepEqual(r.out.missing, { tr: ['Статус', 'запис'], ru: ['Статус', 'робоча група', 'запис'] });
+
+  assert.equal((await cli(f.dir, 'terms', '--add', 'x.json')).code, 2, 'one locale only');
+  await f.write('add.json', { запис: 'kayıt', 'робоча група': 'iş grubu', архів: 'arşiv', 'Робоча група': 'çalışma grubu' });
+  r = await cli(f.dir, 'terms', '--add', 'add.json', '--locales', 'tr');
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(r.out.added.map((x) => x.ua), ['запис', 'архів']);
+  assert.deepEqual(r.out.conflicts, [{ ua: 'робоча група', recorded: 'çalışma grubu', proposed: 'iş grubu' }]);
+  assert.deepEqual(r.out.existing.map((x) => x.ua), ['Робоча група']);
+  assert.equal(await f.read('.doc-toolkit/terms/tr.tsv'), 'архів\tarşiv\nзапис\tkayıt\nробоча група\tçalışma grubu\n');
+  assert.equal(r.out.gitattributes, 'added');
+  assert.equal(await f.read('.gitattributes'), '.doc-toolkit/terms/*.tsv merge=union\n');
+  await f.write('more.tsv', 'дата\ttarih\n');
+  r = await cli(f.dir, 'terms', '--add', 'more.tsv', '--locales', 'tr');
+  assert.deepEqual([r.out.added.length, r.out.gitattributes], [1, 'present']);
+  // A state root outside the repo (a scratch run) never touches the repo's .gitattributes.
+  const scratch = await fs.mkdtemp(path.join(os.tmpdir(), 'locale-sync-state-'));
+  r = await cli(f.dir, 'terms', '--add', 'more.tsv', '--locales', 'tr', '--state-root', scratch);
+  assert.deepEqual([r.out.added.length, r.out.gitattributes], [1, 'outside-repo']);
+  assert.equal(await f.read('.gitattributes'), '.doc-toolkit/terms/*.tsv merge=union\n');
+
+  // Two branches merged with merge=union: the same term twice; the first line wins and the conflict is reported.
+  await f.write('.doc-toolkit/terms/tr.tsv', 'запис\tkayıt\nзапис\tgiriş\n');
+  r = await cli(f.dir, 'terms', 'запис', '--locales', 'tr');
+  assert.deepEqual([r.out.terms[0].recorded.tr, r.out.conflicts.tr[0].ignored], ['kayıt', 'giriş']);
+});
+
+test('record: workers of different locales recording the same page in parallel keep both entries', async () => {
+  const f = await translatedFixture();
+  const ruFile = 'i18n/ru/docusaurus-plugin-content-docs/current/filters/filters.md';
+  await f.write(ruFile, RU);
+  assert.equal((await cli(f.dir, 'link-assets', 'filters', '--locales', 'ru')).code, 0);
+  for (let i = 0; i < 3; i++) {
+    await writeState(f);
+    const [tr, ru] = await Promise.all([cli(f.dir, 'record', 'filters', '--locales', 'tr'), cli(f.dir, 'record', 'filters', '--locales', 'ru')]);
+    assert.equal(tr.code + ru.code, 0, JSON.stringify([tr.out, ru.out]));
+    const state = await readStateFile(f);
+    assert.deepEqual([Object.keys(state.locales).sort(), state.spans], [['ru', 'tr'], SPANS]);
+  }
+  await assert.rejects(fs.stat(path.join(f.dir, `${STATE}.lock`)), 'the lock is released');
+});
+
+test('bind: a sidebar category label is bound to the app string, or recorded as a term when the app has none', async () => {
+  const f = await fixtureRepo({ category: true });
+  let r = await cli(f.dir, 'bind', CAT_ID);
+  assert.deepEqual(r.out.pages[0].resolved, [{ span: 'Фільтри', decision: 'label:filters.title', why: 'sidebar category label in the dictionary' }]);
+  const b = (await cli(f.dir, 'blocks', CAT_ID, '--locales', 'tr')).out.results[0];
+  assert.deepEqual(b.labels, [{ span: 'Фільтри', kind: 'category', decision: 'label:filters.title', key: 'filters.title', write: 'Filtreler' }]);
+
+  await f.write('docs/filters/_category_.json', { ...CATEGORY, label: 'Огляд фільтрів' });
+  await f.commit();
+  r = await cli(f.dir, 'bind', CAT_ID);
+  assert.deepEqual(r.out.pages[0].resolved.map((x) => [x.span, x.decision]), [['Огляд фільтрів', 'term']]);
+});
+
+test('bind and blocks: UI text with markup inside the bold is a term, written part by part from the label store', async () => {
+  const f = await fixtureRepo();
+  await f.write('docs/menu/menu.md', `---\ntitle: Меню\n---\n\n1. Відкрийте **[Фільтри](/filters/)**.\n2. Виберіть **Фільтри&nbsp;>&nbsp;Застосувати**.\n3. Виберіть **Фільтри&nbsp;>&nbsp;Невідоме**.\n`);
+  await f.commit();
+  const r = await cli(f.dir, 'bind', 'menu');
+  const page = r.out.pages[0];
+  assert.deepEqual(page.resolved.map((x) => [x.span, x.decision]), [['[Фільтри](/filters/)', 'term'], ['Фільтри&nbsp;>&nbsp;Застосувати', 'term']]);
+  assert.deepEqual(page.ask.map((x) => [x.span, x.parts.map((p) => p.lookup.status)]), [['Фільтри&nbsp;>&nbsp;Невідоме', ['unique', 'no-match']]]);
+  const b = (await cli(f.dir, 'blocks', 'menu', '--locales', 'tr')).out.results[0];
+  assert.deepEqual(Object.fromEntries(b.labels.map((x) => [x.span, x.parts])), {
+    '[Фільтри](/filters/)': [{ ua: 'Фільтри', write: 'Filtreler' }],
+    'Фільтри&nbsp;>&nbsp;Застосувати': [{ ua: 'Фільтри', write: 'Filtreler' }, { ua: 'Застосувати', write: 'Uygula' }],
+  });
+  assert.deepEqual(b.undecided.map((x) => x.span), ['Фільтри&nbsp;>&nbsp;Невідоме']);
+});
+
+test('apply: splices the translated blocks into a candidate; every other byte of the translation stays', async () => {
+  const f = await translatedFixture();
+  await writeState(f, { tr: trEntry(uaBlob()) });
+  let ua2 = edit(UA, '- Дії доступні лише в статусі **В роботі**.', '- Дії доступні лише для записів у статусі **В роботі**.');
+  ua2 = edit(ua2, '- Фільтр `status` приймає значення `done`.\n', '- Фільтр `status` приймає значення `done`.\n- Новий пункт про **Фільтри**.\n');
+  ua2 = edit(ua2, 'У списку ви можете виконувати такі операції:\n', 'У списку ви можете виконувати такі операції:\n\nНовий абзац.\n');
+  ua2 = edit(ua2, '{/* ToDo: уточнити текст */}\n\n', '');
+  ua2 = edit(ua2, '| Дата | Дата створення. |\n', '| Дата | Дата створення. |\n| Сума | Сума запису. |\n');
+  await f.write('docs/filters/filters.md', ua2);
+  await f.commit();
+
+  const b = (await cli(f.dir, 'blocks', 'filters', '--locales', 'tr')).out.results[0];
+  assert.equal(b.mode, 'incremental');
+  const tr = {
+    'Новий пункт': '- **Filtreler** hakkında yeni madde.',
+    'Дії доступні': '- Eylemler yalnızca **İşlemde** durumundaki kayıtlar için kullanılabilir.',
+    'Новий абзац': 'Yeni paragraf.',
+    Сума: '| Tutar | Kaydın tutarı. |',
+  };
+  const translations = {};
+  for (const c of b.changes) if (c.op !== 'remove') translations[c.id] = Object.entries(tr).find(([k]) => c.ua.text.includes(k))[1];
+  assert.deepEqual(b.changes.map((c) => c.op).sort(), ['add', 'add', 'add', 'remove', 'replace']);
+
+  await f.write('t.json', { c99: 'x' });
+  assert.equal((await cli(f.dir, 'apply', 'filters', '--locales', 'tr', '--translations', 't.json', '--out', 'cand.md')).code, 2, 'unknown or missing ids are refused');
+  await f.write('t.json', translations);
+  const r = await cli(f.dir, 'apply', 'filters', '--locales', 'tr', '--translations', 't.json', '--out', 'cand.md');
+  assert.equal(r.code, 0, JSON.stringify(r.out));
+
+  let want = edit(TR, '- Eylemler yalnızca **İşlemde** durumunda kullanılabilir.', tr['Дії доступні']);
+  want = edit(want, '- `status` filtresi `done` değerini kabul eder.\n', `- \`status\` filtresi \`done\` değerini kabul eder.\n${tr['Новий пункт']}\n`);
+  want = edit(want, 'Listede aşağıdaki işlemleri yapabilirsiniz:\n', 'Listede aşağıdaki işlemleri yapabilirsiniz:\n\nYeni paragraf.\n');
+  want = edit(want, '{/* ToDo: metni netleştirin */}\n\n', '');
+  want = edit(want, '| Tarih | Oluşturulma tarihi. |\n', `| Tarih | Oluşturulma tarihi. |\n${tr['Сума']}\n`);
+  assert.equal(await f.read('cand.md'), want);
+  const c = await cli(f.dir, 'check', 'filters', '--locales', 'tr', '--candidate', 'cand.md');
+  assert.equal(c.code, 0, JSON.stringify(c.out.results[0].failures));
+
+  await f.write('full.json', { full: 'x' });
+  assert.equal((await cli(f.dir, 'apply', 'filters', '--locales', 'tr', '--translations', 'full.json', '--out', 'cand.md')).code, 2, 'an incremental page needs block translations');
+});
+
+test('apply: a new section and several additions at one anchor keep the UA order and blank lines', async () => {
+  const f = await translatedFixture();
+  await writeState(f, { tr: trEntry(uaBlob()) });
+  let ua2 = edit(UA, '- Фільтр `status` приймає значення `done`.\n', '- Фільтр `status` приймає значення `done`.\n- Перший новий.\n- Другий новий.\n');
+  ua2 = edit(ua2, '### Додаткові дії {/* #extra */}\n\nВи також можете скинути фільтри.\n', '### Додаткові дії {/* #extra */}\n\nВи також можете скинути фільтри.\n\n### Нова дія {/* #new-action */}\n\nТекст нової дії.\n');
+  await f.write('docs/filters/filters.md', ua2);
+  await f.commit();
+  const b = (await cli(f.dir, 'blocks', 'filters', '--locales', 'tr')).out.results[0];
+  const lines = { '- Перший новий.': '- İlk yeni.', '- Другий новий.': '- İkinci yeni.', '### Нова дія {/* #new-action */}': '### Yeni işlem {/* #new-action */}', 'Текст нової дії.': 'Yeni işlemin metni.', '': '' };
+  assert.deepEqual(b.changes.map((c) => [c.op, c.kind]), [['add', 'item'], ['add', 'section']]);
+  // The text form: '@@@ <id>' lines, so no JSON escaping is needed.
+  await f.write('t.txt', b.changes.map((c) => `@@@ ${c.id}\n${c.ua.text.split('\n').map((l) => lines[l]).join('\n')}\n`).join('\n'));
+  const r = await cli(f.dir, 'apply', 'filters', '--locales', 'tr', '--translations', 't.txt', '--out', 'cand.md');
+  assert.equal(r.code, 0, JSON.stringify(r.out));
+  let want = edit(TR, '- `status` filtresi `done` değerini kabul eder.\n', '- `status` filtresi `done` değerini kabul eder.\n- İlk yeni.\n- İkinci yeni.\n');
+  want = edit(want, 'Filtreleri sıfırlayabilirsiniz.\n', 'Filtreleri sıfırlayabilirsiniz.\n\n### Yeni işlem {/* #new-action */}\n\nYeni işlemin metni.\n');
+  assert.equal(await f.read('cand.md'), want);
+  assert.equal((await cli(f.dir, 'check', 'filters', '--locales', 'tr', '--candidate', 'cand.md')).code, 0);
+});

@@ -128,6 +128,9 @@ async function fixtureRepo() {
   await write(`${en}/dialog/dialog.md`, 'In the dialog, click **Save**.\n');
   await write('i18n/tr/docusaurus-plugin-content-docs/current/dialog/dialog.md', 'İletişim kutusunda **Kaydet** düğmesine tıklayın.\n');
   await write('.doc-toolkit/pages/dialog/dialog.json', { spans: { Зберегти: 'label:dialog.save' }, locales: {} });
+  // A menu path written part by part (a `term` with markup): no key is bound, so a renamed part is only reported.
+  await write('docs/menu/menu.md', 'Виберіть **Файл&nbsp;>&nbsp;Зберегти**.\n');
+  await write('.doc-toolkit/pages/menu/menu.json', { spans: { 'Файл&nbsp;>&nbsp;Зберегти': 'term' }, locales: {} });
   await git(dir, 'init', '-q');
   await git(dir, 'config', 'user.email', 't@t');
   await git(dir, 'config', 'user.name', 't');
@@ -202,6 +205,8 @@ test('import → change → check → import → sync (fixture repo, command ada
     ].sort(),
   );
   assert.ok(synced.out.patched.every((p) => p.page !== 'dialog/dialog'));
+  assert.deepEqual(synced.out.markupParts, [{ page: 'menu/menu', span: 'Файл&nbsp;>&nbsp;Зберегти', changedKey: 'button.save', old: 'Зберегти', new: 'Підтвердити' }]);
+  assert.ok((await fs.readFile(path.join(dir, 'docs/menu/menu.md'), 'utf8')).includes('Файл&nbsp;>&nbsp;Зберегти'));
   assert.ok((await fs.readFile(path.join(dir, 'docs/dialog/dialog.md'), 'utf8')).includes('**Зберегти**'));
   assert.deepEqual(synced.out.broken.map((b) => [b.key, b.pages]), [['old.key', ['filters/filters']]]);
   assert.deepEqual(synced.out.undocumented.map((u) => u.key), ['button.new']);
@@ -251,9 +256,28 @@ test('sync --commit commits a snapshot that has no label diff, and only the snap
   // Nothing changed since: no commit. Without --commit, or with --dry-run, nothing is committed either.
   assert.equal((await cli(dir, 'sync', '--commit')).out.commit, null);
   await write('.doc-toolkit/ui-labels/meta.json', { ...JSON.parse(await fs.readFile(path.join(dir, '.doc-toolkit/ui-labels/meta.json'), 'utf8')), importedAt: 'later' });
-  assert.equal((await cli(dir, 'sync')).out.commit, undefined);
+  const head = await git(dir, 'rev-parse', 'HEAD');
+  // Without --commit the snapshot stays in the working tree, and the report names the commit for the user to make.
+  const plain = await cli(dir, 'sync');
+  assert.equal(plain.out.commit, undefined);
+  assert.deepEqual(plain.out.suggestedCommit, { message: (await git(dir, 'log', '-1', '--format=%s')), paths: ['.doc-toolkit/ui-labels/meta.json'] });
+  assert.equal(await git(dir, 'rev-parse', 'HEAD'), head);
   assert.equal((await cli(dir, 'sync', '--commit', '--dry-run')).out.commit, undefined);
   assert.notEqual(await git(dir, 'status', '--porcelain', '--', '.doc-toolkit'), '');
+});
+
+test('lookup: a library key with other strings than the app keys stays a candidate; one with the same strings does not', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ul-lookup-'));
+  const labels = {
+    uk: { 'field.ok': 'OK', 'lib.antd.DatePicker.lang.ok': 'OK', 'save': 'Зберегти', 'lib.antd.Form.save': 'Зберегти' },
+    kk: { 'field.ok': 'OK', 'lib.antd.DatePicker.lang.ok': 'Таңдау', 'save': 'Сақтау', 'lib.antd.Form.save': 'Сақтау' },
+  };
+  await fs.writeFile(path.join(dir, 'meta.json'), JSON.stringify({ locales: ['uk', 'kk'], commit: 'x' }));
+  for (const [l, m] of Object.entries(labels)) await fs.writeFile(path.join(dir, `${l}.json`), JSON.stringify(m));
+  const { runLookup } = await import('../lib/lookup.mjs');
+  const { results } = await runLookup({ labelsDir: dir }, { spans: ['OK', 'Зберегти'], locales: ['kk'] });
+  assert.deepEqual([results[0].status, results[0].candidates.map((c) => c.key)], ['ambiguous', ['field.ok', 'lib.antd.DatePicker.lang.ok']]);
+  assert.deepEqual([results[1].status, results[1].key, results[1].alsoKeys], ['unique', 'save', []]);
 });
 
 test('diff command compares two snapshot directories', async () => {

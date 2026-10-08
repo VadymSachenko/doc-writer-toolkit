@@ -33,7 +33,7 @@ export function fenceStep(state, line) {
   return state;
 }
 
-const INLINE_CODE = /(`+)([^`]|[^`][\s\S]*?[^`])\1(?!`)/g;
+export const INLINE_CODE = /(`+)([^`]|[^`][\s\S]*?[^`])\1(?!`)/g;
 
 // Splits a page into "prose" (fenced code and inline code replaced by spaces, same line count and lengths),
 // the fenced blocks, and the inline code spans.
@@ -171,7 +171,7 @@ export function canonicalTags(proseText) {
 
 // ---------------------------------------------------------------- inline facts
 
-const BOLD = /\*\*(?=\S)(.+?)(?<=\S)\*\*/g;
+export const BOLD = /\*\*(?=\S)(.+?)(?<=\S)\*\*/g;
 export function boldSpans(proseLines) {
   const seen = new Set();
   for (const line of proseLines) for (const m of line.matchAll(BOLD)) seen.add(m[1]);

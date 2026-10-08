@@ -2,7 +2,8 @@ import path from 'node:path';
 import { CliError, readJson, writeFileAtomic, writeJson } from '../../ui-labels/lib/util.mjs';
 import { currentFallbacks } from './assets.mjs';
 import { checkTranslation } from './checks.mjs';
-import { abs, listUaPages, statePath } from './pages.mjs';
+import { abs, listUaPages, readState, statePath } from './pages.mjs';
+import { withLock } from './lock.mjs';
 import { resolveTargets, selectPages } from './settings.mjs';
 import { boldSpans, parseFrontmatter, splitCode } from './parse.mjs';
 import { applyCategoryMessages } from './categories.mjs';
@@ -97,8 +98,14 @@ export async function runRecord(s, { selectors = [], candidate = null, unverifie
         unverified: [...merged.values()],
         assetFallbacks,
       };
-      const next = { ...c.state, locales: { ...c.state.locales, [locale]: entry } };
-      if (!dryRun) await writeJson(statePath(s, page.id), next);
+      // Re-read under the lock: the workers of other locales record this page's state file in parallel.
+      if (!dryRun) {
+        const file = statePath(s, page.id);
+        await withLock(file, async () => {
+          const fresh = await readState(s, page.id);
+          await writeJson(file, { ...fresh, locales: { ...fresh.locales, [locale]: entry } });
+        });
+      }
       results.push({ page: page.id, locale, recorded: true, dryRun, file: c.file, state: path.relative(s.root, statePath(s, page.id)), entry, warnings: c.warnings });
     }
   }

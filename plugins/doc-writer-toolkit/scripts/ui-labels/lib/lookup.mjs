@@ -7,6 +7,19 @@ const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 // Case, whitespace and trailing ':' / '.' / '…' don't change which label a span is.
 export const normalize = (s) => s.normalize('NFC').replace(/\s+/g, ' ').trim().replace(/[:.…]+$/, '').trim().toLocaleLowerCase('uk');
 
+// A bold span with markup inside (a link, `&nbsp;`, quotes, a `A > B` menu path) can't be checked as one label, so it
+// is looked up, and written, part by part.
+export function uiParts(span) {
+  const clean = span
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/&nbsp;|\u00a0/g, ' ')
+    .replace(/^[«“"„']+|[»”"']+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const parts = clean.split(/\s*(?:>|→|›)\s*/).filter(Boolean);
+  return { markup: clean !== span || parts.length > 1, parts };
+}
+
 function buildIndex(uk) {
   const exact = new Map();
   const loose = new Map();
@@ -64,8 +77,13 @@ export async function runLookup(settings, { spans, search, locales, limit = 20 }
   const results = spans.map((span) => {
     const { keys, match } = findKeys(index, span);
     if (!keys.length) return { span, class: '?', status: 'no-match' };
-    const app = keys.filter((k) => !isLib(k));
-    const candidates = (app.length ? app : keys).slice().sort();
+    // Application keys beat library keys with the same strings. A library key whose strings differ from every
+    // application key stays a candidate: the same UA text can be a library control (a date picker's OK) whose
+    // translation differs from the app's own button.
+    const app = keys.filter((k) => !isLib(k)).sort();
+    const appValues = new Set(app.map((k) => JSON.stringify(valuesFor(k))));
+    const lib = keys.filter((k) => isLib(k) && !appValues.has(JSON.stringify(valuesFor(k)))).sort();
+    const candidates = app.length ? [...app, ...lib] : keys.slice().sort();
     const rows = candidates.map((key) => ({ key, values: valuesFor(key) }));
     const identical = rows.every((r) => JSON.stringify(r.values) === JSON.stringify(rows[0].values));
     if (candidates.length > 1 && !identical) {

@@ -10,12 +10,21 @@ import { linkAssets } from './lib/assets.mjs';
 import { checkTranslation } from './lib/checks.mjs';
 import { runRecord } from './lib/record.mjs';
 import { renderMarkdown, runReport } from './lib/report.mjs';
+import { runBind, runDecisions } from './lib/bind.mjs';
+import { runApply } from './lib/apply.mjs';
+import { addTerms, lookupTerms } from './lib/terms.mjs';
 
 const USAGE = `locale-sync <command> [<page|folder>…] [options]
 
 Commands
   status [<page|folder>…]   Which UA pages are stale per locale (git blob hashes against the per-page state files).
-  blocks <page>…            The UA blocks to translate, with the matching translated text (blob A -> B, changed-blocks.md).
+  blocks <page>…            The UA blocks to translate, with the matching translated text (blob A -> B, changed-blocks.md),
+                            the label strings and the term-memory rows for those blocks.
+  apply <page>              Writes a candidate file from the translations of the blocks: { "c1": "…" } or { "full": "…" }.
+  bind [<page|folder>…]     Binding pass: records the span decisions the script can make; lists the rest for the model.
+  bind --decisions <file>   Records the model's decisions { "<page>": { "<span>": "label:<key>|unverified|term|emphasis" } }.
+  terms <UA term>…          Term memory and UI strings per locale for these terms; which ones still need a translation.
+  terms --add <file>        Appends entries (TSV or JSON) to one locale's term memory (--locales <locale>).
   link-assets <page>…       Relative per-file symlinks to the EN screenshots in each locale; real files are overrides.
   check <page>…             Every Requirement 8 check on the translated page. Exit 1 if any fails.
   record <page>…            Runs the checks, then advances the page's state. Nothing is recorded if a check fails.
@@ -31,7 +40,9 @@ Project options (default: the 'Documentation toolkit configuration' block of <ro
   --state-root <dir>       default .doc-toolkit
   --docusaurus-config <f>  path to the Docusaurus config
 
-status / blocks:  --overwrite (translate pages that have a locale file but no state)  --threshold <n> (default 10)
+status / blocks / bind:  --overwrite (translate pages that have a locale file but no state)  --threshold <n> (default 10)
+bind / terms --add:      --dry-run
+apply:                   --translations <file.json>  --out <candidate file>  (one page, one locale)
 blocks:           --with-old (include the previous UA text of each changed block)
 link-assets:      --dry-run
 check / record:   --candidate <file> (check/install this file instead of the translation on disk; one page, one locale)
@@ -56,6 +67,10 @@ const OPTIONS = {
   candidate: { type: 'string' },
   'unverified-file': { type: 'string' },
   date: { type: 'string' },
+  decisions: { type: 'string' },
+  translations: { type: 'string' },
+  out: { type: 'string' },
+  add: { type: 'string' },
   md: { type: 'boolean' },
   build: { type: 'boolean' },
   origin: { type: 'string' },
@@ -81,6 +96,36 @@ async function main() {
     }
     case 'blocks': {
       const out = await runBlocks(s, { selectors, overwrite: values.overwrite, withOld: values['with-old'] });
+      for (const w of out.warnings) log(`locale-sync: ${w}`);
+      printJson(out);
+      return 0;
+    }
+    case 'apply': {
+      if (selectors.length !== 1) throw new CliError('Usage: locale-sync apply <page> --locales <locale> --translations <file.json> --out <candidate file>', { code: 2 });
+      printJson(await runApply(s, selectors[0], { translations: values.translations, out: values.out }));
+      return 0;
+    }
+    case 'bind': {
+      if (values.decisions) {
+        const out = await runDecisions(s, values.decisions, { dryRun: values['dry-run'] });
+        printJson(out);
+        return out.rejected.length ? 1 : 0;
+      }
+      const out = await runBind(s, { selectors, overwrite: values.overwrite, dryRun: values['dry-run'] });
+      for (const w of out.warnings) log(`locale-sync: ${w}`);
+      printJson(out);
+      return 0;
+    }
+    case 'terms': {
+      const { targets } = await resolveTargets(s);
+      if (values.add) {
+        if (targets.length !== 1) throw new CliError('terms --add needs exactly one locale (--locales <locale>).', { code: 2 });
+        const out = await addTerms(s, targets[0], values.add, { dryRun: values['dry-run'] });
+        printJson(out);
+        return out.rejected.length ? 1 : 0;
+      }
+      if (!selectors.length) throw new CliError('Usage: locale-sync terms <UA term>… [--locales tr,kk]  |  terms --add <file> --locales <locale>', { code: 2 });
+      const out = await lookupTerms(s, selectors, targets);
       for (const w of out.warnings) log(`locale-sync: ${w}`);
       printJson(out);
       return 0;

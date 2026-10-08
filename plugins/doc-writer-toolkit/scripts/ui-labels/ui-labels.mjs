@@ -18,7 +18,7 @@ Commands
   import                 Import the locale files into <state root>/ui-labels/ (+ ticket overlay, + library strings).
   diff <from> <to>       Compare two ui-labels snapshot directories.
   lookup <span>...       Look up UA strings in the store. --search <text> searches instead.
-  sync                   Patch docs pages for the diff left by the last import. --commit commits the result.
+  sync                   Patch docs pages for the diff left by the last import; the report suggests the commit. --commit makes it.
   hardcoded              Phase 2, not implemented.
 
 Project options (default: the 'Documentation toolkit configuration' block of <root>/CLAUDE.md)

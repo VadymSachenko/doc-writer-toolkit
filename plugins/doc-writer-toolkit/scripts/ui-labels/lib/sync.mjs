@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import { CliError, exists, gitBlobHash, log, readJson, writeJson } from './util.mjs';
 import { deriveLocaleRoot, requireRoots } from './config.mjs';
 import { isLib, loadStore, PENDING_DIFF } from './store.mjs';
+import { uiParts } from './lookup.mjs';
 import { categoryContext, categoryFile, categoryShows, isCategoryId, patchCategory } from './categories.mjs';
 
 const run = promisify(execFile);
@@ -75,20 +76,28 @@ function planChanges(diff) {
 }
 
 async function isDirty(top, files) {
-  const out = await git(top, ['status', '--porcelain', '--', ...files]);
+  const out = await git(top, ['-c', 'core.quotePath=false', 'status', '--porcelain', '--', ...files]);
   return out.trim().length > 0;
 }
+
+const syncMessage = (store) => `Sync UI labels to ${store.meta.source.repo ?? store.meta.source.type}@${store.meta.commit.replace(/^content:/, '').slice(0, 7)}`;
 
 // One commit holding only these paths: `Sync UI labels to <repo>@<sha7>`. Returns its SHA, or null when nothing changed.
 async function commitSync(top, store, paths) {
   await git(top, ['add', '--', ...paths]);
   const staged = (await git(top, ['diff', '--cached', '--name-only', '--', ...paths])).trim();
   if (!staged) return null;
-  const repo = store.meta.source.repo ?? store.meta.source.type;
-  const message = `Sync UI labels to ${repo}@${store.meta.commit.replace(/^content:/, '').slice(0, 7)}`;
+  const message = syncMessage(store);
   await git(top, ['commit', '-m', message, '--', ...paths]);
   log(message);
   return (await git(top, ['rev-parse', 'HEAD'])).trim();
+}
+
+// Without `--commit`, the commit the user should make: the message and the changed paths (repo-relative), or null.
+async function suggestCommit(top, store, paths) {
+  const out = await git(top, ['-c', 'core.quotePath=false', 'status', '--porcelain', '--untracked-files=all', '--', ...paths]);
+  const changed = out.split('\n').filter(Boolean).map((l) => l.slice(3).replace(/^"|"$/g, '')).filter((p) => !p.endsWith(PENDING_DIFF));
+  return changed.length ? { message: syncMessage(store), paths: changed.sort() } : null;
 }
 
 export async function runSync(settings, { commit = false, dryRun = false, diffFile } = {}) {
@@ -97,9 +106,10 @@ export async function runSync(settings, { commit = false, dryRun = false, diffFi
   if (!diff) {
     // No label diff (a first import, or one where only the overlay or the recorded commit moved): `--commit` still
     // commits the new snapshot, so it never lingers as uncommitted changes on the branch.
-    const store = commit && !dryRun ? await loadStore(settings.labelsDir) : null;
+    const store = !dryRun ? await loadStore(settings.labelsDir) : null;
     if (!store) return { status: 'nothing-to-sync' };
     const top = (await git(settings.root, ['rev-parse', '--show-toplevel'])).trim();
+    if (!commit) return { status: 'nothing-to-sync', suggestedCommit: await suggestCommit(top, store, [settings.labelsDir]) };
     return { status: 'nothing-to-sync', commit: await commitSync(top, store, [settings.labelsDir]) };
   }
   const store = await loadStore(settings.labelsDir);
@@ -126,7 +136,7 @@ export async function runSync(settings, { commit = false, dryRun = false, diffFi
     }
   }
 
-  const report = { status: 'synced', from: diff.from, to: diff.to, patched: [], alreadyCurrent: [], notFound: [], unpatched: [], checkBinding: [], broken: [], rekeyed: [], renamedEntries: [], undocumented: [], skipped: [], pagesTouched: 0, commit: null, pendingRemains: false };
+  const report = { status: 'synced', from: diff.from, to: diff.to, patched: [], alreadyCurrent: [], notFound: [], unpatched: [], checkBinding: [], markupParts: [], broken: [], rekeyed: [], renamedEntries: [], undocumented: [], skipped: [], pagesTouched: 0, commit: null, pendingRemains: false };
   const touched = new Set();
   const brokenBy = new Map();
 
@@ -141,6 +151,15 @@ export async function runSync(settings, { commit = false, dryRun = false, diffFi
     }
     for (const key of bound.keys()) if (removed.has(key)) brokenBy.set(key, [...(brokenBy.get(key) ?? []), rel]);
     const relevant = changes.filter((c) => bound.has(c.fromKey));
+    // A `term` span with markup (`⋮&nbsp;>&nbsp;Переглянути`) is written part by part from the store, so no key is bound
+    // to it and nothing here patches it. A part that is a changed string is listed for a writer instead of going stale.
+    for (const [text, decision] of Object.entries(spans)) {
+      if (decision !== 'term' || !uiParts(text).markup) continue;
+      for (const c of changes) {
+        const ua = c.locales.uk;
+        if (ua?.old && ua.old !== ua.new && uiParts(text).parts.includes(ua.old)) report.markupParts.push({ page: rel, span: text, changedKey: c.toKey, old: ua.old, new: ua.new });
+      }
+    }
     const siblingChecks = [...bound.keys()].flatMap((key) => (siblings.get(key) ?? []).filter((c) => !relevant.includes(c)).map((change) => ({ key, change })));
     if (!relevant.length && !siblingChecks.length) continue;
     for (const c of relevant) if (c.fromKey !== c.toKey) report.rekeyed.push({ from: c.fromKey, to: c.toKey, page: rel });
@@ -278,5 +297,6 @@ export async function runSync(settings, { commit = false, dryRun = false, diffFi
   if (!report.pendingRemains && !diffFile) await fs.rm(pendingPath, { force: true });
 
   if (commit) report.commit = await commitSync(top, store, [...touched, settings.labelsDir]);
+  else report.suggestedCommit = await suggestCommit(top, store, [...touched, settings.labelsDir]);
   return report;
 }
