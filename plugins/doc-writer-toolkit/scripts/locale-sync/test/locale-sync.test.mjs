@@ -1312,3 +1312,161 @@ test('apply: a new section and several additions at one anchor keep the UA order
   assert.equal(await f.read('cand.md'), want);
   assert.equal((await cli(f.dir, 'check', 'filters', '--locales', 'tr', '--candidate', 'cand.md')).code, 0);
 });
+
+// ------------------------------------------------------------------ WP7b: scoped decisions, term corrections, link titles
+
+// One UA label text, two app keys: the tab «Отримання» and the switch «Отримання», which ru shows differently.
+const TABS_UA = `---\ntitle: Вкладки\n---\n\nВкладка **Отримання** показує вхідні транзакції.\n\n## Перемикачі {/* #switches */}\n\nУвімкніть перемикач **Отримання**.\n\n## Інше {/* #other */}\n\nТекст.\n`;
+const TABS_RU = (tab, sw) => `---\ntitle: Вкладки транзакций\n---\n\nВкладка **${tab}** показывает входящие транзакции.\n\n## Переключатели {/* #switches */}\n\nВключите переключатель **${sw}**.\n\n## Другое {/* #other */}\n\nТекст.\n`;
+const TABS_LABELS = { uk: ['Отримання', 'Отримання'], en: ['Receive', 'Receive'], tr: ['Alma', 'Alma'], ru: ['Получение', 'Прием'] };
+async function tabsFixture() {
+  const f = await fixtureRepo();
+  for (const [l, [tab, sw]] of Object.entries(TABS_LABELS)) await f.write(`.doc-toolkit/ui-labels/${l}.json`, { ...LABELS[l], 'tabs.advance': tab, 'switch.inbound': sw });
+  await f.write('docs/tabs/tabs.md', TABS_UA);
+  await f.commit();
+  return f;
+}
+const TABS_STATE = '.doc-toolkit/pages/tabs/tabs.json';
+const RU_TABS = 'i18n/ru/docusaurus-plugin-content-docs/current/tabs/tabs.md';
+
+test('scoped decisions: bind lists the headings, records <span>@<heading>, blocks and check follow it per section', async () => {
+  const f = await tabsFixture();
+  let r = await cli(f.dir, 'bind', 'tabs');
+  const ask = r.out.pages[0].ask.find((a) => a.span === 'Отримання');
+  assert.equal(ask.why, '2 keys with different strings');
+  assert.deepEqual(ask.sections, [{ heading: null, count: 1 }, { heading: 'Перемикачі', anchor: '#switches', count: 1 }]);
+  assert.equal(ask.contexts[1].section, 'Перемикачі');
+
+  await f.write('dec.json', { 'tabs/tabs': { Отримання: 'label:tabs.advance', 'Отримання@#switches': 'label:switch.inbound', 'Отримання@#other': 'term', 'Отримання@Немає': 'term' } });
+  r = await cli(f.dir, 'bind', '--decisions', 'dec.json');
+  assert.equal(r.code, 1);
+  assert.deepEqual(r.out.written.map((w) => w.span), ['Отримання', 'Отримання@#switches']);
+  assert.deepEqual(r.out.rejected.map((x) => [x.span, x.reason]), [
+    ['Отримання@#other', "the span does not occur under the heading '#other'"],
+    ['Отримання@Немає', 'the span is not on the committed UA page'],
+  ]);
+  r = await cli(f.dir, 'bind', 'tabs');
+  assert.deepEqual([r.out.pages, r.out.summary.ask], [[], 0], 'every occurrence is decided');
+
+  // The label rows: one per decision, with the heading it applies under and the UA lines.
+  const b = (await cli(f.dir, 'blocks', 'tabs', '--locales', 'ru')).out.results[0];
+  assert.deepEqual(
+    b.labels.map((x) => [x.span, x.write, x.scope, x.lines]),
+    [
+      ['Отримання', 'Получение', undefined, [5]],
+      ['Отримання', 'Прием', '#switches', [9]],
+    ],
+  );
+  assert.deepEqual(b.undecided, []);
+
+  // check: each section shows the string of the key that applies there.
+  await f.write(RU_TABS, TABS_RU('Получение', 'Прием'));
+  assert.equal((await cli(f.dir, 'check', 'tabs', '--locales', 'ru')).code, 0);
+  await f.write(RU_TABS, TABS_RU('Получение', 'Получение'));
+  r = await cli(f.dir, 'check', 'tabs', '--locales', 'ru');
+  assert.equal(r.code, 1);
+  assert.deepEqual(r.out.results[0].failures[0].labels.map((x) => [x.key, x.section, x.expected, x.redo]), [['switch.inbound', 'Перемикачі', '**Прием**', '9']]);
+  await f.write(RU_TABS, TABS_RU('Прием', 'Прием'));
+  r = await cli(f.dir, 'check', 'tabs', '--locales', 'ru');
+  assert.deepEqual(r.out.results[0].failures[0].labels.map((x) => [x.key, x.section]), [['tabs.advance', '(before the first heading)']]);
+});
+
+test('scoped decisions: ui-labels sync patches a renamed string only where its key applies, and keeps the heading in the key', async () => {
+  const f = await tabsFixture();
+  await f.write(TABS_STATE, { spans: { Отримання: 'label:tabs.advance', 'Отримання@Перемикачі': 'label:switch.inbound' }, locales: {} });
+  await f.write(RU_TABS, TABS_RU('Получение', 'Прием'));
+  await f.commit();
+  await f.write('diff.json', { from: 'a', to: 'b', added: [], removed: [], rekeyed: [], changed: [{ key: 'switch.inbound', locales: { uk: { old: 'Отримання', new: 'Надходження' }, ru: { old: 'Прием', new: 'Приём' } } }] });
+  const UL = path.join(path.dirname(CLI), '..', 'ui-labels', 'ui-labels.mjs');
+  const { stdout } = await run('node', [UL, 'sync', '--diff', 'diff.json'], { cwd: f.dir });
+  const out = JSON.parse(stdout);
+  assert.deepEqual(out.patched.filter((p) => p.page === 'tabs/tabs').map((p) => [p.locale, p.line]), [['uk', 9], ['ru', 9]]);
+  assert.equal(await f.read('docs/tabs/tabs.md'), TABS_UA.replace('перемикач **Отримання**', 'перемикач **Надходження**'));
+  assert.equal(await f.read(RU_TABS), TABS_RU('Получение', 'Приём'));
+  assert.deepEqual(JSON.parse(await f.read(TABS_STATE)).spans, { Отримання: 'label:tabs.advance', 'Надходження@Перемикачі': 'label:switch.inbound' });
+});
+
+test('term corrections: terms --replace and --drop, terms --usage finds the blocks, blocks/apply --redo re-translate only those', async () => {
+  const f = await translatedFixture();
+  await writeState(f, { tr: trEntry(uaBlob()) });
+  await f.write('.doc-toolkit/terms/tr.tsv', 'запис\tkayıt\nсписок\tliste\nхлам\tçöp\n');
+  await f.write('fix.json', { список: 'dizelge' });
+  let r = await cli(f.dir, 'terms', '--add', 'fix.json', '--locales', 'tr');
+  assert.deepEqual([r.out.added, r.out.conflicts.length], [[], 1], 'without --replace a different translation stays a conflict');
+  r = await cli(f.dir, 'terms', '--add', 'fix.json', '--locales', 'tr', '--replace');
+  assert.deepEqual(r.out.replaced, [{ ua: 'список', old: 'liste', new: 'dizelge' }]);
+  assert.match(r.out.next, /terms --usage/);
+  r = await cli(f.dir, 'terms', '--drop', 'хлам', 'немає', '--locales', 'tr');
+  assert.deepEqual([r.out.dropped, r.out.notFound], [[{ ua: 'хлам', target: 'çöp' }], ['немає']]);
+  assert.equal(await f.read('.doc-toolkit/terms/tr.tsv'), 'запис\tkayıt\nсписок\tdizelge\n');
+
+  // «liste» (and «Listede») in a paragraph and inside the Accordion: two blocks, no code.
+  r = await cli(f.dir, 'terms', '--usage', 'liste', '--locales', 'tr');
+  assert.equal(r.code, 0, r.stderr);
+  const [page] = r.out.pages;
+  const at = (s) => TR.split('\n').findIndex((l) => l.includes(s)) + 1;
+  assert.deepEqual(page.hits.map((h) => h.line), [at('Listede aşağıdaki'), at('Liste güncellenir')]);
+  assert.deepEqual(page.blocks.map((b) => [b.kind, b.headingPath]), [['paragraph', ['Операції']], ['component', ['Операції']]]);
+  assert.equal(page.redo, `${at('Listede aşağıdaki')},${at('<Accordion')}`);
+  assert.equal(page.upToDate, true);
+
+  const b = (await cli(f.dir, 'blocks', 'filters', '--locales', 'tr', '--redo', page.redo)).out.results[0];
+  assert.equal(b.mode, 'redo');
+  assert.deepEqual(b.changes.map((c) => [c.op, c.kind, c.ua.text.split('\n')[0]]), [
+    ['replace', 'paragraph', 'У списку ви можете виконувати такі операції:'],
+    ['replace', 'component', '<Accordion titleAs="h3" title="Фільтрувати записи">'],
+  ]);
+  assert.deepEqual(b.terms.find((t) => t.ua === 'список'), { ua: 'список', target: 'dizelge', source: 'memory' });
+  const fixed = Object.fromEntries(b.changes.map((c) => [c.id, c.target.text.replace('Listede', 'Dizelgede').replace('Liste güncellenir', 'Dizelge güncellenir')]));
+  await f.write('t.json', fixed);
+  r = await cli(f.dir, 'apply', 'filters', '--locales', 'tr', '--redo', page.redo, '--translations', 't.json', '--out', 'cand.md');
+  assert.equal(r.code, 0, JSON.stringify(r.out));
+  assert.equal(await f.read('cand.md'), TR.replace('Listede', 'Dizelgede').replace('Liste güncellenir', 'Dizelge güncellenir'));
+  assert.equal((await cli(f.dir, 'record', 'filters', '--locales', 'tr', '--candidate', 'cand.md')).code, 0);
+  assert.equal((await cli(f.dir, 'terms', '--usage', 'liste', '--locales', 'tr')).out.pages.length, 0);
+  assert.equal((await cli(f.dir, 'status', 'filters', '--locales', 'tr')).out.summary.pageTranslations, 0, 'the page stays current');
+
+  // A frontmatter line picks its value, a heading line the heading alone, a blank or code line nothing.
+  const lines = TR.split('\n');
+  const r2 = (await cli(f.dir, 'blocks', 'filters', '--locales', 'tr', '--redo', `3,${at('## İşlemler')},${at('## İşlemler') + 1},${lines.indexOf('flowchart LR') + 1}`)).out.results[0];
+  // A mermaid diagram has translatable labels, so its line picks the whole diagram; an import line is verbatim.
+  assert.deepEqual(r2.changes.map((c) => [c.kind, c.key ?? null, c.ua.text.split('\n')[0]]), [['frontmatter', 'title', 'title: Фільтри'], ['heading', null, '## Операції {/* #operations */}'], ['code', null, '```mermaid']]);
+  assert.deepEqual(r2.skipped.map((x) => x.reason), ['blank line']);
+  const imp = (await cli(f.dir, 'blocks', 'filters', '--locales', 'tr', '--redo', String(at('import Tabs')))).out.results[0];
+  assert.deepEqual([imp.changes, imp.skipped.map((x) => x.reason)], [[], ['code or import, copied verbatim']]);
+  assert.equal((await cli(f.dir, 'blocks', 'filters', '--locales', 'tr', '--redo', 'all')).out.results[0].mode, 'full');
+  assert.equal((await cli(f.dir, 'blocks', 'filters', '--locales', 'tr', '--redo', 'x')).code, 2);
+
+  // A page that is not current can't be redone: its pending changes come first.
+  await f.write('docs/filters/filters.md', edit(UA, 'Ви також можете скинути фільтри.', 'Ви можете скинути фільтри.'));
+  await f.commit();
+  assert.equal((await cli(f.dir, 'blocks', 'filters', '--locales', 'tr', '--redo', '12')).out.results[0].mode, 'error');
+  assert.equal((await cli(f.dir, 'apply', 'filters', '--locales', 'tr', '--redo', '12', '--translations', 't.json', '--out', 'c.md')).code, 2);
+  assert.equal((await cli(f.dir, 'terms', '--usage', 'Filtreleri', '--locales', 'tr')).out.pages[0].upToDate, false);
+});
+
+test('link titles: blocks gives the target page title per locale; check warns when a link names a page differently', async () => {
+  const f = await translatedFixture();
+  await f.write('docs/overview/overview.md', '---\ntitle: Огляд кабінету\n---\n\nТекст.\n');
+  await f.write(`${TR_ROOT}/overview/overview.md`, '---\ntitle: Kabine genel bakışı\n---\n\nMetin.\n');
+  await f.write('docs/filters/filters.md', edit(UA, 'на сторінці [Огляд](/overview/)', 'у розділі [огляду кабінету](/overview/)'));
+  await f.commit();
+  const b = (await cli(f.dir, 'blocks', 'filters', '--locales', 'tr,ru', '--overwrite')).out.results;
+  // «огляду кабінету» names the page «Огляд кабінету» in another case; «фільтри» names the page itself.
+  assert.deepEqual(b.find((x) => x.locale === 'tr').links, [
+    { text: 'фільтри', url: '/filters/', page: 'filters/filters', title: 'Filtreler' },
+    { text: 'огляду кабінету', url: '/overview/', page: 'overview/overview', title: 'Kabine genel bakışı' },
+  ]);
+  assert.equal(b.find((x) => x.locale === 'ru').links[1].title, null, 'the target has no ru translation yet');
+
+  const trPage = (text) => edit(TR, '[Genel bakış](/overview/) sayfasına', text);
+  await f.write(`${TR_ROOT}/filters/filters.md`, trPage('[kabine genel bakışına](/overview/) bölümüne'));
+  let r = await cli(f.dir, 'check', 'filters', '--locales', 'tr');
+  assert.deepEqual(r.out.results[0].warnings, [], 'an added suffix is still the title');
+  await f.write(`${TR_ROOT}/filters/filters.md`, trPage('[Genel bakış](/overview/) sayfasına'));
+  r = await cli(f.dir, 'check', 'filters', '--locales', 'tr');
+  assert.equal(r.code, 0, 'a warning, not a failure');
+  assert.match(r.out.results[0].warnings[0], /1 link text names its target page differently from the page title: line \d+ "Genel bakış" for "Kabine genel bakışı"/);
+  r = await cli(f.dir, 'report', '--md', '--locales', 'tr');
+  assert.match(r.out, /### Link texts that name a page differently from its title\n\n- filters\/filters \[tr\] line \d+: "Genel bakış" → \/overview\/ is titled "Kabine genel bakışı"/);
+});

@@ -7,7 +7,9 @@ import { abs, listUaPages, localePagePath, readState } from './pages.mjs';
 import { localeRoot, resolveTargets, selectPages } from './settings.mjs';
 import { checkTranslation } from './checks.mjs';
 import { cachedBlob } from './plan.mjs';
-import { parseFrontmatter } from './parse.mjs';
+import { docRoute } from './links.mjs';
+
+export { docRoute };
 
 const posix = path.posix;
 
@@ -22,25 +24,6 @@ async function readBaseUrl(s) {
     }
   }
   return '/';
-}
-
-// The route Docusaurus gives a doc: number prefixes stripped, `folder/folder.md` and `index.md` collapse to the folder,
-// a frontmatter `slug` overrides. Returned without locale prefix and baseUrl.
-export function docRoute(s, page, uaText) {
-  const strip = (seg) => seg.replace(/^\d+\s*[-_.]\s*(?=\S)/, '');
-  const segs = page.id.split('/').map(strip);
-  const dir = segs.slice(0, -1);
-  const fm = parseFrontmatter(uaText.split('\n'));
-  const slug = fm?.entries.find((e) => e.key === 'slug')?.scalar;
-  let parts;
-  if (slug) parts = slug.startsWith('/') ? slug.split('/').filter(Boolean) : [...dir, ...slug.split('/').filter(Boolean)];
-  else {
-    const last = segs.at(-1);
-    parts = last === 'index' || last === 'README' || last.toLowerCase() === 'readme' || last === dir.at(-1) ? dir : segs;
-  }
-  const prefix = s.urlPrefix.split('/').filter(Boolean);
-  const all = [...prefix, ...parts];
-  return '/' + all.join('/') + (all.length ? '/' : '');
 }
 
 function runBuild(s, locale, timeoutMs) {
@@ -102,6 +85,7 @@ export async function runReport(s, { changed = [], build = false, origin = 'http
         cell.imagesResolve = !c.checks.includes('assets');
         cell.checksPassed = c.ok;
         cell.failures = c.checks;
+        cell.linkTitles = c.linkTitles ?? [];
         const entry = state.locales[locale];
         cell.unverified = entry?.unverified?.length ?? 0;
         cell.assetFallbacks = entry?.assetFallbacks?.length ?? 0;
@@ -147,6 +131,8 @@ export function renderMarkdown(report) {
   ];
   const problems = pages.flatMap((r) => locales.filter((l) => r.cells[l].exists && r.cells[l].failures.length).map((l) => `- ${r.page} [${l}]: ${r.cells[l].failures.join(', ')}`));
   if (problems.length) out.push('### Failing checks', '', ...problems, '');
+  const offTitle = pages.flatMap((r) => locales.flatMap((l) => (r.cells[l].linkTitles ?? []).map((o) => `- ${r.page} [${l}] line ${o.line}: "${o.text}" → ${o.url} is titled "${o.title}"`)));
+  if (offTitle.length) out.push('### Link texts that name a page differently from its title', '', ...offTitle, '');
   if (report.build) {
     out.push('### Build', '', '| Locale | Result | Seconds |', '|---|:-:|--:|');
     for (const [l, b] of Object.entries(report.build)) out.push(`| ${l} | ${mark(b.ok)} | ${b.seconds} |`);

@@ -7,7 +7,12 @@ import { checkCategoryUnit } from './categories.mjs';
 import { acceptedLabels } from './labels.mjs';
 import { abs, localePagePath, readIfExists, readState } from './pages.mjs';
 import { cachedBlob } from './plan.mjs';
-import { assetRefs, boldSpans, canonicalTags, cleanRef, linkTargets, markerCount, otherCommentCount, parsePage, PROSE_FM_KEYS, sections, splitCode } from './parse.mjs';
+import { decidedOccurrences } from './spans.mjs';
+import { sectionMap } from './scope.mjs';
+import { offTitleLinks, titleLinks } from './links.mjs';
+import { nodeAt } from './redo.mjs';
+import { alignTrees } from './diff.mjs';
+import { assetRefs, canonicalTags, cleanRef, linkTargets, markerCount, otherCommentCount, parsePage, PROSE_FM_KEYS, sections, splitCode } from './parse.mjs';
 
 
 function analyze(text) {
@@ -88,7 +93,7 @@ const frontmatterKeys = (fm) => new Map((fm?.entries ?? []).filter((e) => e.key 
 
 // Requirement 8: every deterministic check on one translated page. Pure: reads nothing but its arguments and the disk
 // (for asset links).
-export async function checkPage({ locale, uaText, targetText, targetFile, state, labels, meta, unverified = [], root }) {
+export async function checkPage({ locale, uaText, targetText, targetFile, state, labels, meta, unverified = [], root, linkTitles = [] }) {
   const failures = [];
   const warnings = [];
   const fail = (check, message, detail = {}) => failures.push({ check, message, ...detail });
@@ -179,22 +184,49 @@ export async function checkPage({ locale, uaText, targetText, targetFile, state,
   if (ua.markers !== tr.markers) fail('markers', `The UA page has ${ua.markers} ToDo / NEEDS CONFIRMATION markers but the translation has ${tr.markers}.`);
   if (ua.otherComments !== tr.otherComments) fail('markers', `The UA page has ${ua.otherComments} other {/* … */} comments but the translation has ${tr.otherComments}.`);
 
-  // UI labels: bound spans use the target-locale string from the label store, or are recorded as unverified.
-  const bound = Object.entries(state?.spans ?? {}).filter(([, d]) => typeof d === 'string' && d.startsWith('label:'));
-  if (bound.length) {
-    const uaBold = new Set(boldSpans(ua.sc.prose));
-    const trProse = tr.prose;
+  // UI labels: bound spans use the target-locale string from the label store, or are recorded as unverified. A span with
+  // decisions scoped to headings (`scope.mjs`) is checked section by section, because each section must show the string
+  // of the key that applies there; the headings check guarantees the sections line up. Any other span is checked
+  // anywhere on the page.
+  const uaMap = sectionMap(uaText);
+  const occ = decidedOccurrences([{ text: uaText, firstLine: 1, pathAt: (i) => uaMap.paths[uaMap.at[i]] }], state?.spans ?? {}).filter((o) => o.kind === 'bold' && o.decision?.startsWith('label:'));
+  if (occ.length) {
+    const scopedSpans = new Set(occ.filter((o) => o.scope).map((o) => o.span));
+    const trMap = headingsOk && scopedSpans.size ? sectionMap(targetText) : null;
+    const regions = new Map();
+    const regionText = (k) => {
+      if (!regions.has(k)) regions.set(k, tr.sc.prose.filter((_, i) => trMap.at[i] === k).join('\n'));
+      return regions.get(k);
+    };
     const excused = new Set(unverified.map((u) => (typeof u === 'string' ? u : u.span)));
+    // Where to fix a label: the first line of each translated block that holds the span (in that section, for a scoped
+    // check), ready for `blocks --redo`.
+    const align = headingsOk ? alignTrees(ua.page.root, tr.page.root).map : null;
+    const fixLines = (span, key, k) => {
+      if (!align) return {};
+      const lines = new Set();
+      for (const o of occ) {
+        if (o.span !== span || o.decision !== `label:${key}` || (k !== null && uaMap.at[o.line - 1] !== k)) continue;
+        const t = align.get(nodeAt(ua.page.root, o.line - 1));
+        if (t) lines.add(t.start + 1);
+      }
+      return lines.size ? { redo: [...lines].sort((a, b) => a - b).join(',') } : {};
+    };
     const bad = [];
-    for (const [span, decision] of bound) {
-      if (!uaBold.has(span)) continue;
-      const key = decision.slice(6);
+    const done = new Set();
+    for (const o of occ) {
+      const key = o.decision.slice(6);
+      const k = trMap && scopedSpans.has(o.span) ? uaMap.at[o.line - 1] : null;
+      const id = `${o.span}\0${key}\0${k}`;
+      if (done.has(id)) continue;
+      done.add(id);
+      const where = k === null ? {} : { section: uaMap.paths[k].at(-1)?.title ?? '(before the first heading)' };
       const expected = labels?.[locale]?.[key];
       if (expected === undefined) {
-        if (!labels) bad.push({ span, key, problem: 'no label store: run ui-labels import' });
-        else if (!excused.has(span)) bad.push({ span, key, problem: `the label store has no '${locale}' string for this key, so the span must be recorded as unverified` });
-      } else if (!acceptedLabels(span, labels.uk?.[key], expected).some((form) => trProse.includes(`**${form}**`))) {
-        bad.push({ span, key, expected: `**${expected}**`, problem: 'the UI label is not in bold, verbatim, in the translation' });
+        if (!labels) bad.push({ span: o.span, key, problem: 'no label store: run ui-labels import' });
+        else if (!excused.has(o.span)) bad.push({ span: o.span, key, problem: `the label store has no '${locale}' string for this key, so the span must be recorded as unverified` });
+      } else if (!acceptedLabels(o.span, labels.uk?.[key], expected).some((form) => (k === null ? tr.prose : regionText(k)).includes(`**${form}**`))) {
+        bad.push({ span: o.span, key, ...where, expected: `**${expected}**`, problem: k === null ? 'the UI label is not in bold, verbatim, in the translation' : 'the UI label is not in bold, verbatim, in this section of the translation', ...fixLines(o.span, key, k) });
       }
     }
     if (bad.length) fail('labels', 'UI labels do not match the app strings for this locale.', { labels: bad.slice(0, 12) });
@@ -239,7 +271,15 @@ export async function checkPage({ locale, uaText, targetText, targetFile, state,
     if (stray.length) warnings.push(`Cyrillic text remains in a translation written in Latin letters (${stray.length} lines, first at line ${stray[0].line}: ${stray[0].text}). Fine for language names; otherwise it is untranslated.`);
   }
 
-  return { ok: failures.length === 0, failures, warnings, checks: [...new Set(failures.map((f) => f.check))] };
+  // A link whose UA text names the target page's title names it by that page's title in the translation too, inflected
+  // as needed. Only a warning: the reader still reaches the page.
+  const offTitle = offTitleLinks(linkTitles, tr.sc.prose);
+  if (offTitle.length) {
+    const shown = offTitle.slice(0, 3).map((o) => `line ${o.line} "${o.text}" for "${o.title}"`).join('; ');
+    warnings.push(`${offTitle.length} link text${offTitle.length > 1 ? 's name their target pages' : ' names its target page'} differently from the page title: ${shown}${offTitle.length > 3 ? '; …' : ''}.`);
+  }
+
+  return { ok: failures.length === 0, failures, warnings, checks: [...new Set(failures.map((f) => f.check))], linkTitles: offTitle };
 }
 
 // Loads everything `checkPage` needs for one page in one locale. `candidate` is a file to check instead of the
@@ -252,7 +292,8 @@ export async function checkTranslation(s, page, locale, { candidate = null, unve
   const state = await readState(s, page.id);
   const st = store === undefined ? await loadStore(s.labelsDir) : store;
   const labels = st ? mergedLabels(st).labels : null;
-  const result = await checkPage({ locale, uaText, targetText, targetFile, state, labels, meta: st?.meta, unverified: [...unverified, ...(state.locales[locale]?.unverified ?? [])].filter(Boolean), root: s.root });
+  const linkTitles = targetText === null ? [] : await titleLinks(s, page, uaText, locale);
+  const result = await checkPage({ locale, uaText, targetText, targetFile, state, labels, meta: st?.meta, unverified: [...unverified, ...(state.locales[locale]?.unverified ?? [])].filter(Boolean), root: s.root, linkTitles });
   return { ...result, page: page.id, locale, file: targetFile, uaText, targetText, state, store: st, labels };
 }
 

@@ -7,6 +7,7 @@ import { deriveLocaleRoot, requireRoots } from './config.mjs';
 import { isLib, loadStore, PENDING_DIFF } from './store.mjs';
 import { uiParts } from './lookup.mjs';
 import { categoryContext, categoryFile, categoryShows, isCategoryId, patchCategory } from './categories.mjs';
+import { decisionAt, pageScopes, parseScopedKey, sectionMap } from '../../locale-sync/lib/scope.mjs';
 
 const run = promisify(execFile);
 const git = (cwd, args) => run('git', ['-C', cwd, ...args], { maxBuffer: 64 * 1024 * 1024 }).then((r) => r.stdout);
@@ -35,8 +36,9 @@ async function findPage(root, rel) {
   return null;
 }
 
-// Replaces **old** with **new** outside fenced code blocks. Returns the new text and the patched lines.
-export function replaceBold(text, oldText, newText) {
+// Replaces **old** with **new** outside fenced code blocks, on the lines `keep(lineIndex)` accepts (default: all).
+// Returns the new text and the patched lines.
+export function replaceBold(text, oldText, newText, keep = null) {
   const needle = `**${oldText}**`;
   const replacement = `**${newText}**`;
   const lines = text.split('\n');
@@ -49,7 +51,7 @@ export function replaceBold(text, oldText, newText) {
       else if (f[1][0] === fence) fence = null;
       return;
     }
-    if (fence || !line.includes(needle)) return;
+    if (fence || !line.includes(needle) || (keep && !keep(i))) return;
     lines[i] = line.split(needle).join(replacement);
     hits.push({ line: i + 1, text: lines[i].trim().slice(0, 240) });
   });
@@ -186,11 +188,35 @@ export async function runSync(settings, { commit = false, dryRun = false, diffFi
     let uaLabelOk = true;
     const categoryCtx = (c) => (category ? { ...categoryContext(original.uk, c.locales.uk), renameKeys: uaLabelOk } : null);
     const shows = (text, locale, v, c) => (category ? categoryShows(text, locale, v.old, categoryCtx(c)) : replaceBold(text, v.old, v.new).hits);
+    // Decisions scoped to headings (`<span>@<heading>`, locale-sync's scope.mjs): when a span bound to the changed key has
+    // them, the key applies only in some sections, so only those sections are patched, in every locale. The sections of
+    // a translation line up with UA by position (locale-sync's headings check).
+    const uaMap = category ? null : sectionMap(original.uk);
+    const scopes = uaMap ? pageScopes(uaMap) : new Set();
+    const scopedOf = (key) => (category ? null : parseScopedKey(key, scopes));
+    const fileMaps = {};
+    const sectionsFor = (c) => {
+      if (category) return null;
+      const bases = new Set(bound.get(c.fromKey).map((k) => scopedOf(k)?.span ?? k));
+      if (!Object.keys(spans).some((k) => bases.has(scopedOf(k)?.span))) return null;
+      const out = new Set();
+      uaMap.paths.forEach((p, k) => {
+        if ([...bases].some((b) => decisionAt(spans, b, p).decision === `label:${c.fromKey}`)) out.add(k);
+      });
+      return out;
+    };
     // One change applied to one file: { text, hits, current, renamed, error }.
     const apply = (text, locale, v, c) => {
       if (category) return patchCategory(text, locale, v, categoryCtx(c));
-      const r = replaceBold(text, v.old, v.new);
-      return { ...r, current: !r.hits.length && replaceBold(text, v.new, v.new).hits.length > 0, renamed: [] };
+      const only = sectionsFor(c);
+      let keep = null;
+      if (only) {
+        fileMaps[locale] ??= sectionMap(original[locale]);
+        if (fileMaps[locale].list.length !== uaMap.list.length) return { error: 'the label is bound under some headings only, and the headings of this file do not line up with UA: patch it by hand' };
+        keep = (i) => only.has(fileMaps[locale].at[i]);
+      }
+      const r = replaceBold(text, v.old, v.new, keep);
+      return { ...r, current: !r.hits.length && replaceBold(text, v.new, v.new, keep).hits.length > 0, renamed: [] };
     };
 
     for (const { key, change } of siblingChecks) {
@@ -257,8 +283,12 @@ export async function runSync(settings, { commit = false, dryRun = false, diffFi
     for (const c of relevant) {
       for (const text of bound.get(c.fromKey)) {
         const uk = c.locales.uk;
+        // A scoped key (`<span>@<heading>`) keeps its heading and follows the span text.
+        const scoped = scopedOf(text);
+        const base = scoped?.span ?? text;
         // A category's span is its UA label: it only follows the label once the UA file really has the new value.
-        const renamed = uk?.old === text && uk.new && (!category || uaLabelOk) ? uk.new : text;
+        const renamedBase = uk?.old === base && uk.new && (!category || uaLabelOk) ? uk.new : base;
+        const renamed = scoped ? `${renamedBase}@${scoped.scope}` : renamedBase;
         if (renamed !== text) delete newSpans[text];
         newSpans[renamed] = `label:${c.toKey}`;
       }

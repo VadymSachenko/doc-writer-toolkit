@@ -35,13 +35,14 @@ async function readTranslations(file) {
 // { "full": "<translated page>" } for a page translated in full. The splicing is done here, not by the translator:
 // replaced blocks take the place of their `target` lines, added blocks go after their anchor with the blank lines UA
 // has before them, removed blocks go with the blank lines before them. Every other byte of the translation stays.
-export async function runApply(s, page, { translations: file, out }) {
+// With `redo` (the same value given to `blocks --redo`), the changes are the re-translated blocks of a current page.
+export async function runApply(s, page, { translations: file, out, redo = null }) {
   if (!file || !out) throw new CliError('Usage: locale-sync apply <page> --locales <locale> --translations <file.json> --out <candidate file>', { code: 2 });
   const given = await readTranslations(file);
   if (!given || typeof given !== 'object' || Array.isArray(given) || Object.values(given).some((v) => typeof v !== 'string')) {
     throw new CliError(`${file} must hold { "<change id>": "<translated block>" } or { "full": "<translated page>" }, as JSON or as '@@@ <change id>' sections.`, { code: 2 });
   }
-  const { results } = await runBlocks(s, { selectors: [page] });
+  const { results } = await runBlocks(s, { selectors: [page], redo });
   if (results.length !== 1) throw new CliError('apply needs exactly one page and one locale (--locales <locale>).', { code: 2 });
   const r = results[0];
   if (r.kind === 'category') throw new CliError('A sidebar category has no blocks to apply: pass its { entryKey: message } file to check and record as --candidate.', { code: 2 });
@@ -52,14 +53,14 @@ export async function runApply(s, page, { translations: file, out }) {
     await writeFileAtomic(path.resolve(out), given.full.replace(/\r\n/g, '\n').replace(/\n*$/, '\n'));
     return { ...base, applied: ['full'], unmapped: [] };
   }
-  if (r.mode !== 'incremental') throw new CliError(`${r.page} [${r.locale}] has nothing to apply (mode ${r.mode}).`, { code: 2, data: { mode: r.mode } });
+  if (r.mode !== 'incremental' && r.mode !== 'redo') throw new CliError(`${r.page} [${r.locale}] has nothing to apply (mode ${r.mode}).${r.error ? ` ${r.error}` : ''}`, { code: 2, data: { mode: r.mode } });
 
   const t = toLines(await readIfExists(abs(s, r.target.path)));
   const b = toLines(await cachedBlob(s.root, r.blob));
   const missing = r.changes.filter((c) => c.op !== 'remove' && !c.verbatim && typeof given[c.id] !== 'string').map((c) => c.id);
   if (missing.length) throw new CliError(`No translation for ${missing.join(', ')}.`, { code: 2, data: { missing } });
   const unknown = Object.keys(given).filter((id) => !r.changes.some((c) => c.id === id));
-  if (unknown.length) throw new CliError(`${unknown.join(', ')} are not changes of ${r.page} [${r.locale}]. Run blocks again: the ids follow the current files.`, { code: 2, data: { unknown } });
+  if (unknown.length) throw new CliError(`${unknown.join(', ')} are not changes of ${r.page} [${r.locale}]. Run blocks again (with the same --redo): the ids follow the current files.`, { code: 2, data: { unknown } });
 
   const textOf = (c) => toLines(c.verbatim && typeof given[c.id] !== 'string' ? c.ua.text : given[c.id]);
   const replaceAt = new Map(); // start index -> { end, lines }

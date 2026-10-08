@@ -6,12 +6,14 @@ import { listUaPages, readState, statePath } from './pages.mjs';
 import { cachedBlob } from './plan.mjs';
 import { parseCategory } from './categories.mjs';
 import { withLock } from './lock.mjs';
-import { groupBySpan, inUiContext, spanOccurrences, uiParts } from './spans.mjs';
+import { decidedOccurrences, groupBySpan, inUiContext, spanOccurrences, uiParts } from './spans.mjs';
+import { decisionAt, pageScopes, parseScopedKey, sectionMap } from './scope.mjs';
 
 // The binding pass (Requirement 3), once for all locales. Every bold span (and Cyrillic inline-code span) in the UA text
 // that some locale will translate gets one decision per page: `label:<key>`, `unverified` (UI context, no dictionary
 // match), `term` or `emphasis`. The script records what it can decide on its own and returns the rest (`ask`) for the
-// model, which answers through `bind --decisions`.
+// model, which answers through `bind --decisions`. A decision may be scoped to a heading (`<span>@<heading>`, see
+// `scope.mjs`): it then overrides the page-level one under that heading.
 
 const DECISION = /^(?:term|emphasis|unverified|label:.+)$/;
 
@@ -44,22 +46,32 @@ const clip = (text, at) => {
 };
 
 // The UA text each unit will be translated from, across all target locales: the whole page when any locale translates
-// it in full, otherwise the changed blocks.
+// it in full, otherwise the changed blocks. As segments (`spans.mjs`), so each line has its heading path.
 async function unitsToBind(s, selectors, overwrite) {
   const { results, warnings } = await runBlocks(s, { selectors: selectors.length ? selectors : ['.'], overwrite });
   const units = new Map();
   for (const r of results) {
     if (r.mode !== 'full' && r.mode !== 'incremental') continue;
-    const u = units.get(r.page) ?? { page: r.page, kind: r.kind, blob: r.blob, full: null, parts: new Set() };
+    const u = units.get(r.page) ?? { page: r.page, kind: r.kind, blob: r.blob, full: false, parts: new Map() };
     if (r.kind === 'category') {
       const label = parseCategory(await cachedBlob(s.root, r.blob)).fields.find((f) => f.field === 'label')?.ua;
       if (label) u.categoryLabel = label;
-    } else if (r.mode === 'full') u.full = r.ua.text;
-    else for (const c of r.changes) if (c.ua?.text) u.parts.add(c.ua.text);
+    } else if (r.mode === 'full') u.full = true;
+    else for (const c of r.changes) if (c.ua?.text) u.parts.set(`${c.ua.lines[0]}\0${c.ua.text}`, c);
     units.set(r.page, u);
+  }
+  for (const u of units.values()) {
+    if (u.kind === 'category') continue;
+    const text = await cachedBlob(s.root, u.blob);
+    const map = sectionMap(text);
+    const pathAt = (first) => (i) => map.paths[map.at[first - 1 + i]] ?? [];
+    u.segments = u.full ? [{ text, firstLine: 1, pathAt: pathAt(1) }] : [...u.parts.values()].map((c) => ({ text: c.ua.text, firstLine: c.ua.lines[0], pathAt: pathAt(c.ua.lines[0]) }));
   }
   return { units: [...units.values()], warnings };
 }
+
+// The innermost heading of an occurrence, for the model's context.
+const sectionOf = (o) => (o.path?.length ? { section: o.path.at(-1).title } : {});
 
 export async function runBind(s, { selectors = [], overwrite = false, dryRun = false } = {}) {
   const store = await loadStore(s.labelsDir);
@@ -75,16 +87,26 @@ export async function runBind(s, { selectors = [], overwrite = false, dryRun = f
     const occ =
       u.kind === 'category'
         ? u.categoryLabel
-          ? new Map([[u.categoryLabel, [{ span: u.categoryLabel, kind: 'category', line: 1, at: 0, end: 0, text: u.categoryLabel }]]])
+          ? new Map([[u.categoryLabel, [{ span: u.categoryLabel, kind: 'category', line: 1, at: 0, end: 0, text: u.categoryLabel, path: [], ...decisionAt(state.spans, u.categoryLabel, []) }]]])
           : new Map()
-        : groupBySpan(spanOccurrences(u.full ?? [...u.parts].join('\n')));
-    const open = [...occ].filter(([span]) => !state.spans[span] || state.spans[span] === 'unverified');
+        : groupBySpan(decidedOccurrences(u.segments, state.spans));
+    // A span is open when one of its occurrences has no decision, or an `unverified` one (re-checked against the store).
+    // Only those occurrences count: the others are decided, page-level or under a heading.
+    const open = [];
+    const keys = new Map();
+    for (const [span, all] of occ) {
+      const list = all.filter((o) => !o.decision || o.decision === 'unverified');
+      if (!list.length) continue;
+      open.push([span, list, all]);
+      // Where a decision goes: the page-level key when some occurrence has none, and every key that holds `unverified`.
+      keys.set(span, [...new Set([...(list.some((o) => !o.decision) ? [span] : []), ...list.filter((o) => o.decision).map((o) => o.key)])]);
+    }
     for (const [span] of open) {
       const { markup, parts } = uiParts(span);
       if (markup) for (const p of parts) toLookUp.add(p);
       else toLookUp.add(span);
     }
-    work.push({ u, state, occ, open, inScope: occ.size });
+    work.push({ u, state, occ, open, keys, inScope: occ.size });
   }
   const looked = toLookUp.size ? await runLookup(s, { spans: [...toLookUp], locales: store.meta.locales.filter((l) => l !== 'uk') }) : { results: [] };
   const hits = new Map(looked.results.map((r) => [r.span, r]));
@@ -108,7 +130,7 @@ export async function runBind(s, { selectors = [], overwrite = false, dryRun = f
   };
 
   const pages = [];
-  for (const { u, state, open, inScope } of work) {
+  for (const { u, state, open, keys, inScope } of work) {
     const resolved = [];
     const ask = [];
     const bound = Object.values(state.spans).filter((d) => d.startsWith('label:')).map((d) => d.slice(6));
@@ -118,10 +140,23 @@ export async function runBind(s, { selectors = [], overwrite = false, dryRun = f
         : hit.status === 'ambiguous'
           ? { status: 'ambiguous', match: hit.match, candidates: hit.candidates.map((c) => ({ key: c.key, uk: labels.uk?.[c.key] ?? null, en: labels.en?.[c.key] ?? null })) }
           : { status: hit.status, match: hit.match, key: hit.key, alsoKeys: hit.alsoKeys, en: labels.en?.[hit.key] ?? null };
-    const askFor = (span, occ, hit, suggest, why) => {
+    const contexts = (occ) => occ.slice(0, 3).map((o) => ({ line: o.line, ...sectionOf(o), text: clip(o.text, o.at) }));
+    // Keys with different strings: when the span sits under several headings, list them, so the model can scope a
+    // decision to the heading where another key applies (`<span>@<heading>`).
+    const sectionsOf = (all, hit) => {
+      if (hit.status !== 'ambiguous') return {};
+      const seen = new Map();
+      for (const o of all) {
+        const h = o.path.at(-1);
+        const id = h ? h.title : '';
+        seen.set(id, { heading: h?.title ?? null, ...(h?.anchor ? { anchor: `#${h.anchor}` } : {}), count: (seen.get(id)?.count ?? 0) + 1 });
+      }
+      return seen.size > 1 ? { sections: [...seen.values()] } : {};
+    };
+    const askFor = (span, occ, all, hit, suggest, why) => {
       const { seenOn, top } = fromElsewhere(span, hit);
       const guess = suggest ?? top;
-      ask.push({ span, kind: occ[0].kind, why, lookup: lookupFor(hit), ...(guess ? { suggest: guess } : {}), ...(seenOn ? { seenOn } : {}), contexts: occ.slice(0, 3).map((o) => ({ line: o.line, text: clip(o.text, o.at) })) });
+      ask.push({ span, kind: occ[0].kind, why, lookup: lookupFor(hit), ...(guess ? { suggest: guess } : {}), ...(seenOn ? { seenOn } : {}), contexts: contexts(occ), ...sectionsOf(all, hit) });
     };
 
     // Unique dictionary matches first, so their namespaces help choose among identical candidates.
@@ -129,7 +164,7 @@ export async function runBind(s, { selectors = [], overwrite = false, dryRun = f
     // string per locale. Otherwise the model decides, seeing each part's lookup.
     const markupSpans = open.filter(([span]) => uiParts(span).markup);
     for (const [span, occ] of markupSpans) {
-      const recheck = state.spans[span] === 'unverified';
+      const recheck = occ.every((o) => o.decision === 'unverified');
       const { parts } = uiParts(span);
       const partHits = parts.map((p) => hits.get(p));
       if (partHits.every((h) => h.class === 'label' && h.match !== 'pattern')) {
@@ -146,17 +181,17 @@ export async function runBind(s, { selectors = [], overwrite = false, dryRun = f
         parts: parts.map((p, i) => ({ ua: p, lookup: lookupFor(partHits[i]) })),
         ...(ui || top ? { suggest: ui ? 'term' : top } : {}),
         ...(seenOn ? { seenOn } : {}),
-        contexts: occ.slice(0, 3).map((o) => ({ line: o.line, text: clip(o.text, o.at) })),
+        contexts: contexts(occ),
       });
     }
 
     const pass = (unique) => {
-      for (const [span, occ] of open) {
+      for (const [span, occ, all] of open) {
         if (uiParts(span).markup) continue;
         const hit = hits.get(span);
         const isUnique = hit.class === 'label' && hit.status === 'unique';
         if (isUnique !== unique) continue;
-        const recheck = state.spans[span] === 'unverified';
+        const recheck = occ.every((o) => o.decision === 'unverified');
         const category = occ[0].kind === 'category';
         const defs = occ.filter((o) => o.defList).length;
         // A definition item that is a dictionary string names a UI element (a control or a status value the list
@@ -167,7 +202,7 @@ export async function runBind(s, { selectors = [], overwrite = false, dryRun = f
           if (recheck) continue; // still not in the store: the decision stands
           if (category) resolved.push({ span, decision: 'term', why: 'sidebar category label not in the dictionary' });
           else if (defs === occ.length) resolved.push({ span, decision: 'term', why: 'definition list' });
-          else askFor(span, occ, hit, ui ? 'unverified' : null, ui ? 'UI context, no dictionary match' : 'no dictionary match');
+          else askFor(span, occ, all, hit, ui ? 'unverified' : null, ui ? 'UI context, no dictionary match' : 'no dictionary match');
           continue;
         }
         const keys = hit.status === 'ambiguous' ? hit.candidates.map((c) => c.key) : [hit.key, ...hit.alsoKeys];
@@ -197,14 +232,18 @@ export async function runBind(s, { selectors = [], overwrite = false, dryRun = f
                 : `${keys.length} keys with the same strings, no namespace fits`;
         // No namespace guess among keys with different strings: there the key decides the translation, and a
         // namespace that merely mentions the page's area (a dialog's key) misleads more than it helps.
-        askFor(span, occ, hit, pick && hit.status !== 'ambiguous' ? `label:${pick}` : null, why);
+        askFor(span, occ, all, hit, pick && hit.status !== 'ambiguous' ? `label:${pick}` : null, why);
       }
     };
     pass(true);
     pass(false);
 
-    if (resolved.length && !dryRun) await writeSpans(s, u.page, Object.fromEntries(resolved.map((r) => [r.span, r.decision])));
-    const rechecked = open.filter(([span]) => state.spans[span]).length;
+    for (const r of resolved) {
+      const k = keys.get(r.span);
+      if (k.length !== 1 || k[0] !== r.span) r.keys = k;
+    }
+    if (resolved.length && !dryRun) await writeSpans(s, u.page, Object.fromEntries(resolved.flatMap((r) => keys.get(r.span).map((k) => [k, r.decision]))));
+    const rechecked = open.filter(([, occ]) => occ.every((o) => o.decision)).length;
     pages.push({ page: u.page, kind: u.kind, spans: inScope, decided: inScope - open.length + rechecked, resolved, ask });
   }
   const sum = (f) => pages.reduce((n, p) => n + f(p), 0);
@@ -212,7 +251,7 @@ export async function runBind(s, { selectors = [], overwrite = false, dryRun = f
     dryRun,
     pages: pages.filter((p) => p.resolved.length || p.ask.length),
     summary: { pages: pages.length, spans: sum((p) => p.spans), decided: sum((p) => p.decided), resolved: sum((p) => p.resolved.length), ask: sum((p) => p.ask.length) },
-    apply: 'Decide each `ask` span: label:<key> | unverified | term | emphasis. Write { "<page>": { "<span>": "<decision>" } } to a JSON file and run `bind --decisions <file>`.',
+    apply: 'Decide each `ask` span: label:<key> | unverified | term | emphasis. Write { "<page>": { "<span>": "<decision>" } } to a JSON file and run `bind --decisions <file>`. A key "<span>@<heading>" (a heading title or #anchor) scopes a decision to that heading and its subsections.',
     warnings,
   };
 }
@@ -225,7 +264,8 @@ async function writeSpans(s, id, decisions) {
   });
 }
 
-// Records the model's decisions: { "<page id>": { "<span>": "label:<key>" | "unverified" | "term" | "emphasis" } }.
+// Records the model's decisions: { "<page id>": { "<span>": "label:<key>" | "unverified" | "term" | "emphasis" } }. A key
+// `<span>@<heading>` scopes the decision to that heading (its title or `#anchor`) and its subsections.
 export async function runDecisions(s, file, { dryRun = false } = {}) {
   const data = await readJson(file);
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw new CliError(`${file} must be a JSON object { "<page>": { "<span>": "<decision>" } }.`, { code: 2 });
@@ -242,19 +282,28 @@ export async function runDecisions(s, file, { dryRun = false } = {}) {
       continue;
     }
     const text = await cachedBlob(s.root, unit.blob);
-    const present = new Set(unit.kind === 'category' ? parseCategory(text).fields.filter((f) => f.field === 'label').map((f) => f.ua) : spanOccurrences(text).map((o) => o.span));
+    const category = unit.kind === 'category';
+    const occurrences = category ? [] : spanOccurrences(text);
+    const present = new Set(category ? parseCategory(text).fields.filter((f) => f.field === 'label').map((f) => f.ua) : occurrences.map((o) => o.span));
+    const map = category ? null : sectionMap(text);
+    const scopes = map ? pageScopes(map) : new Set();
+    // A scoped key is valid when the span occurs under that heading.
+    const underScope = ({ span, scope }) => occurrences.some((o) => o.span === span && map.paths[map.at[o.line - 1]].some((h) => h.title === scope || `#${h.anchor}` === scope));
     const state = await readState(s, unit.id);
     const accepted = {};
     for (const [span, decision] of Object.entries(decisions ?? {})) {
       const key = typeof decision === 'string' && decision.startsWith('label:') ? decision.slice(6) : null;
+      const scoped = present.has(span) ? null : parseScopedKey(span, scopes);
       const reason =
         typeof decision !== 'string' || !DECISION.test(decision)
           ? 'a decision is label:<key>, unverified, term or emphasis'
-          : !present.has(span)
+          : !present.has(span) && !scoped
             ? 'the span is not on the committed UA page'
-            : key && !Object.values(labels).some((m) => typeof m?.[key] === 'string')
-              ? 'the label store has no such key'
-              : null;
+            : scoped && !underScope(scoped)
+              ? `the span does not occur under the heading '${scoped.scope}'`
+              : key && !Object.values(labels).some((m) => typeof m?.[key] === 'string')
+                ? 'the label store has no such key'
+                : null;
       if (reason) rejected.push({ page: unit.id, span, decision, reason });
       else {
         accepted[span] = decision;

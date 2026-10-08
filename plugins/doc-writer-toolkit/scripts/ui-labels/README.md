@@ -71,7 +71,7 @@ One file per UA page: `<state root>/pages/<path of the UA page relative to the U
 }
 ```
 
-`spans` holds one decision per UA span text: `label:<key>`, `unverified`, `term` or `emphasis`. `locale-sync bind` writes it (see its README). `sync` only touches `spans` (rebinding and renaming keys) and, per locale, `sourceBlob` and `labelSnapshot`. It keeps every other field.
+`spans` holds one decision per UA span text: `label:<key>`, `unverified`, `term` or `emphasis`. A key `<span>@<heading>` (a heading title or `#anchor`) overrides it under that heading and its subsections, for a label text that is a different app string there. `locale-sync bind` writes it (see its README). `sync` only touches `spans` (rebinding and renaming keys) and, per locale, `sourceBlob` and `labelSnapshot`. It keeps every other field.
 
 A sidebar category has a state file too, named `<dir>/_category_` (`archive/_category_` → `.doc-toolkit/pages/archive/_category_.json`). Its `spans` bind the category's UA label to an app key, exactly like a bold label on a page.
 
@@ -109,8 +109,8 @@ span           class  key                 ru            tr            kk
 
 `sync` reads `.pending-diff.json` (or `--diff <file>`) and, for every page state file that binds a changed or rekeyed key:
 
-1. Replaces `**old**` with `**new**` outside fenced code blocks, in the language each string belongs to: the UA page, the EN page and every locale page that exists.
-2. Renames the span in the state file and rebinds rekeyed keys.
+1. Replaces `**old**` with `**new**` outside fenced code blocks, in the language each string belongs to: the UA page, the EN page and every locale page that exists. When a span bound to the changed key has decisions scoped to headings, only the sections where that key applies are patched; the sections of each file pair with UA by position, and a file whose headings don't line up is reported in `unpatched`.
+2. Renames the span in the state file (a scoped key keeps its heading) and rebinds rekeyed keys.
 3. Advances each locale's `sourceBlob` to the patched UA blob **only if** it equalled the UA blob before the patch, so a translation that was already stale stays stale. Sets `labelSnapshot` when every patch for that locale succeeded.
 
 It never patches a page when any of its files has uncommitted changes (reported in `skipped`; the diff stays pending). Run it again after committing. It is idempotent: a string already at its new value is reported as `alreadyCurrent`.

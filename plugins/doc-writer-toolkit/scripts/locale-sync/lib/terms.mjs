@@ -86,14 +86,17 @@ async function readAdditions(file) {
 }
 
 // Appends new entries; a recorded term is never re-translated (T2), so a different translation is a conflict, not written.
-export async function addTerms(s, locale, file, { dryRun = false } = {}) {
+// With `replace`, a different translation is a correction: it replaces the recorded one (`replaced`). The pages that
+// use the old translation keep it until their blocks are redone (`terms --usage`, then `blocks --redo`).
+export async function addTerms(s, locale, file, { dryRun = false, replace = false } = {}) {
   const additions = await readAdditions(file);
   const target = termsFile(s, locale);
   return withLock(target, async () => {
     const { byUa } = await readTerms(s, locale);
     const raw = (await readIfExists(target)) ?? '';
-    const lines = raw.split('\n').map((l) => l.replace(/\r$/, '')).filter((l) => l.trim());
+    let lines = raw.split('\n').map((l) => l.replace(/\r$/, '')).filter((l) => l.trim());
     const added = [];
+    const replaced = [];
     const existing = [];
     const conflicts = [];
     const rejected = [];
@@ -105,6 +108,14 @@ export async function addTerms(s, locale, file, { dryRun = false } = {}) {
         continue;
       }
       const known = byUa.get(norm(ua));
+      if (known && replace && known.target !== tr) {
+        // Every line of that UA term goes (a merge may have left two), and the corrected one takes their place.
+        lines = lines.filter((l) => norm(l.split('\t')[0]) !== norm(ua));
+        lines.push(`${known.ua}\t${tr}`);
+        replaced.push({ ua: known.ua, old: known.target, new: tr });
+        byUa.set(norm(ua), { ua: known.ua, target: tr });
+        continue;
+      }
       if (known) {
         (known.target === tr ? existing : conflicts).push({ ua, recorded: known.target, ...(known.target === tr ? {} : { proposed: tr }) });
         continue;
@@ -114,12 +125,42 @@ export async function addTerms(s, locale, file, { dryRun = false } = {}) {
       added.push(entry);
       lines.push(`${ua}\t${tr}`);
     }
-    if (!dryRun && added.length) {
-      lines.sort((a, b) => byBytes(a.split('\t')[0], b.split('\t')[0]) || byBytes(a, b));
-      await writeFileAtomic(target, lines.join('\n') + '\n');
-    }
+    if (!dryRun && (added.length || replaced.length)) await writeTermLines(target, lines);
     const gitattributes = dryRun ? 'dry-run' : await ensureUnionMerge(s);
-    return { locale, file: path.relative(s.root, target), dryRun, added, existing, conflicts, rejected, gitattributes };
+    return {
+      locale,
+      file: path.relative(s.root, target),
+      dryRun,
+      added,
+      ...(replace ? { replaced } : {}),
+      existing,
+      conflicts,
+      rejected,
+      gitattributes,
+      ...(replaced.length ? { next: `The pages still use the old translations: run \`terms --usage <old translation> --locales ${locale}\` and redo the blocks it lists.` } : {}),
+    };
+  });
+}
+
+const writeTermLines = (file, lines) => writeFileAtomic(file, [...lines].sort((a, b) => byBytes(a.split('\t')[0], b.split('\t')[0]) || byBytes(a, b)).join('\n') + (lines.length ? '\n' : ''));
+
+// Removes the entries of these UA terms (junk or superseded rows). Pages are not touched.
+export async function dropTerms(s, locale, terms, { dryRun = false } = {}) {
+  const target = termsFile(s, locale);
+  return withLock(target, async () => {
+    const raw = (await readIfExists(target)) ?? '';
+    const lines = raw.split('\n').map((l) => l.replace(/\r$/, '')).filter((l) => l.trim());
+    const wanted = new Set(terms.map(norm));
+    const dropped = [];
+    const kept = [];
+    for (const l of lines) {
+      const [ua, tr] = l.split('\t');
+      if (wanted.has(norm(ua))) dropped.push({ ua, target: tr ?? '' });
+      else kept.push(l);
+    }
+    const notFound = terms.filter((t) => !dropped.some((d) => norm(d.ua) === norm(t)));
+    if (!dryRun && dropped.length) await writeTermLines(target, kept);
+    return { locale, file: path.relative(s.root, target), dryRun, dropped, notFound };
   });
 }
 

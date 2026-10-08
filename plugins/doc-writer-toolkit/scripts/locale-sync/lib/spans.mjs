@@ -5,6 +5,7 @@ import { BOLD, INLINE_CODE, fenceStep } from './parse.mjs';
 import { CYRILLIC } from './letters.mjs';
 import { acceptedLabels } from './labels.mjs';
 import { matchTerms } from './terms.mjs';
+import { decisionAt } from './scope.mjs';
 
 // The spans the binding pass classifies (`context/locale-translation.md`, §4): bold spans, and inline code that holds
 // Cyrillic (UI text in code style). One entry per occurrence, outside fenced code, with its line for context.
@@ -71,42 +72,77 @@ export function uiStringFor(index, labels, ua, locale) {
   return values.size === 1 ? { key: keys[0], value: [...values][0] } : null;
 }
 
-// What a translation worker needs for the spans in `text` (the blocks it writes), in one locale: the recorded decision
-// and, for a bound label, the exact string to write. `undecided` spans mean the binding pass hasn't run on them.
-export function labelRows(text, state, locale, ctx) {
-  const rows = [];
-  const undecided = [];
-  for (const [span, occ] of groupBySpan(spanOccurrences(text))) {
-    const decision = state.spans[span] ?? null;
-    const kind = occ[0].kind;
-    if (!decision) {
-      undecided.push({ span, kind, line: occ[0].line });
+// The UA text a step works on, as segments: { text, firstLine (1-based UA line of its first line), pathAt(i) (heading
+// path of its i-th line), change (the change id, incremental only) }. A plain string is one segment outside any section.
+export const asSegments = (x) => (typeof x === 'string' ? [{ text: x, firstLine: 1, pathAt: () => [] }] : x);
+
+// Every span occurrence in the segments with its decision (page-level, or scoped to a heading: `scope.mjs`).
+export function decidedOccurrences(segments, spans) {
+  const out = [];
+  for (const seg of asSegments(segments)) {
+    for (const o of spanOccurrences(seg.text)) {
+      const path = seg.pathAt(o.line - 1);
+      out.push({ ...o, line: seg.firstLine + o.line - 1, path, change: seg.change, ...decisionAt(spans, o.span, path) });
+    }
+  }
+  return out;
+}
+
+function rowFor(span, kind, decision, locale, ctx) {
+  const row = { span, kind, decision };
+  const { markup, parts } = uiParts(span);
+  if (markup && !decision.startsWith('label:') && ctx.uiIndex) {
+    const found = parts.map((ua) => ({ ua, write: uiStringFor(ctx.uiIndex, ctx.labels, ua, locale)?.value })).filter((p) => p.write);
+    if (found.length) row.parts = found;
+  }
+  if (decision.startsWith('label:')) {
+    const key = decision.slice(6);
+    const value = ctx.labels?.[locale]?.[key];
+    row.key = key;
+    if (typeof value === 'string') {
+      // L1: when the UA span drops the decorative trailing punctuation of the UA string, so does the translation.
+      row.write = acceptedLabels(span, ctx.labels.uk?.[key], value).at(-1);
+    } else {
+      row.missing = true;
+      if (ctx.fallbackEn && typeof ctx.labels?.en?.[key] === 'string') {
+        row.write = ctx.labels.en[key];
+        row.fallback = 'en';
+      }
+    }
+  }
+  return row;
+}
+
+// What a translation worker needs for the spans in the segments (the blocks it writes), in one locale: the recorded
+// decision and, for a bound label, the exact string to write. `undecided` spans mean the binding pass hasn't run on them.
+// A span with decisions scoped to headings gets one row per decision: `scope` names the heading a row applies under (the
+// row without `scope` applies everywhere else), and `lines` (full page) or `changes` (incremental) say where.
+export function labelRows(segments, state, locale, ctx) {
+  const groups = new Map();
+  const undecided = new Map();
+  for (const o of decidedOccurrences(segments, state.spans)) {
+    if (!o.decision) {
+      if (!undecided.has(o.span)) undecided.set(o.span, { span: o.span, kind: o.kind, line: o.line });
       continue;
     }
-    const row = { span, kind, decision };
-    const { markup, parts } = uiParts(span);
-    if (markup && !decision.startsWith('label:') && ctx.uiIndex) {
-      const found = parts.map((ua) => ({ ua, write: uiStringFor(ctx.uiIndex, ctx.labels, ua, locale)?.value })).filter((p) => p.write);
-      if (found.length) row.parts = found;
-    }
-    if (decision.startsWith('label:')) {
-      const key = decision.slice(6);
-      const value = ctx.labels?.[locale]?.[key];
-      row.key = key;
-      if (typeof value === 'string') {
-        // L1: when the UA span drops the decorative trailing punctuation of the UA string, so does the translation.
-        row.write = acceptedLabels(span, ctx.labels.uk?.[key], value).at(-1);
-      } else {
-        row.missing = true;
-        if (ctx.fallbackEn && typeof ctx.labels?.en?.[key] === 'string') {
-          row.write = ctx.labels.en[key];
-          row.fallback = 'en';
-        }
-      }
+    const id = `${o.span}\0${o.key}`;
+    groups.set(id, [...(groups.get(id) ?? []), o]);
+  }
+  const perSpan = new Map();
+  for (const occ of groups.values()) perSpan.set(occ[0].span, (perSpan.get(occ[0].span) ?? 0) + 1);
+  const rows = [];
+  for (const occ of groups.values()) {
+    const { span, kind, decision, scope } = occ[0];
+    const row = rowFor(span, kind, decision, locale, ctx);
+    if (scope) row.scope = scope;
+    if (perSpan.get(span) > 1) {
+      const changes = [...new Set(occ.map((o) => o.change).filter(Boolean))];
+      if (changes.length) row.changes = changes;
+      else row.lines = [...new Set(occ.map((o) => o.line))];
     }
     rows.push(row);
   }
-  return { labels: rows, undecided };
+  return { labels: rows, undecided: [...undecided.values()] };
 }
 
 // The first cell of every table body row whose text is plain (no markup, code or link). Header rows are skipped.
@@ -125,7 +161,9 @@ function firstCells(text) {
 
 // Term-memory rows for the terms in `text` (T4), with the UI string winning over the recorded one (T1). Bold spans
 // classified `term` or `unverified` that equal a UI string are added even when they have no entry yet.
-export function termRows(text, state, locale, ctx) {
+export function termRows(segments, state, locale, ctx) {
+  const segs = asSegments(segments);
+  const text = segs.map((x) => x.text).join('\n');
   const memory = ctx.terms.get(locale) ?? { entries: [], conflicts: [] };
   const rows = [];
   const seen = new Set();
@@ -135,8 +173,9 @@ export function termRows(text, state, locale, ctx) {
     seen.add(normalize(e.ua));
   }
   if (ctx.uiIndex) {
-    for (const [span] of groupBySpan(spanOccurrences(text))) {
-      if (!['term', 'unverified'].includes(state.spans[span]) || seen.has(normalize(span))) continue;
+    const prose = new Set(decidedOccurrences(segs, state.spans).filter((o) => ['term', 'unverified'].includes(o.decision)).map((o) => o.span));
+    for (const span of prose) {
+      if (seen.has(normalize(span))) continue;
       const ui = uiStringFor(ctx.uiIndex, ctx.labels, span, locale);
       if (ui) rows.push({ ua: span, target: ui.value, source: 'ui' });
       seen.add(normalize(span));

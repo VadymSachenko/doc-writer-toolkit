@@ -10,20 +10,25 @@ import { loadStore, mergedLabels } from '../../ui-labels/lib/store.mjs';
 import { readTerms } from './terms.mjs';
 import { labelRows, termRows, uiIndex } from './spans.mjs';
 import { acceptedLabels } from './labels.mjs';
+import { sectionMap } from './scope.mjs';
+import { blocksAtLines, parseLines } from './redo.mjs';
+import { linkRows } from './links.mjs';
 
 // For each page and locale: exactly the UA blocks the translator has to write, with the matching translated text.
-export async function runBlocks(s, { selectors = [], overwrite = false, withOld = false } = {}) {
+// `redo` re-translates blocks of a current page: target line numbers ("12,14-16"), or "all" for the whole page.
+export async function runBlocks(s, { selectors = [], overwrite = false, withOld = false, redo = null } = {}) {
   if (!selectors.length) throw new CliError('Usage: locale-sync blocks <page|folder>… [--locales tr,kk]', { code: 2 });
   const { targets, warnings } = await resolveTargets(s);
   const { inScope, categoriesInScope } = await listUaPages(s);
   const units = selectPages(s, [...inScope, ...categoriesInScope], selectors);
+  const redoLines = redo && redo !== 'all' ? parseLines(redo) : null;
   const ctx = await rowContext(s, targets);
   if (!ctx.labels) warnings.push('No label store: bound labels have no string to write. Run the UI label check first.');
   const results = [];
   for (const unit of units) {
     const state = await readState(s, unit.id);
     for (const locale of targets) {
-      results.push(unit.kind === 'category' ? await categoryBlocksFor(s, unit, locale, state, { overwrite, ctx }) : await blocksFor(s, unit, locale, state, { overwrite, withOld, ctx }));
+      results.push(unit.kind === 'category' ? await categoryBlocksFor(s, unit, locale, state, { overwrite, ctx, redo }) : await blocksFor(s, unit, locale, state, { overwrite, withOld, ctx, redo, redoLines }));
     }
   }
   return { results, warnings };
@@ -55,19 +60,20 @@ function categoryLabelRows(parsed, state, locale, ctx) {
 }
 
 // A sidebar category is translated whole: the entries to write into the locale's current.json, with what is there now.
-async function categoryBlocksFor(s, unit, locale, state, { overwrite, ctx }) {
+async function categoryBlocksFor(s, unit, locale, state, { overwrite, ctx, redo }) {
   const text = await cachedBlob(s.root, unit.blob);
   const parsed = parseCategory(text);
   const target = await readCategoryTarget(s, locale, parsed);
   const cell = classify({ entry: state.locales[locale], blob: unit.blob, targetExists: target.exists, handMade: target.handMade, baseExists: true, overwrite });
   const head = { kind: 'category', page: unit.id, path: unit.path, blob: unit.blob, locale, target: { path: target.file, exists: target.exists }, state: cell.state, reason: cell.reason };
   if (parsed.error) return { ...head, mode: 'error', error: `The UA category file is not valid JSON: ${parsed.error}` };
-  if (cell.state === 'current') return { ...head, mode: 'none', changes: [] };
+  // A category is short: --redo, whatever its value, translates it again in full.
+  if (cell.state === 'current' && !redo) return { ...head, mode: 'none', changes: [] };
   if (cell.state === 'skipped') return { ...head, mode: 'skipped', note: 'An entry in the locale file already differs from the UA text (translated by hand) and no state was recorded. Pass --overwrite to translate it.' };
   return {
     ...head,
     mode: 'full',
-    fullReason: cell.reason,
+    fullReason: cell.state === 'current' ? 'redo' : cell.reason,
     source: { kind: 'full', to: unit.blob },
     overwrites: target.handMade,
     ua: { lines: [1, text.split('\n').length], text },
@@ -80,7 +86,37 @@ async function categoryBlocksFor(s, unit, locale, state, { overwrite, ctx }) {
   };
 }
 
-async function blocksFor(s, page, locale, state, { overwrite, withOld, ctx }) {
+// Segments for the label and term rows (`spans.mjs`): the whole UA page, or the UA text of each change, each line with
+// its heading path in the UA page, so scoped span decisions apply.
+function fullSegments(text) {
+  const map = sectionMap(text);
+  return [{ text, firstLine: 1, pathAt: (i) => map.paths[map.at[i]] }];
+}
+function changeSegments(text, changes) {
+  const map = sectionMap(text);
+  return changes.filter((c) => c.ua?.text).map((c) => ({ text: c.ua.text, firstLine: c.ua.lines[0], change: c.id, pathAt: (i) => map.paths[map.at[c.ua.lines[0] - 1 + i]] ?? [] }));
+}
+
+// The blocks of a current page at the given translation lines, with their UA text from the current UA page.
+async function redoBlocksFor(s, page, head, targetText, state, locale, ctx, lines) {
+  const b = await cachedBlob(s.root, page.blob);
+  const { changes, skipped, unmapped } = blocksAtLines(parsePage(b), parsePage(targetText), lines);
+  const segments = changeSegments(b, changes);
+  return {
+    ...head,
+    mode: 'redo',
+    source: { kind: 'redo', blob: page.blob, lines },
+    changes,
+    unmapped,
+    skipped,
+    ...labelRows(segments, state, locale, ctx),
+    ...termRows(segments, state, locale, ctx),
+    ...(await linkRows(s, page, segments.map((x) => x.text).join('\n'), locale)),
+    summary: { replace: changes.length, unmapped: unmapped.length, words: changes.reduce((n, c) => n + (c.words ?? 0), 0) },
+  };
+}
+
+async function blocksFor(s, page, locale, state, { overwrite, withOld, ctx, redo, redoLines }) {
   const file = localePagePath(s, locale, page);
   const targetText = await readIfExists(abs(s, file));
   const entry = state.locales[locale];
@@ -88,24 +124,29 @@ async function blocksFor(s, page, locale, state, { overwrite, withOld, ctx }) {
   const cell = classify({ entry, blob: page.blob, targetExists: targetText !== null, baseExists, overwrite });
   const head = { kind: 'page', page: page.id, path: page.path, blob: page.blob, locale, target: { path: file, exists: targetText !== null }, state: cell.state, reason: cell.reason };
 
-  if (cell.state === 'current') return { ...head, mode: 'none', changes: [], unmapped: [] };
+  if (redo && cell.state !== 'current') {
+    return { ...head, mode: 'error', error: `--redo needs a page that is current in '${locale}' (it is ${cell.state}${cell.reason ? `, ${cell.reason}` : ''}): translate its pending changes first, then redo.` };
+  }
+  if (cell.state === 'current' && redoLines) return redoBlocksFor(s, page, head, targetText, state, locale, ctx, redoLines);
+  if (cell.state === 'current' && !redo) return { ...head, mode: 'none', changes: [], unmapped: [] };
   if (cell.state === 'skipped') {
     return { ...head, mode: 'skipped', note: 'A translation file exists but no state was recorded for it (a manual bootstrap). Pass --overwrite to translate it from scratch.' };
   }
 
   const b = await cachedBlob(s.root, page.blob);
   const pageB = parsePage(b);
-  if (modeOf(cell) === 'full') {
+  if (redo === 'all' || modeOf(cell) === 'full') {
     return {
       ...head,
       mode: 'full',
-      fullReason: cell.reason,
+      fullReason: redo === 'all' ? 'redo' : cell.reason,
       source: { kind: 'full', to: page.blob },
       overwrites: targetText !== null,
       ua: { lines: [1, pageB.lines.length], text: b },
       bold: boldSpans(splitCode(b).prose),
-      ...labelRows(b, state, locale, ctx),
+      ...labelRows(fullSegments(b), state, locale, ctx),
       ...termRows(b, state, locale, ctx),
+      ...(await linkRows(s, page, b, locale)),
     };
   }
 
@@ -115,7 +156,7 @@ async function blocksFor(s, page, locale, state, { overwrite, withOld, ctx }) {
   const groups = diffBodies(pageA, pageB);
   const fmChanges = diffFrontmatter(pageA.fm, pageB.fm);
   const { changes, unmapped } = composeChanges({ pageA, pageB, pageT, groups, fmChanges, withOld });
-  const changedText = changes.map((c) => c.ua?.text ?? '').join('\n');
+  const segments = changeSegments(b, changes);
   return {
     ...head,
     mode: 'incremental',
@@ -124,8 +165,9 @@ async function blocksFor(s, page, locale, state, { overwrite, withOld, ctx }) {
     changes,
     unmapped,
     introducedBold: introducedBold(changes, pageA),
-    ...labelRows(changedText, state, locale, ctx),
-    ...termRows(changedText, state, locale, ctx),
+    ...labelRows(segments, state, locale, ctx),
+    ...termRows(segments, state, locale, ctx),
+    ...(await linkRows(s, page, segments.map((x) => x.text).join('\n'), locale)),
     summary: {
       replace: changes.filter((c) => c.op === 'replace').length,
       add: changes.filter((c) => c.op === 'add').length,
