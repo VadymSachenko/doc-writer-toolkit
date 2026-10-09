@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repository is
 
-This is the **source repository for a Claude Code plugin marketplace** (`doc-writer-toolkit`), not a documentation site itself. It contains skills, slash commands, and content-rule corpora that get installed into *other* Docusaurus documentation projects (currently only UniComPay's). There is no app to build, no test suite, and no lint config — the deliverable is the Markdown/JSON content under `plugins/doc-writer-toolkit/`, consumed by Claude Code at runtime in a different repo.
+This is the **source repository for a Claude Code plugin marketplace** (`doc-writer-toolkit`), not a documentation site itself. It contains skills, slash commands, and content-rule corpora that get installed into *other* Docusaurus documentation projects (currently only UniComPay's). There is no app to build and no lint config — the deliverable is the Markdown/JSON content under `plugins/doc-writer-toolkit/`, consumed by Claude Code at runtime in a different repo. The only tests are those of the two Node scripts behind the locale translation pipeline (see Commands).
 
 Because of this, most SKILL.md files reference paths like `docs/`, `partner-cabinet/`, `i18n/en/...`, and `CLAUDE.md` that **do not exist in this repo** — they refer to the target project where the plugin is installed. Do not go looking for those paths here; they're part of the runtime contract the skills expect the host project to satisfy.
 
@@ -18,8 +18,13 @@ plugins/doc-writer-toolkit/
   commands/<name>.md                     # slash-command wrappers around skills
   context/doc-rules/                     # style guide, UA grammar, glossary, project rules
   context/doc-templates/                 # page templates (API reference, user guide, concept topic)
+  context/locale-translation.md          # rules for translating into the further (non-EN) locales
+  context/ui-labels.md                   # the UI label check procedure every docs task starts with
+  context/changed-blocks.md              # what "the changed part of a page" means (scope mode, sync, locale-sync)
   context/google-developer-style-guide/  # distilled GDSG corpus (routed loading)
   context/microsoft-style-guide/         # distilled MSSG corpus, EN + UA localization (routed loading)
+  scripts/ui-labels/                     # Node, no deps: UI label store, label check, rename sync (README + tests)
+  scripts/locale-sync/                   # Node, no deps: stale detection, changed blocks, checks, state (README + tests)
   scripts/sme-video-context/             # standalone Python tool, not auto-loaded
 ```
 
@@ -31,7 +36,8 @@ There's no build/lint/test tooling. What you'll actually run:
 
 - **Validate a manifest edit:** `python3 -m json.tool plugins/doc-writer-toolkit/.claude-plugin/plugin.json` (or `.claude-plugin/marketplace.json`) — just a JSON syntax check.
 - **Try a skill/command end-to-end:** it must be exercised from a *different* repo that has this plugin installed (see README's "Install into a project" section) or from a local checkout added via `extraKnownMarketplaces` pointing at a local path. There is no in-repo harness for running a skill.
-- **`scripts/sme-video-context/sme_video_context.py`:** the one real piece of executable code here. Setup and run commands are documented in `plugins/doc-writer-toolkit/scripts/sme-video-context/README.md` (needs system `ffmpeg`/`tesseract` plus a Python venv) — follow that file rather than duplicating the steps here, since the `extract-sme-screenshots` skill's own instructions (with a known-bug workaround) are the current source of truth for how it's actually invoked.
+- **Test the locale pipeline scripts:** `npm test` in `plugins/doc-writer-toolkit/scripts/ui-labels/` and in `.../scripts/locale-sync/`. Offline (throwaway git repos and the `command` label adapter); the `locale-sync` suite takes about two minutes. Keep each script's `README.md` in step with its flags and output fields, and add a test with every behaviour change.
+- **`scripts/sme-video-context/sme_video_context.py`:** the Python tool. Setup and run commands are documented in `plugins/doc-writer-toolkit/scripts/sme-video-context/README.md` (needs system `ffmpeg`/`tesseract` plus a Python venv) — follow that file rather than duplicating the steps here, since the `extract-sme-screenshots` skill's own instructions (with a known-bug workaround) are the current source of truth for how it's actually invoked.
 
 ## Architecture
 
@@ -99,6 +105,16 @@ Four skills move a whole menu *section* (not just one page) toward publish-ready
 4. `resolve-markers` — batch-answers `{/* NEEDS CONFIRMATION */}` markers from app/interview evidence.
 
 `/explore-and-resolve` chains `app-explorer` → `resolve-markers`. There is **no single `/document-section` orchestrator yet** that chains readiness → explore → plan → write → review; that, plus a resumable `.sources/section-state.json` ledger, is the toolkit's headline unbuilt feature.
+
+### Locale translation pipeline (`locale-translator`, `/translate-locales`)
+
+Translates a host repo's approved UA pages into every further locale its `docusaurus.config` declares (all except the default and `en`) with no human review, so correctness comes from mechanisms. Three layers, each with a single job:
+
+- `scripts/ui-labels/` (no AI) imports the app's own dictionaries into a label store in the host repo (`<state root>/ui-labels/`, default `.doc-toolkit/`), checks whether the app's UI text changed, and patches renamed labels in UA, EN and every locale on the current branch. `context/ui-labels.md` is the procedure; `doc-page-updater` and the three `*-writer` skills run it at the start of a docs task, `locale-translator` at the start of every run.
+- `scripts/locale-sync/` (no AI) does everything that needs no model: stale detection by git blob hashes against per-page state files, the exact changed UA blocks, the binding of bold spans to app strings, per-locale term memory, splicing translated blocks back, screenshot symlinks to the EN images, the scripted checks, and `record`, which advances a page's state only when its checks pass. Sidebar category labels (`_category_.json`) are units like pages, translated into each locale's `current.json`. `stray` lists files a run left outside its roots; `status` warns about untranslated category labels in `current.json` that no `_category_.json` owns.
+- `skills/locale-translator/SKILL.md` orchestrates: label check → status (confirmation above 10 pages) → binding pass → terminology pass → one worker per locale in parallel (`worker.md`, rules in `context/locale-translation.md`) → build and per-page report. It never commits; corrections after a run are redone block by block.
+
+Rules that hold across all three: the UA page is the only source (the EN page is never read — `doc-translator` owns UA → EN and is independent); the app's string always wins over a translation of it (T1); a page that fails its checks is not recorded; nothing is deleted or moved (orphans, moved pages, strays are reported). Host config lives in `context/project-paths.md` under "Label store and locale translation" (`App:`, `UI label source:`, `Locale files:`, `Locale register:`, `Translation scope:`, `Toolkit state root:`); target locales are never declared there, only read from `docusaurus.config`. Product-specific data (label snapshots, term memory) lives in the host repo, not here.
 
 ### Templates and the `en` path
 

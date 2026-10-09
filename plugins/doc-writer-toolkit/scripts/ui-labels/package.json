@@ -1,0 +1,9 @@
+{
+  "name": "ui-labels",
+  "private": true,
+  "type": "module",
+  "description": "Import an app's UI dictionaries into a label store and keep documentation pages in sync with it. No dependencies.",
+  "bin": { "ui-labels": "./ui-labels.mjs" },
+  "engines": { "node": ">=18.3" },
+  "scripts": { "test": "node --test test/ui-labels.test.mjs" }
+}

@@ -52,6 +52,8 @@ These examples illustrate prose density, section selection, admonition use, and 
 
 Execute the steps in order. Do not skip the interview.
 
+Run the UI label check in `${CLAUDE_PLUGIN_ROOT}/context/ui-labels.md` before anything else.
+
 ### Step 1 — Locate inputs
 
 Resolve this project's UA content root (or, on an `en` page, its EN i18n root — see `project-paths.md`) for the target location; do not assume `partner-cabinet/`. Ask the user for the target doc folder if not provided (e.g., `<content root>/transactions/transaction-lifecycle/`). Sources live inside that folder.

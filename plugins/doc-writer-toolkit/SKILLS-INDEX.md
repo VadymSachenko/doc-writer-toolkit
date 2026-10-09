@@ -2,7 +2,7 @@
 
 Canonical list of what the plugin ships. One line per skill; the invocation phrasing is what triggers it (all skills are explicit-invocation only). `WORKFLOW.md` at the repo root maps these to the writing process.
 
-## Skills (15)
+## Skills (16)
 
 | Skill | What it does | Invoke with |
 |---|---|---|
@@ -19,10 +19,11 @@ Canonical list of what the plugin ships. One line per skill; the invocation phra
 | `doc-style-reviewer` | Read-only style/grammar findings report under one guide profile (`gdsg`, `mssg-en`, `mssg-ua`, `ua-grammar`); scope mode reviews only changed blocks | "review-doc-style docs/balance/balance.md", "… --changed origin/main" |
 | `doc-style-fixer` | Applies a reviewer report: mechanical fixes in batch, substantive rewrites with consent (or pre-approved via `apply:`), judgment calls asked | "fix-doc-style docs/balance/balance.md apply:mechanical,substantive" |
 | `doc-translator` | Translates an approved UA page into EN at the declared i18n path; sync mode re-translates only changed blocks into an existing EN page | "translate-doc balance/balance", "… --sync --base origin/main" |
+| `locale-translator` | Translates the approved UA pages into every further locale the site declares (not EN), only where UA changed and block by block: label check first, UI labels from the app's dictionaries, per-locale term memory, one worker per locale, scripted checks, build and a per-page report. Never commits | "/translate-locales", "locale-translator: translate the settings section into kk only" |
 | `doc-alignment-checker` | Checks a UA page and its EN counterpart for structural alignment | "check-doc-alignment balance/balance" |
 | `cleanup-unused-screenshots` | Moves candidate screenshots a page never referenced into `_unused/` (never deletes) | "cleanup-unused-screenshots for docs/routing" |
 
-## Commands (11)
+## Commands (12)
 
 | Command | Underlying skill(s) |
 |---|---|
@@ -37,5 +38,6 @@ Canonical list of what the plugin ships. One line per skill; the invocation phra
 | `/fix-doc-todos` | resolves link-type `{/* ToDo */}` markers across the project |
 | `/translate-doc` | `doc-translator` |
 | `/check-doc-alignment` | `doc-alignment-checker` |
+| `/translate-locales` | `locale-translator` |
 
-Commands are thin wrappers: they bind arguments to paths and hand off to the skill's workflow. Shared procedures every skill points to instead of copying: `context/project-paths.md` (content roots, language), `context/style-guide-registry.md` (guide tokens and routed loading), `context/changed-blocks.md` (what "the changed part of a page" means).
+Commands are thin wrappers: they bind arguments to paths and hand off to the skill's workflow. Shared procedures every skill points to instead of copying: `context/project-paths.md` (content roots, language), `context/style-guide-registry.md` (guide tokens and routed loading), `context/changed-blocks.md` (what "the changed part of a page" means), `context/ui-labels.md` (the UI label check at the start of a docs task), `context/locale-translation.md` (rules for translating into the further locales). The scripts the locale pipeline runs, `scripts/ui-labels/` and `scripts/locale-sync/`, each have a README.

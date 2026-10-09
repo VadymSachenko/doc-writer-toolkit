@@ -46,6 +46,8 @@ These examples illustrate prose density, JSON formatting, `<details>` usage for 
 
 Execute the steps in order. Do not skip the interview.
 
+Run the UI label check in `${CLAUDE_PLUGIN_ROOT}/context/ui-labels.md` before anything else.
+
 ### Step 1 — Locate inputs
 
 Ask the user for the endpoint slug if not provided. Default input file: `/api-docs/api-references/<slug>.md`. This file contains all info a tech writer could gather, including request, response, and error details.
