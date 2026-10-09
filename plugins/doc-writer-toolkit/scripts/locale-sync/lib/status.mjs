@@ -5,6 +5,7 @@ import { abs, listUaPages, localePagePath, readState, statePath, walkFiles } fro
 import { resolveTargets, selectorMatches, selectPages, localeRoot } from './settings.mjs';
 import { cachedBlob, classify, estimateWords, fullWords, modeOf } from './plan.mjs';
 import { parseCategory, readCategoryTarget } from './categories.mjs';
+import { sidebarOverrides, sidebarWarning } from './sidebar.mjs';
 
 const CONFIRM_OVER = 10;
 const posix = path.posix;
@@ -99,6 +100,8 @@ export async function runStatus(s, { selectors = [], overwrite = false, threshol
   }
 
   const { orphaned, moved } = await findOrphans(s, all, categories, targets);
+  const sidebarLabels = await sidebarOverrides(s, targets, categories);
+  for (const o of sidebarLabels) warnings.push(sidebarWarning(o));
   const needing = cells.new + cells.stale;
   const categoryNeeding = categoryCells.new + categoryCells.stale;
   const message =
@@ -126,6 +129,7 @@ export async function runStatus(s, { selectors = [], overwrite = false, threshol
     pages: rows,
     orphaned,
     moved,
+    sidebarLabels,
     warnings,
   };
 }

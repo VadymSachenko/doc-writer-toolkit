@@ -3,14 +3,14 @@ import { selectPages } from './settings.mjs';
 import { cachedBlob } from './plan.mjs';
 import { parsePage, splitCode } from './parse.mjs';
 import { parseCategory, readCategoryTarget } from './categories.mjs';
-import { termMatcher } from './terms.mjs';
+import { usageMatcher } from './terms.mjs';
 import { blocksAtLines } from './redo.mjs';
 
 // `terms --usage`: where one locale's pages still use a term's old translation, so a correction reaches them. Matches
-// inflected forms like term lookup does (T4), in prose, frontmatter values and mermaid labels, never in code. Per page,
+// inflected forms by the target language's own stem rule (`usageMatcher`), in prose, frontmatter values and mermaid labels, never in code. Per page,
 // the blocks those lines belong to and the `--redo` value that re-translates exactly them.
 export async function termUsage(s, locale, olds, selectors = []) {
-  const matchers = olds.map((t) => ({ old: t, re: termMatcher(t) }));
+  const matchers = olds.map((t) => ({ old: t, re: usageMatcher(t) }));
   const find = (line) => matchers.map((m) => line.match(m.re)?.[0]).filter(Boolean);
   const { inScope, categoriesInScope } = await listUaPages(s);
   const units = selectPages(s, [...inScope, ...categoriesInScope], selectors);

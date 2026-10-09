@@ -14,7 +14,7 @@ Load nothing else. Never read the EN page, another locale's page, the label stor
 
 Work through the units in the given order. Keep these in your run folder: `<id>.blocks.txt` (your block translations), `<id>.candidate.md` or `<id>.candidate.json`, `<id>.unverified.json`, and `results.jsonl` (one line per unit). Turn `/` in an id into `__` for file names.
 
-**Files.** Every file you write goes in your own run folder: helper scripts, JSON you build, notes. Never write in the docs repo, in the parent run folder, in another locale's folder or in `/tmp`. `results.jsonl` may already hold lines from an earlier batch of your locale: only ever append to it (`>>`, or an append in your script), never rewrite or truncate it.
+**Files.** Every file you write goes in your own run folder: helper scripts, JSON you build, notes. Never write in the docs repo (not even an empty scratch file in its root: the run's `LS stray` check lists every one), in the parent run folder, in another locale's folder or in `/tmp`. `results.jsonl` may already hold lines from an earlier batch of your locale: only ever append to it (`>>`, or an append in your script), never rewrite or truncate it.
 
 ### 1. Get the blocks
 

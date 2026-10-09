@@ -75,6 +75,7 @@ flowchart TD
 | Review style | `doc-style-reviewer` | Read-only findings report (gdsg / mssg-ua / ua-grammar) |
 | Fix style | `doc-style-fixer` | Applies the reviewer's findings to the file |
 | Translate | `doc-translator` | UA → EN, preserves MDX, enforces EN glossary |
+| Translate — further locales | `locale-translator` | UA → every other locale of the site (not EN), only changed blocks, UI labels from the app's own dictionaries, scripted checks |
 | Alignment check | `doc-alignment-checker` | Checks UA and EN pages are structurally in sync |
 | Clean screenshots | `cleanup-unused-screenshots` | Moves unreferenced screenshots to `_unused/` |
 | Full page pipeline | `doc-from-interview` | Orchestrates the full per-page pipeline from SME video to style-reviewed draft |
@@ -96,6 +97,7 @@ See [`SKILLS-INDEX.md`](plugins/doc-writer-toolkit/SKILLS-INDEX.md) for the cano
 | `/fix-doc-todos` | resolves `{/* ToDo */}` markers |
 | `/translate-doc` | `doc-translator` |
 | `/check-doc-alignment` | `doc-alignment-checker` |
+| `/translate-locales` | `locale-translator` |
 | `/update-doc-page` | `doc-page-updater` |
 
 ## Gaps (setup requirements)

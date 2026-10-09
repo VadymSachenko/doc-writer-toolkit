@@ -1,6 +1,6 @@
 # Contributing to doc-writer-toolkit
 
-This repo is a Claude Code plugin marketplace. The deliverable is the Markdown/JSON content under `plugins/doc-writer-toolkit/` — there is no app to build, no test suite, and no lint config. See [CLAUDE.md](CLAUDE.md) for a full architectural overview.
+This repo is a Claude Code plugin marketplace. The deliverable is the Markdown/JSON content under `plugins/doc-writer-toolkit/` — there is no app to build and no lint config. Only the two Node scripts of the locale translation pipeline have tests (`npm test` in `scripts/ui-labels/` and `scripts/locale-sync/`). See [CLAUDE.md](CLAUDE.md) for a full architectural overview.
 
 ## How to add a skill
 

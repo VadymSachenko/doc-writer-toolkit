@@ -54,6 +54,25 @@ export function termMatcher(ua) {
   return new RegExp(`(?<!${WORD})${body}(?!${WORD})`, 'iu');
 }
 
+// `terms --usage`: where a locale's own (old) translation still occurs. The suffixes of the target languages are longer
+// than UA's, so the UA rule over-matches a verb with a noun's stem (az «bağlantı» → «bağlanması») and misses the plural or
+// case of a short last word (ky «жумушчу топ» → «топтун»). Here every word keeps its whole stem except one final vowel
+// (the vowel is what suffixes replace or lengthen) and then takes any ending; one- and two-letter words match exactly.
+// Stem alternations («топ» → «тобу») are not matched: list both forms.
+const VOWELS = 'aeiouyəıöüâêîôûáéíóúàèìòùäаеёиіїоуыэюяєөүӯӣӧӱ';
+function usageStem(word) {
+  const letters = [...word];
+  if (letters.length <= 2) return { text: word, open: false };
+  const cut = letters.length > 3 && VOWELS.includes(letters.at(-1).toLocaleLowerCase()) ? 1 : 0;
+  return { text: letters.slice(0, letters.length - cut).join(''), open: true };
+}
+
+export function usageMatcher(term) {
+  const words = term.normalize('NFC').trim().split(/\s+/).map(usageStem);
+  const body = words.map((w) => esc(w.text) + (w.open ? `${WORD}*` : '')).join('\\s+');
+  return new RegExp(`(?<!${WORD})${body}(?!${WORD})`, 'iu');
+}
+
 // The entries whose UA term occurs in `text` (T4): never the whole file.
 export function matchTerms(entries, text) {
   const t = text.normalize('NFC');

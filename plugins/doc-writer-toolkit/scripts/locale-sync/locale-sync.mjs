@@ -14,6 +14,7 @@ import { runBind, runDecisions } from './lib/bind.mjs';
 import { runApply } from './lib/apply.mjs';
 import { addTerms, dropTerms, lookupTerms } from './lib/terms.mjs';
 import { termUsage } from './lib/usage.mjs';
+import { runStray } from './lib/stray.mjs';
 
 const USAGE = `locale-sync <command> [<page|folder>…] [options]
 
@@ -35,6 +36,8 @@ Commands
   check <page>…             Every Requirement 8 check on the translated page. Exit 1 if any fails.
   record <page>…            Runs the checks, then advances the page's state. Nothing is recorded if a check fails.
   report [<page>…]          Requirement 13 tables: exists / images resolve / checks passed, local URLs, optional build.
+  stray                     Changed or untracked files outside the places a run writes to (locale roots, their
+                            current.json, the state root, .gitattributes). Exit 1 if any. Deletes nothing.
 
 A <page> is a page id (disputes/manage-disputes), a path, or a folder, relative to the repo root or the UA content root.
 
@@ -57,6 +60,7 @@ check / record:   --candidate <file> (check/install this file instead of the tra
                   --unverified-file <json>  UA spans recorded as unverified in this run
 record:           --dry-run  --date <YYYY-MM-DD>
 report:           --md  --build  --origin <url> (default http://localhost:3000)  --url-prefix <prefix>
+stray:            --save <file> (record what is already dirty)  --baseline <file> (ignore that)
 `;
 
 const OPTIONS = {
@@ -85,6 +89,8 @@ const OPTIONS = {
   redo: { type: 'string' },
   md: { type: 'boolean' },
   build: { type: 'boolean' },
+  save: { type: 'string' },
+  baseline: { type: 'string' },
   origin: { type: 'string' },
   help: { type: 'boolean', short: 'h' },
 };
@@ -195,6 +201,11 @@ async function main() {
       if (values.md) process.stdout.write(renderMarkdown(report) + '\n');
       else printJson(report);
       return report.allGood ? 0 : 1;
+    }
+    case 'stray': {
+      const out = await runStray(s, { baseline: values.baseline, save: values.save });
+      printJson(out);
+      return out.ok === false ? 1 : 0;
     }
     default:
       throw new CliError(`Unknown command '${command}'.\n\n${USAGE}`, { code: 2 });
