@@ -9,3 +9,7 @@ tasks/
 
 # Task run logs — local only
 test-results/
+
+# Python bytecode
+__pycache__/
+*.pyc
