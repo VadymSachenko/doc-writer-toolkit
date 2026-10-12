@@ -83,7 +83,7 @@ and inline body links pointing at another `.md`/`.mdx` page in the docs tree).
 
 - **Authoring** skills (`concept-doc-writer`, `user-guide-writer`, `api-doc-writer`) build every new
   page-to-page link with this algorithm from the start.
-- **Repair** (`fix-doc-todos`) rewrites a relative or extensioned page link to the algorithm's output.
+- **Repair** (the `/fix-doc-todos` command) rewrites a relative or extensioned page link to the algorithm's output.
 - **Translation** (`doc-translator`) **preserves an already-correct route verbatim** — an EN page links
   to the same site-root-relative path as its UA source (the locales share one path; see
   `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md`). It does not
