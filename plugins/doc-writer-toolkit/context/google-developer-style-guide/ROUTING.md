@@ -17,7 +17,7 @@ Load this file first. Then open only the smallest matching set.
 | Task instructions or tutorial | `procedures/procedures.md` plus relevant UI/code rules | structural |
 | Diagram, screenshot, figure, or alt text | `visuals/images-and-media.md` | structural |
 | Link, cross-reference, or anchor | `linking/` | structural |
-| API reference | `technical-content/api-reference-comments.md` | structural |
+| API reference or method descriptions | `technical-content/api-reference-comments.md`, `language/reference-verbs.md` | structural |
 | Inline code or code sample | `technical-content/code-in-text-and-samples.md` | structural |
 | Command line or command output | `technical-content/command-line-syntax.md` | structural |
 | Placeholder | `technical-content/placeholders.md` | structural |

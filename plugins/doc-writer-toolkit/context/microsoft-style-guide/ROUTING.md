@@ -14,6 +14,9 @@ Load this file first. Then open only the matching topic files.
 | Localization and global readiness | `shared/globalization/` | structural |
 | English grammar or punctuation | `en-us/grammar/`, `en-us/punctuation/` | language-specific (en-US) |
 | English spelling or exact term | Search `en-us/terminology/INDEX.md`, then load its mapped file | language-specific (en-US) |
+| English capitalization, acronyms, or numbers | One matching file of `en-us/capitalization.md`, `en-us/acronyms.md`, `en-us/numbers.md` | language-specific (en-US) |
+| English word choice, plain language, or contractions | `en-us/word-choice/` | language-specific (en-US) |
+| English terms for one theme (keys and shortcuts, mouse, touch and pen, dates and times, units of measure, special characters, computers and devices, bits and bytes, cloud computing, security, AI and bots, accessibility) | One matching file in `en-us/terminology/term-collections/` | language-specific (en-US) |
 | Ukrainian voice or natural translation | `uk-ua/voice-and-tone/`, `localization/` | language-specific (uk-UA) |
 | Ukrainian UI or documentation | `uk-ua/ui-localization/`, `uk-ua/documentation/` | language-specific (uk-UA) |
 | Ukrainian software strings or messages | `uk-ua/software-and-web/` | language-specific (uk-UA) |
@@ -21,6 +24,9 @@ Load this file first. Then open only the matching topic files.
 | Ukrainian Copilot predefined prompt | `uk-ua/conversational-content/copilot-prompts.md` | language-specific (uk-UA) |
 | Ukrainian voiceover or video | `uk-ua/voice-video/voice-and-video.md` | language-specific (uk-UA) |
 | Ukrainian spelling, grammar, or punctuation | `uk-ua/grammar-authority.md`, then the mapped external grammar file | language-specific (uk-UA) |
+| Ukrainian localization conventions: abbreviations, capitalization, descriptors and prepositions, grammar-style or punctuation choices in UI text, or where orthography ends and localization rules begin | One matching file in `uk-ua/language-standards/` | language-specific (uk-UA) |
+| Ukrainian numbers, units, or placeholders | `uk-ua/locale-formats/numbers-and-placeholders.md` | language-specific (uk-UA) |
+| Ukrainian inclusive or accessible language | `uk-ua/inclusive-language/inclusive-and-accessible.md` | language-specific (uk-UA) |
 | Conflict between language rules | `AUTHORITY-AND-PRECEDENCE.md`, `localization/conflicts.md` | structural |
 
 For programmatic lookup, filter `manifest.json` by `languages`, `content_types`,
