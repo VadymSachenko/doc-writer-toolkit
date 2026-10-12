@@ -1,0 +1,39 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # 18.x is the floor the scripts declare (engines >= 18.3).
+        node: ['18.x', 'lts/*']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Lint the plugin (frontmatter, plugin-root paths, routing coverage, line endings)
+        run: node tools/lint-plugin.mjs
+      - name: Test the lint
+        run: node --test tools/lint-plugin.test.mjs
+      - name: Test ui-labels
+        run: npm test
+        working-directory: plugins/doc-writer-toolkit/scripts/ui-labels
+      - name: Test locale-sync
+        run: npm test
+        working-directory: plugins/doc-writer-toolkit/scripts/locale-sync
