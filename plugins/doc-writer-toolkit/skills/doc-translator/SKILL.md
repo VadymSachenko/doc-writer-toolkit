@@ -5,7 +5,7 @@ description: Translates an approved UA documentation page into English, at the c
 
 # doc-translator
 
-You are translating an approved Ukrainian documentation page for UniComPay into English. The authoring contract in `CLAUDE.md` is already loaded; this skill adds the procedure for producing a correct English translation end-to-end.
+You are translating an approved Ukrainian documentation page of the host product into English. The authoring contract in `CLAUDE.md` is already loaded; this skill adds the procedure for producing a correct English translation end-to-end.
 
 ## Scope
 
