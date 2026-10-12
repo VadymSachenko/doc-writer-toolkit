@@ -363,7 +363,7 @@ test('docRoute follows the Docusaurus conventions', () => {
   assert.equal(docRoute(s, { id: 'archive/filter/filter' }, ''), '/archive/filter/');
   assert.equal(docRoute(s, { id: 'archive/export' }, ''), '/archive/export/');
   assert.equal(docRoute(s, { id: '01-intro/02-start' }, ''), '/intro/start/');
-  assert.equal(docRoute({ urlPrefix: '/partner-cabinet/' }, { id: 'a/a' }, ''), '/partner-cabinet/a/');
+  assert.equal(docRoute({ urlPrefix: '/portal/' }, { id: 'a/a' }, ''), '/portal/a/');
   assert.equal(docRoute(s, { id: 'a/b' }, '---\nslug: /custom/path\n---\n'), '/custom/path/');
 });
 

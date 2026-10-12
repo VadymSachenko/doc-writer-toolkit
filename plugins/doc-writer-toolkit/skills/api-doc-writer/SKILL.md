@@ -10,7 +10,7 @@ You are writing an English API reference page for the host product. The authorin
 ## Scope
 
 - **In scope:** one endpoint per page, following `${CLAUDE_PLUGIN_ROOT}/context/doc-templates/api-reference-template.md`.
-- **Out of scope:** partner cabinet user guides, concept topics for the partner cabinet, Ukrainian translations, sidebar changes. Narrative API pages that describe concepts (authentication overview, webhook delivery model, status lifecycle, error handling) are **out of scope** — use `concept-doc-writer` instead, which loads `api-integration-context.md` and handles concept topics for any domain including API. When the user requests a narrative API page, say: "This is a concept topic — I'll use concept-doc-writer which has the right template and API context loaded."
+- **Out of scope:** user guides, concept topics, Ukrainian translations, sidebar changes. Narrative API pages that describe concepts (authentication overview, webhook delivery model, status lifecycle, error handling) are **out of scope** — use `concept-doc-writer` instead, which loads `api-integration-context.md` and handles concept topics for any domain including API. When the user requests a narrative API page, say: "This is a concept topic — I'll use concept-doc-writer which has the right template and API context loaded."
 
 ## Sources to load
 
@@ -54,7 +54,7 @@ Ask the user for the endpoint slug if not provided. Default input file: `/api-do
 
 Also check for a supplemental transcript at `.sources/sme-interview.md` in the relevant section folder. If present, treat it as one input among others — it may be incomplete or contradict the brief.
 
-Also check for `.sources/app-notes.md` in the relevant section folder — **optional**; structured evidence written by `app-explorer` when it has run. Load if present; skip if absent — do not require it. It is direct app observation and the highest-confidence source for any UI facts an API page cites (e.g. a partner-cabinet setting named in Prerequisites); prefer it over the brief or `sme-interview.md` when they disagree on such a detail.
+Also check for `.sources/app-notes.md` in the relevant section folder — **optional**; structured evidence written by `app-explorer` when it has run. Load if present; skip if absent — do not require it. It is direct app observation and the highest-confidence source for any UI facts an API page cites (e.g. a UI setting named in Prerequisites); prefer it over the brief or `sme-interview.md` when they disagree on such a detail.
 
 If you still have open questions after reading the inputs, check existing published pages in the project's API reference root (resolved in Sources to load) for consistency — do not copy structure or content from them.
 
@@ -71,7 +71,7 @@ Read every available input file. Extract:
 - Any prerequisites (partner configuration, tokens, feature flags)
 - Any related endpoints or flows the user should know about
 
-**Screenshots (only if the brief includes any — most endpoint pages have none).** An API reference page occasionally needs a partner-cabinet screenshot (e.g., where to find a setting mentioned in Prerequisites). Each API doc page has its own `.assets/` folder, co-located with the page file — create it if it does not exist before copying any screenshots into it. If `.assets/` or `.sources/frames/{video}-frames/` exist next to the input file, follow `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-selection.md` — it covers the three-folder model, the four selection cases, the sensitive-content screening requirement, the rename pattern, and the full-page vs. compact classification. Apply every rule in that file before embedding or renaming any screenshot. If neither folder exists, this page simply has no screenshots — proceed without one.
+**Screenshots (only if the brief includes any — most endpoint pages have none).** An API reference page occasionally needs a UI screenshot (e.g., where to find a setting mentioned in Prerequisites). Each API doc page has its own `.assets/` folder, co-located with the page file — create it if it does not exist before copying any screenshots into it. If `.assets/` or `.sources/frames/{video}-frames/` exist next to the input file, follow `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-selection.md` — it covers the three-folder model, the four selection cases, the sensitive-content screening requirement, the rename pattern, and the full-page vs. compact classification. Apply every rule in that file before embedding or renaming any screenshot. If neither folder exists, this page simply has no screenshots — proceed without one.
 
 Choose the embed syntax based on the classification:
 - **Full-page**: `![Descriptive alt text](./.assets/image.png)`

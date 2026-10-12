@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repository is
 
-This is the **source repository for a Claude Code plugin marketplace** (`doc-writer-toolkit`), not a documentation site itself. It contains skills, slash commands, and content-rule corpora that get installed into *other* Docusaurus documentation projects (currently only UniComPay's). There is no app to build and no lint config — the deliverable is the Markdown/JSON content under `plugins/doc-writer-toolkit/`, consumed by Claude Code at runtime in a different repo. The only tests are those of the two Node scripts behind the locale translation pipeline (see Commands).
+This is the **source repository for a Claude Code plugin marketplace** (`doc-writer-toolkit`), not a documentation site itself. It contains skills, slash commands, and content-rule corpora that get installed into *other* Docusaurus documentation projects (currently a single host project). There is no app to build and no lint config — the deliverable is the Markdown/JSON content under `plugins/doc-writer-toolkit/`, consumed by Claude Code at runtime in a different repo. The only tests are those of the two Node scripts behind the locale translation pipeline (see Commands).
 
-Because of this, most SKILL.md files reference paths like `docs/`, `partner-cabinet/`, `i18n/en/...`, and `CLAUDE.md` that **do not exist in this repo** — they refer to the target project where the plugin is installed. Do not go looking for those paths here; they're part of the runtime contract the skills expect the host project to satisfy.
+Because of this, most SKILL.md files reference paths like `docs/`, `portal/`, `i18n/en/...`, and `CLAUDE.md` that **do not exist in this repo** — they refer to the target project where the plugin is installed. Do not go looking for those paths here; they're part of the runtime contract the skills expect the host project to satisfy.
 
 ## Repository structure
 
@@ -43,7 +43,7 @@ There's no build/lint/test tooling. What you'll actually run:
 
 ### Generic vs. product-specific seam
 
-Skill *logic* is generic and reusable for any Docusaurus doc project. Product-specific terminology and examples live only in `context/doc-rules/project-rules/` (`glossary-en.md`, `glossary-ua.md`, `api-integration-context.md`), `context/doc-rules/doc-examples/`, and `context/doc-templates/` — all currently UCPay-specific. Every skill references these exclusively through `${CLAUDE_PLUGIN_ROOT}`, so splitting a second product out into its own plugin would mean swapping that directory's contents, not touching skill logic. Keep new product-specific content inside that seam rather than hardcoding it into a skill.
+Skill *logic* is generic and reusable for any Docusaurus doc project. Product-specific terminology and examples live only in `context/doc-rules/project-rules/` (`glossary-en.md`, `glossary-ua.md`, `api-integration-context.md`), `context/doc-rules/doc-examples/`, and `context/doc-templates/` — all currently specific to that one host product. Every skill references these exclusively through `${CLAUDE_PLUGIN_ROOT}`, so splitting a second product out into its own plugin would mean swapping that directory's contents, not touching skill logic. Keep new product-specific content inside that seam rather than hardcoding it into a skill.
 
 `context/doc-rules/project-rules/glossary.md` is a bilingual EN↔UA *human-facing* alignment reference; skills themselves never load it directly — they load the language-specific `glossary-en.md`/`glossary-ua.md` instead.
 
@@ -81,7 +81,7 @@ No skill hardcodes a UA content root, an EN i18n root, a URL prefix, or a style-
 - `context/project-paths.md` is the single source of truth for the path-resolution procedure (and the ask-once, offer-to-persist fallback when a project hasn't declared these fields yet).
 - `context/style-guide-registry.md` is the equivalent for the style-guide token, plus the corpus/router each token maps to.
 
-Host projects are free to differ in shape here, and none of that difference lives in a skill file: some split UA-first content and EN-native reference docs into two separate Docusaurus plugin instances with two i18n output paths (e.g. `partner-cabinet/` alongside a default-id `docs/`); others use a single tree. A skill never assumes which — it reads the declaration.
+Host projects are free to differ in shape here, and none of that difference lives in a skill file: some split UA-first content and EN-native reference docs into two separate Docusaurus plugin instances with two i18n output paths (e.g. `portal/` alongside a default-id `docs/`); others use a single tree. A skill never assumes which — it reads the declaration.
 
 Across any project's tree(s), unresolved content is marked with `{/* ToDo: ... */}` and `{/* NEEDS CONFIRMATION: ... */}` HTML comments — every writing/translation/alignment skill knows to preserve, carry over, or check for these markers rather than resolving them silently.
 

@@ -9,7 +9,7 @@ You are writing a procedural user guide page for the host product, in the conten
 
 ## Scope
 
-- **In scope:** task-based procedural pages that walk a partner through a specific action in the partner cabinet. One topic per page. Covers both single-procedure pages and multi-procedure overview pages.
+- **In scope:** task-based procedural pages that walk a user through a specific action in the product's UI. One topic per page. Covers both single-procedure pages and multi-procedure overview pages.
 - **Out of scope:** concept topics explaining how something works (`concept-doc-writer`'s job), API reference pages (`api-doc-writer`'s job), EN translations of a UA-authored page (`doc-translator`'s job — only relevant on a project that translates rather than dual-authors), sidebar config changes.
 
 ## Sources to load
@@ -56,7 +56,7 @@ Run the UI label check in `${CLAUDE_PLUGIN_ROOT}/context/ui-labels.md` before an
 
 ### Step 1 — Locate inputs
 
-Resolve this project's UA content root (or, on an `en` page, its EN i18n root — see `project-paths.md`) for the target location; do not assume `partner-cabinet/`. Ask the user for the target doc folder if not provided (e.g., `<content root>/transactions/manage-transactions/filter-transactions/`). Sources live inside that folder.
+Resolve this project's UA content root (or, on an `en` page, its EN i18n root — see `project-paths.md`) for the target location; do not assume `portal/`. Ask the user for the target doc folder if not provided (e.g., `<content root>/transactions/manage-transactions/filter-transactions/`). Sources live inside that folder.
 
 **Each user guide page has its own `.assets/` folder**, co-located with the page file (e.g., `filter-transactions/.assets/`). If the folder does not exist, create it before copying any screenshots into it. Never place a page's screenshots in a parent folder's `.assets/` or in a shared assets directory — every page owns its own copy of the screenshots it embeds, even if those screenshots duplicate files from another page.
 
@@ -318,6 +318,6 @@ This skill triggers only when the user names it explicitly. Examples of valid in
 
 - "Use user-guide-writer to write the Filter transactions page"
 - "user-guide-writer: write Manage receipts"
-- "Invoke user-guide-writer for partner-cabinet/transactions/manage-transactions/cancel-transaction/"
+- "Invoke user-guide-writer for docs/transactions/manage-transactions/cancel-transaction/"
 
 If the user asks for a user guide or procedural documentation without naming this skill, suggest invoking it but wait for explicit permission.

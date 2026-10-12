@@ -21,7 +21,7 @@ Both figures were measured on a near-idle 8-core machine and scale linearly with
 
 ## Inputs
 
-A `.sources/` folder (e.g. `partner-cabinet/archive/.sources/`) containing:
+A `.sources/` folder (e.g. `docs/archive/.sources/`) containing:
 
 - Exactly one video file.
 - Zero or more `.txt` transcript files (e.g. TurboScribe exports).
@@ -82,7 +82,7 @@ Run into a scratch output directory (not directly into `.sources/`), in the **ba
 # add --jobs N only to deliberately throttle below the script's cpu_count-1 default
 ```
 
-**Progress, without burning tokens on it:** the script rewrites `progress.json` atomically (schema: `stage`, `done`, `total`, `pct`, `elapsed_s`, `eta_s`) at most once a second. When the user asks for status, read that one file **once** and report the numbers back — that's the entire cost. Do not poll it in a loop, do not sleep-and-recheck repeatedly, and do not read the script's stdout in bulk to "watch" it; the file is the whole point of K2, exactly so progress doesn't cost anything beyond a single cheap read per question.
+**Progress, without burning tokens on it:** the script rewrites `progress.json` atomically (schema: `stage`, `done`, `total`, `pct`, `elapsed_s`, `eta_s`) at most once a second. When the user asks for status, read that one file **once** and report the numbers back — that's the entire cost. Do not poll it in a loop, do not sleep-and-recheck repeatedly, and do not read the script's stdout in bulk to "watch" it; the file exists exactly so progress costs nothing beyond a single cheap read per question.
 
 ### Step 5 — Keep everything that lets a screenshot be found without opening it
 
@@ -125,7 +125,7 @@ Guarantees a screenshot near one or more specific moments in an **already-existi
     --transcript "<part1.txt>" --transcript "<part2.txt>@<offset-seconds>"
   ```
   It prints a time-sorted JSON list of `{seconds, score, reasons, text}`. Pick the seconds worth a screenshot (for example `score >= 4`) and pass them all to `--extract-at` above in one call.
-- Each new frame gets appended to `frames-index.json` (K8) alongside the existing entries — this call never overwrites the index, only adds to it.
+- Each new frame gets appended to `frames-index.json` alongside the existing entries — this call never overwrites the index, only adds to it.
 - Report how many new screenshots were extracted versus already covered.
 
 This is also what a manual "second pass" after `convert-sme-input` finishes looks like: pull every `(M:SS)`/`(M:SS–M:SS)` citation out of the finished `sme-interview.md` (for a range, use the midpoint) and run this once with all of them.

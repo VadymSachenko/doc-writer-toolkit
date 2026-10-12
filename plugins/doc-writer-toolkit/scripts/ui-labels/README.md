@@ -35,7 +35,7 @@ Every option can be a flag. Missing flags are read from the `Documentation toolk
 | `--docusaurus-config` | | Path to the Docusaurus config if it isn't `docusaurus.config.{ts,js,mjs,cjs}` in the root |
 | `--state-root` | `Toolkit state root:` | Default `.doc-toolkit` |
 | `--ua-root`, `--en-root` | `UA content root:`, `EN i18n root:` | Needed by `sync`. Locale roots are derived by replacing the `en` path segment of the EN root. |
-| `--ticket` | | Ticket number(s), comma-separated. Default: the leading numbers of the current git branch (`1139-x-doc` → `1139`, `90-94-x` → `90`, `94`). |
+| `--ticket` | | Ticket number(s), comma-separated. Default: the leading numbers of the current git branch (`123-x-doc` → `123`, `45-46-x` → `45`, `46`). |
 
 Locale file matching:
 - A file matches a docs locale by language code: `es-AR.json` → `es`, `tr-TR.json` → `tr`.

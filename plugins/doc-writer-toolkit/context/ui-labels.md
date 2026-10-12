@@ -29,7 +29,7 @@ Review, fix, alignment and UA → EN translation skills don't run it.
 
 ## Procedure
 
-Run every command from the docs repo root. Pass `--ticket <n>` when the user shared a ticket whose number doesn't start the current branch name. Otherwise the script reads the ticket from the branch (`1163-…` → `1163`) and adds that ticket's frontend branches as an overlay.
+Run every command from the docs repo root. Pass `--ticket <n>` when the user shared a ticket whose number doesn't start the current branch name. Otherwise the script reads the ticket from the branch (`123-…` → `123`) and adds that ticket's frontend branches as an overlay.
 
 1. **Check.** Run `ui-labels.mjs check`.
    - Exit `0`: the snapshot is current and nothing is pending. Continue the task. The rest of this file doesn't apply.

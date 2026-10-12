@@ -27,7 +27,7 @@ Claude only does what needs language skills: deciding what a bold word is and tr
 
 | What you're doing | Session (coordinator) | Workers | Why |
 |---|---|---|---|
-| A normal run: first run, new or changed pages | **Opus, high effort** | **Sonnet** (`--worker-model sonnet`) | The coordinator makes the judgment calls that every language inherits: which bold word is which button, and the glossary. A wrong call there spreads to every language, with no reviewer to catch it. Workers follow rules and get exact strings from the scripts. Translated side by side on the same pages, Sonnet workers matched Opus, for far less. |
+| A normal run: first run, new or changed pages | **Opus, high effort** | **Sonnet** (`--worker-model sonnet`) | The coordinator makes the judgment calls that every language inherits: which bold word is which button, and the glossary. A wrong call there spreads to every language, with no reviewer to catch it. Workers follow rules and get exact strings from the scripts. |
 | Corrections after a run (a term, a button in one section, titles) | **Opus, high effort** | **Sonnet** | Deciding which lines need a redo, and what the correct term is, needs judgment. The rewrite itself is small. |
 | `--dry-run` (only "what would be translated?") | Any model, low effort | None | Only scripts run. Claude shows their table. |
 | The label check at the start of a writer skill | Whatever that skill uses | None | Scripts only. No AI is involved. |
@@ -260,6 +260,6 @@ Every script change needs a test: `npm test` in `scripts/ui-labels/` and in `scr
 - **A renamed button is patched word for word.** If the new name needs a different grammatical form in a UA sentence, a writer must fix that sentence. The label check's report names it.
 - **Only committed UA text is translated.** Uncommitted edits wait for the next run.
 - **Deleted or moved UA pages** are only reported. Their translations aren't deleted or moved.
-- **Search** finds only exact word forms in `az`, `uz`, `kk`, `ky`, `tg`, because the search plugin has no stemmer for them.
-- **Navbar, footer and site components** (`code.json`, the feedback widget) are a one-time setup per repo, not part of a run.
+- **Search** finds only exact word forms in a locale the search plugin has no stemmer for (for example `kk` or `tg`).
+- **Navbar, footer and site components** (`code.json`, custom site components) are a one-time setup per repo, not part of a run.
 - **Symlinks** need macOS or Linux. On Windows, screenshots would need a different approach.

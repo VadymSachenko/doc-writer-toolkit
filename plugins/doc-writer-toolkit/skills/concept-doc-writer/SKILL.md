@@ -56,7 +56,7 @@ Run the UI label check in `${CLAUDE_PLUGIN_ROOT}/context/ui-labels.md` before an
 
 ### Step 1 — Locate inputs
 
-Resolve this project's UA content root (or, on an `en` page, its EN i18n root — see `project-paths.md`) for the target location; do not assume `partner-cabinet/`. Ask the user for the target doc folder if not provided (e.g., `<content root>/transactions/transaction-lifecycle/`). Sources live inside that folder.
+Resolve this project's UA content root (or, on an `en` page, its EN i18n root — see `project-paths.md`) for the target location; do not assume `portal/`. Ask the user for the target doc folder if not provided (e.g., `<content root>/transactions/transaction-lifecycle/`). Sources live inside that folder.
 
 **Each concept page has its own `.assets/` folder**, co-located with the page file. If the folder does not exist, create it before copying any screenshots into it. Never place a page's screenshots in a parent folder's `.assets/` or in a shared assets directory — every page owns its own copy of the screenshots it embeds, even if those screenshots duplicate files from another page.
 

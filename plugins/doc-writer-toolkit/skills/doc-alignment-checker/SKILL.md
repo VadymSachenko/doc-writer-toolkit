@@ -16,7 +16,7 @@ You are checking whether a Ukrainian documentation page and its English counterp
 
 Load these files at the start of the task. Do not load others unless the user references them explicitly.
 
-- Follow `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` to resolve this project's **UA content root**, **EN i18n root**, and **UA URL prefix**. Do not assume `partner-cabinet/` or any other default.
+- Follow `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` to resolve this project's **UA content root**, **EN i18n root**, and **UA URL prefix**. Do not assume `portal/` or any other default.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` — the shared page-to-page link contract. Check 5 checks links against this file's algorithm; do not restate it here.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` — the shared slug/title/filename convention. Check 11 checks title form and slug/filename agreement against this file; do not restate it here.
 - The UA page being checked (at the path resolved above).
@@ -24,7 +24,7 @@ Load these files at the start of the task. Do not load others unless the user re
 
 ## Path mapping
 
-Resolve the project's actual roots via `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` before doing anything else — do not assume `partner-cabinet/`.
+Resolve the project's actual roots via `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` before doing anything else — do not assume `portal/`.
 
 | Role | Path |
 |---|---|
