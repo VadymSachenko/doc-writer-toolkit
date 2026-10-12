@@ -1,6 +1,6 @@
 ---
 name: convert-sme-input
-description: Converts raw SME interview notes, meeting transcripts, or rough text into a structured Markdown source file for this project's documentation. Use when you need to turn unprocessed SME input into a clean `.sources/sme-interview.md`, compare raw SME files against processed source notes, or extract facts for guide writing.
+description: 'Converts raw SME interview notes, meeting transcripts, or rough text into a clean structured source file, `.sources/sme-interview.md`, for this project''s documentation; also compares raw SME files against processed source notes, or extracts facts for guide writing. Use explicitly ("convert-sme-input", "use convert-sme-input on <folder>/.sources/"), or through a command that names it (/doc-from-interview).'
 ---
 
 # convert-sme-input
@@ -181,3 +181,11 @@ Before finishing:
   - **If the input was a video transcript:** for every section that describes a screen, button, form, or other UI element, count its timestamp citations. Zero citations in a UI-describing section means the self-check step was skipped — say so plainly. (Calibration: a 42 KB `sme-interview.md` with a single timestamp citation total is a failure.)
   - **If the input was `app-notes.md` or no `.sources/frames/` folder exists:** timestamps are not applicable. Instead confirm that every UI fact cites a screenshot filename or "observed directly" as its source. Zero sourced facts in a UI section is the failure condition here, not zero timestamps.
 - The final response explains what changed and whether anything needs SME follow-up.
+
+## Explicit invocation examples
+
+This skill runs only when the user names it, or when a command hands off to it by name: `/doc-from-interview` counts as an explicit invocation. Examples:
+
+- "convert-sme-input: docs/archive/.sources/"
+- "use convert-sme-input to turn docs/archive/.sources/meeting-transcript.txt into sme-interview.md"
+- "use convert-sme-input to compare the raw notes in docs/archive/.sources/ with the existing sme-interview.md"

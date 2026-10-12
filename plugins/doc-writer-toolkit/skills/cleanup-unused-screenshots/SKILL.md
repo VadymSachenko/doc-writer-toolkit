@@ -1,6 +1,6 @@
 ---
 name: cleanup-unused-screenshots
-description: Moves screenshots from a .sources/frames/{video-name}-frames/ folder into a _unused/ subfolder if a target doc never ends up referencing them. Use after a doc has been written from extract-sme-screenshots output, to sweep up whichever candidate screenshots didn't get used. Never deletes anything - moves only.
+description: 'Moves screenshots from a .sources/frames/{video-name}-frames/ folder into a _unused/ subfolder if a target doc never ends up referencing them, after a doc has been written from extract-sme-screenshots output. Never deletes anything - moves only. Use explicitly ("cleanup-unused-screenshots", "use cleanup-unused-screenshots for <page>.md").'
 ---
 
 # cleanup-unused-screenshots
@@ -34,3 +34,10 @@ After `extract-sme-screenshots` produces a pool of candidate screenshots and som
 - If the screenshots folder already has a `_unused/` subfolder from a previous run, add to it rather than overwriting — don't clobber a prior cleanup pass.
 - If the target doc references an image filename that *isn't* in the screenshots folder at all, don't treat that as an error — it just means that image came from somewhere else (a different `.sources/` folder, a manually added screenshot). Only act on files that are actually present in the folder being cleaned up.
 - Never delete or drop entries from `frames-index.json` — update the moved ones' locations, keep the rest as-is.
+
+## Explicit invocation examples
+
+This skill runs only when the user names it. Examples:
+
+- "cleanup-unused-screenshots: docs/archive/archive.md"
+- "use cleanup-unused-screenshots for docs/archive/archive.md and docs/archive/.sources/frames/meeting-frames/"
