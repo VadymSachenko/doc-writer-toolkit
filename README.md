@@ -16,7 +16,7 @@ A [Claude Code plugin marketplace](https://code.claude.com/docs/en/plugin-market
 - **`context/microsoft-style-guide/`** — complete distilled corpus of the Microsoft Writing Style Guide (English + Ukrainian localization, 168 files), with routed loading for token efficiency.
 - **`context/doc-templates/`** — page templates for API reference pages, user guides, and concept topics.
 - **`scripts/`** — non-skill utilities that plugin skills shell out to: `ui-labels/` and `locale-sync/` (Node, no dependencies, tested with `npm test`) for the locale translation pipeline, and `sme-video-context/` (Python) for the SME video pipeline.
-- **`to-delete/`** — retired content staged for manual deletion (nothing here is loaded by any skill). Currently: `style-guide-rules/`, a hand-curated GDSG digest that drifted out of sync with `context/google-developer-style-guide/` and has been superseded by it everywhere.
+- **`to-delete/`** was removed: it held a retired GDSG digest, superseded by `context/google-developer-style-guide/` (see git history).
 
 ### Generic vs. product-specific
 
