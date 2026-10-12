@@ -64,4 +64,6 @@ Add to the project's `.claude/settings.json`:
 }
 ```
 
-Anyone opening the project in Claude Code will be prompted to trust it once; after that the skills and commands above are available without any local copies. Pull updates with `/plugin marketplace update`.
+Anyone opening the project in Claude Code will be prompted to trust it once; after that the skills and commands above are available without any local copies.
+
+The plugin has no version number, so an install tracks this repository's commits. With auto-update on for the marketplace (`/plugin` → Marketplaces), new commits on `main` arrive by themselves; otherwise run `claude plugin update doc-writer-toolkit@doc-writer-toolkit` and restart Claude Code.

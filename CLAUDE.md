@@ -28,7 +28,7 @@ plugins/doc-writer-toolkit/
   scripts/sme-video-context/             # standalone Python tool, not auto-loaded
 ```
 
-Two manifests gate everything: `marketplace.json` points at `./plugins/doc-writer-toolkit` as a plugin source, and that plugin's own `plugin.json` is what Claude Code reads once installed. If you add a new skill or command directory, no manifest edit is needed — both commands and skills are picked up by directory convention.
+Two manifests gate everything: `marketplace.json` points at `./plugins/doc-writer-toolkit` as a plugin source, and that plugin's own `plugin.json` is what Claude Code reads once installed. If you add a new skill or command directory, no manifest edit is needed — both commands and skills are picked up by directory convention. Neither manifest declares a `version`, on purpose: a pinned version keeps every install on that copy until the string changes, while without one an install tracks the commit SHA. Don't add one.
 
 ## Commands used when developing this repo
 

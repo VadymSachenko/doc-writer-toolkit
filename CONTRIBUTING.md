@@ -86,3 +86,5 @@ python3 -m json.tool .claude-plugin/marketplace.json
 ```
 
 Both manifests are static — adding skills/commands by directory convention does not require editing them.
+
+Don't add a `version` field to either manifest. Claude Code keeps every install on a pinned version until the string changes, so installs would stop receiving new commits; without it, an install's version is the commit SHA. Record notable changes in [CHANGELOG.md](CHANGELOG.md) instead.

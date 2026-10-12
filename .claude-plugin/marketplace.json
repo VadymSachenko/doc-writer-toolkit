@@ -8,7 +8,6 @@
     {
       "name": "doc-writer-toolkit",
       "source": "./plugins/doc-writer-toolkit",
-      "version": "0.1.0",
       "description": "Skills, commands, and content rules (style guide, glossary, templates) for writing Docusaurus product documentation."
     }
   ]
