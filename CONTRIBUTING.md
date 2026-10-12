@@ -28,6 +28,9 @@ This repo is a Claude Code plugin marketplace. The deliverable is the Markdown/J
    Phrasing that should trigger the skill. Mark it explicit-invocation only in the description.
    ```
 
+**Note on the contract:** the three headings above are the target shape for new skills. Several existing skills (read-only diagnostics, SME-video helpers, reviewer/fixer skills) use equivalent content under other headings, for example a procedure or checks section instead of `## Workflow`, or scope stated in the opening paragraph. A skill meets the contract when a reader can find its scope, its allowlist of loaded files and its ordered steps; the exact heading text is not enforced.
+
+
 3. **Mark it explicit-invocation only** in the `description` field if the skill edits files (all authoring/translation/review/fix skills must be). State this clearly: "Use explicitly (…)."
 4. **No manifest edit needed** — skills are picked up by directory convention.
 5. **Update [SKILLS-INDEX.md](plugins/doc-writer-toolkit/SKILLS-INDEX.md)** — add a row to the Skills table.
