@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repository is
 
-This is the **source repository for a Claude Code plugin marketplace** (`doc-writer-toolkit`), not a documentation site itself. It contains skills, slash commands, and content-rule corpora that get installed into *other* Docusaurus documentation projects (currently a single host project). There is no app to build and no lint config — the deliverable is the Markdown/JSON content under `plugins/doc-writer-toolkit/`, consumed by Claude Code at runtime in a different repo. The only tests are those of the two Node scripts behind the locale translation pipeline (see Commands).
+This is the **source repository for a Claude Code plugin marketplace** (`doc-writer-toolkit`), not a documentation site itself. It contains skills, slash commands, and content-rule corpora that get installed into *other* Docusaurus documentation projects (currently a single host project). There is no app to build — the deliverable is the Markdown/JSON content under `plugins/doc-writer-toolkit/`, consumed by Claude Code at runtime in a different repo. The checks are a plugin lint (`tools/lint-plugin.mjs`) and the tests of the two Node scripts behind the locale translation pipeline; CI runs them (see Commands).
 
 Because of this, most SKILL.md files reference paths like `docs/`, `portal/`, `i18n/en/...`, and `CLAUDE.md` that **do not exist in this repo** — they refer to the target project where the plugin is installed. Do not go looking for those paths here; they're part of the runtime contract the skills expect the host project to satisfy.
 
@@ -12,11 +12,18 @@ Because of this, most SKILL.md files reference paths like `docs/`, `portal/`, `i
 
 ```
 .claude-plugin/marketplace.json          # marketplace manifest (lists the plugin(s) below)
+.github/workflows/check.yml              # CI: plugin lint, its tests, both script test suites
+tools/lint-plugin.mjs                    # dev-only plugin lint, not shipped (tests: lint-plugin.test.mjs)
+docs/notes/                              # working and design notes, not shipped
+README.md, CONTRIBUTING.md, WORKFLOW.md, CHANGELOG.md, LICENSE
 plugins/doc-writer-toolkit/
-  .claude-plugin/plugin.json             # plugin manifest (name/description/author)
-  skills/<name>/SKILL.md                 # one skill per directory
+  .claude-plugin/plugin.json             # plugin manifest (name/description/author; no version, on purpose)
+  SKILLS-INDEX.md                        # canonical list of skills and commands
+  skills/<name>/SKILL.md                 # one skill per directory (locale-translator also has worker.md, HOW-IT-WORKS.md)
   commands/<name>.md                     # slash-command wrappers around skills
-  context/doc-rules/                     # style guide, UA grammar, glossary, project rules
+  context/project-paths.md               # how a skill resolves the host's content roots, language and other paths
+  context/style-guide-registry.md        # the guide tokens, their corpora and routed loading
+  context/doc-rules/                     # ua-grammar/, project-rules/ (glossary, product rules), input-templates/, doc-examples/
   context/doc-templates/                 # page templates (API reference, user guide, concept topic)
   context/locale-translation.md          # rules for translating into the further (non-EN) locales
   context/ui-labels.md                   # the UI label check procedure every docs task starts with
@@ -32,9 +39,10 @@ Two manifests gate everything: `marketplace.json` points at `./plugins/doc-write
 
 ## Commands used when developing this repo
 
-There's no build/lint/test tooling. What you'll actually run:
+There's no build step. What you'll actually run:
 
-- **Validate a manifest edit:** `python3 -m json.tool plugins/doc-writer-toolkit/.claude-plugin/plugin.json` (or `.claude-plugin/marketplace.json`) — just a JSON syntax check.
+- **Lint the plugin:** `node tools/lint-plugin.mjs` (no dependencies) checks that skill and command frontmatter is YAML a strict parser accepts, that every `${CLAUDE_PLUGIN_ROOT}/…` path exists, that every style-guide rule file is reachable from its corpus's `ROUTING.md`, and that no file has CRLF line endings. Its own tests: `node --test tools/lint-plugin.test.mjs`. CI (`.github/workflows/check.yml`) runs the lint, its tests and both script suites on every push to `main` and every pull request.
+- **Validate a manifest edit:** `claude plugin validate .` (or `python3 -m json.tool` on `plugins/doc-writer-toolkit/.claude-plugin/plugin.json` / `.claude-plugin/marketplace.json` for a plain JSON syntax check).
 - **Try a skill/command end-to-end:** it must be exercised from a *different* repo that has this plugin installed (see README's "Install into a project" section) or from a local checkout added via `extraKnownMarketplaces` pointing at a local path. There is no in-repo harness for running a skill.
 - **Test the locale pipeline scripts:** `npm test` in `plugins/doc-writer-toolkit/scripts/ui-labels/` and in `.../scripts/locale-sync/`. Offline (throwaway git repos and the `command` label adapter); the `locale-sync` suite takes about two minutes. Keep each script's `README.md` in step with its flags and output fields, and add a test with every behaviour change.
 - **`scripts/sme-video-context/sme_video_context.py`:** the Python tool. Setup and run commands are documented in `plugins/doc-writer-toolkit/scripts/sme-video-context/README.md` (needs system `ffmpeg`/`tesseract` plus a Python venv) — follow that file rather than duplicating the steps here, since the `extract-sme-screenshots` skill's own instructions are the current source of truth for how it's actually invoked.
@@ -43,15 +51,15 @@ There's no build/lint/test tooling. What you'll actually run:
 
 ### Generic vs. product-specific seam
 
-Skill *logic* is generic and reusable for any Docusaurus doc project. Product-specific terminology and examples live only in `context/doc-rules/project-rules/` (`glossary-en.md`, `glossary-ua.md`, `api-integration-context.md`), `context/doc-rules/doc-examples/`, and `context/doc-templates/` — all currently specific to that one host product. Every skill references these exclusively through `${CLAUDE_PLUGIN_ROOT}`, so splitting a second product out into its own plugin would mean swapping that directory's contents, not touching skill logic. Keep new product-specific content inside that seam rather than hardcoding it into a skill.
+Skill *logic* is generic and reusable for any Docusaurus doc project. Product-specific terminology and examples belong in `context/doc-rules/project-rules/` (`glossary-en.md`, `glossary-ua.md`, `api-integration-context.md`) and `context/doc-templates/` — both currently specific to that one host product. (`context/doc-rules/doc-examples/` is generic third-party prose kept as a voice and density reference, not product content.) A few product rules still sit inside skill bodies (the product's naming rule, brand colours, the reader it assumes); issue #9 tracks moving them into the seam. Every skill references these exclusively through `${CLAUDE_PLUGIN_ROOT}`, so splitting a second product out into its own plugin would mean swapping that directory's contents, not touching skill logic. Keep new product-specific content inside that seam rather than hardcoding it into a skill.
 
 `context/doc-rules/project-rules/glossary.md` is a bilingual EN↔UA *human-facing* alignment reference; skills themselves never load it directly — they load the language-specific `glossary-en.md`/`glossary-ua.md` instead.
 
 ### Skill file shape
 
-Every `SKILL.md` follows the same contract; when writing a new one or editing an existing one, preserve it:
+Every `SKILL.md` aims at the same contract. New skills follow it, and an edit shouldn't move a skill further from it. The heading text isn't enforced: several existing skills keep the same content under other headings (a procedure or checks section instead of `## Workflow`, scope in the opening paragraph), as CONTRIBUTING.md notes.
 
-- Frontmatter `name` + `description` — the description doubles as the trigger spec. All authoring/translation/review skills are **explicit-invocation only** (they say so in their own description and end with an "Explicit invocation examples" section) — they must never fire on an implicit request. Preserve that if you touch the description.
+- Frontmatter `name` + `description` — the description doubles as the trigger spec. Wrap the value in single quotes and write an apostrophe inside it as `''`: an unquoted `: ` (an invocation example such as `"skill-name: do X"` is enough) is invalid YAML, and Claude Code then loads the skill without a description. `node tools/lint-plugin.mjs` checks this. Every skill is **explicit-invocation only** (it says so in its own description and ends with an "Explicit invocation examples" section) — it must never fire on an implicit request; a command or skill that hands off to it by name counts as explicit. Preserve that if you touch the description.
 - **Scope** section stating in-scope/out-of-scope up front, cross-referencing sibling skills by name so responsibilities don't overlap (e.g. style review vs. UA/EN structural alignment are deliberately separate skills).
 - **Sources to load** — an explicit, short allowlist of files loaded at task start; skills are written to *not* load anything beyond this list unless the user references it.
 - A numbered **Workflow** with a mandatory interview/question phase before drafting (the three `*-writer` skills), and a **self-review checklist** run before any file is saved.
@@ -61,7 +69,7 @@ Commands in `commands/*.md` are thin: they bind `$ARGUMENTS` to concrete paths a
 
 ### Style-guide corpora use signal-driven routed loading, never bulk loading
 
-`context/google-developer-style-guide/` and `context/microsoft-style-guide/` are large distilled corpora (121 and 168 files). Every consumer (`doc-style-reviewer`, and the loading sections of `api-doc-writer`/`doc-translator`) is required to read that corpus's own `ROUTING.md` (or, for UA grammar, `context/doc-rules/ua-grammar/INDEX.md`) first, map document signals to the routing table, and load only the matched topic files — the routing files themselves explicitly forbid loading the full manifest, terminology index, or word index wholesale. If you add rules to these corpora, add a routing-table row rather than expecting consumers to discover the file unaided, and never hand-copy corpus rules into a skill file — skills reference the corpus so it stays the single source of truth.
+`context/google-developer-style-guide/` and `context/microsoft-style-guide/` are large distilled corpora (121 and 168 files). Every consumer (`doc-style-reviewer`, and the loading sections of `api-doc-writer`/`doc-translator`) is required to read that corpus's own `ROUTING.md` (or, for UA grammar, `context/doc-rules/ua-grammar/INDEX.md`) first, map document signals to the routing table, and load only the matched topic files — the routing files themselves explicitly forbid loading the full manifest, terminology index, or word index wholesale. If you add rules to these corpora, add a routing-table row rather than expecting consumers to discover the file unaided (the lint fails on a rule file no row reaches), and never hand-copy corpus rules into a skill file — skills reference the corpus so it stays the single source of truth.
 
 `doc-style-reviewer` is the one skill with four selectable modes (`gdsg`, `mssg-en`, `mssg-ua`, `ua-grammar`) chosen via a `guide:` argument; each mode reads a different combination of the two corpora plus `ua-grammar/`.
 
@@ -89,7 +97,7 @@ Across any project's tree(s), unresolved content is marked with `{/* ToDo: ... *
 
 Three skills form a linear pipeline turning a raw meeting recording into doc-ready material, each independent and re-invocable on its own:
 
-1. `extract-sme-screenshots` — shells out to `scripts/sme-video-context/sme_video_context.py` (system deps: `ffmpeg`, `tesseract`; a persistent Python venv at `~/.cache/doc-writer-toolkit/sme-video-venv`), keeps only `images/` (+ transcript if freshly generated), discards the rest of the script's output package.
+1. `extract-sme-screenshots` — shells out to `scripts/sme-video-context/sme_video_context.py` (system deps: `ffmpeg`, `tesseract`; a persistent Python venv at `~/.cache/doc-writer-toolkit/sme-video-venv`), merges the kept screenshots into `.sources/frames/{video-basename}-frames/` next to their `frames-index.json`, moves a freshly generated transcript beside that folder, and deletes only disposable scratch output (never `context.md` or `ocr/`).
 2. `convert-sme-input` — turns the transcript/notes into a structured `.sources/sme-interview.md`.
 3. `cleanup-unused-screenshots` — after a doc is written referencing only some screenshots, moves the rest into `_unused/` (never deletes).
 

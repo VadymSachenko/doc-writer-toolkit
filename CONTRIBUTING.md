@@ -1,6 +1,6 @@
 # Contributing to doc-writer-toolkit
 
-This repo is a Claude Code plugin marketplace. The deliverable is the Markdown/JSON content under `plugins/doc-writer-toolkit/` — there is no app to build and no lint config. Only the two Node scripts of the locale translation pipeline have tests (`npm test` in `scripts/ui-labels/` and `scripts/locale-sync/`). See [CLAUDE.md](CLAUDE.md) for a full architectural overview.
+This repo is a Claude Code plugin marketplace. The deliverable is the Markdown/JSON content under `plugins/doc-writer-toolkit/` — there is no app to build. Before you push, run the plugin lint and the tests (see [Validating](#validating)); CI runs the same checks on every pull request. See [CLAUDE.md](CLAUDE.md) for a full architectural overview.
 
 ## How to add a skill
 
@@ -30,10 +30,9 @@ This repo is a Claude Code plugin marketplace. The deliverable is the Markdown/J
 
    Wrap the `description` value in single quotes and write an apostrophe inside it as `''`. An unquoted value that contains `: ` (an invocation example such as `"skill-name: do X"` is enough) is invalid YAML, and Claude Code then loads the skill without a description, so the model never offers it. The same rule applies to command frontmatter.
 
-**Note on the contract:** the three headings above are the target shape for new skills. Several existing skills (read-only diagnostics, SME-video helpers, reviewer/fixer skills) use equivalent content under other headings, for example a procedure or checks section instead of `## Workflow`, or scope stated in the opening paragraph. A skill meets the contract when a reader can find its scope, its allowlist of loaded files and its ordered steps; the exact heading text is not enforced.
+   **Note on the contract:** the four headings above are the target shape for new skills. Several existing skills (read-only diagnostics, SME-video helpers, reviewer/fixer skills) use equivalent content under other headings, for example a procedure or checks section instead of `## Workflow`, or scope stated in the opening paragraph. A skill meets the contract when a reader can find its scope, its allowlist of loaded files and its ordered steps; the exact heading text is not enforced.
 
-
-3. **Mark it explicit-invocation only** in the `description` field if the skill edits files (all authoring/translation/review/fix skills must be). State this clearly: "Use explicitly (…)."
+3. **Mark it explicit-invocation only** in the `description` field — every skill in this plugin is. State this clearly: "Use explicitly (…)." A command or skill that hands off to it by name counts as explicit; say so in its "Explicit invocation examples" section if one does.
 4. **No manifest edit needed** — skills are picked up by directory convention.
 5. **Update [SKILLS-INDEX.md](plugins/doc-writer-toolkit/SKILLS-INDEX.md)** — add a row to the Skills table.
 6. **Check README.md and WORKFLOW.md** — update any prose that lists or counts skills.
@@ -76,14 +75,20 @@ This repo is a Claude Code plugin marketplace. The deliverable is the Markdown/J
 - [ ] WORKFLOW.md — quick reference tables updated; Gaps section updated if a gap was closed
 - [ ] Sibling SKILL.md files — Scope cross-references updated if the name changed
 - [ ] CLAUDE.md — architecture section updated if the change affects the documented seam
+- [ ] `node tools/lint-plugin.mjs` passes
 ```
 
-## Validating JSON manifests
+## Validating
 
 ```bash
-python3 -m json.tool plugins/doc-writer-toolkit/.claude-plugin/plugin.json
-python3 -m json.tool .claude-plugin/marketplace.json
+node tools/lint-plugin.mjs              # frontmatter YAML, ${CLAUDE_PLUGIN_ROOT} paths, router coverage, line endings
+node --test tools/lint-plugin.test.mjs  # the lint's own tests
+claude plugin validate .                # marketplace and plugin manifests
+(cd plugins/doc-writer-toolkit/scripts/ui-labels && npm test)
+(cd plugins/doc-writer-toolkit/scripts/locale-sync && npm test)   # about two minutes
 ```
+
+CI (`.github/workflows/check.yml`) runs the lint, its tests and both script suites on every push to `main` and every pull request, on Node 18 and the current LTS. The lint needs no dependencies; when it reports a style-guide rule file that no `ROUTING.md` row reaches, add a row for it (or, for an index or meta file, an allowlist entry in `tools/lint-plugin.mjs`).
 
 Both manifests are static — adding skills/commands by directory convention does not require editing them.
 

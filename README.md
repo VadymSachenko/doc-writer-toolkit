@@ -16,13 +16,12 @@ A [Claude Code plugin marketplace](https://code.claude.com/docs/en/plugin-market
 - **`context/microsoft-style-guide/`** — complete distilled corpus of the Microsoft Writing Style Guide (English + Ukrainian localization, 168 files), with routed loading for token efficiency.
 - **`context/doc-templates/`** — page templates for API reference pages, user guides, and concept topics.
 - **`scripts/`** — non-skill utilities that plugin skills shell out to: `ui-labels/` and `locale-sync/` (Node, no dependencies, tested with `npm test`) for the locale translation pipeline, and `sme-video-context/` (Python) for the SME video pipeline.
-- **`to-delete/`** was removed: it held a retired GDSG digest, superseded by `context/google-developer-style-guide/` (see git history).
 
 ### Generic vs. product-specific
 
 The skills and `doc-rules/ua-grammar/` are reusable as-is for any Docusaurus documentation project. `context/doc-rules/project-rules/glossary-*.md`, `api-integration-context.md`, and `context/doc-templates/` currently carry one host product's terminology and examples. If a second, unrelated product ever needs this toolkit with different terminology, that seam is where to split into a second plugin — the skills already reference everything through `${CLAUDE_PLUGIN_ROOT}`, so no skill logic would need to change.
 
-(`context/doc-rules/doc-examples/` is *not* product-specific, despite being listed alongside those folders in an earlier version of this README — its worked examples are unrelated third-party content (a public API reference, an unrelated SaaS product's docs), kept only as a generic prose voice/density reference. Don't treat it as a source of product facts or terminology.)
+(`context/doc-rules/doc-examples/` is *not* product-specific: its worked examples are unrelated third-party content (a public API reference, an unrelated SaaS product's docs), kept only as a generic prose voice/density reference. Don't treat it as a source of product facts or terminology.)
 
 **Glossary, direction (not yet implemented):** `glossary-*.md` is currently always-bundled, product-specific content, which cuts against this toolkit's goal of being product-agnostic — but it's also useful to keep an example on hand for bootstrapping the next similar project. The intended fix, when it lands, is a "starter-kit" framing rather than a silent runtime fallback: rename it out of `project-rules/` into something structurally marked as an example (e.g. `starter-glossary/`), and have glossary-consuming skills follow the same ask-once/offer-to-persist pattern already used for `style-guide-registry.md` and `project-paths.md` when a host project has no local glossary — copy the starter in as a one-time seed, or proceed without one. A prose label alone ("this is just an example") isn't durable — it drifted unnoticed for `doc-examples/` above, so the eventual fix should be structural, not a comment.
 
@@ -64,6 +63,10 @@ Add to the project's `.claude/settings.json`:
 }
 ```
 
-Anyone opening the project in Claude Code will be prompted to trust it once; after that the skills and commands above are available without any local copies.
+Anyone opening the project in Claude Code will be prompted to trust it once; after that the skills and commands above are available without any local copies. To install it for yourself only, run `/plugin install doc-writer-toolkit --marketplace VadymSachenko/doc-writer-toolkit` (Claude Code 2.1.275 or later).
 
 The plugin has no version number, so an install tracks this repository's commits. With auto-update on for the marketplace (`/plugin` → Marketplaces), new commits on `main` arrive by themselves; otherwise run `claude plugin update doc-writer-toolkit@doc-writer-toolkit` and restart Claude Code.
+
+## Development
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). `node tools/lint-plugin.mjs` and the script tests run in CI on every pull request; notable changes go in [CHANGELOG.md](CHANGELOG.md).
