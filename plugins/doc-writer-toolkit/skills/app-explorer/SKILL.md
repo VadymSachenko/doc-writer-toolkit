@@ -1,6 +1,6 @@
 ---
 name: app-explorer
-description: Explores the live app for a documentation section by seeding real scenarios via the project's API test collection (Postman/newman), then capturing screenshots and recording observed UI behavior using Playwright. Writes everything it finds to .sources/app-notes.md — a structured evidence file that later steps (section-planner, writers, marker resolution) read instead of guessing. Use explicitly ("app-explorer: explore docs/transactions", "use app-explorer on the balance section").
+description: 'Explores the live app for a documentation section by seeding real scenarios via the project''s API test collection (Postman/newman), then capturing screenshots and recording observed UI behavior using Playwright. Writes everything it finds to .sources/app-notes.md — a structured evidence file that later steps (section-planner, writers, marker resolution) read instead of guessing. Use explicitly ("app-explorer: explore docs/transactions", "use app-explorer on the balance section").'
 ---
 
 # app-explorer

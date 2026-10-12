@@ -10,7 +10,7 @@ This repo is a Claude Code plugin marketplace. The deliverable is the Markdown/J
    ```
    ---
    name: <kebab-name>
-   description: <one-line trigger spec — what the skill does and why>
+   description: '<one-line trigger spec — what the skill does and why>'
    ---
    
    # <skill-name>
@@ -28,6 +28,8 @@ This repo is a Claude Code plugin marketplace. The deliverable is the Markdown/J
    Phrasing that should trigger the skill. Mark it explicit-invocation only in the description.
    ```
 
+   Wrap the `description` value in single quotes and write an apostrophe inside it as `''`. An unquoted value that contains `: ` (an invocation example such as `"skill-name: do X"` is enough) is invalid YAML, and Claude Code then loads the skill without a description, so the model never offers it. The same rule applies to command frontmatter.
+
 **Note on the contract:** the three headings above are the target shape for new skills. Several existing skills (read-only diagnostics, SME-video helpers, reviewer/fixer skills) use equivalent content under other headings, for example a procedure or checks section instead of `## Workflow`, or scope stated in the opening paragraph. A skill meets the contract when a reader can find its scope, its allowlist of loaded files and its ordered steps; the exact heading text is not enforced.
 
 
@@ -44,7 +46,7 @@ This repo is a Claude Code plugin marketplace. The deliverable is the Markdown/J
    Canonical shape:
    ```markdown
    ---
-   description: <one-line description>
+   description: '<one-line description>'
    argument-hint: "<arg format>"
    ---
 

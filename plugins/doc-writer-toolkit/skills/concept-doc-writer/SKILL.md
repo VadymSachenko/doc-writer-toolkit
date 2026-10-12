@@ -1,6 +1,6 @@
 ---
 name: concept-doc-writer
-description: Writes concept topic pages for the host product, in the project's declared content language, following the authoring rules in CLAUDE.md. Use explicitly ("use concept-doc-writer to document...", "concept-doc-writer: write the Transaction lifecycle page"). Follows ${CLAUDE_PLUGIN_ROOT}/context/doc-templates/ua-concept-topic-template.md (Ukrainian) or concept-topic-template.md (English), with a mandatory interview phase before drafting. Not for API reference pages or user guides.
+description: 'Writes concept topic pages for the host product, in the project''s declared content language, following the authoring rules in CLAUDE.md. Use explicitly ("use concept-doc-writer to document...", "concept-doc-writer: write the Transaction lifecycle page"). Follows ${CLAUDE_PLUGIN_ROOT}/context/doc-templates/ua-concept-topic-template.md (Ukrainian) or concept-topic-template.md (English), with a mandatory interview phase before drafting. Not for API reference pages or user guides.'
 ---
 
 # concept-doc-writer
