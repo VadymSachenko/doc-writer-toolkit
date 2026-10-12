@@ -103,5 +103,5 @@ Counts from the report header, the list of changed sections, and every "Not appl
 ## Explicit invocation examples
 
 - "doc-page-updater: page docs/currencies/currencies.md, brief docs/.sources/tickets/1120/change-brief-currencies.md"
-- "use doc-page-updater to apply docs/.sources/tickets/1096/change-brief-add-cards.md to docs/balance/add-cards/add-cards.md in /Users/vadym/Projects/UCPAY-DOC-OPERATOR"
+- "use doc-page-updater to apply docs/.sources/tickets/1096/change-brief-add-cards.md to docs/balance/add-cards/add-cards.md in /path/to/host-docs-project"
 - "/update-doc-page docs/currencies/currencies.md docs/.sources/tickets/1120/change-brief-currencies.md"
