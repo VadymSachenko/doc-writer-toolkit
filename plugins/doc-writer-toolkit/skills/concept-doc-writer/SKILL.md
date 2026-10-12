@@ -1,11 +1,11 @@
 ---
 name: concept-doc-writer
-description: Writes concept topic pages for the UniComPay partner cabinet, in the project's declared content language, following the authoring rules in CLAUDE.md. Use explicitly ("use concept-doc-writer to document...", "concept-doc-writer: write the Transaction lifecycle page"). Follows ${CLAUDE_PLUGIN_ROOT}/context/doc-templates/ua-concept-topic-template.md (Ukrainian) or concept-topic-template.md (English), with a mandatory interview phase before drafting. Not for API reference pages or user guides.
+description: 'Writes concept topic pages for the host product, in the project''s declared content language, following the authoring rules in CLAUDE.md. Use explicitly ("use concept-doc-writer to document...", "concept-doc-writer: write the Transaction lifecycle page"). Follows ${CLAUDE_PLUGIN_ROOT}/context/doc-templates/ua-concept-topic-template.md (Ukrainian) or concept-topic-template.md (English), with a mandatory interview phase before drafting. Not for API reference pages or user guides.'
 ---
 
 # concept-doc-writer
 
-You are writing a concept topic page for the UniComPay partner cabinet, in the content language this project declares. The authoring contract in `CLAUDE.md` is already loaded; this skill adds the procedure for producing a concept page end-to-end.
+You are writing a concept topic page for the host product, in the content language this project declares. The authoring contract in `CLAUDE.md` is already loaded; this skill adds the procedure for producing a concept page end-to-end.
 
 ## Scope
 
@@ -56,7 +56,7 @@ Run the UI label check in `${CLAUDE_PLUGIN_ROOT}/context/ui-labels.md` before an
 
 ### Step 1 — Locate inputs
 
-Resolve this project's UA content root (or, on an `en` page, its EN i18n root — see `project-paths.md`) for the target location; do not assume `partner-cabinet/`. Ask the user for the target doc folder if not provided (e.g., `<content root>/transactions/transaction-lifecycle/`). Sources live inside that folder.
+Resolve this project's UA content root (or, on an `en` page, its EN i18n root — see `project-paths.md`) for the target location; do not assume `portal/`. Ask the user for the target doc folder if not provided (e.g., `<content root>/transactions/transaction-lifecycle/`). Sources live inside that folder.
 
 **Each concept page has its own `.assets/` folder**, co-located with the page file. If the folder does not exist, create it before copying any screenshots into it. Never place a page's screenshots in a parent folder's `.assets/` or in a shared assets directory — every page owns its own copy of the screenshots it embeds, even if those screenshots duplicate files from another page.
 

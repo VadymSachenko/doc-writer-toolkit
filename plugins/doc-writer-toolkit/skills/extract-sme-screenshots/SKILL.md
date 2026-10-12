@@ -1,6 +1,6 @@
 ---
 name: extract-sme-screenshots
-description: Extracts deduplicated screenshots (and, if needed, an auto-transcribed transcript) from a meeting recording placed in a doc page's .sources/ folder. Use when the user has dropped a video (and optionally a transcript) into .sources/ and wants screenshots ready for convert-sme-input or a doc-writing skill. Not for producing the final structured source note itself — that's convert-sme-input's job.
+description: 'Extracts deduplicated screenshots (and, if needed, an auto-transcribed transcript) from a meeting recording placed in a doc page''s .sources/ folder, ready for convert-sme-input or a doc-writing skill. Use explicitly ("extract-sme-screenshots", "use extract-sme-screenshots on <folder>/.sources/"), or through a command or skill that names it (/doc-from-interview, or convert-sme-input for a targeted pull). Not for producing the final structured source note itself — that''s convert-sme-input''s job.'
 ---
 
 # extract-sme-screenshots
@@ -21,7 +21,7 @@ Both figures were measured on a near-idle 8-core machine and scale linearly with
 
 ## Inputs
 
-A `.sources/` folder (e.g. `partner-cabinet/archive/.sources/`) containing:
+A `.sources/` folder (e.g. `docs/archive/.sources/`) containing:
 
 - Exactly one video file.
 - Zero or more `.txt` transcript files (e.g. TurboScribe exports).
@@ -43,12 +43,17 @@ Read your own phrasing back before asking: if it could plausibly be read as stee
 If no transcript exists at all (and none will be auto-generated, e.g. the user declines Whisper), Mode A is impossible — say so explicitly and proceed with Mode B.
 
 Once a mode is chosen (or Mode B is the only option), continue:
-- **Mode A:** skip Step 3 (venv) entirely — see "Targeted extraction" below for how `--plan-from-transcript` + `--extract-at` runs; ffmpeg on `PATH` is all that's needed.
+- **Mode A:** skip Step 3's full setup; Mode A needs less. It needs `ffmpeg`, `tesseract` with the Ukrainian and Russian language data (the default `--ocr-language` is `eng+ukr+rus`; on macOS `brew install ffmpeg tesseract tesseract-lang`; check with `which ffmpeg tesseract` and `tesseract --list-langs`), and the persistent venv with `Pillow` only (no `imagehash`, no `faster-whisper`). Set the venv up once, in one Bash call:
+  ```bash
+  [ -d ~/.cache/doc-writer-toolkit/sme-video-venv ] || python3 -m venv ~/.cache/doc-writer-toolkit/sme-video-venv
+  ~/.cache/doc-writer-toolkit/sme-video-venv/bin/pip install --quiet Pillow==11.3.0
+  ```
+  Then follow "Targeted extraction" below: `--plan-from-transcript` picks the seconds, and `--extract-at` pulls those frames.
 - **Mode B:** continue to Step 3.
 
 ### Step 3 — Ensure the environment
 
-The script (`${CLAUDE_PLUGIN_ROOT}/scripts/sme-video-context/sme_video_context.py`) needs `ffmpeg` and `tesseract` (system-installed — check with `which ffmpeg tesseract` first, don't assume) and a Python venv with `Pillow` + `imagehash` always, plus `faster-whisper` only when there's no transcript to import (it's a heavy dependency with a real model download — don't install it if a transcript already covers the whole recording).
+The script (`${CLAUDE_PLUGIN_ROOT}/scripts/sme-video-context/sme_video_context.py`) needs `ffmpeg` and `tesseract` with the Ukrainian and Russian language data (system-installed — check with `which ffmpeg tesseract` and `tesseract --list-langs` first, don't assume; on macOS `brew install ffmpeg tesseract tesseract-lang`) and a Python venv with `Pillow` + `imagehash` always, plus `faster-whisper` only when there's no transcript to import (it's a heavy dependency with a real model download — don't install it if a transcript already covers the whole recording).
 
 Use a **persistent** venv, not a fresh one per run — recreating it (and re-downloading the Whisper model) on every invocation wastes real time and bandwidth for no benefit:
 
@@ -61,12 +66,14 @@ VENV=~/.cache/doc-writer-toolkit/sme-video-venv
 "$VENV/bin/pip" install --quiet faster-whisper==1.2.1
 ```
 
+Each Bash call starts a new shell, so `$VENV` exists only inside this block. The commands below use the venv's absolute path, `~/.cache/doc-writer-toolkit/sme-video-venv/bin/python` (leave the `~` unquoted so it expands).
+
 ### Step 4 — Run the script
 
 Run into a scratch output directory (not directly into `.sources/`), in the **background** — a full bulk pass on a long recording can take up to an hour, and nothing about this pipeline needs the conversation blocked while it runs:
 
 ```bash
-"$VENV/bin/python" "${CLAUDE_PLUGIN_ROOT}/scripts/sme-video-context/sme_video_context.py" \
+~/.cache/doc-writer-toolkit/sme-video-venv/bin/python "${CLAUDE_PLUGIN_ROOT}/scripts/sme-video-context/sme_video_context.py" \
   "<path-to-video>" \
   "<scratch-output-dir>" \
   --transcript "<part1.txt>" --transcript "<part2.txt>@<offset-seconds>" \
@@ -75,7 +82,7 @@ Run into a scratch output directory (not directly into `.sources/`), in the **ba
 # add --jobs N only to deliberately throttle below the script's cpu_count-1 default
 ```
 
-**Progress, without burning tokens on it:** the script rewrites `progress.json` atomically (schema: `stage`, `done`, `total`, `pct`, `elapsed_s`, `eta_s`) at most once a second. When the user asks for status, read that one file **once** and report the numbers back — that's the entire cost. Do not poll it in a loop, do not sleep-and-recheck repeatedly, and do not read the script's stdout in bulk to "watch" it; the file is the whole point of K2, exactly so progress doesn't cost anything beyond a single cheap read per question.
+**Progress, without burning tokens on it:** the script rewrites `progress.json` atomically (schema: `stage`, `done`, `total`, `pct`, `elapsed_s`, `eta_s`) at most once a second. When the user asks for status, read that one file **once** and report the numbers back — that's the entire cost. Do not poll it in a loop, do not sleep-and-recheck repeatedly, and do not read the script's stdout in bulk to "watch" it; the file exists exactly so progress costs nothing beyond a single cheap read per question.
 
 ### Step 5 — Keep everything that lets a screenshot be found without opening it
 
@@ -83,7 +90,7 @@ The destination is `.sources/frames/{video-basename}-frames/` (create it, includ
 
 - Merge `<scratch-output-dir>/images/` into the destination:
   ```bash
-  "$VENV/bin/python" "${CLAUDE_PLUGIN_ROOT}/scripts/sme-video-context/sme_video_context.py" \
+  ~/.cache/doc-writer-toolkit/sme-video-venv/bin/python "${CLAUDE_PLUGIN_ROOT}/scripts/sme-video-context/sme_video_context.py" \
     "<path-to-video>" ".sources/frames/{video-basename}-frames" --merge-from "<scratch-output-dir>/images"
   ```
 - Merge `<scratch-output-dir>/transcript-key/images/` into the same destination the same way. The script's built-in transcript-relevance heuristic (Ukrainian/Russian keyword scoring — see the script's `transcript_relevance`) already guarantees a screenshot exists near every transcript moment it scores as significant, extracting a fresh frame via ffmpeg when the visual dedup pass alone would have skipped it. Don't skip this merge — it's exactly the "don't skip a critical moment" guarantee, already computed for free, and `--merge-from` will naturally skip anything the first merge already placed near the same moment.
@@ -102,16 +109,23 @@ State how many screenshots were kept (and how many were skipped as already-cover
 Guarantees a screenshot near one or more specific moments in an **already-existing** `.sources/frames/{video-basename}-frames/` folder, without re-running the full pipeline:
 
 ```bash
-"$VENV/bin/python" "${CLAUDE_PLUGIN_ROOT}/scripts/sme-video-context/sme_video_context.py" \
+~/.cache/doc-writer-toolkit/sme-video-venv/bin/python "${CLAUDE_PLUGIN_ROOT}/scripts/sme-video-context/sme_video_context.py" \
   "<path-to-video>" ".sources/frames/{video-basename}-frames" \
+  --transcript "<part1.txt>" --transcript "<part2.txt>@<offset-seconds>" \
   --extract-at "<seconds-1>,<seconds-2>,..."
+# the same --transcript flag(s) as in Step 1; omit them only when no transcript exists
 ```
 
 - Pass every needed timestamp in **one call**, comma-separated — don't call this once per timestamp. Each requested second is checked against what's already in the folder; a new frame is extracted via ffmpeg only for the ones not already covered.
 - `--tolerance` (default 15s) controls how close an existing screenshot must be to count as already covering a requested second.
-- This mode needs only `ffmpeg` on `PATH` — no Python packages, no persistent venv setup (Step 3 above doesn't apply here). That's what makes it cheap enough for `convert-sme-input` to call directly mid-workflow instead of only as a manual follow-up.
-- This is also how Mode A's `--plan-from-transcript` output gets turned into screenshots: feed the seconds it picks straight into `--extract-at` as above.
-- Each new frame gets appended to `frames-index.json` (K8) alongside the existing entries — this call never overwrites the index, only adds to it.
+- This mode needs `ffmpeg`, `tesseract` with the `ukr` and `rus` language data (or pass `--ocr-language eng` when they're missing) and the persistent venv with `Pillow` only, set up as in Step 2's Mode A bullet; Step 3's full setup doesn't apply. It OCRs only the frames it extracts, which is what makes it cheap enough for `convert-sme-input` to call directly mid-workflow instead of only as a manual follow-up. Without `--transcript`, the new `frames-index.json` entries get `transcript_text: ""`, `score: 0` and `reasons: []`.
+- This is also how Mode A turns a transcript into screenshots. First plan, with bare `python3` (standard library only: no video, no OCR):
+  ```bash
+  python3 "${CLAUDE_PLUGIN_ROOT}/scripts/sme-video-context/sme_video_context.py" --plan-from-transcript \
+    --transcript "<part1.txt>" --transcript "<part2.txt>@<offset-seconds>"
+  ```
+  It prints a time-sorted JSON list of `{seconds, score, reasons, text}`. Pick the seconds worth a screenshot (for example `score >= 4`) and pass them all to `--extract-at` above in one call.
+- Each new frame gets appended to `frames-index.json` alongside the existing entries — this call never overwrites the index, only adds to it.
 - Report how many new screenshots were extracted versus already covered.
 
 This is also what a manual "second pass" after `convert-sme-input` finishes looks like: pull every `(M:SS)`/`(M:SS–M:SS)` citation out of the finished `sme-interview.md` (for a range, use the midpoint) and run this once with all of them.
@@ -120,3 +134,11 @@ This is also what a manual "second pass" after `convert-sme-input` finishes look
 
 - Writing the structured source note — hand off to `convert-sme-input` for that.
 - Deciding which of the extracted screenshots the final doc actually needs — that happens naturally when someone writes the doc and references the ones they want; use `cleanup-unused-screenshots` afterward to sweep up the rest.
+
+## Explicit invocation examples
+
+This skill runs only when the user names it, or when a command or skill hands off to it by name: `/doc-from-interview` (its first phase) and `convert-sme-input` (a targeted pull) count as explicit invocations. Examples:
+
+- "extract-sme-screenshots: docs/archive/.sources/"
+- "use extract-sme-screenshots on docs/archive/.sources/ in Mode A"
+- "use extract-sme-screenshots to pull frames at 3:12 and 7:40 from docs/archive/.sources/"

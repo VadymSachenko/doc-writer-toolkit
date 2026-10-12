@@ -65,7 +65,7 @@ For each confirmed fix:
 
 - **Bucket A (inline):** Replace the TODO comment with the Markdown link. Preserve surrounding prose exactly.
 - **Bucket B (block comment):** Replace the entire `{/* ... */}` block with the user-approved prose. Polish punctuation and sentence flow to match the surrounding text, but do not rewrite beyond what is needed.
-- For both UA and EN files: build the inserted link with the `internal-links.md` algorithm (declared **UA URL prefix** + the target's path relative to the content root, no `.md`) — e.g. `/routing/pools` for a project whose prefix is `/`, or `/partner-cabinet/transactions/transactions` for a project whose prefix is `/partner-cabinet/`.
+- For both UA and EN files: build the inserted link with the `internal-links.md` algorithm (declared **UA URL prefix** + the target's path relative to the content root, no `.md`) — e.g. `/routing/pools` for a project whose prefix is `/`, or `/portal/transactions/transactions` for a project whose prefix is `/portal/`.
 
 ---
 

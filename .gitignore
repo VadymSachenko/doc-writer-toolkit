@@ -9,3 +9,14 @@ tasks/
 
 # Task run logs — local only
 test-results/
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Node dependencies and Python virtual environments (the scripts need none committed)
+node_modules/
+.venv*/
+
+# Toolkit state, written when a script runs from this repo's root (it belongs in host repos)
+.doc-toolkit/

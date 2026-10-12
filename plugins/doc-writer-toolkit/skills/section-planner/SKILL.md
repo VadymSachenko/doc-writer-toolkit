@@ -1,6 +1,6 @@
 ---
 name: section-planner
-description: Reads a section's readiness report and app-notes.md (required when a live Admin UI is declared, produced by app-explorer), cross-checks existing pages against the app's actual flows as recorded in app-notes.md, and proposes a page inventory — what to keep, merge, split, add, or delete — with a doc type and one-line rationale per page. Writes a section-plan.md for human approval. Nothing is written or deleted until you confirm. Use explicitly ("section-planner: docs/balance", "use section-planner on the archive section").
+description: 'Reads a section''s readiness report and app-notes.md (required when a live Admin UI is declared, produced by app-explorer), cross-checks existing pages against the app''s actual flows as recorded in app-notes.md, and proposes a page inventory — what to keep, merge, split, add, or delete — with a doc type and one-line rationale per page. Writes a section-plan.md for human approval. Nothing is written or deleted until you confirm. Use explicitly ("section-planner: docs/balance", "use section-planner on the archive section").'
 ---
 
 # section-planner

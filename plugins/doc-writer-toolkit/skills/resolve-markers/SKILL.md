@@ -1,6 +1,6 @@
 ---
 name: resolve-markers
-description: Resolves every {/* NEEDS CONFIRMATION */} and {/* ToDo */} marker in a section's doc pages automatically using whatever evidence is available — app-notes.md (if app-explorer has run), sme-interview.md, existing screenshots in .assets/, and direct app observation via Playwright. No questions asked when the answer can be found. Only stops for markers that genuinely cannot be answered from any available source. Use explicitly ("resolve-markers: docs/transactions", "use resolve-markers on the archive section").
+description: 'Resolves every {/* NEEDS CONFIRMATION */} and {/* ToDo */} marker in a section''s doc pages automatically using whatever evidence is available — app-notes.md (if app-explorer has run), sme-interview.md, existing screenshots in .assets/, and direct app observation via Playwright. No questions asked when the answer can be found. Only stops for markers that genuinely cannot be answered from any available source. Use explicitly ("resolve-markers: docs/transactions", "use resolve-markers on the archive section").'
 ---
 
 # resolve-markers
@@ -53,7 +53,7 @@ Scan every `.md`/`.mdx` file in the section folder for:
 - `{/* ToDo: add a screenshot — ... */}` — a missing screenshot
 - `{/* ToDo: ... */}` — any other outstanding writer task that needs a *fact or observation* to resolve (a missing UI label, an unconfirmed step, a value to check in the app)
 
-This skill owns fact/observation markers. It does **not** handle pure cross-link TODOs — a `{/* ToDo: link to ... */}` whose only need is a link to another existing page belongs to `fix-doc-todos` (its Buckets A–C). If you encounter such a link-only ToDo, leave it and note it for `fix-doc-todos` rather than resolving it here.
+This skill owns fact/observation markers. It does **not** handle pure cross-link TODOs — a `{/* ToDo: link to ... */}` whose only need is a link to another existing page belongs to the `/fix-doc-todos` command (its Buckets A–C). If you encounter such a link-only ToDo, leave it and note it for `/fix-doc-todos` rather than resolving it here.
 
 For each marker, record: the file, the line, the full marker text, and the surrounding sentence or step.
 

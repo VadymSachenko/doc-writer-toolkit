@@ -29,15 +29,17 @@ Review, fix, alignment and UA → EN translation skills don't run it.
 
 ## Procedure
 
-Run every command from the docs repo root. Pass `--ticket <n>` when the user shared a ticket whose number doesn't start the current branch name. Otherwise the script reads the ticket from the branch (`1163-…` → `1163`) and adds that ticket's frontend branches as an overlay.
+Run every command from the docs repo root. Pass `--ticket <n>` when the user shared a ticket whose number doesn't start the current branch name. Otherwise the script reads the ticket from the branch (`123-…` → `123`) and adds that ticket's frontend branches as an overlay.
 
 1. **Check.** Run `ui-labels.mjs check`.
    - Exit `0`: the snapshot is current and nothing is pending. Continue the task. The rest of this file doesn't apply.
    - Exit `10`: something changed or a diff is pending (`reasons`, `pendingSync`). Go to step 2.
-   - Exit `2`: a declaration is missing, or a docs locale matches no locale file or several. Ask once for the fields in `missing`, or for the mapping of the locales in `unresolved` (show their `candidates`). Offer to persist the answer in the `CLAUDE.md` configuration block, then run `check` again. Never pick a candidate yourself.
+   - Exit `2`: a declaration is missing or can't be read (`missing`, for example the `UI label source`). Ask once for the fields in `missing`, offer to persist the answer in the `CLAUDE.md` configuration block, then run `check` again.
    - Exit `1`: see the table above.
 2. **Drain an earlier diff.** If `pendingSync` is `false`, go to step 3. If it is `true`, run step 4 first, because `import` refuses to run (exit `3`) while a diff is unsynced, so a diff is never lost. Then run `check` again: exit `0` → step 5, exit `10` → step 3.
-3. **Import.** Run `ui-labels.mjs import`. It writes the new snapshot, the ticket overlay and the diff for `sync`. On exit `1` the previous snapshot is untouched: see the table above.
+3. **Import.** Run `ui-labels.mjs import`. It writes the new snapshot, the ticket overlay and the diff for `sync`. On exit `1` the previous snapshot is untouched: see the table above. Exit `2` means the locales can't be resolved, and nothing is written:
+   - `unresolved`: a docs locale matches no locale file or several. Ask once for the mapping of those locales (show their `candidates`), offer to persist it as `Locale files:` in the `CLAUDE.md` configuration block, then run `import` again. Never pick a candidate yourself.
+   - `missing: ["target locales"]`: `docusaurus.config` lists only the default locale and `en`. `locale-translator` stops (see its edge cases); writer and updater skills report it in one line and continue with the existing snapshot.
 4. **Sync.** Run `ui-labels.mjs sync`, without `--commit`: commits in the docs repo are the user's. For every page and sidebar category bound to a changed or rekeyed key, it patches the bold label in UA, EN and every locale on the current branch, and advances the state, so the patch doesn't trigger a re-translation once it is committed. The changes stay in the working tree. `suggestedCommit` gives the commit for the user to make: the message (`Sync UI labels to <repo>@<sha7>`) and the changed paths. After an import with no diff to sync (`status: nothing-to-sync`, a first import for example), it lists the new snapshot alone.
    - A page with uncommitted changes isn't patched (`skipped`), and the diff stays pending (`pendingRemains`). Ask the user to commit or stash those files, then run `sync` again. Never commit or stash them yourself.
 5. **Show the report** before the task continues:

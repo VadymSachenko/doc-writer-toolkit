@@ -1,6 +1,6 @@
 # TW Workflow Map
 
-Personal reference: your real process stages mapped to toolkit skills. Use this to decide which skill to invoke next, and to spot where you still work manually.
+The documentation process stages mapped to the toolkit's skills. Use it to decide which skill to invoke next, and to spot the stages that are still manual.
 
 ---
 
@@ -66,35 +66,35 @@ flowchart TD
 |---|---|---|
 | Readiness check | `section-readiness` | Classifies a section folder (skeleton / needs-revision / greenfield), emits a JSON verdict |
 | Explore app | `app-explorer` | Explores the live app + API-seeded state, writes `.sources/app-notes.md` |
+| Screenshots from a recording | `extract-sme-screenshots` | Pulls deduplicated screenshots (and, if needed, a transcript) from an SME recording in `.sources/` |
+| SME notes | `convert-sme-input` | Turns a transcript or raw notes into a structured `.sources/sme-interview.md` |
 | Plan section | `section-planner` | Proposes IA (keep/merge/split/add) for a section, gated on approval |
 | Draft — concept | `concept-doc-writer` | Background topics: how a feature works, what a term means |
-| Draft — user guide | `user-guide-writer` | Task-based procedural docs for partner cabinet |
+| Draft — user guide | `user-guide-writer` | Task-based procedural docs for the product's UI |
 | Draft — API | `api-doc-writer` | One endpoint per page, API reference format |
 | Update a page | `doc-page-updater` | Applies a change brief to an approved page with the smallest edit; writes update-report.md for the scoped review / sync translation that follow |
 | Resolve markers | `resolve-markers` | Batch-answers `{/* NEEDS CONFIRMATION */}` markers from evidence |
-| Review style | `doc-style-reviewer` | Read-only findings report (gdsg / mssg-ua / ua-grammar) |
+| Review style | `doc-style-reviewer` | Read-only findings report (gdsg / mssg-en / mssg-ua / ua-grammar) |
 | Fix style | `doc-style-fixer` | Applies the reviewer's findings to the file |
 | Translate | `doc-translator` | UA → EN, preserves MDX, enforces EN glossary |
 | Translate — further locales | `locale-translator` | UA → every other locale of the site (not EN), only changed blocks, UI labels from the app's own dictionaries, scripted checks |
 | Alignment check | `doc-alignment-checker` | Checks UA and EN pages are structurally in sync |
 | Clean screenshots | `cleanup-unused-screenshots` | Moves unreferenced screenshots to `_unused/` |
-| Full page pipeline | `doc-from-interview` | Orchestrates the full per-page pipeline from SME video to style-reviewed draft |
-| Fix link TODOs | `fix-doc-todos` | Resolves link-type `{/* ToDo */}` markers across the project |
 
-See [`SKILLS-INDEX.md`](plugins/doc-writer-toolkit/SKILLS-INDEX.md) for the canonical list with invocation examples.
+The full per-page pipeline from an SME video to a style-reviewed draft (`/doc-from-interview`) and the link-TODO repair (`/fix-doc-todos`) are commands, listed below. See [`SKILLS-INDEX.md`](plugins/doc-writer-toolkit/SKILLS-INDEX.md) for the canonical list with invocation examples.
 
 ## Commands quick reference
 
 | Command | Underlying skill |
 |---|---|
-| `/doc-from-interview` | `convert-sme-input` → `user-guide-writer` |
+| `/doc-from-interview` | `extract-sme-screenshots` → `convert-sme-input` → the writer chosen by `type:` (`concept-doc-writer`, `user-guide-writer` or `api-doc-writer`) → `doc-style-reviewer` → `doc-style-fixer` |
 | `/create-api-doc` | `api-doc-writer` |
 | `/check-section-readiness` | `section-readiness` |
 | `/plan-section` | `section-planner` |
 | `/explore-and-resolve` | `app-explorer` → `resolve-markers` |
 | `/review-doc-style` | `doc-style-reviewer` |
 | `/fix-doc-style` | `doc-style-fixer` |
-| `/fix-doc-todos` | resolves `{/* ToDo */}` markers |
+| `/fix-doc-todos` | its own steps resolve link-type `{/* ToDo */}` markers, then `doc-alignment-checker` |
 | `/translate-doc` | `doc-translator` |
 | `/check-doc-alignment` | `doc-alignment-checker` |
 | `/translate-locales` | `locale-translator` |

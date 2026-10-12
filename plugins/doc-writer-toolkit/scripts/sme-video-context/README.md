@@ -99,7 +99,7 @@ python3 sme_video_context.py --plan-from-transcript \
 #    score: 0, reasons: [] even though the frame itself was chosen *because* of what was
 #    said nearby — the plan (step 1) already proved the relevance, this step just needs
 #    the same source to carry it into the index entry.
-python3 sme_video_context.py \
+.venv-sme-video/bin/python sme_video_context.py \
   /path/to/meeting.mp4 /path/to/output-package \
   --transcript part1.txt --transcript part2.txt@1500 \
   --extract-at "36,58.5,140,612"
@@ -115,7 +115,7 @@ python3 sme_video_context.py \
 
 `score`/`reasons` come from the same `transcript_relevance()` heuristic the bulk pipeline uses internally to guarantee transcript-important moments aren't skipped. Filtering by score (and picking which seconds are worth a screenshot) is the caller's decision — this mode only scores and reports, it doesn't filter or extract on its own.
 
-## `frames-index.json` (K8)
+## `frames-index.json`
 
 Lives alongside a folder of `screen-HH-MM-SS.jpg` screenshots — `images/`, `transcript-key/images/`, or a merged destination folder like `.sources/frames/{video}-frames/`. One entry per screenshot in that folder:
 

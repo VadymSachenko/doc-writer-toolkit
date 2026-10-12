@@ -1,15 +1,15 @@
 ---
 name: user-guide-writer
-description: Writes user guide pages (procedural docs) for the UniComPay partner cabinet, in the project's declared content language, following the authoring rules in CLAUDE.md. Use explicitly ("use user-guide-writer to document...", "user-guide-writer: write the Filter transactions page"). Follows ${CLAUDE_PLUGIN_ROOT}/context/doc-templates/ua-user-guide-template.md (Ukrainian, Операції/Етапи structure) or user-guide-template.md (English, single/multi-task structure), with a mandatory interview phase before drafting. Not for concept topics or API reference pages.
+description: 'Writes user guide pages (procedural docs) for the host product, in the project''s declared content language, following the authoring rules in CLAUDE.md. Use explicitly ("use user-guide-writer to document...", "user-guide-writer: write the Filter transactions page"). Follows ${CLAUDE_PLUGIN_ROOT}/context/doc-templates/ua-user-guide-template.md (Ukrainian, Операції/Етапи structure) or user-guide-template.md (English, single/multi-task structure), with a mandatory interview phase before drafting. Not for concept topics or API reference pages.'
 ---
 
 # user-guide-writer
 
-You are writing a procedural user guide page for the UniComPay partner cabinet, in the content language this project declares. The authoring contract in `CLAUDE.md` is already loaded; this skill adds the procedure for producing a procedural user guide end-to-end.
+You are writing a procedural user guide page for the host product, in the content language this project declares. The authoring contract in `CLAUDE.md` is already loaded; this skill adds the procedure for producing a procedural user guide end-to-end.
 
 ## Scope
 
-- **In scope:** task-based procedural pages that walk a partner through a specific action in the partner cabinet. One topic per page. Covers both single-procedure pages and multi-procedure overview pages.
+- **In scope:** task-based procedural pages that walk a user through a specific action in the product's UI. One topic per page. Covers both single-procedure pages and multi-procedure overview pages.
 - **Out of scope:** concept topics explaining how something works (`concept-doc-writer`'s job), API reference pages (`api-doc-writer`'s job), EN translations of a UA-authored page (`doc-translator`'s job — only relevant on a project that translates rather than dual-authors), sidebar config changes.
 
 ## Sources to load
@@ -56,7 +56,7 @@ Run the UI label check in `${CLAUDE_PLUGIN_ROOT}/context/ui-labels.md` before an
 
 ### Step 1 — Locate inputs
 
-Resolve this project's UA content root (or, on an `en` page, its EN i18n root — see `project-paths.md`) for the target location; do not assume `partner-cabinet/`. Ask the user for the target doc folder if not provided (e.g., `<content root>/transactions/manage-transactions/filter-transactions/`). Sources live inside that folder.
+Resolve this project's UA content root (or, on an `en` page, its EN i18n root — see `project-paths.md`) for the target location; do not assume `portal/`. Ask the user for the target doc folder if not provided (e.g., `<content root>/transactions/manage-transactions/filter-transactions/`). Sources live inside that folder.
 
 **Each user guide page has its own `.assets/` folder**, co-located with the page file (e.g., `filter-transactions/.assets/`). If the folder does not exist, create it before copying any screenshots into it. Never place a page's screenshots in a parent folder's `.assets/` or in a shared assets directory — every page owns its own copy of the screenshots it embeds, even if those screenshots duplicate files from another page.
 
@@ -318,6 +318,6 @@ This skill triggers only when the user names it explicitly. Examples of valid in
 
 - "Use user-guide-writer to write the Filter transactions page"
 - "user-guide-writer: write Manage receipts"
-- "Invoke user-guide-writer for partner-cabinet/transactions/manage-transactions/cancel-transaction/"
+- "Invoke user-guide-writer for docs/transactions/manage-transactions/cancel-transaction/"
 
 If the user asks for a user guide or procedural documentation without naming this skill, suggest invoking it but wait for explicit permission.

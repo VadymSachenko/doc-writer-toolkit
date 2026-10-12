@@ -5,7 +5,7 @@ description: Translates an approved UA documentation page into English, at the c
 
 # doc-translator
 
-You are translating an approved Ukrainian documentation page for UniComPay into English. The authoring contract in `CLAUDE.md` is already loaded; this skill adds the procedure for producing a correct English translation end-to-end.
+You are translating an approved Ukrainian documentation page of the host product into English. The authoring contract in `CLAUDE.md` is already loaded; this skill adds the procedure for producing a correct English translation end-to-end.
 
 ## Scope
 
@@ -14,21 +14,21 @@ You are translating an approved Ukrainian documentation page for UniComPay into 
 
 ## Path mapping
 
-Resolve the project's actual roots via `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` before doing anything else — do not assume `partner-cabinet/`.
+Resolve the project's actual roots via `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` before doing anything else — do not assume `portal/`.
 
 | Ukrainian source | English output |
 |---|---|
 | `<UA content root>/<relative-path>.md` | `<EN i18n root>/<relative-path>.md` |
 
-Example, for a project whose declared UA content root is `partner-cabinet/` and EN i18n root is `i18n/en/docusaurus-plugin-content-docs-partner-cabinet/current/`:
-- `partner-cabinet/transactions/transactions.md` → `i18n/en/docusaurus-plugin-content-docs-partner-cabinet/current/transactions/transactions.md`
+Example, for a project whose declared UA content root is `portal/` and EN i18n root is `i18n/en/docusaurus-plugin-content-docs-portal/current/`:
+- `portal/transactions/transactions.md` → `i18n/en/docusaurus-plugin-content-docs-portal/current/transactions/transactions.md`
 
 ## Sources to load
 
 Load these files at the start of the task.
 
 **Project paths (resolve first):**
-- Follow `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` to resolve this project's **UA content root** and **EN i18n root**. Do not assume `partner-cabinet/` or any other default. If either is undeclared, follow that file's fallback (ask once, offer to persist to the project's `CLAUDE.md`).
+- Follow `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` to resolve this project's **UA content root** and **EN i18n root**. Do not assume `portal/` or any other default. If either is undeclared, follow that file's fallback (ask once, offer to persist to the project's `CLAUDE.md`).
 
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-en.md` — canonical EN terminology. Use it to replace UA terms with their correct EN equivalents.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` — rank-0 project formatting conventions. Core section and English section apply. Outranks this skill's own body for any rule both cover.
@@ -39,7 +39,7 @@ Load these files at the start of the task.
 **Style guide (project-declared, resolved before translating):**
 - Follow `${CLAUDE_PLUGIN_ROOT}/context/style-guide-registry.md` — "Resolving which guide a project uses" section — to find this project's declared `Style guide:` token, then that file's "Loading procedure per guide" for the resolved token, mapping the content you're about to translate (terminology, tone, notation, procedures, punctuation) to the matched topical files.
 - If the project has no declared style guide, follow the registry's fallback: ask once, offer to persist the answer to that project's `CLAUDE.md`.
-- Do not hand-copy a guide name, corpus path, or individual rule into this skill file. `context/doc-rules/style-guide-rules/` is a retired, unmaintained digest — do not load it.
+- Do not hand-copy a guide name, corpus path, or individual rule into this skill file.
 
 ## What to translate
 
@@ -221,10 +221,10 @@ Translate these recurring UA patterns consistently:
 
 **Cross-reference link text:** Do not repeat the subject when it matches the link text. "For more information about X, see [X]" is redundant — omit "about X":
 
-- ✓ Recommended: `For more information, see [Transactions](/partner-cabinet/transactions/).`
-- ⛔ Not recommended: `For more information about transactions, see [Transactions](/partner-cabinet/transactions/).`
+- ✓ Recommended: `For more information, see [Transactions](/portal/transactions/).`
+- ⛔ Not recommended: `For more information about transactions, see [Transactions](/portal/transactions/).`
 
-Use "about X" only when the subject differs from the link text: `For more information about filtering, see [Transactions](/partner-cabinet/transactions/).`
+Use "about X" only when the subject differs from the link text: `For more information about filtering, see [Transactions](/portal/transactions/).`
 
 ### Capitalize after a colon
 
@@ -310,7 +310,7 @@ Set `last_update.date` in the English output to today's date (format: `M/D/YYYY`
 
 Also update `last_update.date` in the Ukrainian source file to today's date. This is the only permitted change to the Ukrainian source.
 
-Do not modify any sidebar config file (`sidebars.ts`, or a project's custom-id equivalent like `sidebarsPartnerCabinet.ts`), `docusaurus.config.ts`, or any JSON files.
+Do not modify any sidebar config file (`sidebars.ts`, or a project's custom-id equivalent like `sidebarsPortal.ts`), `docusaurus.config.ts`, or any JSON files.
 
 ### Step 6 — Report
 
@@ -332,7 +332,7 @@ Carry all `{/* NEEDS CONFIRMATION */}` and `{/* ToDo */}` markers into the Engli
 This skill triggers only when the user names it explicitly or via the `/translate-doc` command. Examples of valid invocations:
 
 - `/translate-doc transactions/filter-transactions/filter-transactions`
-- "Use doc-translator to translate partner-cabinet/transactions/transactions.md"
+- "Use doc-translator to translate portal/transactions/transactions.md"
 - "doc-translator: translate the manage-receipts page"
 
 If the user asks for translation without naming this skill, suggest invoking it but wait for explicit permission.

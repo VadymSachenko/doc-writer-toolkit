@@ -33,7 +33,7 @@ For exact word lookup (single word — e.g. "is `на́родний` right?"), g
 
 | File | §§ | Topic | Load triggers |
 |---|---|---|---|
-| `03-foreign-words.md` | 121–140 | Transliteration of foreign letters/digraphs: **L, G, H, TH, W, LL, J, -TR/-DR, AU, OU, EI, EU**; English [ж], [ə:]; apostrophe and **ь** in foreign words; foreign-noun declension | Any foreign brand, product, technology name. Direct trigger: Latin-script word in the draft (e.g. **UniComPay, Widget, API, UUID, IBAN, JSON, HTTP**) |
+| `03-foreign-words.md` | 121–140 | Transliteration of foreign letters/digraphs: **L, G, H, TH, W, LL, J, -TR/-DR, AU, OU, EI, EU**; English [ж], [ə:]; apostrophe and **ь** in foreign words; foreign-noun declension | Any foreign brand, product, technology name. Direct trigger: Latin-script word in the draft (e.g. **ExampleCorp, Widget, API, UUID, IBAN, JSON, HTTP**) |
 
 ## IV. Proper names (власні назви)
 
@@ -67,7 +67,7 @@ For exact word lookup (single word — e.g. "is `на́родний` right?"), g
 1. **Always load**: `01a` (vowels), `01b` (prepositions у/в, conjunctions і/й, soft sign), `05a` (period), `05b` (comma), `05g` (list punctuation — critical for procedures)
 2. **If draft has numbers/quantities**: add `02b` (numerals)
 3. **If draft has imperatives or `-ся` verbs**: add `02c` (verbs)
-4. **If draft has Latin-script terms or foreign brands** (UniComPay, Widget, API, UUID, IBAN, JSON, etc.): add `03` and `05f` (quotes)
+4. **If draft has Latin-script terms or foreign brands** (ExampleCorp, Widget, API, UUID, IBAN, JSON, etc.): add `03` and `05f` (quotes)
 5. **If draft has proper names (people)**: add `04a`
 6. **If draft has place names**: add `04b`
 7. **If draft has compound words, **пів-**, **не-**, hyphenated terms**: add `01d`

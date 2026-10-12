@@ -48,7 +48,7 @@ class Candidate:
 
 
 class Progress:
-    """Atomically rewrites a K2-schema progress.json at most once a second, plus a
+    """Atomically rewrites progress.json (stage, done, total, pct, elapsed_s, eta_s) at most once a second, plus a
     single-line \\r progress bar on stderr. stdout is left alone — that's where the
     final summary lines the calling skill reads still live."""
 

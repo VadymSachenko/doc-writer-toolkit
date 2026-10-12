@@ -1,6 +1,6 @@
 ---
 name: convert-sme-input
-description: Converts raw SME interview notes, meeting transcripts, or rough text into a structured Markdown source file for this project's documentation. Use when you need to turn unprocessed SME input into a clean `.sources/sme-interview.md`, compare raw SME files against processed source notes, or extract facts for guide writing.
+description: 'Converts raw SME interview notes, meeting transcripts, or rough text into a clean structured source file, `.sources/sme-interview.md`, for this project''s documentation; also compares raw SME files against processed source notes, or extracts facts for guide writing. Use explicitly ("convert-sme-input", "use convert-sme-input on <folder>/.sources/"), or through a command that names it (/doc-from-interview).'
 ---
 
 # convert-sme-input
@@ -13,7 +13,7 @@ The output is **not** a user guide or concept topic. It is a processed source no
 
 ## Domain note
 
-The extraction checklist, the section-name examples, and the "Згадати у документації" categories further down are written for this project's payments domain (UCPay's partner cabinet: transactions, webhooks, disputes). If this skill runs against a different product, treat them as illustrations of the underlying principle — group facts by business concept, name sections after what's actually being explained, flag what a guide writer must not miss — and substitute that product's own categories rather than forcing UCPay-specific ones onto unrelated content.
+The extraction checklist, the section-name examples, and the "Згадати у документації" categories further down are written for a payments domain (transactions, webhooks, disputes). If this skill runs against a different product, treat them as illustrations of the underlying principle — group facts by business concept, name sections after what's actually being explained, flag what a guide writer must not miss — and substitute that product's own categories rather than forcing payments-specific ones onto unrelated content.
 
 ## Inputs
 
@@ -22,8 +22,8 @@ The user can provide one or more of the following:
 - Raw transcript or conversation text.
 - A raw source file (`.txt`, `.md`, etc.).
 - An existing processed Markdown file to compare against or update.
-- A target doc folder under this project's UA content root (resolve the root via `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — do not assume `partner-cabinet/`).
-- A topic or flow (e.g., inbound transactions, webhook configuration, dispute handling, partner cabinet receipts — see "Domain note" below).
+- A target doc folder under this project's UA content root (resolve the root via `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — do not assume `portal/`).
+- A topic or flow (e.g., inbound transactions, webhook configuration, dispute handling, receipts — see "Domain note" below).
 
 If the target path is missing, propose a concise file name under `.sources/` in the relevant doc folder, e.g. `<UA content root>/transactions/.sources/sme-interview.md`.
 
@@ -85,9 +85,9 @@ Always include `### Згадати у документації`. This section is
    - Business rules and ownership
    - Process boundaries and entry conditions
    - UI screens, buttons, fields, banners, modals, and tooltips
-   - Statuses and their meaning in the partner cabinet context
+   - Statuses and their meaning in the product's UI
    - Validations, errors, blockers, warnings, and exceptions
-   - Partner-side vs UCPay-side responsibilities
+   - Client-side vs provider-side responsibilities
    - Webhook events and delivery conditions
    - Dependencies on API calls, external systems, or configuration
    - Open questions and SME uncertainty
@@ -123,10 +123,10 @@ When the user asks to compare raw and processed files:
 ## Writing rules
 
 - Write in Ukrainian.
-- Use canonical UCPay terms from `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-ua.md`: **Партнер**, **Транзакція**, **Вебхук**, **API-токен**, **Кабінет партнера**, **Вхідна транзакція**, **Вихідна транзакція**, etc.
+- Use the canonical terms from `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-ua.md`: **Партнер**, **Транзакція**, **Вебхук**, **API-токен**, **Кабінет партнера**, **Вхідна транзакція**, **Вихідна транзакція**, etc.
 - Status values in `code font`: `new`, `in queue`, `in work`, `success`, `cancelled` (UK spelling).
 - UI labels in **bold**: натисніть **Зберегти**.
-- Keep source-ticket identifiers when they help trace a fact (e.g., `UCP-277`).
+- Keep source-ticket identifiers when they help trace a fact (e.g., `ABC-123`).
 - **Cite a timestamp for facts tied to a specific visual/UI moment** — the SME shows, clicks, or points at something on screen, not just states a rule verbally. Use the format already in the raw transcript: `(M:SS)` for a moment, `(M:SS–M:SS)` for a range. Place it right after the sentence it supports: «Після оплати статус одразу змінюється на **Завершений** (14:32).» Don't cite a timestamp for a fact that's purely verbal (a business rule, a policy, an answer to a question) — only for something a screenshot could actually show. Before writing one of these facts, confirm it against an actual screenshot first — see Workflow step 5 (the self-check is mandatory, not optional); the citation is also what a later manual pass over `extract-sme-screenshots` reads to guarantee a screenshot exists at each one, so an uncited visual finding can silently end up without one.
 - Do not use raw transcript fillers, false starts, or personal chatter unless they explain a decision.
 - Do not invent behavior that is not in the raw SME input or supporting sources.
@@ -160,7 +160,7 @@ Add concise bullets for points a future guide must not miss. The categories belo
 - Status behavior that affects what the partner can do.
 - Error messages and validation differences.
 - Webhook delivery conditions and retry behavior.
-- Cases where partner cabinet behavior differs from API behavior.
+- Cases where UI behavior differs from API behavior.
 - Warnings that prevent wrong partner expectations.
 - SME-confirmed defaults or recommendations.
 
@@ -181,3 +181,11 @@ Before finishing:
   - **If the input was a video transcript:** for every section that describes a screen, button, form, or other UI element, count its timestamp citations. Zero citations in a UI-describing section means the self-check step was skipped — say so plainly. (Calibration: a 42 KB `sme-interview.md` with a single timestamp citation total is a failure.)
   - **If the input was `app-notes.md` or no `.sources/frames/` folder exists:** timestamps are not applicable. Instead confirm that every UI fact cites a screenshot filename or "observed directly" as its source. Zero sourced facts in a UI section is the failure condition here, not zero timestamps.
 - The final response explains what changed and whether anything needs SME follow-up.
+
+## Explicit invocation examples
+
+This skill runs only when the user names it, or when a command hands off to it by name: `/doc-from-interview` counts as an explicit invocation. Examples:
+
+- "convert-sme-input: docs/archive/.sources/"
+- "use convert-sme-input to turn docs/archive/.sources/meeting-transcript.txt into sme-interview.md"
+- "use convert-sme-input to compare the raw notes in docs/archive/.sources/ with the existing sme-interview.md"

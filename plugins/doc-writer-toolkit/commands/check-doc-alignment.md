@@ -11,4 +11,4 @@ The skill resolves this project's actual UA content root and EN i18n root itself
 
 The `main:` argument tells the skill which version is the source of truth. If not provided in `$ARGUMENTS`, ask the user before proceeding.
 
-Strictly follow the skill's workflow: load both files, run all 10 checks, then report bugs and warnings.
+Strictly follow the skill's workflow: load both files, run every check in the skill, then report bugs and warnings.

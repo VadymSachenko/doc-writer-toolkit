@@ -1,6 +1,6 @@
 ---
 name: app-explorer
-description: Explores the live app for a documentation section by seeding real scenarios via the project's API test collection (Postman/newman), then capturing screenshots and recording observed UI behavior using Playwright. Writes everything it finds to .sources/app-notes.md — a structured evidence file that later steps (section-planner, writers, marker resolution) read instead of guessing. Use explicitly ("app-explorer: explore docs/transactions", "use app-explorer on the balance section").
+description: 'Explores the live app for a documentation section by seeding real scenarios via the project''s API test collection (Postman/newman), then capturing screenshots and recording observed UI behavior using Playwright. Writes everything it finds to .sources/app-notes.md — a structured evidence file that later steps (section-planner, writers, marker resolution) read instead of guessing. Use explicitly ("app-explorer: explore docs/transactions", "use app-explorer on the balance section").'
 ---
 
 # app-explorer
@@ -39,7 +39,7 @@ Apply the Value realism rule from `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/proje
 
 1. Read `.env` at the project root. Extract the variables needed for this section (at minimum: `OPERATOR_BASE_URL`, `OPERATOR_USERNAME`, `OPERATOR_PASSWORD`). If any are missing, stop and list them.
 2. Confirm `Admin UI: playwright` is declared in `CLAUDE.md`. If not, stop — Playwright is required for this skill.
-3. Confirm the `API test collection:` field points at an existing file. If it's not declared but a `.sources/UCPay.postman_collection.json` (or similar) exists, use it and note that it is not yet declared in `CLAUDE.md` — offer to add the declaration.
+3. Confirm the `API test collection:` field points at an existing file. If it's not declared but a `.sources/app.postman_collection.json` (or similar) exists, use it and note that it is not yet declared in `CLAUDE.md` — offer to add the declaration.
 4. Read `.sources/section-readiness.json`. Extract: the section verdict, list of pages, marker counts, and whether `sme-interview.md` is present.
 5. Read `.sources/sme-interview.md` if present. Extract every open question or `{/* NEEDS CONFIRMATION */}` item mentioned — these are the specific things to watch for during exploration.
 
