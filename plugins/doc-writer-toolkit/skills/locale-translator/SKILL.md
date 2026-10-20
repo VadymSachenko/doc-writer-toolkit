@@ -11,7 +11,7 @@ You are bringing the further locales of a documentation site up to date with its
 
 ## Scope
 
-- **In scope:** every in-scope UA page and sidebar category (`_category_.json`) that is new or changed for at least one target locale; writing the locale pages, the category entries in each locale's `current.json`, the screenshot symlinks, the page state and the term memory; the build and the report. Also corrections of recorded translations, block by block: a wrong term, a label that needs another key in one section, a link text or a task title (see "Corrections after a run").
+- **In scope:** every in-scope UA page and sidebar category (`_category_.json`) that is new or changed for at least one target locale, in every root pair the project declares (a root pair is one docs plugin instance: a UA content root with its own EN i18n root, URL prefix and locale files); writing the locale pages, the category entries in each locale's `current.json`, the screenshot symlinks, the page state and the term memory; the build and the report. Also corrections of recorded translations, block by block: a wrong term, a label that needs another key in one section, a link text or a task title (see "Corrections after a run").
 - **Out of scope:**
   - UA → EN: `doc-translator`. The EN page is never read, used as a reference or modified here.
   - Writing or fixing UA content. The UA page is never modified, and a suspected error in it is reported, not fixed.
@@ -24,16 +24,17 @@ You are bringing the further locales of a documentation site up to date with its
 
 At the start of the run, only these:
 
-1. `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — resolve `UA content root:`, `EN i18n root:`, `UA URL prefix:` and the fields in its "Label store and locale translation" section (`App:`, `Locale register:`, `Translation scope:`, `Toolkit state root:`, `UI label fallback:`). Target locales come from `docusaurus.config.*`, never from `CLAUDE.md`.
+1. `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — resolve `UA content root:`, `EN i18n root:`, `UA URL prefix:`, any further root pairs (the same fields with a name in front, `<Name> UA content root:` …) and the fields in its "Label store and locale translation" section (`App:`, `Locale register:`, `Translation scope:`, `Toolkit state root:`, `UI label fallback:`). Target locales come from `docusaurus.config.*`, never from `CLAUDE.md`. The scripts read the root pairs themselves; you only need them to describe the run.
 2. `${CLAUDE_PLUGIN_ROOT}/context/ui-labels.md` — the label check, run in the column for `locale-translator`.
 
 Each translation worker loads `${CLAUDE_PLUGIN_ROOT}/skills/locale-translator/worker.md` and `${CLAUDE_PLUGIN_ROOT}/context/locale-translation.md` itself. Don't load those, the label store files, the term-memory files, EN pages or whole UA pages into your own context: the scripts hand out exactly the rows and blocks each step needs.
 
 ## Arguments
 
-All optional. Without arguments the run covers every in-scope page that is stale in any target locale.
+All optional. Without arguments the run covers every in-scope page that is stale in any target locale, in every declared root pair.
 
-- `<page|folder>…` — narrow the run to these pages or folders (ids or paths, relative to the repo or the UA content root).
+- `<page|folder>…` — narrow the run to these pages or folders (ids or paths, relative to the repo or the UA content root). With more than one root pair, an id is `<pair>:<id>` (`primary:getting-started/getting-started`), as `status` prints it; a path from the repo root needs no prefix.
+- `--pair <id>[,<id>]` — narrow the run to these root pairs. The unprefixed pair is `primary`; another pair's id is its name in lower case with dashes (`API reference` → `api-reference`), as `status` lists it in `pairs[]`.
 - `--locales tr,kk` — narrow the run to these target locales.
 - `--dry-run` — status only: the label check's `check` step (nothing imported or synced) and Step 2's table. Nothing is written.
 - `--overwrite` — also translate pages that have a locale file but no recorded state (a manual bootstrap). Their files are replaced.
@@ -41,13 +42,15 @@ All optional. Without arguments the run covers every in-scope page that is stale
 - `--worker-model <model>` — the model for the translation workers (default: the session's model).
 - `--no-build` — skip the build in Step 6. Only for quick iterations; say in the report that no build ran.
 
-Pass `<page|folder>…`, `--locales` and `--overwrite` to every `LS` call that takes them.
+Pass `<page|folder>…`, `--pair`, `--locales` and `--overwrite` to every `LS` call that takes them. Never pass `--pair` to the label check (`UL`): it patches renamed labels in every pair, and a sync narrowed to one pair leaves the diff pending.
+
+**Unit ids.** With more than one root pair declared, the scripts print every page and category id as `<pair>:<id>`, so two pages with the same path in two pairs (`primary:transactions/transactions`, `api-reference:transactions/transactions`) are never confused. Use those ids as they are everywhere: in `LS` calls, the decisions file, the worker prompts, `results.jsonl` and the report. A host with one pair has bare ids.
 
 ## Workflow
 
 ### Step 0 — Declarations and the run folder
 
-1. Resolve the declarations through `project-paths.md`. If `App:` or `UI label source:` is missing, ask once and offer to persist the answer. Whenever a script exits `2`, it names what is missing (`missing`, `unresolved`): no target locales configured yet → stop and say so; anything else → ask once and offer to persist the answer, then run the step again.
+1. Resolve the declarations through `project-paths.md`. If `App:` or `UI label source:` is missing, ask once and offer to persist the answer. Whenever a script exits `2`, it names what is missing (`missing`, `unresolved`): no target locales configured yet → stop and say so; a page or folder that two root pairs have (`ambiguous`) → show its `candidates` and ask which one is meant, never pick one; anything else → ask once and offer to persist the answer, then run the step again.
 2. Unless `--dry-run`, create the run folder `<state root>/.run/<YYYYMMDD-HHMM>/`. If `<state root>/.run/.gitignore` doesn't exist, write it with the single line `*`, so nothing in `.run/` is ever committed. Every working file of the run (bind output, decisions, terms, candidates, unverified lists, worker results, the report) goes in the run folder.
 
 ### Step 1 — UI label check (required)
@@ -66,7 +69,7 @@ With `--dry-run`, run `UL check` only and report whether an import and sync are 
    - **Uncommitted UA changes** (a warning): only the committed version is translated. Say so once; don't commit for the user.
    - **`base-missing`** warnings: those cells are re-translated in full. Mention them.
    - **`skipped` cells** (`manual-bootstrap`): left alone; list them and mention `--overwrite`.
-3. Show the user a short table: per locale, how many pages and categories are `new` / `stale`, and `summary.message`.
+3. Show the user a short table: per locale, how many pages and categories are `new` / `stale`, and `summary.message`. With more than one root pair (`pairs[]`), add one line per pair from `summary.byPair`, by the pair's name, so the user sees which section the work is in.
 4. **Confirmation.** If `summary.needsConfirmation` is true (more than the threshold of UA pages, normally on the first run), show `summary.message` and wait for the user's go-ahead before anything else. Otherwise continue without asking.
 5. With `--dry-run`, stop here.
 
@@ -109,6 +112,8 @@ The units of the run are every page and category row with at least one `new` or 
    Units, in this order: <id> (<page|category>, <full|incremental|redo <lines>>), …
    ```
 
+   Each `<id>` is the unit's id exactly as `status` printed it (`<pair>:<id>` when the host has several root pairs).
+
 3. When a worker finishes, start that locale's next batch, until every queue is done. A locale whose worker fails or stops keeps its previous files and state; the other locales go on (Requirement 5, criterion 8).
 4. If the run is interrupted, run it again: `status` shows what is still stale, because every page passed and recorded is `current`.
 
@@ -122,7 +127,7 @@ Don't translate, check or record pages yourself, and don't read the workers' can
    ```
    # Locale translation — <App> — <date>
 
-   Branch: <branch> · Locales: <list> · Label snapshot: <repo>@<sha7> (<new snapshot, uncommitted | unchanged>)
+   Branch: <branch> · Locales: <list> · Root pairs: <the pairs of the run, by name; omit with one pair> · Label snapshot: <repo>@<sha7> (<new snapshot, uncommitted | unchanged>)
    Pages: <n> translated · <n> synced · <n> skipped · <n> failed (page × locale cells)
 
    ## Label sync
@@ -166,6 +171,7 @@ Tell each worker in its prompt which correction it applies (for example, "the te
 - [ ] The label check ran before anything else, and the run didn't continue on a failed check, import or a pending diff.
 - [ ] Every `new` / `stale` cell from Step 2 has an outcome in a `results.jsonl` (translated, synced, skipped or failed). None is missing, and none was translated twice. Each locale's `results.jsonl` has one line per unit given to its workers: a file with fewer lines was overwritten by a later batch, so report the lost lines.
 - [ ] `LS stray --baseline` reported nothing, or every path it reported is in the report. (It covers the UA content root, the EN i18n root and anything else outside the locale roots, the locale `current.json` files, the state root and `.gitattributes`.)
+- [ ] With more than one root pair, every page id in the worker prompts and the report is qualified (`<pair>:<id>`), and the report covers every pair of the run.
 - [ ] Nothing was deleted or moved.
 - [ ] Every failed cell kept its previous file and state.
 - [ ] Every failure, unverified label, asset fallback, unmapped block, orphan, skipped page and term conflict is in the report.
@@ -177,6 +183,8 @@ Tell each worker in its prompt which correction it applies (for example, "the te
 - **No target locales** in `docusaurus.config.*` (only the default locale and `en`): stop and say that none are configured yet.
 - **A docs locale that matches no locale file, or several** (`UL check` exit `2` with `unresolved`): ask once for the `Locale files:` mapping, show the `candidates`, offer to persist it. Never pick one.
 - **A UA page deleted or moved:** listed as `orphaned` / `moved` by `status`. Report it; don't delete or move locale files or state.
+- **Two root pairs with a page of the same id:** each has its own state, locale files and URL, and `status` lists both, qualified. A warning that a primary state "records the UA blob of" the other pair's page means an earlier run was pointed at the other pair's roots: report it. The state stays with the primary page.
+- **A declared root pair that the project doesn't translate into further locales:** its `<Name> Translation scope:` is `none`, so no run covers it. If `status` shows a pair the user didn't expect to translate, say so before Step 3 and wait: the declaration is the project's decision.
 - **A page whose translation no longer lines up with UA** (the worker reports `unmapped` changes and the page fails `structure`): it can't be updated block by block. Report it; the user can delete that locale's file, and the next run translates the page whole.
 - **`status` warns that a locale's `current.json` keeps Ukrainian category labels** (`sidebarLabels[]`): `write-translations` filled the file with the UA labels of an autogenerated sidebar, and Docusaurus prefers them to the translated titles of the section pages, so the sidebar shows UA in that locale. The categories that have a `_category_.json` aren't meant: those are translated by this skill. For the others, report the file and tell the user to delete it (Docusaurus then takes the labels from the section page titles, as in EN); don't delete it and don't translate the entries here.
 - **A category without entries in a locale's `current.json`** (`write-translations` not run for that locale): the worker skips it. Report "run `write-translations --locale <locale>`".
@@ -190,6 +198,7 @@ This skill triggers only when the user names it or runs `/translate-locales`:
 - `/translate-locales`
 - `/translate-locales getting-started --locales tr,kk`
 - `/translate-locales --dry-run`
+- `/translate-locales --pair api-reference --dry-run`
 - "Use locale-translator to update the locales for this branch."
 - "locale-translator: translate the settings section into kk only."
 - "locale-translator: correct the tg term «Вхідна транзакція» and redo the pages that use it."

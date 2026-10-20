@@ -189,7 +189,7 @@ Everything product-specific lives in the docs repo, under `.doc-toolkit/`. The p
 | What | Where (in the docs repo) | Written by | Committed? |
 |---|---|---|---|
 | Saved copy of the app's UI texts, all languages | `.doc-toolkit/ui-labels/` | `ui-labels` script | Yes |
-| Per-page state: fingerprint per language, bold-word decisions, unconfirmed buttons | `.doc-toolkit/pages/<page>.json` | `locale-sync` script | Yes |
+| Per-page state: fingerprint per language, bold-word decisions, unconfirmed buttons | `.doc-toolkit/pages/<page>.json` (a second docs section: `.doc-toolkit/pairs/<section id>/pages/<page>.json`) | `locale-sync` script | Yes |
 | Glossary per language | `.doc-toolkit/terms/<locale>.tsv` | `locale-sync terms` | Yes. `.gitattributes` merges it without conflicts. |
 | Working files of a run (pieces, drafts, results, report) | `.doc-toolkit/.run/<date-time>/` | Coordinator and workers | Never (git-ignored) |
 | Translated pages | `i18n/<locale>/docusaurus-plugin-content-docs*/current/` | `locale-sync record` | Yes |
@@ -197,6 +197,8 @@ Everything product-specific lives in the docs repo, under `.doc-toolkit/`. The p
 | Screenshots | `.assets/` next to each translated page: links to the EN images, not copies | `locale-sync link-assets` | Yes (as links) |
 | Settings: app repo, locale file names, scope | The docs repo's `CLAUDE.md`, "Documentation toolkit configuration" | You, once per repo | Yes |
 | Target languages | `docusaurus.config.ts` | You, once per language | Yes |
+
+**Two docs sections in one repo.** Some repos have two Docusaurus docs sections (two plugin instances), each with its own UA folder, EN folder and URL, for example user guides and an API reference. Each section is a *root pair*, declared in `CLAUDE.md` with its own fields (see `context/project-paths.md`, "More than one root pair"). One run covers every section. Each page is translated, linked and checked inside its own section. Its fingerprints are saved in that section's own state folder, so two pages with the same path in two sections never overwrite each other. The scripts then name every page with its section in front (`api-reference:transactions/transactions`). The glossary, the app's UI texts and the languages are shared. To translate one section only, pass `--pair <id>`. To keep a section out of every run, set its `Translation scope:` to `none`.
 
 **Screenshots.** Each language's screenshot is a link to the EN image, so the images are never duplicated. To give a language its own screenshot, replace the link with a real file; the script never touches a real file. If no EN screenshot exists yet, the link points to the UA image and the report says so.
 
@@ -244,6 +246,7 @@ Every behaviour has one owner. Change it there, then check the ripple effects in
 | Translation rules (style, word order, titles, polite form) | `context/locale-translation.md` | **Only new or changed text follows new rules.** Pages already translated stay as they are until their UA changes, or until you redo them. A rule that must apply everywhere needs a redo of every page. |
 | How pages are cut into pieces | `scripts/locale-sync/lib/parse.mjs` | Pieces are matched to old translations **by position**. If the same page now splits differently, saved translations may stop matching: changes become "unmapped" or whole pages are retranslated. Run both test suites and a `--dry-run` on every docs repo that uses the skill. |
 | The state file or glossary format | `scripts/ui-labels/lib/`, `scripts/locale-sync/` | A docs repo that already uses the skill holds hundreds of these files. Without a migration, every page looks new: a full, expensive retranslation of all languages. The glossary must stay one line per term, sorted, for the conflict-free merge. |
+| How root pairs are declared, or where their state lives | `scripts/ui-labels/lib/config.mjs` (`requirePairs`, `pagesDir`) | The same risk: a pair whose state folder moves looks new in every language. The primary pair's `pages/` must stay where it is. The state of the other pairs must never land inside `pages/`, where a folder of the same name belongs to a primary page. |
 | What a check accepts | `scripts/locale-sync/` (`check`) | A looser check lets bad pages through with no one noticing. A stricter one can make already saved pages fail on their next update. Run `check` on every docs repo that uses the skill before you merge. |
 | How bold words are classified automatically | `scripts/locale-sync/` (`bind`) | Earlier decisions are kept, so the change applies only to new bold words. More automatic decisions save tokens. A wrong automatic decision puts a wrong button name into every language. |
 | The recommended models (for example, a cheaper worker or coordinator) | This file, and the `--worker-model` default in `SKILL.md` | Translate the same few pages in two or three languages with the old and new setups, and compare them side by side. A cheaper coordinator can make wrong binding and glossary decisions, and those reach every language. |

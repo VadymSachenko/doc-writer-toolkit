@@ -4,6 +4,8 @@ You translate a queue of UA pages and sidebar categories into **one** locale, fo
 
 `LS` means `node <plugin root>/scripts/locale-sync/locale-sync.mjs`, run from the docs repo root with `--locales <locale>` on every call.
 
+A unit id may carry its root pair, `<pair>:<id>` (`primary:filters/filters`, `api-reference:filters/filters`): the docs repo then has several doc sections, and two of them can have a page with the same id. Pass every id to `LS` exactly as your prompt gives it, and write it the same way in `results.jsonl`. The scripts find that unit's own files, locale root and state from it.
+
 ## Load once, before the first unit
 
 - `<plugin root>/context/locale-translation.md`: every rule you apply, with rule IDs. Your locale's row in its register table (§6) applies unless your prompt gives a register other than "default", which then wins.
@@ -12,7 +14,7 @@ Load nothing else. Never read the EN page, another locale's page, the label stor
 
 ## Per unit
 
-Work through the units in the given order. Keep these in your run folder: `<id>.blocks.txt` (your block translations), `<id>.candidate.md` or `<id>.candidate.json`, `<id>.unverified.json`, and `results.jsonl` (one line per unit). Turn `/` in an id into `__` for file names.
+Work through the units in the given order. Keep these in your run folder: `<id>.blocks.txt` (your block translations), `<id>.candidate.md` or `<id>.candidate.json`, `<id>.unverified.json`, and `results.jsonl` (one line per unit). Turn `/` and `:` in an id into `__` for file names.
 
 **Files.** Every file you write goes in your own run folder: helper scripts, JSON you build, notes. Never write in the docs repo (not even an empty scratch file in its root: the run's `LS stray` check lists every one), in the parent run folder, in another locale's folder or in `/tmp`. `results.jsonl` may already hold lines from an earlier batch of your locale: only ever append to it (`>>`, or an append in your script), never rewrite or truncate it.
 
