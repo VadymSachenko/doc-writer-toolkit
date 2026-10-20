@@ -54,7 +54,7 @@ Flags override the `Documentation toolkit configuration` block of `<root>/CLAUDE
 
 ## Stale detection (`status`)
 
-State is one file per UA page, `<state root>/pages/<page id>.json` (the layout `ui-labels` documents). `status`, `blocks`, `check` and `record` write only `locales.<locale>`; `spans` belongs to the binding pass (`bind`) and is kept as it is.
+State is one file per UA page, `<state root>/pages/<page id>.json` (the layout `ui-labels` documents). Only `record` writes `locales.<locale>`; `status`, `blocks` and `check` read the state and write nothing. `spans` belongs to the binding pass (`bind`, `ui-labels sync`) and `record` keeps it as it is.
 
 For every page and locale, one cell:
 
