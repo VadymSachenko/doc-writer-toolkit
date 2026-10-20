@@ -399,3 +399,75 @@ test('sync patches sidebar category labels: UA _category_.json, each locale\'s c
   assert.equal(await git(dir, 'status', '--porcelain', '--', 'docs', 'i18n', '.doc-toolkit'), '');
   assert.equal((await cli(dir, 'sync')).out.status, 'nothing-to-sync', 'the diff is no longer pending, so the next import can run');
 });
+
+// A second root pair whose page has the same id as the primary pair's filters/filters, both bound to button.save, and
+// an import of a release that renames button.save.
+const G_EN = 'i18n/en/docusaurus-plugin-content-docs-guides/current';
+const G_TR = 'i18n/tr/docusaurus-plugin-content-docs-guides/current';
+const G_STATE = '.doc-toolkit/pairs/guides/pages/filters/filters.json';
+async function twoPairRepo() {
+  const { dir, write } = await fixtureRepo();
+  const read = (rel) => fs.readFile(path.join(dir, rel), 'utf8');
+  await write('CLAUDE.md', (await read('CLAUDE.md')).replace('\n## Other', `- **Guides UA content root:** \`guides/\`\n- **Guides EN i18n root:** \`${G_EN}/\`\n\n## Other`));
+  const gUa = 'Натисніть **Зберегти** у звіті.\n';
+  await write('guides/filters/filters.md', gUa);
+  await write(`${G_EN}/filters/filters.md`, 'Click **Save** in the report.\n');
+  await write(`${G_TR}/filters/filters.md`, 'Raporda **Kaydet** düğmesine tıklayın.\n');
+  await write(G_STATE, { spans: { Зберегти: 'label:button.save' }, locales: { tr: { sourceBlob: gitBlobHash(gUa), labelSnapshot: 'old' } } });
+  await git(dir, 'add', '-A');
+  await git(dir, 'commit', '-qm', 'guides');
+  assert.equal((await cli(dir, 'import')).code, 0);
+  await git(dir, 'add', '-A');
+  await git(dir, 'commit', '-qm', 'labels');
+  await write('labels/uk.json', { 'button.save': 'Підтвердити', 'dialog.save': 'Зберегти', 'col.status': 'Статус', 'x.title': 'Назва' });
+  await write('labels/en.json', { 'button.save': 'Confirm', 'dialog.save': 'Save', 'col.status': 'Status', 'x.title': 'Title' });
+  await write('labels/tr.json', { 'button.save': 'Onayla', 'dialog.save': 'Kaydet', 'col.status': 'Durum', 'x.title': 'Başlık' });
+  assert.equal((await cli(dir, 'import')).code, 0);
+  return { dir, write, read };
+}
+
+test('sync patches a renamed label in every root pair: its UA, EN and locale pages, and its own state file', async () => {
+  const { dir, read } = await twoPairRepo();
+  const r = await cli(dir, 'sync');
+  assert.equal(r.code, 0, r.stderr);
+  const filters = r.out.patched.filter((p) => p.page.endsWith(':filters/filters')).map((p) => [p.page, p.locale, p.file, p.old, p.new]);
+  assert.deepEqual(filters, [
+    ['primary:filters/filters', 'uk', 'docs/filters/filters.md', 'Зберегти', 'Підтвердити'],
+    ['primary:filters/filters', 'en', 'i18n/en/docusaurus-plugin-content-docs/current/filters/filters.md', 'Save', 'Confirm'],
+    ['primary:filters/filters', 'tr', 'i18n/tr/docusaurus-plugin-content-docs/current/filters/filters.md', 'Kaydet', 'Onayla'],
+    ['guides:filters/filters', 'uk', 'guides/filters/filters.md', 'Зберегти', 'Підтвердити'],
+    ['guides:filters/filters', 'en', `${G_EN}/filters/filters.md`, 'Save', 'Confirm'],
+    ['guides:filters/filters', 'tr', `${G_TR}/filters/filters.md`, 'Kaydet', 'Onayla'],
+  ]);
+  assert.equal(await read('guides/filters/filters.md'), 'Натисніть **Підтвердити** у звіті.\n');
+  assert.equal(await read(`${G_TR}/filters/filters.md`), 'Raporda **Onayla** düğmesine tıklayın.\n');
+  // Each pair's state follows its own page; the ids in every report list name the pair.
+  const g = JSON.parse(await read(G_STATE));
+  assert.deepEqual([g.spans, g.locales.tr.sourceBlob], [{ Підтвердити: 'label:button.save' }, gitBlobHash('Натисніть **Підтвердити** у звіті.\n')]);
+  assert.equal(JSON.parse(await read('.doc-toolkit/pages/filters/filters.json')).spans['Підтвердити'], 'label:button.save');
+  assert.deepEqual(r.out.broken.map((b) => b.pages), [['primary:filters/filters']]);
+  assert.ok(r.out.suggestedCommit.paths.includes(G_STATE) && r.out.suggestedCommit.paths.includes(`${G_TR}/filters/filters.md`));
+  assert.equal(r.out.pendingRemains, false);
+  assert.equal(r.out.unsyncedPairs, undefined);
+});
+
+test('sync --pair patches only that pair and keeps the diff pending for the others', async () => {
+  const { dir, read } = await twoPairRepo();
+  const dry = await cli(dir, 'sync', '--pair', 'guides', '--dry-run');
+  assert.deepEqual([[...new Set(dry.out.patched.map((p) => p.page))], dry.out.unsyncedPairs, dry.out.pendingRemains], [['guides:filters/filters'], ['primary'], true]);
+
+  const r = await cli(dir, 'sync', '--pair', 'guides');
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual([[...new Set(r.out.patched.map((p) => p.page))], r.out.pendingRemains], [['guides:filters/filters'], true]);
+  assert.ok((await read('docs/filters/filters.md')).includes('**Зберегти**'), 'the primary page is not patched');
+  await fs.stat(path.join(dir, '.doc-toolkit/ui-labels/.pending-diff.json'));
+  assert.equal((await cli(dir, 'import')).code, 3, 'the diff is still pending');
+
+  // Committed, a full sync then patches the primary pages and finds the guides page already current.
+  await git(dir, 'add', '-A');
+  await git(dir, 'commit', '-qm', 'guides sync');
+  const full = await cli(dir, 'sync');
+  assert.deepEqual([full.out.pendingRemains, full.out.alreadyCurrent.filter((a) => a.page === 'guides:filters/filters').map((a) => a.locale)], [false, ['uk', 'en', 'tr']]);
+  assert.ok((await read('docs/filters/filters.md')).includes('**Підтвердити**'));
+  await assert.rejects(fs.stat(path.join(dir, '.doc-toolkit/ui-labels/.pending-diff.json')));
+});

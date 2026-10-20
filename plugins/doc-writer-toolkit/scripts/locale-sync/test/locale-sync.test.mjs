@@ -1625,3 +1625,227 @@ test('root pairs: a host with one pair sees the same output and state layout as 
   }
   assert.deepEqual(actual, JSON.parse(await fs.readFile(SNAPSHOT, 'utf8')));
 });
+
+// A second pair, `Guides`, with its own roots and URL prefix, and a page and a category with the same ids as the
+// primary pair's (`filters/filters`, `filters/_category_`).
+const G_UA = 'guides';
+const G_EN = 'i18n/en/docusaurus-plugin-content-docs-guides/current';
+const G_TR = 'i18n/tr/docusaurus-plugin-content-docs-guides/current';
+const G_PAGE = `---\ntitle: Фільтри звітів\ndescription: Як фільтрувати звіти\n---\n\nНатисніть **Фільтри**, щоб відкрити панель. Див. [Фільтри](/filters/).\n\n![Панель](./.assets/panel.png)\n`;
+const G_PAGE_TR = `---\ntitle: Rapor filtreleri\ndescription: Raporlar nasıl filtrelenir\n---\n\nPaneli açmak için **Filtreler** düğmesine tıklayın. Bkz. [Filtreler](/filters/).\n\n![Panel](./.assets/panel.png)\n`;
+const G_CATEGORY = { label: 'Фільтри', key: 'guide-filters' };
+const G_ENTRY = 'sidebar.guides.category.guide-filters';
+const G_STATE = `.doc-toolkit/pairs/guides/pages/filters/filters.json`;
+const PAIR_LINES = `- **Guides UA content root:** \`${G_UA}/\`\n- **Guides EN i18n root:** \`${G_EN}/\`\n- **Guides UA URL prefix:** \`/guides/\`\n`;
+
+async function addGuides(f, { declare = true } = {}) {
+  if (declare) await f.write('CLAUDE.md', (await f.read('CLAUDE.md')).replace('\n## Other', `${PAIR_LINES}\n## Other`));
+  await f.write(`${G_UA}/filters/filters.md`, G_PAGE);
+  await f.write(`${G_UA}/filters/_category_.json`, G_CATEGORY);
+  await f.write(`${G_UA}/filters/.assets/panel.png`, 'png-ua-guides');
+  await f.write(`${G_UA}/intro/intro.md`, `---\ntitle: Вступ\n---\n\nТекст.\n`);
+  await f.write(`${G_EN}/filters/filters.md`, '# Report filters\n\nClick **Filters** to open the panel.\n');
+  await f.write(`${G_EN}/filters/.assets/panel.png`, 'png-en-guides');
+  await f.write(`${G_TR}.json`, { [G_ENTRY]: { message: 'Фільтри', description: "The label for category 'Фільтри' in sidebar 'guides'" } });
+  await f.commit('guides');
+}
+
+async function pairRepo() {
+  const f = await fixtureRepo({ category: true });
+  await addGuides(f);
+  return f;
+}
+const rowOf = (out, page) => out.pages.find((p) => p.page === page);
+
+test('root pairs: status covers every declared pair, each unit with its own roots, files and state', async () => {
+  const f = await pairRepo();
+  const r = await cli(f.dir, 'status');
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(r.out.pages.map((p) => p.page), ['primary:filters/filters', 'guides:filters/filters', 'guides:intro/intro', 'primary:filters/_category_', 'guides:filters/_category_']);
+  assert.deepEqual(r.out.pairs.map((p) => [p.id, p.name, p.uaRoot, p.urlPrefix, p.states]), [
+    ['primary', null, 'docs', '/', '.doc-toolkit/pages'],
+    ['guides', 'Guides', G_UA, '/guides/', '.doc-toolkit/pairs/guides/pages'],
+  ]);
+  assert.equal(rowOf(r.out, 'guides:filters/filters').locales.tr.file, `${G_TR}/filters/filters.md`);
+  assert.equal(rowOf(r.out, 'guides:filters/_category_').locales.tr.file, `${G_TR}.json`);
+  assert.equal(rowOf(r.out, 'primary:filters/_category_').locales.tr.file, `${TR_ROOT}.json`);
+  assert.deepEqual(r.out.summary.byPair, {
+    primary: { pages: 1, stalePages: 1, pageTranslations: 2, categoryTranslations: 2, words: r.out.summary.byPair.primary.words },
+    guides: { pages: 2, stalePages: 2, pageTranslations: 4, categoryTranslations: 2, words: r.out.summary.byPair.guides.words },
+  });
+  assert.deepEqual([r.out.summary.pages, r.out.summary.stalePages, r.out.summary.pageTranslations], [3, 3, 6]);
+
+  // --pair narrows the run to one pair; the ids stay qualified, so they can be passed on as they are.
+  const g = await cli(f.dir, 'status', '--pair', 'guides', '--locales', 'tr');
+  assert.deepEqual(g.out.pages.map((p) => p.page), ['guides:filters/filters', 'guides:intro/intro', 'guides:filters/_category_']);
+  assert.equal(g.out.uaRoot, G_UA);
+  assert.equal((await cli(f.dir, 'status', '--pair', 'nope')).code, 2);
+
+  // Each pair's own `Translation scope:`; `none` keeps a declared pair out of every run.
+  await f.write('CLAUDE.md', (await f.read('CLAUDE.md')).replace('- **Guides UA URL prefix:**', '- **Guides Translation scope:** `intro`\n- **Guides UA URL prefix:**'));
+  assert.deepEqual((await cli(f.dir, 'status', '--locales', 'tr')).out.pages.map((p) => p.page), ['primary:filters/filters', 'guides:intro/intro', 'primary:filters/_category_']);
+  await f.write('CLAUDE.md', (await f.read('CLAUDE.md')).replace('`intro`', '`none`'));
+  assert.deepEqual((await cli(f.dir, 'status', '--locales', 'tr')).out.pages.map((p) => p.page), ['primary:filters/filters', 'primary:filters/_category_']);
+  // --scope replaces every pair's scope; a qualified folder applies to its pair only.
+  assert.deepEqual((await cli(f.dir, 'status', '--locales', 'tr', '--scope', 'guides:filters')).out.pages.map((p) => p.page), ['guides:filters/filters', 'guides:filters/_category_']);
+});
+
+test('root pairs: recording a page of one pair leaves the state of the same id in the other pair byte-identical', async () => {
+  const f = await pairRepo();
+  await writeState(f, {}, SPANS);
+  await f.write(G_STATE, { spans: { Фільтри: 'label:filters.title' }, locales: {} });
+  const primaryBefore = await f.read(STATE);
+
+  await f.write(`${G_TR}/filters/filters.md`, G_PAGE_TR);
+  assert.equal((await cli(f.dir, 'link-assets', 'guides:filters/filters', '--locales', 'tr')).code, 0);
+  assert.equal(await fs.readFile(path.join(f.dir, G_TR, 'filters/.assets/panel.png'), 'utf8'), 'png-en-guides', 'linked to its own pair\'s EN asset');
+  let r = await cli(f.dir, 'record', 'guides:filters/filters', '--locales', 'tr', '--date', '2026-10-09');
+  assert.equal(r.code, 0, JSON.stringify(r.out));
+  assert.deepEqual([r.out.results[0].page, r.out.results[0].state, r.out.results[0].file], ['guides:filters/filters', G_STATE, `${G_TR}/filters/filters.md`]);
+  assert.equal(await f.read(STATE), primaryBefore, 'the primary state of filters/filters is untouched');
+  assert.equal((await readStateFile(f, G_STATE)).locales.tr.sourceBlob, gitBlobHash(G_PAGE));
+
+  // And the other way round.
+  const guidesBefore = await f.read(G_STATE);
+  await f.write(`${TR_ROOT}/filters/filters.md`, TR);
+  assert.equal((await cli(f.dir, 'link-assets', 'docs/filters/filters.md', '--locales', 'tr')).code, 0);
+  r = await cli(f.dir, 'record', 'primary:filters/filters', '--locales', 'tr', '--date', '2026-10-09');
+  assert.equal(r.code, 0, JSON.stringify(r.out));
+  assert.equal(r.out.results[0].state, STATE);
+  assert.equal(await f.read(G_STATE), guidesBefore);
+
+  r = await cli(f.dir, 'status', '--locales', 'tr');
+  assert.deepEqual([rowOf(r.out, 'primary:filters/filters').locales.tr.state, rowOf(r.out, 'guides:filters/filters').locales.tr.state, rowOf(r.out, 'guides:intro/intro').locales.tr.state], ['current', 'current', 'new']);
+
+  // A category of each pair goes into its own pair's current.json.
+  await catCand(f, { [G_ENTRY]: 'Filtreler' });
+  await f.write(`.doc-toolkit/pairs/guides/pages/filters/_category_.json`, { spans: { Фільтри: 'label:filters.title' }, locales: {} });
+  const trCurrent = await f.read(`${TR_ROOT}.json`);
+  r = await cli(f.dir, 'record', 'guides:filters/_category_', '--locales', 'tr', '--candidate', 'cat.json');
+  assert.equal(r.code, 0, JSON.stringify(r.out));
+  assert.equal(JSON.parse(await f.read(`${G_TR}.json`))[G_ENTRY].message, 'Filtreler');
+  assert.equal(await f.read(`${TR_ROOT}.json`), trCurrent);
+  await assert.rejects(fs.stat(path.join(f.dir, catStatePath)), 'no primary category state was written');
+});
+
+test('root pairs: a primary state recorded before the second pair was declared stays attached to the primary page and current', async () => {
+  const f = await translatedFixture();
+  assert.equal((await cli(f.dir, 'record', 'filters', '--locales', 'tr', '--date', '2026-10-09')).code, 0);
+  await f.commit('recorded');
+  const before = await f.read(STATE);
+  assert.equal((await cli(f.dir, 'status', '--locales', 'tr')).out.pages[0].locales.tr.state, 'current');
+
+  await addGuides(f);
+  const r = await cli(f.dir, 'status', '--locales', 'tr');
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual([rowOf(r.out, 'primary:filters/filters').locales.tr.state, rowOf(r.out, 'guides:filters/filters').locales.tr.state], ['current', 'new']);
+  assert.deepEqual(r.out.orphaned, []);
+  assert.equal(await f.read(STATE), before);
+  assert.equal(await git(f.dir, 'status', '--porcelain', '--', '.doc-toolkit'), '');
+  await assert.rejects(fs.stat(path.join(f.dir, '.doc-toolkit/pairs')), 'status writes nothing');
+});
+
+test('root pairs: a bare id or folder that two pairs have is ambiguous; a path, a qualified id or --pair resolves it', async () => {
+  const f = await pairRepo();
+  let r = await cli(f.dir, 'blocks', 'filters/filters', '--locales', 'tr');
+  assert.equal(r.code, 2);
+  assert.deepEqual(r.out.ambiguous, [{ selector: 'filters/filters', candidates: [
+    { selector: 'primary:filters/filters', pair: 'primary', units: ['docs/filters/filters.md'] },
+    { selector: 'guides:filters/filters', pair: 'guides', units: [`${G_UA}/filters/filters.md`] },
+  ] }]);
+  assert.match(r.stderr, /primary:filters\/filters or guides:filters\/filters/);
+  r = await cli(f.dir, 'status', 'filters');
+  assert.deepEqual([r.code, r.out.ambiguous[0].candidates.map((c) => [c.selector, c.units.length])], [2, [['primary:filters', 2], ['guides:filters', 2]]]);
+
+  const pages = async (...args) => (await cli(f.dir, 'blocks', ...args, '--locales', 'tr')).out.results?.map((x) => [x.page, x.target.path]);
+  assert.deepEqual(await pages('docs/filters/filters.md'), [['primary:filters/filters', `${TR_ROOT}/filters/filters.md`]]);
+  assert.deepEqual(await pages(`${G_UA}/filters/filters.md`), [['guides:filters/filters', `${G_TR}/filters/filters.md`]]);
+  assert.deepEqual(await pages('guides:filters/filters'), [['guides:filters/filters', `${G_TR}/filters/filters.md`]]);
+  assert.deepEqual(await pages('primary:filters'), [['primary:filters/filters', `${TR_ROOT}/filters/filters.md`], ['primary:filters/_category_', `${TR_ROOT}.json`]]);
+  assert.deepEqual(await pages('intro/intro'), [['guides:intro/intro', `${G_TR}/intro/intro.md`]], 'a bare id only one pair has resolves');
+  assert.deepEqual(await pages('filters/filters', '--pair', 'guides'), [['guides:filters/filters', `${G_TR}/filters/filters.md`]]);
+  assert.equal((await cli(f.dir, 'status', 'nothing:here')).code, 2, 'an unknown prefix is a plain selector that matches nothing');
+
+  // bind --decisions: a bare id two pairs have is rejected with the qualified ids; a qualified id goes to its pair's state.
+  await f.write('decisions.json', { 'filters/filters': { Фільтри: 'term' }, 'guides:filters/filters': { Фільтри: 'label:filters.title' } });
+  r = await cli(f.dir, 'bind', '--decisions', 'decisions.json');
+  assert.equal(r.code, 1);
+  assert.deepEqual(r.out.rejected, [{ page: 'filters/filters', reason: 'the id names a unit of more than one root pair: use primary:filters/filters or guides:filters/filters' }]);
+  assert.deepEqual(r.out.written.map((w) => w.page), ['guides:filters/filters']);
+  assert.deepEqual((await readStateFile(f, G_STATE)).spans, { Фільтри: 'label:filters.title' });
+  await assert.rejects(fs.stat(path.join(f.dir, STATE)));
+
+  // bind: one pass over both pairs, each page's decisions in its own pair's state.
+  r = await cli(f.dir, 'bind');
+  assert.equal(r.code, 0, r.stderr);
+  assert.ok(r.out.pages.some((p) => p.page === 'primary:filters/filters'));
+  assert.equal((await readStateFile(f)).spans['В роботі'], 'label:status.inwork');
+  assert.equal((await readStateFile(f, G_STATE)).spans['В роботі'], undefined);
+});
+
+test('root pairs: report gives each page the local URL of its own pair; link titles reach a page of another pair', async () => {
+  const f = await pairRepo();
+  await writeState(f);
+  await f.write(G_STATE, { spans: { Фільтри: 'label:filters.title' }, locales: {} });
+  await f.write(`${TR_ROOT}/filters/filters.md`, TR);
+  await f.write(`${G_TR}/filters/filters.md`, G_PAGE_TR);
+  const r = await cli(f.dir, 'report', 'guides:filters/filters', '--locales', 'tr');
+  assert.deepEqual(r.out.pages.map((p) => [p.page, p.changed, p.cells.tr.url]), [
+    ['primary:filters/filters', false, 'http://localhost:3000/tr/filters/'],
+    ['guides:filters/filters', true, 'http://localhost:3000/tr/guides/filters/'],
+    ['guides:intro/intro', false, 'http://localhost:3000/tr/guides/intro/'],
+  ]);
+  const md = await cli(f.dir, 'report', 'guides:filters/filters', '--md', '--locales', 'tr');
+  assert.match(md.out, /\| guides:filters\/filters \|/);
+  assert.match(md.out, /\*\*tr\*\*\n\n- http:\/\/localhost:3000\/tr\/guides\/filters\//);
+
+  // The guides page links to /filters/, the primary pair's page: its row carries that page's tr title.
+  const b = (await cli(f.dir, 'blocks', 'guides:filters/filters', '--locales', 'tr', '--overwrite')).out.results[0];
+  assert.deepEqual(b.links, [{ text: 'Фільтри', url: '/filters/', page: 'primary:filters/filters', title: 'Filtreler' }]);
+
+  const { parseBuildErrors: parse } = await import('../lib/report.mjs');
+  const s = { root: '/r', multiPair: true, pairs: [{ root: '/r', en: EN_ROOT, pair: { id: 'primary' } }, { root: '/r', en: G_EN, pair: { id: 'guides' } }] };
+  assert.deepEqual(parse(s, 'tr', `Can't resolve './.assets/a.png' in '/r/${G_TR}/filters'`)[0], { kind: 'unresolved', ref: './.assets/a.png', folder: 'filters', pair: 'guides', message: "Can't resolve './.assets/a.png'" });
+});
+
+test('root pairs: stray allows the locale roots and current.json of every pair of the run', async () => {
+  const f = await pairRepo();
+  await f.write(`${G_TR}/filters/filters.md`, G_PAGE_TR);
+  await f.write(`${G_TR}.json`, { [G_ENTRY]: { message: 'Filtreler' } });
+  await f.write(G_STATE, { spans: {}, locales: {} });
+  await f.write(`${TR_ROOT}/filters/filters.md`, TR);
+  let r = await cli(f.dir, 'stray');
+  assert.deepEqual([r.code, r.out.stray], [0, []]);
+  assert.ok(r.out.allowed.includes(G_TR) && r.out.allowed.includes(`${G_TR}.json`) && r.out.allowed.includes(TR_ROOT));
+  // A run narrowed to the primary pair writes nothing in the other pair's roots.
+  r = await cli(f.dir, 'stray', '--pair', 'primary');
+  assert.deepEqual([r.code, r.out.stray.map((x) => x.path)], [1, [`${G_TR}.json`, `${G_TR}/filters/filters.md`]]);
+});
+
+test('root pairs: a primary state that holds another pair\'s blob is reported and stays with the primary page', async () => {
+  const f = await pairRepo();
+  // Written by a run whose --ua-root/--en-root pointed at the guides roots: same id, the guides page's blob.
+  await writeState(f, { tr: trEntry(gitBlobHash(G_PAGE)) });
+  await f.write(`${TR_ROOT}/filters/filters.md`, TR);
+  await f.write('.doc-toolkit/pages/intro/intro.json', { spans: {}, locales: { tr: trEntry(gitBlobHash('x')) } });
+  const r = await cli(f.dir, 'status', '--locales', 'tr');
+  assert.ok(r.out.warnings.some((w) => w.startsWith(`${STATE} records the UA blob of ${G_UA}/filters/filters.md (Guides) for tr`)), r.out.warnings.join('\n'));
+  assert.deepEqual([rowOf(r.out, 'primary:filters/filters').locales.tr.state, rowOf(r.out, 'guides:filters/filters').locales.tr.state], ['stale', 'new']);
+  assert.deepEqual(r.out.orphaned.map((o) => [o.page, o.state]), [['primary:intro/intro', '.doc-toolkit/pages/intro/intro.json']]);
+  assert.match(r.out.orphaned[0].note, /guides:intro\/intro keeps its state in \.doc-toolkit\/pairs\/guides\/pages\/intro\/intro\.json/);
+});
+
+test('root pairs: declarations that cannot work are configuration errors (exit 2)', async () => {
+  const f = await fixtureRepo();
+  const claude = await f.read('CLAUDE.md');
+  const withLines = (lines) => f.write('CLAUDE.md', claude.replace('\n## Other', `${lines}\n## Other`));
+  await withLines(`- **Guides UA content root:** \`${G_UA}/\`\n`);
+  let r = await cli(f.dir, 'status');
+  assert.deepEqual([r.code, r.out.missing], [2, ['Guides EN i18n root']]);
+  await withLines(`- **Guides UA content root:** \`docs/filters/\`\n- **Guides EN i18n root:** \`${G_EN}/\`\n`);
+  assert.match((await cli(f.dir, 'status')).out.error, /UA content roots of the root pairs 'primary' \(docs\/\) and 'Guides' \(docs\/filters\/\) overlap/);
+  await withLines(`- **Guides UA content root:** \`${G_UA}/\`\n- **Guides EN i18n root:** \`${EN_ROOT}/\`\n`);
+  assert.equal((await cli(f.dir, 'status')).code, 2);
+  await withLines(`- **Primary UA content root:** \`${G_UA}/\`\n- **Primary EN i18n root:** \`${G_EN}/\`\n`);
+  assert.match((await cli(f.dir, 'status')).out.error, /can't be called 'primary'/);
+});

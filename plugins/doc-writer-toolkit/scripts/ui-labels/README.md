@@ -34,7 +34,9 @@ Every option can be a flag. Missing flags are read from the `Documentation toolk
 | `--locales` | (from `docusaurus.config.ts`) | Target locales. Default: `i18n.locales` minus `defaultLocale` and `en`. `uk` (the default locale) and `en` are always imported too. |
 | `--docusaurus-config` | | Path to the Docusaurus config if it isn't `docusaurus.config.{ts,js,mjs,cjs}` in the root |
 | `--state-root` | `Toolkit state root:` | Default `.doc-toolkit` |
-| `--ua-root`, `--en-root` | `UA content root:`, `EN i18n root:` | Needed by `sync`. Locale roots are derived by replacing the `en` path segment of the EN root. |
+| `--ua-root`, `--en-root` | `UA content root:`, `EN i18n root:` | Needed by `sync`: the primary root pair. Locale roots are derived by replacing the `en` path segment of the EN root. |
+| | `<Name> UA content root:`, `<Name> EN i18n root:` | One more root pair per `<Name>` (a second docs plugin instance). `sync` patches each pair's own files. The name's id (`API reference` → `api-reference`) and the rules are in the `locale-sync` README, "Root pairs". |
+| `--pair` | | `sync` only these root pairs (comma-separated ids; the unprefixed pair is `primary`). Default: every declared pair. |
 | `--ticket` | | Ticket number(s), comma-separated. Default: the leading numbers of the current git branch (`1139-x-doc` → `1139`, `90-94-x` → `90`, `94`). |
 
 Locale file matching:
@@ -62,7 +64,7 @@ overlay.json     { tickets, branches: { branch: { commit, mergeBase, keys: { key
 
 ### Page state files (read and written by `sync`; also by the page-sync tooling)
 
-One file per UA page: `<state root>/pages/<path of the UA page relative to the UA content root, without .md/.mdx>.json`, for example `archive/archive.md` → `.doc-toolkit/pages/archive/archive.json`.
+One file per UA page: `<state root>/pages/<path of the UA page relative to the UA content root, without .md/.mdx>.json`, for example `archive/archive.md` → `.doc-toolkit/pages/archive/archive.json`. A page of another root pair has its file in that pair's folder, `<state root>/pairs/<pair id>/pages/…`, so two pairs' pages with the same path never share a state.
 
 ```json
 {
@@ -107,9 +109,9 @@ span           class  key                 ru            tr            kk
 
 ## Sync
 
-`sync` reads `.pending-diff.json` (or `--diff <file>`) and, for every page state file that binds a changed or rekeyed key:
+`sync` reads `.pending-diff.json` (or `--diff <file>`) and, for every page state file of every root pair (`--pair` narrows them) that binds a changed or rekeyed key:
 
-1. Replaces `**old**` with `**new**` outside fenced code blocks, in the language each string belongs to: the UA page, the EN page and every locale page that exists. When a span bound to the changed key has decisions scoped to headings, only the sections where that key applies are patched; the sections of each file pair with UA by position, and a file whose headings don't line up is reported in `unpatched`.
+1. Replaces `**old**` with `**new**` outside fenced code blocks, in the language each string belongs to: the UA page, the EN page and every locale page that exists, all in the page's own pair (its UA root, EN root and locale roots). When a span bound to the changed key has decisions scoped to headings, only the sections where that key applies are patched; the sections of each file pair with UA by position, and a file whose headings don't line up is reported in `unpatched`.
 2. Renames the span in the state file (a scoped key keeps its heading) and rebinds rekeyed keys.
 3. Advances each locale's `sourceBlob` to the patched UA blob **only if** it equalled the UA blob before the patch, so a translation that was already stale stays stale. Sets `labelSnapshot` when every patch for that locale succeeded.
 
@@ -120,7 +122,7 @@ It never patches a page when any of its files has uncommitted changes (reported 
 A state file named `…/_category_` is patched like a page, in these files:
 
 - **UA:** `<UA root>/<dir>/_category_.json`, its `label`.
-- **Every other locale (EN included):** the category's label entry in `<locale root>.json` (`current.json`), `sidebar.<sidebarId>.category.<key>`, `message`. `<key>` is the category's `key`, or its label when it has none. Entries for the category's other fields (generated-index title and description) are not bound to an app string and keep their messages.
+- **Every other locale (EN included):** the category's label entry in `<locale root>.json` (`current.json`, the one of the category's pair), `sidebar.<sidebarId>.category.<key>`, `message`. `<key>` is the category's `key`, or its label when it has none. Entries for the category's other fields (generated-index title and description) are not bound to an app string and keep their messages.
 
 Details:
 
@@ -136,7 +138,7 @@ Without `--commit` (what the skills run: commits in a docs repo are the user's),
 
 `--commit`, for hosts that want the script to commit, stages the patched pages, state files and `ui-labels/`, and makes one commit: `Sync UI labels to <repo>@<sha7>`. Only those paths are committed. When there is no diff to sync (a first import, or an import where only the overlay or the recorded commit moved), `--commit` still commits `ui-labels/` alone, so a new snapshot never stays uncommitted; the report is then `{ "status": "nothing-to-sync", "commit": <sha or null> }`. `--dry-run` writes nothing.
 
-The report lists:
+The report lists the entries below. Each names its page by the id `locale-sync` prints: the page's path relative to its UA root without the extension, or `<pair>:<that id>` when the host declares more than one root pair.
 
 - `patched`: page, locale, key, old and new string, line and the patched line text. **Show the `uk` and `en` entries to the PR reviewer.** A label inside a sentence whose grammar depends on it is patched verbatim, so the reviewer fixes agreement or case by hand.
 - `alreadyCurrent`
@@ -149,6 +151,7 @@ The report lists:
 - `renamedEntries`: `current.json` entry keys renamed for a category without a `key`
 - `undocumented`: new keys, information only
 - `skipped`
+- `unsyncedPairs`: with `--pair`, the declared pairs this sync left out. Their pages are not patched, so the diff stays pending (`pendingRemains`) until a sync covers them.
 - `pendingRemains`
 - `commit` (with `--commit`) or `suggestedCommit` (without)
 

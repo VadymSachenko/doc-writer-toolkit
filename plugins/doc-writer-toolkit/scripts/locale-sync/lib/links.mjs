@@ -6,7 +6,7 @@ import { parseFrontmatter, splitCode } from './parse.mjs';
 const posix = path.posix;
 
 // The route Docusaurus gives a doc: number prefixes stripped, `folder/folder.md` and `index.md` collapse to the folder,
-// a frontmatter `slug` overrides. Returned without locale prefix and baseUrl.
+// a frontmatter `slug` overrides. Returned without locale prefix and baseUrl. `s` holds the URL prefix of the page's pair.
 export function docRoute(s, page, uaText) {
   const strip = (seg) => seg.replace(/^\d+\s*[-_.]\s*(?=\S)/, '');
   const segs = page.id.split('/').map(strip);
@@ -45,7 +45,8 @@ export function textLinks(proseLines) {
   return out;
 }
 
-// Every UA page by route and by path, with its UA title. Built once per run.
+// Every UA page of every declared pair by route and by path, with its UA title. Built once per run. The routes of two
+// pairs differ by their URL prefixes, so a link reaches a page of another pair too.
 const indexes = new WeakMap();
 function linkIndex(s) {
   if (!indexes.has(s)) {
@@ -54,10 +55,10 @@ function linkIndex(s) {
       (async () => {
         const byRoute = new Map();
         const byPath = new Map();
-        for (const page of (await listUaPages(s)).all) {
+        for (const page of (await listUaPages(s, s.declaredPairs)).all) {
           const text = await cachedBlob(s.root, page.blob);
           const entry = { page, uaTitle: pageTitle(text) };
-          byRoute.set(docRoute(s, page, text), entry);
+          byRoute.set(docRoute(page.ps, page, text), entry);
           byPath.set(page.path, entry);
         }
         return { byRoute, byPath };
@@ -117,8 +118,8 @@ export async function titleLinks(s, page, text, locale) {
     nth.set(l.url, n + 1);
     const target = resolveLink(index, page, l.url);
     if (!target?.uaTitle || !namesTitle(l.text, target.uaTitle, uaCut)) continue;
-    const title = pageTitle(await readIfExists(abs(s, localePagePath(s, locale, target.page))));
-    out.push({ text: l.text, url: l.url, nth: n, line: l.line, page: target.page.id, uaTitle: target.uaTitle, title });
+    const title = pageTitle(await readIfExists(abs(s, localePagePath(locale, target.page))));
+    out.push({ text: l.text, url: l.url, nth: n, line: l.line, page: target.page.ref, uaTitle: target.uaTitle, title });
   }
   return out;
 }

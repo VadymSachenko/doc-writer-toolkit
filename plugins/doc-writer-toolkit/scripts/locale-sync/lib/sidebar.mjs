@@ -10,7 +10,8 @@ import { abs, readIfExists } from './pages.mjs';
 const LABEL_KEY = /^sidebar\..+\.category\./;
 const GENERATED_INDEX = /\.link\.generated-index\.(title|description)$/;
 
-export async function sidebarOverrides(s, targets, categories) {
+// One root pair (`ps`): its locales' current.json, and its tracked categories.
+export async function sidebarOverrides(s, ps, targets, categories) {
   const parsed = [];
   for (const c of categories) {
     const p = parseCategory(await cachedBlob(s.root, c.blob));
@@ -18,7 +19,7 @@ export async function sidebarOverrides(s, targets, categories) {
   }
   const byLocale = new Map();
   for (const locale of targets) {
-    const file = categoryFile(s, locale);
+    const file = categoryFile(ps, locale);
     const raw = await readIfExists(abs(s, file));
     let data = null;
     try {
@@ -28,7 +29,7 @@ export async function sidebarOverrides(s, targets, categories) {
     }
     if (!data || typeof data !== 'object') continue;
     const owned = new Set();
-    for (const p of parsed) for (const e of (await readCategoryTarget(s, locale, p)).entries) owned.add(e.entryKey);
+    for (const p of parsed) for (const e of (await readCategoryTarget(ps, locale, p)).entries) owned.add(e.entryKey);
     const labels = Object.entries(data)
       .filter(([key, v]) => LABEL_KEY.test(key) && !GENERATED_INDEX.test(key) && !owned.has(key) && typeof v?.message === 'string')
       .map(([entryKey, v]) => ({ entryKey, message: v.message }));

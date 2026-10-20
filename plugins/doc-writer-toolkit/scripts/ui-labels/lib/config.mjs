@@ -6,14 +6,17 @@ import { CliError, exists, unique } from './util.mjs';
 const CONFIG_HEADING = /^(#{1,6})\s+Documentation toolkit configuration\b/i;
 
 // Reads the "Documentation toolkit configuration" bullets of <root>/CLAUDE.md as { 'field name (lowercase)': value }.
+// The names as written are kept in the non-enumerable `names` ({ 'field name (lowercase)': 'Field name' }).
 export async function loadClaudeConfig(root) {
+  const fields = {};
+  const names = {};
+  Object.defineProperty(fields, 'names', { value: names });
   let text;
   try {
     text = await fs.readFile(path.join(root, 'CLAUDE.md'), 'utf8');
   } catch {
-    return {};
+    return fields;
   }
-  const fields = {};
   let level = 0;
   for (const line of text.split('\n')) {
     const heading = line.match(/^(#{1,6})\s/);
@@ -27,6 +30,7 @@ export async function loadClaudeConfig(root) {
     if (!m) continue;
     const ticks = m[2].match(/`([^`]*)`/);
     fields[m[1].trim().toLowerCase()] = (ticks ? ticks[1] : m[2]).trim();
+    names[m[1].trim().toLowerCase()] = m[1].trim();
   }
   return fields;
 }
@@ -101,6 +105,9 @@ export async function loadSettings(values) {
     docusaurusConfig: values['docusaurus-config'],
     uaRoot: pick('ua-root', 'ua content root'),
     enRoot: pick('en-root', 'en i18n root'),
+    urlPrefix: pick('url-prefix', 'ua url prefix'),
+    scopeSpec: claude['translation scope'] ?? null,
+    pairSpec: values.pair ?? null,
     tickets,
   };
 }
@@ -115,7 +122,21 @@ export function requireSource(settings) {
   return parseSource(settings.sourceSpec);
 }
 
-export function requireRoots(settings) {
+// UA/EN root pairs. The unprefixed fields (`UA content root:`, `EN i18n root:`, `UA URL prefix:`, `Translation scope:`)
+// are the primary pair, id `primary`; the flags override them. The same fields with a name in front
+// (`API reference UA content root:` …) declare one more pair per name. The name is any text; its slug
+// (`API reference` -> `api-reference`) is the pair's id, which `--pair`, qualified unit ids and the state folder use.
+export const PRIMARY = 'primary';
+const PAIR_FIELDS = { ua: 'ua content root', en: 'en i18n root', urlPrefix: 'ua url prefix', scope: 'translation scope' };
+const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+export const pairSlug = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+
+const within = (a, b) => a === b || a.startsWith(b.endsWith('/') ? b : `${b}/`);
+const dirOf = (p) => path.posix.normalize(String(p).replace(/\\/g, '/')).replace(/^\.\//, '').replace(/\/+$/, '');
+
+// Every declared pair, primary first, then the others in the order CLAUDE.md declares them: { id, name, primary, ua, en,
+// urlPrefix, scope }. Exits 2 on a missing root, an unusable name, or roots that overlap.
+export function requirePairs(settings) {
   const missing = [];
   if (!settings.uaRoot) missing.push('UA content root');
   if (!settings.enRoot) missing.push('EN i18n root');
@@ -125,8 +146,60 @@ export function requireRoots(settings) {
       data: { missing },
     });
   }
-  return { ua: settings.uaRoot, en: settings.enRoot };
+  const pairs = [{ id: PRIMARY, name: null, primary: true, ua: settings.uaRoot, en: settings.enRoot, urlPrefix: settings.urlPrefix ?? '/', scope: settings.scopeSpec ?? null }];
+
+  const claude = settings.claude ?? {};
+  const named = new Map(); // lowercase name -> { name, fields }
+  for (const field of Object.keys(claude)) {
+    for (const [prop, suffix] of Object.entries(PAIR_FIELDS)) {
+      const re = new RegExp(`^(.+?)\\s+${suffix}$`, 'i');
+      const m = field.match(re);
+      if (!m) continue;
+      const entry = named.get(m[1]) ?? { name: (claude.names?.[field] ?? field).match(re)[1], fields: {} };
+      entry.fields[prop] = claude[field];
+      named.set(m[1], entry);
+    }
+  }
+  for (const { name, fields } of named.values()) {
+    const lacking = ['ua', 'en'].filter((k) => !fields[k]).map((k) => `${name} ${k === 'ua' ? 'UA content root' : 'EN i18n root'}`);
+    if (lacking.length) throw new CliError(`Missing declaration(s): ${lacking.join(', ')}. A root pair needs both roots.`, { code: 2, data: { missing: lacking } });
+    const id = pairSlug(name);
+    if (!SLUG.test(id)) throw new CliError(`The root pair '${name}' needs a name with Latin letters or digits: its id is made from them.`, { code: 2 });
+    if (id === PRIMARY) throw new CliError(`The root pair '${name}' can't be called '${PRIMARY}': that is the id of the unprefixed pair.`, { code: 2 });
+    const twin = pairs.find((p) => p.id === id);
+    if (twin) throw new CliError(`The root pairs '${twin.name}' and '${name}' have the same id '${id}'. Rename one.`, { code: 2 });
+    pairs.push({ id, name, primary: false, ua: fields.ua, en: fields.en, urlPrefix: fields.urlPrefix ?? '/', scope: fields.scope ?? null });
+  }
+
+  // A page in two UA roots, or two pairs writing the same locale files, can't be told apart.
+  for (const [i, a] of pairs.entries()) {
+    for (const b of pairs.slice(i + 1)) {
+      for (const [kind, x, y] of [['UA content root', dirOf(a.ua), dirOf(b.ua)], ['EN i18n root', dirOf(a.en), dirOf(b.en)]]) {
+        if (within(x, y) || within(y, x)) {
+          throw new CliError(`The ${kind}s of the root pairs '${a.name ?? PRIMARY}' (${x}/) and '${b.name}' (${y}/) overlap. Each pair needs its own folders.`, { code: 2 });
+        }
+      }
+    }
+  }
+  return pairs;
 }
+
+// The pairs a run covers: all, or those `--pair <id>[,<id>]` names.
+export function selectPairs(pairs, spec) {
+  if (!spec) return pairs;
+  const wanted = spec.split(',').map((x) => x.trim()).filter(Boolean);
+  const unknown = wanted.filter((id) => !pairs.some((p) => p.id === id));
+  if (unknown.length) throw new CliError(`--pair ${unknown.join(', ')} is not a declared root pair. Declared: ${pairs.map((p) => p.id).join(', ')}.`, { code: 2, data: { pairs: pairs.map((p) => p.id) } });
+  return pairs.filter((p) => wanted.includes(p.id));
+}
+
+// Where a pair's page states live. The primary pair keeps `<state root>/pages/`. Any other pair gets
+// `<state root>/pairs/<id>/pages/`, beside `pages/` rather than in it: a folder inside `pages/` could be a primary page
+// folder of the same name, and tools that walk `pages/` would take the other pair's files for primary pages.
+export const pagesDir = (stateRoot, pair) => (pair.primary ? path.join(stateRoot, 'pages') : path.join(stateRoot, 'pairs', pair.id, 'pages'));
+
+// The id of a unit in output and selectors: the page id, or `<pair>:<page id>` when the host declares more than one pair.
+export const unitRef = (pair, id, multiPair) => (multiPair ? `${pair.id}:${id}` : id);
 
 // i18n/en/docusaurus-plugin-content-docs/current/ -> i18n/tr/docusaurus-plugin-content-docs/current/
 export function deriveLocaleRoot(enRoot, locale) {

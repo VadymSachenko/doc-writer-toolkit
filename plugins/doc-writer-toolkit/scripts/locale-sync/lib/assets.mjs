@@ -40,10 +40,11 @@ async function placeLink(linkAbs, target, { replace, dryRun }) {
   await fs.rename(tmp, linkAbs);
 }
 
-// Per-file relative symlinks: <locale root>/<dir>/.assets/<file> -> <EN root>/<dir>/.assets/<file>.
-// A real file at that path is a deliberate locale override and is never touched. With no EN asset the link falls
-// back to the UA asset and is reported, so the next run can repoint it.
+// Per-file relative symlinks: <locale root>/<dir>/.assets/<file> -> <EN root>/<dir>/.assets/<file>, the roots of the
+// page's own pair. A real file at that path is a deliberate locale override and is never touched. With no EN asset the
+// link falls back to the UA asset and is reported, so the next run can repoint it.
 export async function linkAssets(s, page, locale, allPages, { dryRun = false } = {}) {
+  const ps = page.ps;
   const uaText = await cachedBlob(s.root, page.blob);
   const items = assetsOf(page, uaText);
   const links = [];
@@ -54,10 +55,10 @@ export async function linkAssets(s, page, locale, allPages, { dryRun = false } =
       links.push({ ref: it.ref, status: 'skipped', problem: it.problem });
       continue;
     }
-    const uaAbs = abs(s, posix.join(s.ua, it.asset));
-    const enAbs = abs(s, posix.join(s.en, it.asset));
-    const linkAbs = abs(s, posix.join(localeRoot(s, locale), it.asset));
-    const entry = { asset: it.asset, link: posix.join(localeRoot(s, locale), it.asset) };
+    const uaAbs = abs(s, posix.join(ps.ua, it.asset));
+    const enAbs = abs(s, posix.join(ps.en, it.asset));
+    const linkAbs = abs(s, posix.join(localeRoot(ps, locale), it.asset));
+    const entry = { asset: it.asset, link: posix.join(localeRoot(ps, locale), it.asset) };
     const existing = await lstat(linkAbs);
 
     if (existing && !existing.isSymbolicLink()) {
@@ -92,12 +93,12 @@ export async function linkAssets(s, page, locale, allPages, { dryRun = false } =
 
   // Symlinks next to the page that no UA page in the folder references any more. Reported, never deleted.
   const referenced = new Set();
-  for (const p of allPages.filter((q) => posix.dirname(q.rel) === posix.dirname(page.rel))) {
+  for (const p of allPages.filter((q) => q.ps === ps && posix.dirname(q.rel) === posix.dirname(page.rel))) {
     const text = p.id === page.id ? uaText : await cachedBlob(s.root, p.blob);
     for (const a of assetsOf(p, text)) if (a.asset) referenced.add(a.asset);
   }
   const orphans = [];
-  const assetsDir = abs(s, posix.join(localeRoot(s, locale), posix.dirname(page.rel), '.assets'));
+  const assetsDir = abs(s, posix.join(localeRoot(ps, locale), posix.dirname(page.rel), '.assets'));
   let names = [];
   try {
     names = await fs.readdir(assetsDir, { withFileTypes: true });
@@ -106,10 +107,10 @@ export async function linkAssets(s, page, locale, allPages, { dryRun = false } =
   }
   for (const d of names) {
     const asset = posix.join(posix.dirname(page.rel), '.assets', d.name);
-    if (d.isSymbolicLink() && !referenced.has(asset)) orphans.push({ asset, link: posix.join(localeRoot(s, locale), asset) });
+    if (d.isSymbolicLink() && !referenced.has(asset)) orphans.push({ asset, link: posix.join(localeRoot(ps, locale), asset) });
   }
 
-  return { page: page.id, locale, links, assetFallbacks: fallbacks, orphans };
+  return { page: page.ref, locale, links, assetFallbacks: fallbacks, orphans };
 }
 
 // Asset references of a translated page that currently point at the UA fallback (for the recorded `assetFallbacks`).
@@ -117,11 +118,11 @@ export async function currentFallbacks(s, page, locale, uaText) {
   const out = [];
   for (const it of assetsOf(page, uaText)) {
     if (!it.asset) continue;
-    const linkAbs = abs(s, posix.join(localeRoot(s, locale), it.asset));
+    const linkAbs = abs(s, posix.join(localeRoot(page.ps, locale), it.asset));
     const st = await lstat(linkAbs);
     if (!st?.isSymbolicLink()) continue;
     const current = path.resolve(path.dirname(linkAbs), await fs.readlink(linkAbs));
-    if (current === abs(s, posix.join(s.ua, it.asset))) out.push(it.asset);
+    if (current === abs(s, posix.join(page.ps.ua, it.asset))) out.push(it.asset);
   }
   return out;
 }

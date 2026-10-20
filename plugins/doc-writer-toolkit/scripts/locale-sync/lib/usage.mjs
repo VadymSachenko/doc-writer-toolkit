@@ -16,15 +16,15 @@ export async function termUsage(s, locale, olds, selectors = []) {
   const units = selectPages(s, [...inScope, ...categoriesInScope], selectors);
   const pages = [];
   for (const unit of units) {
-    const state = await readState(s, unit.id);
+    const state = await readState(unit);
     const upToDate = state.locales[locale]?.sourceBlob === unit.blob;
     if (unit.kind === 'category') {
-      const target = await readCategoryTarget(s, locale, parseCategory(await cachedBlob(s.root, unit.blob)));
+      const target = await readCategoryTarget(unit.ps, locale, parseCategory(await cachedBlob(s.root, unit.blob)));
       const entries = target.entries.filter((e) => typeof e.message === 'string' && find(e.message).length).map((e) => ({ entryKey: e.entryKey, field: e.field, message: e.message, match: find(e.message) }));
-      if (entries.length) pages.push({ page: unit.id, kind: 'category', file: target.file, upToDate, entries, redo: 'all' });
+      if (entries.length) pages.push({ page: unit.ref, kind: 'category', file: target.file, upToDate, entries, redo: 'all' });
       continue;
     }
-    const file = localePagePath(s, locale, unit);
+    const file = localePagePath(locale, unit);
     const text = await readIfExists(abs(s, file));
     if (text === null) continue;
     const sc = splitCode(text);
@@ -38,7 +38,7 @@ export async function termUsage(s, locale, olds, selectors = []) {
     if (!hits.length) continue;
     const { changes, skipped, unmapped } = blocksAtLines(parsePage(await cachedBlob(s.root, unit.blob)), parsePage(text), hits.map((h) => h.line));
     pages.push({
-      page: unit.id,
+      page: unit.ref,
       kind: 'page',
       file,
       upToDate,

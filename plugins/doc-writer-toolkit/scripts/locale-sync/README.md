@@ -23,7 +23,7 @@ Run it from the docs repo root (or pass `--root`). Needs Node 18.3+ and `git`. T
 | `report [<page>…]` | The Requirement 13 tables. Pages only. Positional pages are the "changed pages" for the URL list. `--md` prints Markdown, `--build` also builds each locale. |
 | `stray` | Files that are changed or untracked in the repo outside the places a run writes to. Exit `1` if any. Deletes nothing. |
 
-A `<page>` is a page id (`disputes/manage-disputes`), a path, or a folder, relative to the repo root or the UA content root. A sidebar category is selected by its id (`api-reference/_category_`), its path, or its folder. A selector that matches nothing is an input error (exit `2`).
+A `<page>` is a page id (`disputes/manage-disputes`), a path, or a folder, relative to the repo root or the UA content root. A sidebar category is selected by its id (`api-reference/_category_`), its path, or its folder. A selector that matches nothing is an input error (exit `2`). A host that declares more than one root pair also takes qualified ids (`<pair>:<id>`), and a bare id or folder that two pairs have is an input error (see [Root pairs](#root-pairs)).
 
 Output is JSON on stdout and logs on stderr. A failure prints `{"error": …}`.
 
@@ -43,18 +43,52 @@ Flags override the `Documentation toolkit configuration` block of `<root>/CLAUDE
 
 | Flag | CLAUDE.md field | Meaning |
 |---|---|---|
-| `--ua-root`, `--en-root` | `UA content root:`, `EN i18n root:` | Required. A locale's root is the EN root with its `en` path segment replaced. |
+| `--ua-root`, `--en-root` | `UA content root:`, `EN i18n root:` | Required: the primary root pair. A locale's root is the EN root with its `en` path segment replaced. |
+| | `<Name> UA content root:`, `<Name> EN i18n root:`, `<Name> UA URL prefix:`, `<Name> Translation scope:` | One more root pair per `<Name>`, see [Root pairs](#root-pairs). |
+| `--pair` | | Narrows the run to these root pairs (comma-separated ids). Default: every declared pair. The unprefixed pair is `primary`. |
 | `--locales` | (from `docusaurus.config.ts`) | Narrows the run. Target locales are `i18n.locales` minus the default locale and `en`. A locale that is not configured is an error. Without a usable config, `--locales` is accepted with a warning. |
-| `--scope` | `Translation scope:` | Comma-separated folders or pages, relative to the repo root or the UA root. Default: the whole UA root. |
-| `--url-prefix` | `UA URL prefix:` | Route prefix for the report URLs (default `/`). |
+| `--scope` | `Translation scope:` | Comma-separated folders or pages, relative to the repo root or the UA root. Default: the whole UA root. `none` is an empty scope. `--scope` replaces the scope of every pair; `<pair>:<folder>` applies to that pair only. |
+| `--url-prefix` | `UA URL prefix:` | Route prefix for the report URLs (default `/`). The flag sets the primary pair's. |
 | `--state-root` | `Toolkit state root:` | Default `.doc-toolkit`. |
 | `--docusaurus-config` | | Path, if it is not `docusaurus.config.{ts,js,mjs,cjs}` in the root. |
 
 **In scope** is every `.md`/`.mdx` file committed at `HEAD` under the UA root, inside the scope, with no path segment starting with `.` or `_` (so `.sources/` and `_partial.md` are skipped).
 
+## Root pairs
+
+A docs repo with two Docusaurus docs plugin instances has two UA content roots, each with its own EN i18n root, URL prefix and locale files. Each such UA/EN pair is a **root pair**. The unprefixed fields are the **primary** pair, so a host that declares one pair needs no change. Each further pair is the same fields with a name in front:
+
+```md
+- **UA content root:** `portal/`
+- **EN i18n root:** `i18n/en/docusaurus-plugin-content-docs-portal/current/`
+- **UA URL prefix:** `/portal/`
+- **API reference UA content root:** `docs/`
+- **API reference EN i18n root:** `i18n/en/docusaurus-plugin-content-docs/current/`
+- **API reference UA URL prefix:** `/`
+- **API reference Translation scope:** `api-reference`
+```
+
+- **Name and id.** The name is any text in front of the field. Its id is the name in lower case, with each run of characters other than `a-z` and `0-9` replaced by one `-`: `API reference` → `api-reference`. The id must not be empty or `primary`, and two names can't give the same id. A pair needs both roots; `UA URL prefix` defaults to `/` and `Translation scope` to the whole UA root, as for the primary pair. Two pairs whose UA roots or EN roots are the same folder, or one inside the other, are a configuration error (exit `2`).
+- **Derived per pair, as for the primary pair:** the locale roots (the pair's EN root with `en` replaced by the locale) and the `current.json` of each locale (`<locale root>.json`).
+- **Shared by all pairs:** the label store, the term memory (one `terms/<locale>.tsv` per locale), the target locales and the build.
+- **Every command covers every pair**, unless `--pair <id>[,<id>]` narrows the run. `--ua-root`, `--en-root` and `--url-prefix` set the primary pair's roots.
+
+**State.** The primary pair keeps `<state root>/pages/<page id>.json`. Every other pair keeps `<state root>/pairs/<id>/pages/<page id>.json`. The extra pairs' states sit beside `pages/`, not in it, because any folder inside `pages/` could be a primary page folder of the same name: `pages/api-reference/…` is where a primary page `api-reference/…` keeps its state. Next to `pages/`, no page id of any pair can reach another pair's file, and a tool that walks `pages/` (an older version of this script, or `ui-labels sync`) never takes another pair's state for a primary page. Adding a pair moves no file: the primary states stay where they are and stay `current`.
+
+**Ids in output and selectors.** With more than one pair declared, every unit id in the output is `<pair>:<id>`: `primary:transactions/transactions`, `api-reference:transactions/transactions`. That is the `page` of status rows, of `blocks`, `link-assets`, `check` and `record` results, of `bind` pages, `terms --usage` pages, `links[]` rows, the `report` rows and tables, and `orphaned` / `moved`. A host with one pair keeps bare ids. Every command takes the qualified id back as a selector. Other selectors resolve like this:
+
+- `<pair>:<selector>` (an id, a path or a folder) looks in that pair only.
+- A path or folder from the repo root (`docs/transactions/transactions.md`) always resolves to the pair whose UA root holds it.
+- A bare id or folder relative to a UA root resolves when only one pair has it. When two pairs have it, the selector is ambiguous: exit `2` with `ambiguous: [{ selector, candidates: [{ selector: "<pair>:<selector>", pair, units: [<paths, up to 5>], more? }] }]`. Pass one of the candidates' selectors.
+- With `--pair`, only the units of those pairs are candidates.
+
+`bind --decisions` takes the ids `bind` printed. A bare id that two pairs have is rejected (`the id names a unit of more than one root pair: use …`).
+
+**A state written against another pair's roots.** A primary state file is read for the primary page of that id only. When a primary state records, for some locale, the UA blob of the other pair's page with the same id (a run whose `--ua-root` and `--en-root` pointed at that pair), `status` warns, and the state stays with the primary page. A primary state file whose id only another pair has is listed in `orphaned` with a `note`: that pair's unit keeps its state in its own folder, so this file is not read for it.
+
 ## Stale detection (`status`)
 
-State is one file per UA page, `<state root>/pages/<page id>.json` (the layout `ui-labels` documents). Only `record` writes `locales.<locale>`; `status`, `blocks` and `check` read the state and write nothing. `spans` belongs to the binding pass (`bind`, `ui-labels sync`) and `record` keeps it as it is.
+State is one file per UA page, `<state root>/pages/<page id>.json` (the layout `ui-labels` documents; another root pair's is `<state root>/pairs/<pair id>/pages/<page id>.json`). Only `record` writes `locales.<locale>`; `status`, `blocks` and `check` read the state and write nothing. `spans` belongs to the binding pass (`bind`, `ui-labels sync`) and `record` keeps it as it is.
 
 For every page and locale, one cell:
 
@@ -72,7 +106,9 @@ Only **committed** content counts. Uncommitted changes to a UA page are reported
 
 The `summary` carries what the skill needs for the confirmation: `stalePages`, `languages`, `pageTranslations`, `words`, `bootstrap`, `needsConfirmation` (`stalePages > threshold`, default 10, `--threshold`) and a ready `message` ("24 pages × 8 languages = 192 page translations, about 113,600 words"). Each stale cell has a `words` estimate: the whole page for `full`, the changed blocks only for `incremental`.
 
-`orphaned` lists state files and locale files whose UA page no longer exists. `moved` lists the same, when a current UA page with no state has the recorded blob. Nothing is deleted or moved (moving is Phase 2).
+`orphaned` lists state files and locale files whose UA page no longer exists. `moved` lists the same, when a current UA page with no state has the recorded blob. Nothing is deleted or moved (moving is Phase 2). Each pair is checked against its own state folder and locale roots.
+
+With more than one root pair declared, the output also has `pairs[]` (`id`, `name`, `uaRoot`, `enRoot`, `urlPrefix`, `states`: the pair's state folder) and `summary.byPair` (per pair id: `pages`, `stalePages`, `pageTranslations`, `categoryTranslations`, `words`). `uaRoot` is the UA root of the first pair of the run.
 
 `sidebarLabels[]` (and a warning per file) lists, per locale, the sidebar category labels in its docs-plugin `current.json` that are still Ukrainian and that no `_category_.json` owns: `write-translations` fills the file with the default-language labels of an autogenerated sidebar, and Docusaurus prefers them to the translated titles of the section pages, so that locale's sidebar shows Ukrainian. A label counts as untranslated when it keeps Ukrainian-only letters, or when the same Cyrillic text stands under the same key in two or more of the run's locales (so narrow `--locales` to a single Cyrillic-script locale and only the first test applies). The fix is to delete the file where the sidebar is autogenerated; categories with a `_category_.json` are tracked as units and never reported here.
 
@@ -110,7 +146,7 @@ Every `full` and `incremental` result (and every category) also carries what the
 | `undecided[]` | Spans with no decision: the binding pass has not run on them. |
 | `terms[]` | Term-memory entries whose UA term occurs in the text, matched by prefix to cover inflection (a word of 4 letters without its last letter, longer words without their last two): `{ ua, target, source }`. When the term equals a UI string with one string in the locale, that string wins (`source: "ui"`, the memory's value in `recorded` if it differs). `term` and `unverified` spans that equal a UI string are added even without an entry. So is the plain first cell of a table body row (no markup, code or link) that equals a UI string: attribute tables name the app's columns and fields without bold, so no span covers them (`where: "table"`). |
 | `termConflicts[]` | A matched term recorded twice with different translations. The first line is used. |
-| `links[]` | Links whose UA text names the target page by its title, in any grammatical form (same words, each one matched without its last two letters): `{ text, url, page, title }`. `title` is the target page's title in this locale, which the link text uses, inflected as the sentence needs; `null` while the target has no translation. Routes resolve as Docusaurus does (see `report`), and relative `.md` links by path. |
+| `links[]` | Links whose UA text names the target page by its title, in any grammatical form (same words, each one matched without its last two letters): `{ text, url, page, title }`. `title` is the target page's title in this locale, which the link text uses, inflected as the sentence needs; `null` while the target has no translation. Routes resolve as Docusaurus does (see `report`), and relative `.md` links by path. A link reaches the pages of every declared root pair: each pair's routes carry its own URL prefix. |
 
 **How blocks are found.** Both pages are parsed into a tree of sections and blocks (`lib/parse.mjs`), the trees are diffed, and the changed units are expanded as `context/changed-blocks.md` says: a changed sentence → its paragraph, a list item → the item with its sub-items, a table cell → the row (header → the whole table), a heading → its whole section with its subsections, an admonition or MDX component → its whole body, frontmatter → the value. More than half of a section's blocks changed → its whole body (heading and subsections excluded). This is the unit set that expanding `git diff A B` hunks produces, found on parsed blocks instead of line numbers.
 
@@ -216,9 +252,9 @@ Warnings:
 
 ## Sidebar categories (`_category_.json`)
 
-A `_category_.json` in the UA content root is a unit of its own (`kind: "category"`, id `<dir>/_category_`), tracked like a page by `status`, `blocks`, `check` and `record`, with the same state file layout (`<state root>/pages/<dir>/_category_.json`) and the same `current` / `new` / `stale` / `skipped` cells.
+A `_category_.json` in the UA content root is a unit of its own (`kind: "category"`, id `<dir>/_category_`), tracked like a page by `status`, `blocks`, `check` and `record`, with the same state file layout (`<state root>/pages/<dir>/_category_.json`, or the pair's own state folder) and the same `current` / `new` / `stale` / `skipped` cells.
 
-Docusaurus reads `_category_.json` from the UA root only; a copy in the `i18n` tree is ignored. A locale's text lives in that locale's `current.json` (written by `write-translations`), so that is the target: `<locale root>.json`, for example `i18n/tr/docusaurus-plugin-content-docs/current.json`. Per category there are up to three entries, found by their key suffix so the sidebar id need not be known:
+Docusaurus reads `_category_.json` from the UA root only; a copy in the `i18n` tree is ignored. A locale's text lives in that locale's `current.json` (written by `write-translations`), so that is the target: `<locale root>.json`, for example `i18n/tr/docusaurus-plugin-content-docs/current.json`. Each root pair has its own (`i18n/tr/docusaurus-plugin-content-docs-portal/current.json`). Per category there are up to three entries, found by their key suffix so the sidebar id need not be known:
 
 | UA field | `current.json` entry |
 |---|---|
@@ -236,15 +272,15 @@ Docusaurus reads `_category_.json` from the UA root only; a copy in the `i18n` t
 
 ## Report (`report`)
 
-Over every in-scope page and target locale: `exists`, `imagesResolve`, `checksPassed`, the failing check names, `unverified` / `assetFallbacks` counts, `upToDate`, and the local URL of the page (`http://localhost:3000/<locale><route>`, with `--origin` and the config's `baseUrl`; the route follows Docusaurus: `folder/folder.md` and `index.md` collapse to the folder, number prefixes are dropped, `slug:` wins). Exit `1` unless every page exists, resolves its images, passes its checks and every build passed.
+Over every in-scope page and target locale: `exists`, `imagesResolve`, `checksPassed`, the failing check names, `unverified` / `assetFallbacks` counts, `upToDate`, and the local URL of the page (`http://localhost:3000/<locale><route>`, with `--origin` and the config's `baseUrl`; the route follows Docusaurus: the page's own pair's `UA URL prefix`, then `folder/folder.md` and `index.md` collapse to the folder, number prefixes are dropped, `slug:` wins). Exit `1` unless every page exists, resolves its images, passes its checks and every build passed.
 
 `--md` adds a list of the link texts that name a page differently from its title (the `check` warning), per page and locale.
 
-`--build` runs `npm run build -- --locale <locale>` for each locale that has a changed page (sequentially, 30 minute timeout each) and reports unresolved images and broken links per page, or the last log lines.
+`--build` runs `npm run build -- --locale <locale>` for each locale that has a changed page (sequentially, 30 minute timeout each) and reports unresolved images and broken links per page, or the last log lines. An unresolved image's `folder` is relative to the locale root of its pair, and `pair` names that pair when the host has more than one.
 
 ## Stray files (`stray`)
 
-A run writes to the locale roots, the locales' `current.json`, the state root and `.gitattributes`. `stray` lists everything else that `git status` shows as changed or untracked (an empty file in the repo root is the usual leftover of a worker's scratch file). `stray --save <file>` records what is already dirty, with content hashes; `stray --baseline <file>` then ignores those paths unless their content changed, so the user's own uncommitted work is not reported. Output: `{ ok, stray: [{ path, status, empty? }], ignored, allowed }`, exit `1` when `stray` is not empty. Nothing is deleted: the user removes the files (some repos deny `rm` to sessions).
+A run writes to the locale roots, the locales' `current.json` (of every root pair of the run), the state root and `.gitattributes`. `stray` lists everything else that `git status` shows as changed or untracked (an empty file in the repo root is the usual leftover of a worker's scratch file). `stray --save <file>` records what is already dirty, with content hashes; `stray --baseline <file>` then ignores those paths unless their content changed, so the user's own uncommitted work is not reported. Output: `{ ok, stray: [{ path, status, empty? }], ignored, allowed }`, exit `1` when `stray` is not empty. Nothing is deleted: the user removes the files (some repos deny `rm` to sessions).
 
 ## Limits
 

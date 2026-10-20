@@ -291,15 +291,15 @@ export async function checkPage({ locale, uaText, targetText, targetFile, state,
 export async function checkTranslation(s, page, locale, { candidate = null, unverified = [], store } = {}) {
   if (page.kind === 'category') return checkCategoryUnit(s, page, locale, { candidate, unverified, store });
   const uaText = await cachedBlob(s.root, page.blob);
-  const targetFile = localePagePath(s, locale, page);
+  const targetFile = localePagePath(locale, page);
   const targetText = await readIfExists(candidate ? path.resolve(candidate) : abs(s, targetFile));
-  const state = await readState(s, page.id);
+  const state = await readState(page);
   const st = store === undefined ? await loadStore(s.labelsDir) : store;
   const labels = st ? mergedLabels(st).labels : null;
   const terms = await readTerms(s, locale);
   const knownStrings = new Set([...terms.entries.map((e) => e.target), ...Object.values(labels?.[locale] ?? {})].map(normString));
   const linkTitles = targetText === null ? [] : await titleLinks(s, page, uaText, locale);
   const result = await checkPage({ locale, uaText, targetText, targetFile, state, labels, meta: st?.meta, unverified: [...unverified, ...(state.locales[locale]?.unverified ?? [])].filter(Boolean), root: s.root, linkTitles, knownStrings });
-  return { ...result, page: page.id, locale, file: targetFile, uaText, targetText, state, store: st, labels };
+  return { ...result, page: page.ref, locale, file: targetFile, uaText, targetText, state, store: st, labels };
 }
 

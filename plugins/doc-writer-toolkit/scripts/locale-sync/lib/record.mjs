@@ -61,7 +61,7 @@ export async function runRecord(s, { selectors = [], candidate = null, unverifie
     for (const locale of targets) {
       const c = await checkTranslation(s, page, locale, { candidate, unverified: given });
       if (!c.ok) {
-        results.push({ page: page.id, locale, recorded: false, failures: c.failures, note: 'The state was not advanced and no file was written.' });
+        results.push({ page: page.ref, locale, recorded: false, failures: c.failures, note: 'The state was not advanced and no file was written.' });
         continue;
       }
 
@@ -100,13 +100,13 @@ export async function runRecord(s, { selectors = [], candidate = null, unverifie
       };
       // Re-read under the lock: the workers of other locales record this page's state file in parallel.
       if (!dryRun) {
-        const file = statePath(s, page.id);
+        const file = statePath(page);
         await withLock(file, async () => {
-          const fresh = await readState(s, page.id);
+          const fresh = await readState(page);
           await writeJson(file, { ...fresh, locales: { ...fresh.locales, [locale]: entry } });
         });
       }
-      results.push({ page: page.id, locale, recorded: true, dryRun, file: c.file, state: path.relative(s.root, statePath(s, page.id)), entry, warnings: c.warnings });
+      results.push({ page: page.ref, locale, recorded: true, dryRun, file: c.file, state: path.relative(s.root, statePath(page)), entry, warnings: c.warnings });
     }
   }
   return { results };

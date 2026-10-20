@@ -26,7 +26,7 @@ export async function runBlocks(s, { selectors = [], overwrite = false, withOld 
   if (!ctx.labels) warnings.push('No label store: bound labels have no string to write. Run the UI label check first.');
   const results = [];
   for (const unit of units) {
-    const state = await readState(s, unit.id);
+    const state = await readState(unit);
     for (const locale of targets) {
       results.push(unit.kind === 'category' ? await categoryBlocksFor(s, unit, locale, state, { overwrite, ctx, redo }) : await blocksFor(s, unit, locale, state, { overwrite, withOld, ctx, redo, redoLines }));
     }
@@ -63,9 +63,9 @@ function categoryLabelRows(parsed, state, locale, ctx) {
 async function categoryBlocksFor(s, unit, locale, state, { overwrite, ctx, redo }) {
   const text = await cachedBlob(s.root, unit.blob);
   const parsed = parseCategory(text);
-  const target = await readCategoryTarget(s, locale, parsed);
+  const target = await readCategoryTarget(unit.ps, locale, parsed);
   const cell = classify({ entry: state.locales[locale], blob: unit.blob, targetExists: target.exists, handMade: target.handMade, baseExists: true, overwrite });
-  const head = { kind: 'category', page: unit.id, path: unit.path, blob: unit.blob, locale, target: { path: target.file, exists: target.exists }, state: cell.state, reason: cell.reason };
+  const head = { kind: 'category', page: unit.ref, path: unit.path, blob: unit.blob, locale, target: { path: target.file, exists: target.exists }, state: cell.state, reason: cell.reason };
   if (parsed.error) return { ...head, mode: 'error', error: `The UA category file is not valid JSON: ${parsed.error}` };
   // A category is short: --redo, whatever its value, translates it again in full.
   if (cell.state === 'current' && !redo) return { ...head, mode: 'none', changes: [] };
@@ -117,12 +117,12 @@ async function redoBlocksFor(s, page, head, targetText, state, locale, ctx, line
 }
 
 async function blocksFor(s, page, locale, state, { overwrite, withOld, ctx, redo, redoLines }) {
-  const file = localePagePath(s, locale, page);
+  const file = localePagePath(locale, page);
   const targetText = await readIfExists(abs(s, file));
   const entry = state.locales[locale];
   const baseExists = entry?.sourceBlob ? (await existingBlobs(s.root, [entry.sourceBlob])).has(entry.sourceBlob) : false;
   const cell = classify({ entry, blob: page.blob, targetExists: targetText !== null, baseExists, overwrite });
-  const head = { kind: 'page', page: page.id, path: page.path, blob: page.blob, locale, target: { path: file, exists: targetText !== null }, state: cell.state, reason: cell.reason };
+  const head = { kind: 'page', page: page.ref, path: page.path, blob: page.blob, locale, target: { path: file, exists: targetText !== null }, state: cell.state, reason: cell.reason };
 
   if (redo && cell.state !== 'current') {
     return { ...head, mode: 'error', error: `--redo needs a page that is current in '${locale}' (it is ${cell.state}${cell.reason ? `, ${cell.reason}` : ''}): translate its pending changes first, then redo.` };

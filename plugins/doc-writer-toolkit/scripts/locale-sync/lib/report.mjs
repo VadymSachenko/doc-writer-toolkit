@@ -46,13 +46,14 @@ function runBuild(s, locale, timeoutMs) {
   });
 }
 
-// Pulls page-level problems out of a Docusaurus build log: unresolved images/modules and broken links.
+// Pulls page-level problems out of a Docusaurus build log: unresolved images/modules and broken links. An unresolved
+// file's `folder` is relative to the locale root of the pair it is in (`pair` names it when the host has several).
 export function parseBuildErrors(s, locale, log) {
   const errors = [];
-  const root = abs(s, localeRoot(s, locale));
+  const roots = (s.pairs ?? [s]).map((ps) => ({ ps, root: abs(s, localeRoot(ps, locale)) }));
   for (const m of log.matchAll(/Can't resolve '([^']+)' in '([^']+)'/g)) {
-    const rel = path.relative(root, m[2]).split(path.sep).join('/');
-    errors.push({ kind: 'unresolved', ref: m[1], folder: rel.startsWith('..') ? m[2] : rel, message: `Can't resolve '${m[1]}'` });
+    const at = roots.map((r) => ({ ...r, rel: path.relative(r.root, m[2]).split(path.sep).join('/') })).find((r) => !r.rel.startsWith('..'));
+    errors.push({ kind: 'unresolved', ref: m[1], folder: at ? at.rel : m[2], ...(at && s.multiPair ? { pair: at.ps.pair.id } : {}), message: `Can't resolve '${m[1]}'` });
   }
   for (const m of log.matchAll(/On source page path = (\S+?):\s*\n((?:\s+-> linking to [^\n]*\n?)+)/g)) {
     for (const l of m[2].split('\n').filter((x) => x.trim())) errors.push({ kind: 'broken-link', route: m[1], message: l.trim() });
@@ -67,17 +68,17 @@ const mark = (ok) => (ok ? '✓' : '✗');
 export async function runReport(s, { changed = [], build = false, origin = 'http://localhost:3000', buildTimeoutMin = 30 } = {}) {
   const { targets } = await resolveTargets(s);
   const { inScope } = await listUaPages(s);
-  const changedPages = new Set((changed.length ? selectPages(s, inScope, changed) : inScope).map((p) => p.id));
+  const changedPages = new Set((changed.length ? selectPages(s, inScope, changed) : inScope).map((p) => p.ref));
   const baseUrl = (await readBaseUrl(s)).replace(/\/+$/, '');
   const store = await loadStore(s.labelsDir);
 
   const rows = [];
   for (const page of inScope) {
     const uaText = await cachedBlob(s.root, page.blob);
-    const state = await readState(s, page.id);
-    const row = { page: page.id, changed: changedPages.has(page.id), cells: {} };
+    const state = await readState(page);
+    const row = { page: page.ref, changed: changedPages.has(page.ref), cells: {} };
     for (const locale of targets) {
-      const file = localePagePath(s, locale, page);
+      const file = localePagePath(locale, page);
       const exist = await exists(abs(s, file));
       const cell = { exists: exist, imagesResolve: false, checksPassed: false, failures: [] };
       if (exist) {
@@ -92,7 +93,7 @@ export async function runReport(s, { changed = [], build = false, origin = 'http
         cell.recorded = Boolean(entry?.sourceBlob);
         cell.upToDate = entry?.sourceBlob === page.blob;
       }
-      cell.url = `${origin}${baseUrl}/${locale}${docRoute(s, page, uaText)}`;
+      cell.url = `${origin}${baseUrl}/${locale}${docRoute(page.ps, page, uaText)}`;
       row.cells[locale] = cell;
     }
     rows.push(row);
@@ -105,7 +106,7 @@ export async function runReport(s, { changed = [], build = false, origin = 'http
       const r = await runBuild(s, locale, buildTimeoutMin * 60_000);
       const pages = new Set();
       for (const e of r.errors) {
-        if (e.folder) for (const p of inScope) if (posix.dirname(p.rel) === e.folder) pages.add(p.id);
+        if (e.folder) for (const p of inScope) if (posix.dirname(p.rel) === e.folder && (!e.pair || e.pair === p.ps.pair.id)) pages.add(p.ref);
       }
       buildResults[locale] = { ...r, pages: [...pages] };
     }

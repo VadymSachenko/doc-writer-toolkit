@@ -16,8 +16,8 @@ import { acceptedLabels } from './labels.mjs';
 
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-// `<locale root>.json`: i18n/tr/docusaurus-plugin-content-docs/current -> .../current.json
-export const categoryFile = (s, locale) => `${localeRoot(s, locale)}.json`;
+// `<locale root>.json` of a root pair: i18n/tr/docusaurus-plugin-content-docs/current -> .../current.json
+export const categoryFile = (ps, locale) => `${localeRoot(ps, locale)}.json`;
 
 export function parseCategory(text) {
   let data;
@@ -37,11 +37,11 @@ export function parseCategory(text) {
   return { key: str(data.key) ?? str(data.label), fields };
 }
 
-// The category's entries in a locale's current.json. `exists` means every entry is there; `handMade` that at least one
-// message already differs from the UA text (someone translated it without this process).
-export async function readCategoryTarget(s, locale, parsed) {
-  const file = categoryFile(s, locale);
-  const raw = await readIfExists(abs(s, file));
+// The category's entries in the current.json of its pair (`ps`) for a locale. `exists` means every entry is there;
+// `handMade` that at least one message already differs from the UA text (someone translated it without this process).
+export async function readCategoryTarget(ps, locale, parsed) {
+  const file = categoryFile(ps, locale);
+  const raw = await readIfExists(abs(ps, file));
   let data = null;
   let error = null;
   if (raw !== null) {
@@ -73,8 +73,8 @@ async function readCandidate(candidate) {
 // Check one category in one locale. `candidate` is a { entryKey: message } file judged as if it were applied.
 export async function checkCategoryUnit(s, unit, locale, { candidate = null, unverified = [], store } = {}) {
   const parsed = parseCategory(await cachedBlob(s.root, unit.blob));
-  const target = await readCategoryTarget(s, locale, parsed);
-  const state = await readState(s, unit.id);
+  const target = await readCategoryTarget(unit.ps, locale, parsed);
+  const state = await readState(unit);
   const st = store === undefined ? await loadStore(s.labelsDir) : store;
   const labels = st ? mergedLabels(st).labels : null;
   const overrides = candidate ? await readCandidate(candidate) : {};
@@ -115,7 +115,7 @@ export async function checkCategoryUnit(s, unit, locale, { candidate = null, unv
   }
 
   const checks = [...new Set(failures.map((f) => f.check))];
-  return { ok: !failures.length, failures, warnings: [], checks, page: unit.id, locale, file: target.file, state, store: st, labels, category: { parsed, target, messages, overrides } };
+  return { ok: !failures.length, failures, warnings: [], checks, page: unit.ref, locale, file: target.file, state, store: st, labels, category: { parsed, target, messages, overrides } };
 }
 
 // Writes the candidate's messages into current.json. Everything else in the file (other entries, descriptions) stays.

@@ -28,7 +28,8 @@ Project options (default: the 'Documentation toolkit configuration' block of <ro
   --locales <list>          target locales (default: docusaurus.config.ts i18n.locales minus default and en)
   --docusaurus-config <f>   path to the Docusaurus config
   --state-root <dir>        default .doc-toolkit
-  --ua-root <dir>  --en-root <dir>   page roots (sync)
+  --ua-root <dir>  --en-root <dir>   the primary pair's page roots (sync)
+  --pair <list>             sync only these root pairs (default: every declared pair; the unprefixed one is primary)
   --ticket <n[,n]>          ticket number(s) for the overlay (default: leading numbers of the git branch)
 
 import:  --dry-run  --no-libs  --discard-pending
@@ -45,6 +46,7 @@ const OPTIONS = {
   'state-root': { type: 'string' },
   'ua-root': { type: 'string' },
   'en-root': { type: 'string' },
+  pair: { type: 'string' },
   ticket: { type: 'string' },
   'dry-run': { type: 'boolean' },
   'no-libs': { type: 'boolean' },

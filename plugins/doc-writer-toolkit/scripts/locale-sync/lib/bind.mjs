@@ -3,6 +3,7 @@ import { loadStore, mergedLabels } from '../../ui-labels/lib/store.mjs';
 import { runLookup } from '../../ui-labels/lib/lookup.mjs';
 import { runBlocks } from './blocks.mjs';
 import { listUaPages, readState, statePath } from './pages.mjs';
+import { splitQualified } from './settings.mjs';
 import { cachedBlob } from './plan.mjs';
 import { parseCategory } from './categories.mjs';
 import { withLock } from './lock.mjs';
@@ -49,10 +50,12 @@ const clip = (text, at) => {
 // it in full, otherwise the changed blocks. As segments (`spans.mjs`), so each line has its heading path.
 async function unitsToBind(s, selectors, overwrite) {
   const { results, warnings } = await runBlocks(s, { selectors: selectors.length ? selectors : ['.'], overwrite });
+  const { all, categories } = await listUaPages(s);
+  const byRef = new Map([...all, ...categories].map((u) => [u.ref, u]));
   const units = new Map();
   for (const r of results) {
     if (r.mode !== 'full' && r.mode !== 'incremental') continue;
-    const u = units.get(r.page) ?? { page: r.page, kind: r.kind, blob: r.blob, full: false, parts: new Map() };
+    const u = units.get(r.page) ?? { page: r.page, unit: byRef.get(r.page), kind: r.kind, blob: r.blob, full: false, parts: new Map() };
     if (r.kind === 'category') {
       const label = parseCategory(await cachedBlob(s.root, r.blob)).fields.find((f) => f.field === 'label')?.ua;
       if (label) u.categoryLabel = label;
@@ -83,7 +86,7 @@ export async function runBind(s, { selectors = [], overwrite = false, dryRun = f
   const work = [];
   const toLookUp = new Set();
   for (const u of units) {
-    const state = await readState(s, u.page);
+    const state = await readState(u.unit);
     const occ =
       u.kind === 'category'
         ? u.categoryLabel
@@ -115,7 +118,7 @@ export async function runBind(s, { selectors = [], overwrite = false, dryRun = f
   // decided the same way everywhere. They become the `suggest` of an ask that has none (`seenOn` counts them).
   const elsewhere = new Map();
   for (const p of (await listUaPages(s)).all) {
-    for (const [span, d] of Object.entries((await readState(s, p.id)).spans)) {
+    for (const [span, d] of Object.entries((await readState(p)).spans)) {
       const m = elsewhere.get(span) ?? new Map();
       elsewhere.set(span, m.set(d, (m.get(d) ?? 0) + 1));
     }
@@ -206,7 +209,7 @@ export async function runBind(s, { selectors = [], overwrite = false, dryRun = f
           continue;
         }
         const keys = hit.status === 'ambiguous' ? hit.candidates.map((c) => c.key) : [hit.key, ...hit.alsoKeys];
-        const pick = keys.length === 1 ? keys[0] : pickByNamespace(keys, u.page, bound);
+        const pick = keys.length === 1 ? keys[0] : pickByNamespace(keys, u.unit.id, bound);
         if (hit.class === 'label' && hit.match !== 'pattern' && ui && pick) {
           const why = recheck
             ? 'now in the dictionary'
@@ -242,7 +245,7 @@ export async function runBind(s, { selectors = [], overwrite = false, dryRun = f
       const k = keys.get(r.span);
       if (k.length !== 1 || k[0] !== r.span) r.keys = k;
     }
-    if (resolved.length && !dryRun) await writeSpans(s, u.page, Object.fromEntries(resolved.flatMap((r) => keys.get(r.span).map((k) => [k, r.decision]))));
+    if (resolved.length && !dryRun) await writeSpans(u.unit, Object.fromEntries(resolved.flatMap((r) => keys.get(r.span).map((k) => [k, r.decision]))));
     const rechecked = open.filter(([, occ]) => occ.every((o) => o.decision)).length;
     pages.push({ page: u.page, kind: u.kind, spans: inScope, decided: inScope - open.length + rechecked, resolved, ask });
   }
@@ -256,31 +259,36 @@ export async function runBind(s, { selectors = [], overwrite = false, dryRun = f
   };
 }
 
-async function writeSpans(s, id, decisions) {
-  const file = statePath(s, id);
+async function writeSpans(unit, decisions) {
+  const file = statePath(unit);
   await withLock(file, async () => {
-    const fresh = await readState(s, id);
+    const fresh = await readState(unit);
     await writeJson(file, { ...fresh, spans: { ...fresh.spans, ...decisions } });
   });
 }
 
 // Records the model's decisions: { "<page id>": { "<span>": "label:<key>" | "unverified" | "term" | "emphasis" } }. A key
-// `<span>@<heading>` scopes the decision to that heading (its title or `#anchor`) and its subsections.
+// `<span>@<heading>` scopes the decision to that heading (its title or `#anchor`) and its subsections. A page id is the
+// unit's id as `status` and `bind` print it: `<pair>:<id>` when the host declares several root pairs. A bare id that
+// two pairs have is rejected with the qualified ids.
 export async function runDecisions(s, file, { dryRun = false } = {}) {
   const data = await readJson(file);
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw new CliError(`${file} must be a JSON object { "<page>": { "<span>": "<decision>" } }.`, { code: 2 });
   const store = await loadStore(s.labelsDir);
   const labels = store ? mergedLabels(store).labels : {};
   const { all, categories } = await listUaPages(s);
-  const units = new Map([...all, ...categories].map((u) => [u.id, u]));
+  const everyUnit = [...all, ...categories];
   const written = [];
   const rejected = [];
   for (const [id, decisions] of Object.entries(data)) {
-    const unit = units.get(id.replace(/\.(md|mdx|json)$/, ''));
-    if (!unit) {
-      rejected.push({ page: id, reason: 'no UA page or category with this id' });
+    const q = splitQualified(id, s.pairIds);
+    const bare = (q ? q.rest : id).replace(/\.(md|mdx|json)$/, '');
+    const found = everyUnit.filter((u) => u.id === bare && (!q || u.ps.pair.id === q.pair));
+    if (found.length !== 1) {
+      rejected.push({ page: id, reason: found.length ? `the id names a unit of more than one root pair: use ${found.map((u) => u.ref).join(' or ')}` : 'no UA page or category with this id' });
       continue;
     }
+    const [unit] = found;
     const text = await cachedBlob(s.root, unit.blob);
     const category = unit.kind === 'category';
     const occurrences = category ? [] : spanOccurrences(text);
@@ -289,7 +297,7 @@ export async function runDecisions(s, file, { dryRun = false } = {}) {
     const scopes = map ? pageScopes(map) : new Set();
     // A scoped key is valid when the span occurs under that heading.
     const underScope = ({ span, scope }) => occurrences.some((o) => o.span === span && map.paths[map.at[o.line - 1]].some((h) => h.title === scope || `#${h.anchor}` === scope));
-    const state = await readState(s, unit.id);
+    const state = await readState(unit);
     const accepted = {};
     for (const [span, decision] of Object.entries(decisions ?? {})) {
       const key = typeof decision === 'string' && decision.startsWith('label:') ? decision.slice(6) : null;
@@ -304,13 +312,13 @@ export async function runDecisions(s, file, { dryRun = false } = {}) {
               : key && !Object.values(labels).some((m) => typeof m?.[key] === 'string')
                 ? 'the label store has no such key'
                 : null;
-      if (reason) rejected.push({ page: unit.id, span, decision, reason });
+      if (reason) rejected.push({ page: unit.ref, span, decision, reason });
       else {
         accepted[span] = decision;
-        written.push({ page: unit.id, span, decision, ...(state.spans[span] && state.spans[span] !== decision ? { previous: state.spans[span] } : {}) });
+        written.push({ page: unit.ref, span, decision, ...(state.spans[span] && state.spans[span] !== decision ? { previous: state.spans[span] } : {}) });
       }
     }
-    if (Object.keys(accepted).length && !dryRun) await writeSpans(s, unit.id, accepted);
+    if (Object.keys(accepted).length && !dryRun) await writeSpans(unit, accepted);
   }
   return { dryRun, written, rejected };
 }

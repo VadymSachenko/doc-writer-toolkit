@@ -3,7 +3,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { CliError, exists, gitBlobHash, log, readJson, writeJson } from './util.mjs';
-import { deriveLocaleRoot, requireRoots } from './config.mjs';
+import { deriveLocaleRoot, pagesDir, requirePairs, selectPairs, unitRef } from './config.mjs';
 import { isLib, loadStore, PENDING_DIFF } from './store.mjs';
 import { uiParts } from './lookup.mjs';
 import { categoryContext, categoryFile, categoryShows, isCategoryId, patchCategory } from './categories.mjs';
@@ -116,11 +116,20 @@ export async function runSync(settings, { commit = false, dryRun = false, diffFi
   }
   const store = await loadStore(settings.labelsDir);
   if (!store) throw new CliError('No label snapshot found. Run `import` first.', { code: 2 });
-  const roots = requireRoots(settings);
+  const declared = requirePairs(settings);
+  const multiPair = declared.length > 1;
 
   const top = (await git(settings.root, ['rev-parse', '--show-toplevel'])).trim();
-  const localeRoots = { uk: path.resolve(settings.root, roots.ua), en: path.resolve(settings.root, roots.en) };
-  for (const l of store.meta.locales) if (l !== 'uk' && l !== 'en') localeRoots[l] = path.resolve(settings.root, deriveLocaleRoot(roots.en, l));
+  // Each root pair has its own UA, EN and locale roots, and its own state folder. A page is patched in its pair's files.
+  const stateFiles = [];
+  const syncing = selectPairs(declared, settings.pairSpec);
+  for (const pair of syncing) {
+    const localeRoots = { uk: path.resolve(settings.root, pair.ua), en: path.resolve(settings.root, pair.en) };
+    for (const l of store.meta.locales) if (l !== 'uk' && l !== 'en') localeRoots[l] = path.resolve(settings.root, deriveLocaleRoot(pair.en, l));
+    const dir = pagesDir(settings.stateRoot, pair);
+    for (const file of (await walkJson(dir)).sort()) stateFiles.push({ file, rel: path.relative(dir, file).replace(/\.json$/, ''), page: null, localeRoots, pair });
+  }
+  for (const f of stateFiles) f.page = unitRef(f.pair, f.rel.split(path.sep).join('/'), multiPair);
 
   const { changes, ambiguous } = planChanges(diff);
   const removed = new Set(diff.removed.map((r) => r.key));
@@ -142,16 +151,14 @@ export async function runSync(settings, { commit = false, dryRun = false, diffFi
   const touched = new Set();
   const brokenBy = new Map();
 
-  const pagesDir = path.join(settings.stateRoot, 'pages');
-  for (const stateFile of (await walkJson(pagesDir)).sort()) {
-    const rel = path.relative(pagesDir, stateFile).replace(/\.json$/, '');
+  for (const { file: stateFile, rel, page, localeRoots } of stateFiles) {
     const state = await readJson(stateFile);
     const spans = state?.spans ?? {};
     const bound = new Map();
     for (const [text, decision] of Object.entries(spans)) {
       if (decision.startsWith('label:')) bound.set(decision.slice(6), [...(bound.get(decision.slice(6)) ?? []), text]);
     }
-    for (const key of bound.keys()) if (removed.has(key)) brokenBy.set(key, [...(brokenBy.get(key) ?? []), rel]);
+    for (const key of bound.keys()) if (removed.has(key)) brokenBy.set(key, [...(brokenBy.get(key) ?? []), page]);
     const relevant = changes.filter((c) => bound.has(c.fromKey));
     // A `term` span with markup (`⋮&nbsp;>&nbsp;Переглянути`) is written part by part from the store, so no key is bound
     // to it and nothing here patches it. A part that is a changed string is listed for a writer instead of going stale.
@@ -159,12 +166,12 @@ export async function runSync(settings, { commit = false, dryRun = false, diffFi
       if (decision !== 'term' || !uiParts(text).markup) continue;
       for (const c of changes) {
         const ua = c.locales.uk;
-        if (ua?.old && ua.old !== ua.new && uiParts(text).parts.includes(ua.old)) report.markupParts.push({ page: rel, span: text, changedKey: c.toKey, old: ua.old, new: ua.new });
+        if (ua?.old && ua.old !== ua.new && uiParts(text).parts.includes(ua.old)) report.markupParts.push({ page, span: text, changedKey: c.toKey, old: ua.old, new: ua.new });
       }
     }
     const siblingChecks = [...bound.keys()].flatMap((key) => (siblings.get(key) ?? []).filter((c) => !relevant.includes(c)).map((change) => ({ key, change })));
     if (!relevant.length && !siblingChecks.length) continue;
-    for (const c of relevant) if (c.fromKey !== c.toKey) report.rekeyed.push({ from: c.fromKey, to: c.toKey, page: rel });
+    for (const c of relevant) if (c.fromKey !== c.toKey) report.rekeyed.push({ from: c.fromKey, to: c.toKey, page });
 
     // A page is a markdown file per locale. A sidebar category is the UA `_category_.json` plus an entry in each locale's
     // current.json, which every category of that locale shares.
@@ -175,13 +182,13 @@ export async function runSync(settings, { commit = false, dryRun = false, diffFi
       if (file && (!category || (await exists(file)))) files[locale] = file;
     }
     if (!files.uk) {
-      report.skipped.push({ page: rel, reason: category ? 'UA category file not found' : 'UA page not found' });
+      report.skipped.push({ page, reason: category ? 'UA category file not found' : 'UA page not found' });
       continue;
     }
     const original = {};
     for (const [locale, file] of Object.entries(files)) original[locale] = await fs.readFile(file, 'utf8');
     if (category && !categoryContext(original.uk)) {
-      report.skipped.push({ page: rel, reason: 'the UA category file is not valid JSON' });
+      report.skipped.push({ page, reason: 'the UA category file is not valid JSON' });
       continue;
     }
     // The entry keys of a category without `key` follow its UA label: they are only renamed once the UA label has the new value.
@@ -224,7 +231,7 @@ export async function runSync(settings, { commit = false, dryRun = false, diffFi
         if (!v.old || !v.new || v.old === v.new || original[locale] === undefined) continue;
         const hits = shows(original[locale], locale, v, change);
         if (hits.length) {
-          report.checkBinding.push({ page: rel, locale, boundKey: key, changedKey: change.toKey, old: v.old, new: v.new, lines: hits.map((h) => h.line) });
+          report.checkBinding.push({ page, locale, boundKey: key, changedKey: change.toKey, old: v.old, new: v.new, lines: hits.map((h) => h.line) });
         }
       }
     }
@@ -232,7 +239,7 @@ export async function runSync(settings, { commit = false, dryRun = false, diffFi
 
     // Files written earlier in this run (a current.json shared by several categories) are ours, not uncommitted work.
     if (!dryRun && (await isDirty(top, Object.values(files).filter((f) => !touched.has(f))))) {
-      report.skipped.push({ page: rel, reason: 'uncommitted changes in the page or its translations; commit them and re-run sync' });
+      report.skipped.push({ page, reason: 'uncommitted changes in the page or its translations; commit them and re-run sync' });
       continue;
     }
 
@@ -246,7 +253,7 @@ export async function runSync(settings, { commit = false, dryRun = false, diffFi
       for (const c of relevant) {
         const v = c.locales[locale];
         if (!v) continue; // string identical in this locale
-        const entry = { page: rel, locale, key: c.toKey };
+        const entry = { page, locale, key: c.toKey };
         if (!v.old || !v.new) {
           report.unpatched.push({ ...entry, reason: v.new ? 'string was missing in the previous snapshot' : 'string removed for this locale' });
           results[locale] = false;
@@ -267,7 +274,7 @@ export async function runSync(settings, { commit = false, dryRun = false, diffFi
           anyChange = true;
           const file = path.relative(top, files[locale]);
           for (const h of r.hits) report.patched.push({ ...entry, file, old: v.old, new: v.new, ...h });
-          for (const rn of r.renamed) report.renamedEntries.push({ page: rel, locale, file, ...rn });
+          for (const rn of r.renamed) report.renamedEntries.push({ page, locale, file, ...rn });
         } else if (r.current) {
           report.alreadyCurrent.push({ ...entry, new: v.new });
         } else {
@@ -320,7 +327,10 @@ export async function runSync(settings, { commit = false, dryRun = false, diffFi
 
   report.broken = [...brokenBy].map(([key, pages]) => ({ key, pages, old: diff.removed.find((r) => r.key === key)?.values?.uk ?? null }));
   report.undocumented = diff.added.filter((a) => !isLib(a.key)).map((a) => ({ key: a.key, uk: a.values.uk ?? null, en: a.values.en ?? null }));
-  report.pendingRemains = report.skipped.length > 0;
+  // A sync narrowed by --pair leaves the other pairs' pages unpatched, so the diff stays for a sync that covers them.
+  const unsynced = declared.filter((p) => !syncing.includes(p)).map((p) => p.id);
+  if (unsynced.length) report.unsyncedPairs = unsynced;
+  report.pendingRemains = report.skipped.length > 0 || unsynced.length > 0;
 
   if (dryRun) return { ...report, dryRun: true };
 

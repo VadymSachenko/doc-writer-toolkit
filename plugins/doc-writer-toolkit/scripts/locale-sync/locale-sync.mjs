@@ -40,12 +40,16 @@ Commands
                             current.json, the state root, .gitattributes). Exit 1 if any. Deletes nothing.
 
 A <page> is a page id (disputes/manage-disputes), a path, or a folder, relative to the repo root or the UA content root.
+With more than one root pair declared, ids are <pair>:<id> (primary:disputes/manage-disputes); a bare id or folder that
+two pairs have is an input error, a path from the repo root always resolves.
 
 Project options (default: the 'Documentation toolkit configuration' block of <root>/CLAUDE.md)
   --root <dir>             docs repo root (default: cwd)
+  --pair <list>            narrow the run to these root pairs (default: every declared pair; the unprefixed one is primary)
   --locales <list>         narrow the run to these target locales (default: all from docusaurus.config.ts)
-  --scope <list>           folders or pages in scope (default: 'Translation scope:' or the whole UA content root)
-  --ua-root <dir> --en-root <dir>   content roots; locale roots derive from the EN root
+  --scope <list>           folders or pages in scope, for every pair (<pair>:<folder> for one pair only)
+                           (default: each pair's 'Translation scope:' or its whole UA content root)
+  --ua-root <dir> --en-root <dir>   the primary pair's content roots; locale roots derive from the EN root
   --state-root <dir>       default .doc-toolkit
   --docusaurus-config <f>  path to the Docusaurus config
 
@@ -59,12 +63,13 @@ link-assets:      --dry-run
 check / record:   --candidate <file> (check/install this file instead of the translation on disk; one page, one locale)
                   --unverified-file <json>  UA spans recorded as unverified in this run
 record:           --dry-run  --date <YYYY-MM-DD>
-report:           --md  --build  --origin <url> (default http://localhost:3000)  --url-prefix <prefix>
+report:           --md  --build  --origin <url> (default http://localhost:3000)  --url-prefix <prefix> (primary pair)
 stray:            --save <file> (record what is already dirty)  --baseline <file> (ignore that)
 `;
 
 const OPTIONS = {
   root: { type: 'string' },
+  pair: { type: 'string' },
   locales: { type: 'string' },
   scope: { type: 'string' },
   'ua-root': { type: 'string' },
@@ -183,7 +188,7 @@ async function main() {
       for (const page of pages) {
         for (const locale of targets) {
           const { ok, failures, warnings, checks, file, linkTitles } = await checkTranslation(s, page, locale, { candidate: values.candidate, unverified });
-          results.push({ page: page.id, locale, file, ok, checks, failures, warnings, linkTitles });
+          results.push({ page: page.ref, locale, file, ok, checks, failures, warnings, linkTitles });
         }
       }
       const ok = results.every((r) => r.ok);

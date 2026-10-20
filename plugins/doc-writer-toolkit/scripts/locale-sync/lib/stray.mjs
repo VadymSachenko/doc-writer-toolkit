@@ -7,8 +7,8 @@ import { abs } from './pages.mjs';
 import { localeRoot, resolveTargets } from './settings.mjs';
 import { categoryFile } from './categories.mjs';
 
-// A run writes in a fixed set of places: the locale roots, the locales' current.json, the state root (page states, term
-// memory, label snapshot, run folder) and .gitattributes. Everything else that git sees as changed is stray, e.g. the
+// A run writes in a fixed set of places: the locale roots of each root pair it covers, their locales' current.json, the
+// state root (page states, term memory, label snapshot, run folder) and .gitattributes. Everything else that git sees as changed is stray, e.g. the
 // scratch files a worker left in the repo root. Nothing is deleted here.
 const under = (file, dir) => file === dir || file.startsWith(dir.endsWith('/') ? dir : `${dir}/`);
 
@@ -25,7 +25,7 @@ async function fingerprint(s, file) {
 export async function runStray(s, { baseline = null, save = null } = {}) {
   if (baseline && save) throw new CliError('Use --baseline or --save, not both.', { code: 2 });
   const { targets } = await resolveTargets(s);
-  const allowed = [...targets.flatMap((l) => [localeRoot(s, l), categoryFile(s, l)]), '.gitattributes'];
+  const allowed = [...s.pairs.flatMap((ps) => targets.flatMap((l) => [localeRoot(ps, l), categoryFile(ps, l)])), '.gitattributes'];
   const state = path.relative(s.root, s.stateRoot).split(path.sep).join('/');
   if (state && !state.startsWith('..')) allowed.push(state);
   const changed = (await uncommitted(s.root, '.')).filter((f) => !allowed.some((a) => under(f.path, a)));
