@@ -1570,3 +1570,58 @@ test('stray: lists changed files outside the places a run writes to, ignores a s
   assert.match(r.out.note, /Nothing was deleted/);
   assert.equal(await f.read('<redo>.blocks.json'), '', 'the file is still there');
 });
+
+// ------------------------------------------------------------------ root pairs
+
+// A host that declares one UA/EN root pair must see exactly the output and state layout it saw before more pairs were
+// supported. The snapshot was taken from the single-pair code; `UPDATE_SNAPSHOT=1 npm test` rewrites it.
+const SNAPSHOT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'single-pair-snapshot.json');
+
+async function treeOf(dir, rel = '') {
+  const out = {};
+  for (const e of (await fs.readdir(path.join(dir, rel), { withFileTypes: true })).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+    const r = rel ? `${rel}/${e.name}` : e.name;
+    if (e.isDirectory()) Object.assign(out, await treeOf(dir, r));
+    else out[r] = await fs.readFile(path.join(dir, r), 'utf8');
+  }
+  return out;
+}
+
+test('root pairs: a host with one pair sees the same output and state layout as before', async () => {
+  const f = await fixtureRepo({ category: true });
+  const steps = {};
+  const step = async (name, ...args) => {
+    const r = await cli(f.dir, ...args);
+    steps[name] = { code: r.code, out: r.out };
+  };
+  await step('status', 'status');
+  await step('bind', 'bind');
+  await step('blocks page', 'blocks', 'filters', '--locales', 'tr');
+  await step('blocks category', 'blocks', CAT_ID, '--locales', 'tr');
+  await f.write(`${TR_ROOT}/filters/filters.md`, TR);
+  await step('link-assets', 'link-assets', 'filters', '--locales', 'tr');
+  await step('check', 'check', 'filters', '--locales', 'tr');
+  await step('record', 'record', 'filters', '--locales', 'tr', '--date', '2026-10-09');
+  await catCand(f, GOOD_CAT);
+  await step('record category', 'record', CAT_ID, '--locales', 'tr', '--candidate', 'cat.json', '--date', '2026-10-09');
+  await step('status after', 'status', '--locales', 'tr');
+  await step('report', 'report', '--locales', 'tr');
+  await step('report md', 'report', 'filters', '--md', '--locales', 'tr');
+  await f.write('.doc-toolkit/terms/tr.tsv', 'список\tliste\n');
+  await step('terms usage', 'terms', '--usage', 'liste', '--locales', 'tr');
+  await step('stray', 'stray');
+  await f.commit('translated');
+  await f.write('diff.json', { from: 'a', to: 'b', added: [], removed: [], rekeyed: [], changed: [{ key: 'filters.apply', locales: { uk: { old: 'Застосувати', new: 'Підтвердити' }, tr: { old: 'Uygula', new: 'Onayla' } } }] });
+  const UL = path.join(path.dirname(CLI), '..', 'ui-labels', 'ui-labels.mjs');
+  steps['ui-labels sync'] = JSON.parse((await run('node', [UL, 'sync', '--diff', 'diff.json'], { cwd: f.dir })).stdout);
+  const state = await treeOf(path.join(f.dir, '.doc-toolkit'));
+  delete state['ui-labels/meta.json'];
+  const head = await git(f.dir, 'rev-parse', 'HEAD');
+  const actual = JSON.parse(JSON.stringify({ steps, state }).replaceAll(await fs.realpath(f.dir), '<root>').replaceAll(f.dir, '<root>'), (k, v) => (k === 'head' ? '<head>' : v));
+  assert.ok(head);
+  if (process.env.UPDATE_SNAPSHOT) {
+    await fs.mkdir(path.dirname(SNAPSHOT), { recursive: true });
+    await fs.writeFile(SNAPSHOT, JSON.stringify(actual, null, 2) + '\n');
+  }
+  assert.deepEqual(actual, JSON.parse(await fs.readFile(SNAPSHOT, 'utf8')));
+});

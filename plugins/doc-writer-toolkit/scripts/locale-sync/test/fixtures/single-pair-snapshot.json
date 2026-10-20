@@ -1,0 +1,798 @@
+{
+  "steps": {
+    "status": {
+      "code": 0,
+      "out": {
+        "root": "<root>",
+        "head": "<head>",
+        "uaRoot": "docs",
+        "locales": [
+          "tr",
+          "ru"
+        ],
+        "summary": {
+          "pages": 1,
+          "stalePages": 1,
+          "languages": 2,
+          "pageTranslations": 2,
+          "words": 270,
+          "new": 2,
+          "stale": 0,
+          "current": 0,
+          "skipped": 0,
+          "categories": {
+            "total": 1,
+            "stale": 0,
+            "translations": 2,
+            "new": 2,
+            "current": 0,
+            "skipped": 0
+          },
+          "bootstrap": true,
+          "threshold": 10,
+          "needsConfirmation": false,
+          "message": "1 pages × 2 languages = 2 page translations, plus 2 sidebar category translations, about 270 words"
+        },
+        "pages": [
+          {
+            "kind": "page",
+            "page": "filters/filters",
+            "path": "docs/filters/filters.md",
+            "blob": "20bc27b92012b5e89c7ee0b6fc89cdb7cfdf9e70",
+            "locales": {
+              "tr": {
+                "state": "new",
+                "reason": "bootstrap",
+                "base": null,
+                "mode": "full",
+                "file": "i18n/tr/docusaurus-plugin-content-docs/current/filters/filters.md",
+                "targetExists": false,
+                "words": 132,
+                "changedBlocks": null
+              },
+              "ru": {
+                "state": "new",
+                "reason": "bootstrap",
+                "base": null,
+                "mode": "full",
+                "file": "i18n/ru/docusaurus-plugin-content-docs/current/filters/filters.md",
+                "targetExists": false,
+                "words": 132,
+                "changedBlocks": null
+              }
+            }
+          },
+          {
+            "kind": "category",
+            "page": "filters/_category_",
+            "path": "docs/filters/_category_.json",
+            "blob": "16d57c5726a62a3b75648b4d39b8052efb278ef4",
+            "locales": {
+              "tr": {
+                "state": "new",
+                "reason": "bootstrap",
+                "base": null,
+                "mode": "full",
+                "file": "i18n/tr/docusaurus-plugin-content-docs/current.json",
+                "targetExists": true,
+                "words": 3,
+                "changedBlocks": null
+              },
+              "ru": {
+                "state": "new",
+                "reason": "bootstrap",
+                "base": null,
+                "mode": "full",
+                "file": "i18n/ru/docusaurus-plugin-content-docs/current.json",
+                "targetExists": false,
+                "words": 3,
+                "changedBlocks": null
+              }
+            }
+          }
+        ],
+        "orphaned": [],
+        "moved": [],
+        "sidebarLabels": [],
+        "warnings": []
+      }
+    },
+    "bind": {
+      "code": 0,
+      "out": {
+        "dryRun": false,
+        "pages": [
+          {
+            "page": "filters/filters",
+            "kind": "page",
+            "spans": 5,
+            "decided": 0,
+            "resolved": [
+              {
+                "span": "В роботі",
+                "decision": "label:status.inwork",
+                "why": "dictionary match in a UI context"
+              },
+              {
+                "span": "Фільтри",
+                "decision": "label:filters.title",
+                "why": "dictionary match in a UI context"
+              },
+              {
+                "span": "Статус",
+                "decision": "label:filters.status",
+                "why": "dictionary match in a UI context"
+              },
+              {
+                "span": "Застосувати",
+                "decision": "label:filters.apply",
+                "why": "dictionary match in a UI context"
+              }
+            ],
+            "ask": [
+              {
+                "span": "Результат:",
+                "kind": "bold",
+                "why": "no dictionary match",
+                "lookup": {
+                  "status": "no-match"
+                },
+                "contexts": [
+                  {
+                    "line": 29,
+                    "section": "Операції",
+                    "text": "**Результат:** Список оновлюється."
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "page": "filters/_category_",
+            "kind": "category",
+            "spans": 1,
+            "decided": 0,
+            "resolved": [
+              {
+                "span": "Фільтри",
+                "decision": "label:filters.title",
+                "why": "sidebar category label in the dictionary"
+              }
+            ],
+            "ask": []
+          }
+        ],
+        "summary": {
+          "pages": 2,
+          "spans": 6,
+          "decided": 0,
+          "resolved": 5,
+          "ask": 1
+        },
+        "apply": "Decide each `ask` span: label:<key> | unverified | term | emphasis. Write { \"<page>\": { \"<span>\": \"<decision>\" } } to a JSON file and run `bind --decisions <file>`. A key \"<span>@<heading>\" (a heading title or #anchor) scopes a decision to that heading and its subsections.",
+        "warnings": []
+      }
+    },
+    "blocks page": {
+      "code": 0,
+      "out": {
+        "results": [
+          {
+            "kind": "page",
+            "page": "filters/filters",
+            "path": "docs/filters/filters.md",
+            "blob": "20bc27b92012b5e89c7ee0b6fc89cdb7cfdf9e70",
+            "locale": "tr",
+            "target": {
+              "path": "i18n/tr/docusaurus-plugin-content-docs/current/filters/filters.md",
+              "exists": false
+            },
+            "state": "new",
+            "reason": "bootstrap",
+            "mode": "full",
+            "fullReason": "bootstrap",
+            "source": {
+              "kind": "full",
+              "to": "20bc27b92012b5e89c7ee0b6fc89cdb7cfdf9e70"
+            },
+            "overwrites": false,
+            "ua": {
+              "lines": [
+                1,
+                58
+              ],
+              "text": "---\nsidebar_position: 2\ntitle: Фільтри\ndescription: Дізнайтеся, як працювати з фільтрами\nlast_update:\n  date: 9/8/2026\n---\n\nimport Tabs from '@theme/Tabs';\n\nЦя сторінка описує [фільтри](/filters/).\n\n## Що потрібно знати {/* #what-to-know */}\n\n- Дії доступні лише в статусі **В роботі**.\n- Фільтр `status` приймає значення `done`.\n- Докладніше — на сторінці [Огляд](/overview/).\n\n## Операції {/* #operations */}\n\nУ списку ви можете виконувати такі операції:\n\n<Accordion titleAs=\"h3\" title=\"Фільтрувати записи\">\n\n1. Натисніть **Фільтри**.\n   <img src={require('./.assets/panel.png').default} width=\"480\" alt=\"Панель фільтрів\" />\n2. Оберіть **Статус** і натисніть **Застосувати**.\n\n**Результат:** Список оновлюється.\n\n</Accordion>\n\n{/* ToDo: уточнити текст */}\n\n:::note\n\nДопустимі формати: PNG, JPEG.\n\n:::\n\n```mermaid\nflowchart LR\n  work[\"В роботі\"] -->|Завершити| done[\"Завершений\"]\n```\n\n### Додаткові дії {/* #extra */}\n\nВи також можете скинути фільтри.\n\n## Довідкова інформація {/* #reference */}\n\n| Атрибут | Опис |\n|---|---|\n| Статус | Поточний статус. |\n| Дата | Дата створення. |\n\n![Вікно фільтрів](./.assets/dialog.png)\n"
+            },
+            "bold": [
+              "В роботі",
+              "Фільтри",
+              "Статус",
+              "Застосувати",
+              "Результат:"
+            ],
+            "labels": [
+              {
+                "span": "В роботі",
+                "kind": "bold",
+                "decision": "label:status.inwork",
+                "key": "status.inwork",
+                "write": "İşlemde"
+              },
+              {
+                "span": "Фільтри",
+                "kind": "bold",
+                "decision": "label:filters.title",
+                "key": "filters.title",
+                "write": "Filtreler"
+              },
+              {
+                "span": "Статус",
+                "kind": "bold",
+                "decision": "label:filters.status",
+                "key": "filters.status",
+                "write": "Durum"
+              },
+              {
+                "span": "Застосувати",
+                "kind": "bold",
+                "decision": "label:filters.apply",
+                "key": "filters.apply",
+                "write": "Uygula"
+              }
+            ],
+            "undecided": [
+              {
+                "span": "Результат:",
+                "kind": "bold",
+                "line": 29
+              }
+            ],
+            "terms": [
+              {
+                "ua": "Статус",
+                "target": "Durum",
+                "source": "ui",
+                "where": "table"
+              }
+            ],
+            "links": [
+              {
+                "text": "фільтри",
+                "url": "/filters/",
+                "page": "filters/filters",
+                "title": null
+              }
+            ]
+          },
+          {
+            "kind": "category",
+            "page": "filters/_category_",
+            "path": "docs/filters/_category_.json",
+            "blob": "16d57c5726a62a3b75648b4d39b8052efb278ef4",
+            "locale": "tr",
+            "target": {
+              "path": "i18n/tr/docusaurus-plugin-content-docs/current.json",
+              "exists": true
+            },
+            "state": "new",
+            "reason": "bootstrap",
+            "mode": "full",
+            "fullReason": "bootstrap",
+            "source": {
+              "kind": "full",
+              "to": "16d57c5726a62a3b75648b4d39b8052efb278ef4"
+            },
+            "overwrites": false,
+            "ua": {
+              "lines": [
+                1,
+                10
+              ],
+              "text": "{\n  \"label\": \"Фільтри\",\n  \"position\": 2,\n  \"key\": \"filters\",\n  \"link\": {\n    \"type\": \"generated-index\",\n    \"description\": \"Перегляньте фільтри.\"\n  }\n}\n"
+            },
+            "entries": [
+              {
+                "entryKey": "sidebar.tutorialSidebar.category.filters",
+                "field": "label",
+                "ua": "Фільтри",
+                "current": "Фільтри",
+                "binding": "label:filters.title"
+              },
+              {
+                "entryKey": "sidebar.tutorialSidebar.category.filters.link.generated-index.description",
+                "field": "link.description",
+                "ua": "Перегляньте фільтри.",
+                "current": "Перегляньте фільтри."
+              }
+            ],
+            "missing": [],
+            "labels": [
+              {
+                "span": "Фільтри",
+                "kind": "category",
+                "decision": "label:filters.title",
+                "key": "filters.title",
+                "write": "Filtreler"
+              }
+            ],
+            "undecided": [],
+            "terms": [],
+            "apply": "Write { \"<entryKey>\": \"<translated message>\" } for every entry to a JSON file and pass it as --candidate to check and record."
+          }
+        ],
+        "warnings": []
+      }
+    },
+    "blocks category": {
+      "code": 0,
+      "out": {
+        "results": [
+          {
+            "kind": "category",
+            "page": "filters/_category_",
+            "path": "docs/filters/_category_.json",
+            "blob": "16d57c5726a62a3b75648b4d39b8052efb278ef4",
+            "locale": "tr",
+            "target": {
+              "path": "i18n/tr/docusaurus-plugin-content-docs/current.json",
+              "exists": true
+            },
+            "state": "new",
+            "reason": "bootstrap",
+            "mode": "full",
+            "fullReason": "bootstrap",
+            "source": {
+              "kind": "full",
+              "to": "16d57c5726a62a3b75648b4d39b8052efb278ef4"
+            },
+            "overwrites": false,
+            "ua": {
+              "lines": [
+                1,
+                10
+              ],
+              "text": "{\n  \"label\": \"Фільтри\",\n  \"position\": 2,\n  \"key\": \"filters\",\n  \"link\": {\n    \"type\": \"generated-index\",\n    \"description\": \"Перегляньте фільтри.\"\n  }\n}\n"
+            },
+            "entries": [
+              {
+                "entryKey": "sidebar.tutorialSidebar.category.filters",
+                "field": "label",
+                "ua": "Фільтри",
+                "current": "Фільтри",
+                "binding": "label:filters.title"
+              },
+              {
+                "entryKey": "sidebar.tutorialSidebar.category.filters.link.generated-index.description",
+                "field": "link.description",
+                "ua": "Перегляньте фільтри.",
+                "current": "Перегляньте фільтри."
+              }
+            ],
+            "missing": [],
+            "labels": [
+              {
+                "span": "Фільтри",
+                "kind": "category",
+                "decision": "label:filters.title",
+                "key": "filters.title",
+                "write": "Filtreler"
+              }
+            ],
+            "undecided": [],
+            "terms": [],
+            "apply": "Write { \"<entryKey>\": \"<translated message>\" } for every entry to a JSON file and pass it as --candidate to check and record."
+          }
+        ],
+        "warnings": []
+      }
+    },
+    "link-assets": {
+      "code": 0,
+      "out": {
+        "dryRun": false,
+        "results": [
+          {
+            "page": "filters/filters",
+            "locale": "tr",
+            "links": [
+              {
+                "asset": "filters/.assets/panel.png",
+                "link": "i18n/tr/docusaurus-plugin-content-docs/current/filters/.assets/panel.png",
+                "target": "../../../../../en/docusaurus-plugin-content-docs/current/filters/.assets/panel.png",
+                "fallback": false,
+                "status": "created"
+              },
+              {
+                "asset": "filters/.assets/dialog.png",
+                "link": "i18n/tr/docusaurus-plugin-content-docs/current/filters/.assets/dialog.png",
+                "target": "../../../../../en/docusaurus-plugin-content-docs/current/filters/.assets/dialog.png",
+                "fallback": false,
+                "status": "created"
+              }
+            ],
+            "assetFallbacks": [],
+            "orphans": []
+          }
+        ],
+        "problems": []
+      }
+    },
+    "check": {
+      "code": 1,
+      "out": {
+        "ok": false,
+        "results": [
+          {
+            "page": "filters/filters",
+            "locale": "tr",
+            "file": "i18n/tr/docusaurus-plugin-content-docs/current/filters/filters.md",
+            "ok": true,
+            "checks": [],
+            "failures": [],
+            "warnings": [],
+            "linkTitles": []
+          },
+          {
+            "page": "filters/_category_",
+            "locale": "tr",
+            "file": "i18n/tr/docusaurus-plugin-content-docs/current.json",
+            "ok": false,
+            "checks": [
+              "category",
+              "labels"
+            ],
+            "failures": [
+              {
+                "check": "category",
+                "message": "Фільтри",
+                "entry": "sidebar.tutorialSidebar.category.filters",
+                "field": "label"
+              },
+              {
+                "check": "labels",
+                "message": "Фільтри",
+                "entry": "sidebar.tutorialSidebar.category.filters",
+                "field": "label",
+                "expected": "Filtreler"
+              },
+              {
+                "check": "category",
+                "message": "Перегляньте фільтри.",
+                "entry": "sidebar.tutorialSidebar.category.filters.link.generated-index.description",
+                "field": "link.description"
+              }
+            ],
+            "warnings": []
+          }
+        ]
+      }
+    },
+    "record": {
+      "code": 1,
+      "out": {
+        "ok": false,
+        "results": [
+          {
+            "page": "filters/filters",
+            "locale": "tr",
+            "recorded": true,
+            "dryRun": false,
+            "file": "i18n/tr/docusaurus-plugin-content-docs/current/filters/filters.md",
+            "state": ".doc-toolkit/pages/filters/filters.json",
+            "entry": {
+              "sourceBlob": "20bc27b92012b5e89c7ee0b6fc89cdb7cfdf9e70",
+              "labelSnapshot": "content:abc1234",
+              "translatedAt": "2026-10-09",
+              "unverified": [],
+              "assetFallbacks": []
+            },
+            "warnings": []
+          },
+          {
+            "page": "filters/_category_",
+            "locale": "tr",
+            "recorded": false,
+            "failures": [
+              {
+                "check": "category",
+                "message": "Фільтри",
+                "entry": "sidebar.tutorialSidebar.category.filters",
+                "field": "label"
+              },
+              {
+                "check": "labels",
+                "message": "Фільтри",
+                "entry": "sidebar.tutorialSidebar.category.filters",
+                "field": "label",
+                "expected": "Filtreler"
+              },
+              {
+                "check": "category",
+                "message": "Перегляньте фільтри.",
+                "entry": "sidebar.tutorialSidebar.category.filters.link.generated-index.description",
+                "field": "link.description"
+              }
+            ],
+            "note": "The state was not advanced and no file was written."
+          }
+        ]
+      }
+    },
+    "record category": {
+      "code": 0,
+      "out": {
+        "ok": true,
+        "results": [
+          {
+            "page": "filters/_category_",
+            "locale": "tr",
+            "recorded": true,
+            "dryRun": false,
+            "file": "i18n/tr/docusaurus-plugin-content-docs/current.json",
+            "state": ".doc-toolkit/pages/filters/_category_.json",
+            "entry": {
+              "sourceBlob": "16d57c5726a62a3b75648b4d39b8052efb278ef4",
+              "labelSnapshot": "content:abc1234",
+              "translatedAt": "2026-10-09",
+              "unverified": [],
+              "assetFallbacks": []
+            },
+            "warnings": []
+          }
+        ]
+      }
+    },
+    "status after": {
+      "code": 0,
+      "out": {
+        "root": "<root>",
+        "head": "<head>",
+        "uaRoot": "docs",
+        "locales": [
+          "tr"
+        ],
+        "summary": {
+          "pages": 1,
+          "stalePages": 0,
+          "languages": 0,
+          "pageTranslations": 0,
+          "words": 0,
+          "new": 0,
+          "stale": 0,
+          "current": 1,
+          "skipped": 0,
+          "categories": {
+            "total": 1,
+            "stale": 0,
+            "translations": 0,
+            "new": 0,
+            "current": 1,
+            "skipped": 0
+          },
+          "bootstrap": false,
+          "threshold": 10,
+          "needsConfirmation": false,
+          "message": "0 pages × 0 languages = 0 page translations, about 0 words"
+        },
+        "pages": [
+          {
+            "kind": "page",
+            "page": "filters/filters",
+            "path": "docs/filters/filters.md",
+            "blob": "20bc27b92012b5e89c7ee0b6fc89cdb7cfdf9e70",
+            "locales": {
+              "tr": {
+                "state": "current",
+                "reason": null,
+                "base": null,
+                "mode": null,
+                "file": "i18n/tr/docusaurus-plugin-content-docs/current/filters/filters.md",
+                "targetExists": true
+              }
+            }
+          },
+          {
+            "kind": "category",
+            "page": "filters/_category_",
+            "path": "docs/filters/_category_.json",
+            "blob": "16d57c5726a62a3b75648b4d39b8052efb278ef4",
+            "locales": {
+              "tr": {
+                "state": "current",
+                "reason": null,
+                "base": null,
+                "mode": null,
+                "file": "i18n/tr/docusaurus-plugin-content-docs/current.json",
+                "targetExists": true
+              }
+            }
+          }
+        ],
+        "orphaned": [],
+        "moved": [],
+        "sidebarLabels": [],
+        "warnings": []
+      }
+    },
+    "report": {
+      "code": 0,
+      "out": {
+        "locales": [
+          "tr"
+        ],
+        "totals": {
+          "pages": 1,
+          "locales": 1
+        },
+        "allGood": true,
+        "failing": 0,
+        "pages": [
+          {
+            "page": "filters/filters",
+            "changed": true,
+            "cells": {
+              "tr": {
+                "exists": true,
+                "imagesResolve": true,
+                "checksPassed": true,
+                "failures": [],
+                "linkTitles": [],
+                "unverified": 0,
+                "assetFallbacks": 0,
+                "recorded": true,
+                "upToDate": true,
+                "url": "http://localhost:3000/tr/filters/"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "report md": {
+      "code": 0,
+      "out": "# Locale translation report\n\n1 pages × 1 locales. Every page exists, its images resolve and its checks pass.\n\n### Page exists\n\n| Page | tr |\n|---|:-:|\n| filters/filters | ✓ |\n\n### All images resolve\n\n| Page | tr |\n|---|:-:|\n| filters/filters | ✓ |\n\n### Checks passed\n\n| Page | tr |\n|---|:-:|\n| filters/filters | ✓ |\n\n### Changed pages: local URLs (`npm run serve`)\n\n**tr**\n\n- http://localhost:3000/tr/filters/\n\n"
+    },
+    "terms usage": {
+      "code": 0,
+      "out": {
+        "locale": "tr",
+        "olds": [
+          "liste"
+        ],
+        "pages": [
+          {
+            "page": "filters/filters",
+            "kind": "page",
+            "file": "i18n/tr/docusaurus-plugin-content-docs/current/filters/filters.md",
+            "upToDate": true,
+            "hits": [
+              {
+                "line": 21,
+                "match": [
+                  "Listede"
+                ],
+                "text": "Listede aşağıdaki işlemleri yapabilirsiniz:"
+              },
+              {
+                "line": 29,
+                "match": [
+                  "Liste"
+                ],
+                "text": "**Sonuç:** Liste güncellenir."
+              }
+            ],
+            "blocks": [
+              {
+                "lines": [
+                  21,
+                  21
+                ],
+                "kind": "paragraph",
+                "headingPath": [
+                  "Операції"
+                ]
+              },
+              {
+                "lines": [
+                  23,
+                  31
+                ],
+                "kind": "component",
+                "headingPath": [
+                  "Операції"
+                ]
+              }
+            ],
+            "redo": "21,23"
+          }
+        ],
+        "summary": {
+          "pages": 1,
+          "blocks": 2,
+          "categories": 0,
+          "hits": 2
+        },
+        "apply": "Per page: `blocks <page> --redo <redo>`, translate the changes with the corrected term, `apply <page> --redo <redo> --translations … --out …`, then `check` and `record` with --candidate. A category: `blocks <id> --redo all`, as a full category."
+      }
+    },
+    "stray": {
+      "code": 1,
+      "out": {
+        "ok": false,
+        "stray": [
+          {
+            "path": "cat.json",
+            "status": "??"
+          }
+        ],
+        "ignored": 0,
+        "allowed": [
+          "i18n/tr/docusaurus-plugin-content-docs/current",
+          "i18n/tr/docusaurus-plugin-content-docs/current.json",
+          "i18n/ru/docusaurus-plugin-content-docs/current",
+          "i18n/ru/docusaurus-plugin-content-docs/current.json",
+          ".gitattributes",
+          ".doc-toolkit"
+        ],
+        "note": "Nothing was deleted. Report these paths: the user removes them or commits them separately."
+      }
+    },
+    "ui-labels sync": {
+      "status": "synced",
+      "from": "a",
+      "to": "b",
+      "patched": [
+        {
+          "page": "filters/filters",
+          "locale": "uk",
+          "key": "filters.apply",
+          "file": "docs/filters/filters.md",
+          "old": "Застосувати",
+          "new": "Підтвердити",
+          "line": 27,
+          "text": "2. Оберіть **Статус** і натисніть **Підтвердити**."
+        },
+        {
+          "page": "filters/filters",
+          "locale": "tr",
+          "key": "filters.apply",
+          "file": "i18n/tr/docusaurus-plugin-content-docs/current/filters/filters.md",
+          "old": "Uygula",
+          "new": "Onayla",
+          "line": 27,
+          "text": "2. **Durum** seçin ve **Onayla** düğmesine tıklayın."
+        }
+      ],
+      "alreadyCurrent": [],
+      "notFound": [],
+      "unpatched": [],
+      "checkBinding": [],
+      "markupParts": [],
+      "broken": [],
+      "rekeyed": [],
+      "renamedEntries": [],
+      "undocumented": [],
+      "skipped": [],
+      "pagesTouched": 1,
+      "commit": null,
+      "pendingRemains": false,
+      "suggestedCommit": {
+        "message": "Sync UI labels to command@abc1234",
+        "paths": [
+          ".doc-toolkit/pages/filters/filters.json",
+          "docs/filters/filters.md",
+          "i18n/tr/docusaurus-plugin-content-docs/current/filters/filters.md"
+        ]
+      }
+    }
+  },
+  "state": {
+    "pages/filters/_category_.json": "{\n  \"spans\": {\n    \"Фільтри\": \"label:filters.title\"\n  },\n  \"locales\": {\n    \"tr\": {\n      \"sourceBlob\": \"16d57c5726a62a3b75648b4d39b8052efb278ef4\",\n      \"labelSnapshot\": \"content:abc1234\",\n      \"translatedAt\": \"2026-10-09\",\n      \"unverified\": [],\n      \"assetFallbacks\": []\n    }\n  }\n}\n",
+    "pages/filters/filters.json": "{\n  \"spans\": {\n    \"В роботі\": \"label:status.inwork\",\n    \"Фільтри\": \"label:filters.title\",\n    \"Статус\": \"label:filters.status\",\n    \"Підтвердити\": \"label:filters.apply\"\n  },\n  \"locales\": {\n    \"tr\": {\n      \"sourceBlob\": \"7c3e8bc49c1c307f6b01fd15b974ed2816bc46f7\",\n      \"labelSnapshot\": \"content:abc1234\",\n      \"translatedAt\": \"2026-10-09\",\n      \"unverified\": [],\n      \"assetFallbacks\": []\n    }\n  }\n}\n",
+    "terms/tr.tsv": "список\tliste\n",
+    "ui-labels/en.json": "{\n  \"status.inwork\": \"In progress\",\n  \"filters.title\": \"Filters\",\n  \"filters.status\": \"Status\",\n  \"filters.apply\": \"Apply\"\n}\n",
+    "ui-labels/ru.json": "{\n  \"status.inwork\": \"В работе\",\n  \"filters.title\": \"Фильтры\",\n  \"filters.status\": \"Статус\",\n  \"filters.apply\": \"Применить\"\n}\n",
+    "ui-labels/tr.json": "{\n  \"status.inwork\": \"İşlemde\",\n  \"filters.title\": \"Filtreler\",\n  \"filters.status\": \"Durum\",\n  \"filters.apply\": \"Uygula\"\n}\n",
+    "ui-labels/uk.json": "{\n  \"status.inwork\": \"В роботі\",\n  \"filters.title\": \"Фільтри\",\n  \"filters.status\": \"Статус\",\n  \"filters.apply\": \"Застосувати\"\n}\n"
+  }
+}
