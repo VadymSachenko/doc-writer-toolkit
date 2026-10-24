@@ -41,6 +41,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: npm test
         working-directory: plugins/doc-writer-toolkit/scripts/locale-sync
+      - name: Test doc-align
+        if: ${{ !cancelled() }}
+        run: npm test
+        working-directory: plugins/doc-writer-toolkit/scripts/doc-align
 
   # The two checks that need the Claude Code CLI. Neither needs credentials. The CLI needs Node 22 or later,
   # and is pinned so its token estimates don't move under the visibility check.
