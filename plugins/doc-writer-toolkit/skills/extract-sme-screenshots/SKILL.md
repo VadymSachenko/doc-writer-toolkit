@@ -102,6 +102,12 @@ The destination is `.sources/frames/{video-basename}-frames/` (create it, includ
 - If there was no input transcript (Whisper ran), also move `<scratch-output-dir>/transcript.txt` to `.sources/{video-basename}-transcript.txt` (sibling of `frames/`, not inside it) — this is now the only record of what was said; don't let it get discarded with the rest of the scratch output.
 - Delete only what's genuinely disposable scratch: `contact-sheet.jpg`, `frame-decisions.csv`, `transcript.json`, `key/`, and the rest of `transcript-key/` once its `images/` are merged. **Do not delete `context.md` or `ocr/`** — the whole point of `frames-index.json` is to carry that description forward; treating it as safe-to-delete scratch output defeats it.
 
+### Self-review before reporting
+
+- The destination folder holds the merged screenshots and `frames-index.json` beside them; screenshots and index entries that were there before are all still there (appended to, not overwritten).
+- A transcript Whisper generated is at `.sources/{video-basename}-transcript.txt`.
+- Only the scratch files Step 5 lists were deleted; `context.md` and `ocr/` were kept, and nothing outside the scratch folder and the destination changed.
+
 ### Step 6 — Report
 
 State how many screenshots were kept (and how many were skipped as already-covered duplicates, if the destination wasn't empty), where they landed, and whether a transcript was auto-generated (and if so, that it hasn't been human-reviewed — Whisper output can mis-hear names, numbers, and technical terms, so flag it as needing a pass before being treated as ground truth).
