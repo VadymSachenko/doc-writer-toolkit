@@ -10,7 +10,7 @@ This repo is a Claude Code plugin marketplace. The deliverable is the Markdown/J
    ```
    ---
    name: <kebab-name>
-   description: <one-line trigger spec — what the skill does and why>
+   description: '<one-line trigger spec — what the skill does and why>'
    ---
    
    # <skill-name>
@@ -28,6 +28,8 @@ This repo is a Claude Code plugin marketplace. The deliverable is the Markdown/J
    Phrasing that should trigger the skill. Mark it explicit-invocation only in the description.
    ```
 
+   Keep `description` in single quotes, writing a `'` inside it as `''`: an unquoted `: ` is invalid YAML, and the skill then loads with no description. The same goes for a command's `description`.
+
 3. **Mark it explicit-invocation only** in the `description` field if the skill edits files (all authoring/translation/review/fix skills must be). State this clearly: "Use explicitly (…)."
 4. **No manifest edit needed** — skills are picked up by directory convention.
 5. **Update [SKILLS-INDEX.md](plugins/doc-writer-toolkit/SKILLS-INDEX.md)** — add a row to the Skills table.
@@ -41,7 +43,7 @@ This repo is a Claude Code plugin marketplace. The deliverable is the Markdown/J
    Canonical shape:
    ```markdown
    ---
-   description: <one-line description>
+   description: '<one-line description>'
    argument-hint: "<arg format>"
    ---
 
