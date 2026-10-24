@@ -4,8 +4,9 @@ import { isLib, loadStore, mergedLabels } from './store.mjs';
 const PLACEHOLDER = /\{\{[^}]*\}\}|\$\{[^}]*\}|\{[^}]*\}|%[sd]/;
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-// Case, whitespace and trailing ':' / '.' / '…' don't change which label a span is.
-export const normalize = (s) => s.normalize('NFC').replace(/\s+/g, ' ').trim().replace(/[:.…]+$/, '').trim().toLocaleLowerCase('uk');
+// Case, whitespace and trailing ':' / '.' / '…' / '!' / '?' don't change which label a span is: a page drops that
+// decoration from the bold span (`Create!` → **Create**).
+export const normalize = (s) => s.normalize('NFC').replace(/\s+/g, ' ').trim().replace(/[:.…!?]+$/, '').trim().toLocaleLowerCase('uk');
 
 // A bold span with markup inside (a link, `&nbsp;`, quotes, a `A > B` menu path) can't be checked as one label, so it
 // is looked up, and written, part by part.

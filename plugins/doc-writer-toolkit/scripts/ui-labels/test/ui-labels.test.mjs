@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { diffSnapshots } from '../lib/diff.mjs';
 import { resolveLocaleFiles, ticketsFromBranch, parseSource, deriveLocaleRoot } from '../lib/config.mjs';
 import { replaceBold } from '../lib/sync.mjs';
+import { normalize } from '../lib/lookup.mjs';
 import { gitBlobHash } from '../lib/util.mjs';
 
 const run = promisify(execFile);
@@ -23,6 +24,15 @@ async function cli(cwd, ...args) {
   }
 }
 const git = (cwd, ...args) => run('git', ['-C', cwd, ...args]).then((r) => r.stdout.trim());
+
+test('normalize: decorative trailing punctuation goes, internal punctuation stays', () => {
+  assert.equal(normalize('Create!'), normalize('Create'));
+  assert.equal(normalize('What’s new?'), 'what’s new');
+  assert.equal(normalize('Статус:'), 'статус');
+  assert.equal(normalize('Save & close'), 'save & close');
+  assert.equal(normalize('Import/Export'), 'import/export');
+  assert.equal(normalize('v2.1'), 'v2.1');
+});
 
 test('diff: added / removed / changed / rekeyed', () => {
   const before = {

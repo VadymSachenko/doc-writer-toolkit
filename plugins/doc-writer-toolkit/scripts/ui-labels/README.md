@@ -99,7 +99,7 @@ span           class  key                 ru            tr            kk
 Нема такого    ?      no match
 ```
 
-- Matching is exact, then normalized (case, whitespace, trailing `:` `.` `…`), then placeholder patterns.
+- Matching is exact, then normalized (case, whitespace, trailing `:` `.` `…` `!` `?`), then placeholder patterns.
 - Application keys beat `lib.*` keys with the same strings. A `lib.*` key whose strings differ from every application key stays a candidate (`ambiguous`): the same UA text can be a library control, such as a date picker's OK, that the app's own button translates differently.
 - Several keys with identical strings in the requested locales are `label` (`status: identical-targets`; `key` is just the first of the candidates, the others are in `alsoKeys`). **`key` must not be used as the binding in that case.** Choosing among the candidates by the page's namespace is the binding pass's job (Requirement 3, criterion 2). Binding to whichever key sorts first would make a later rename of a sibling key skip the page, or patch it wrongly.
 - Several keys with different strings are `?` with `status: ambiguous` and the candidates. The binding pass chooses.
