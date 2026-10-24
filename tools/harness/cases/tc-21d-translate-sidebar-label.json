@@ -36,9 +36,15 @@
       "pattern": "^---\\n[^]*?[А-Яа-яІіЇїЄєҐґ][^]*?\\n---"
     },
     {
+      "name": "the UA page only gains its last_update date",
+      "type": "command",
+      "run": "test -z \"$(git diff -U0 -- portal/payment-status-webhook-notifications/payment-status-webhook-notifications.md | grep -E '^[-+]' | grep -vE '^(---|\\+\\+\\+) ' | grep -vE '^\\+(last_update:|  date: )')\""
+    },
+    {
       "type": "changed-only",
       "paths": [
         "i18n/en/docusaurus-plugin-content-docs-portal/current/payment-status-webhook-notifications/",
+        "portal/payment-status-webhook-notifications/payment-status-webhook-notifications.md",
         ".doc-toolkit/"
       ]
     }
