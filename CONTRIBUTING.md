@@ -88,7 +88,7 @@ It prints one row per step, with the exit code and the result line. A step whose
 | Step | Command | Checks |
 |---|---|---|
 | `lint` | `node tools/lint-plugin.mjs` | Skill and command frontmatter that strict YAML accepts; every `${CLAUDE_PLUGIN_ROOT}/…` path exists; every style-guide rule file is reachable from its `ROUTING.md` |
-| `tools-tests` | `node --test tools/lint-plugin.test.mjs tools/check-visibility.test.mjs` | The two tools' own tests |
+| `tools-tests` | `node --test tools/lint-plugin.test.mjs tools/check-visibility.test.mjs tools/harness/harness.test.mjs` | The tools' own tests, including the skill harness (no model calls) |
 | `ui-labels`, `locale-sync` | `npm test` in each folder under `plugins/doc-writer-toolkit/scripts/` | The scripts' suites. `locale-sync` takes about two minutes |
 | `validate` | `claude plugin validate plugins/doc-writer-toolkit` | The CLI's own plugin checks |
 | `visibility` | `node tools/check-visibility.mjs` | Every skill and command loads with its description. It reads a copy under a sentinel name, so an installed copy can't stand in for the tree under review |
