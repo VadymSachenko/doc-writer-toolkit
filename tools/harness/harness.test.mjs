@@ -61,6 +61,8 @@ test('assertions: files, patterns, frontmatter, links and the changed paths', ()
   const after = { ...ctx, status: git(host, 'status', '--porcelain') };
   assert.equal(check({ type: 'diff-lines', path: page, allow: 'Фільтри' }, after).pass, true);
   assert.equal(check({ type: 'diff-lines', path: page }, after).pass, false);
+  fs.writeFileSync(path.join(host, page), before.replace('Список оновлюється автоматично.', 'Список оновлюється автоматично. Його можна експортувати.'));
+  assert.equal(check({ type: 'diff-lines', path: page }, ctx).pass, true);
   fs.writeFileSync(path.join(host, page), before);
   const calls = { ...ctx, skills: ['harness-x:extract-sme-screenshots'] };
   assert.equal(check({ type: 'skill-called', skill: 'extract-sme-screenshots' }, calls).pass, true);

@@ -94,7 +94,7 @@ One JSON file per case in `cases/`, named after its `id`:
 | `match`, `no-match` | `path` (a file, or `output` for the final answer), `pattern` (a regex), optional `flags` | the text matches, or doesn't |
 | `frontmatter` | `path` | the file starts with a closed `---` block of `key: value` lines (nested maps and lists allowed) whose values parse as the strings they show |
 | `links` | `path`, `form: "root-relative"` | every Markdown link to a page starts with `/`, with no `.md` and no `./` or `../` |
-| `diff-lines` | `path`, optional `allow` (a regex) and `flags` | every line the run removed from the file comes back among its added lines (list numbers aside), or matches `allow`: nothing outside what the brief names changed |
+| `diff-lines` | `path`, optional `allow` (a regex) and `flags` | every line the run removed from the file comes back among its added lines (list numbers aside), whole or with text appended to it, or matches `allow`: nothing outside what the brief names changed |
 | `skill-called`, `skill-not-called` | `skill` (its own name, without the plugin prefix) | the run called that skill through the `Skill` tool, or didn't |
 | `heading-ids` | `path` (a page, or a folder: every page under it), optional `except` (heading texts) | every heading from `##` down ends with a unique `{/* #id */}` and every `](#id)` link names one, per `heading-anchors.md`; headings listed in `except` may stay without |
 | `unchanged` | optional `ignore` (path prefixes) | `git status` shows no change outside `ignore` |
