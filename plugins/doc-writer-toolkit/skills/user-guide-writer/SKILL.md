@@ -17,7 +17,7 @@ You are writing a procedural user guide page for the UniComPay partner cabinet, 
 Load these files at the start of the task. Do not load others unless the user references them explicitly.
 
 **Content language (resolve first — decides which of the remaining bullets apply):**
-- Follow `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` to resolve this project's declared `Content language:` (`uk`, `en`, or `uk,en`) for the target file, plus its **UA URL prefix** (needed to build absolute links to other doc pages — see the internal-link rule in Step 6). For `uk,en`, the target file's location relative to the declared UA content root / EN i18n root decides which language you're drafting in. If undeclared, follow that file's fallback (ask once, offer to persist).
+- Follow `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` to resolve this project's declared `Content language:` (`uk`, `en`, or `uk,en`) for the target file, plus the **UA URL prefix of each link target's root pair** (needed to build absolute links to other doc pages — see the internal-link rule in Step 6). For `uk,en`, the target file's location — under any pair's UA content root or under any pair's EN i18n root — decides which language you're drafting in. If undeclared, follow that file's fallback (ask once, offer to persist).
 
 **Templates (load the one matching the resolved language):**
 - `uk` → `${CLAUDE_PLUGIN_ROOT}/context/doc-templates/ua-user-guide-template.md` — Операції/Етапи structure.
@@ -31,7 +31,9 @@ Load these files at the start of the task. Do not load others unless the user re
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` — rank-0 project formatting conventions (what bold/italic/code font mean here, placeholder form, one-entity-one-render, code-entity vs. human concept). Outranks everything else loaded for this task, including this skill's own body. Loaded regardless of resolved language.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-selection.md` — shared screenshot selection procedure: three-folder model, four selection cases, sensitive-content screening, rename pattern, full-page vs. compact classification.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` — the shared page-to-page link contract (see the link rule in Step 6).
+- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/heading-anchors.md` — the shared heading-id contract: on a `uk` page every heading from `##` down ends with `{/* #id */}` (see the heading rule in Step 6).
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` — the shared slug/title/filename convention (used to name the output file and title in Step 9).
+- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/procedure-steps.md` — when coupled actions share one step (Step 6).
 
 **UA grammar — only when the resolved language is `uk`:**
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/ua-grammar/00-cheatsheet.md` — always-loaded quick reference for UA orthography. Do not load this on an `en` page; English sentence-style rules live in `formatting-conventions.md`'s English section instead.
@@ -46,7 +48,7 @@ Load these files at the start of the task. Do not load others unless the user re
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/doc-examples/user-guide-examples/user-guide-example-create-branches.md`
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/doc-examples/user-guide-examples/user-guide-example-edit-links.md`
 
-These examples illustrate prose density, step phrasing, screenshot placement, admonition use, and result block formatting. They do **not** define the target structure, and their own language does not dictate yours. For sections, headings, and required content, follow the template. When an example and the template disagree, the template wins.
+These examples illustrate prose density, step phrasing, screenshot placement, admonition use, and result block formatting. They do **not** define the target structure, and their own language does not dictate yours. For sections, headings, and required content, follow the template. When an example and the template disagree, the template wins. Their page links (`/docs/…`) belong to the example's own site: never copy one, and build every link from `internal-links.md`.
 
 ## Workflow
 
@@ -56,7 +58,7 @@ Run the UI label check in `${CLAUDE_PLUGIN_ROOT}/context/ui-labels.md` before an
 
 ### Step 1 — Locate inputs
 
-Resolve this project's UA content root (or, on an `en` page, its EN i18n root — see `project-paths.md`) for the target location; do not assume `partner-cabinet/`. Ask the user for the target doc folder if not provided (e.g., `<content root>/transactions/manage-transactions/filter-transactions/`). Sources live inside that folder.
+Resolve the target page's root pair (for a new page, its folder's) via `project-paths.md` — its UA content root, or, on an `en` page, its EN i18n root; do not assume any folder. With more than one pair declared, name the pair you resolved. Ask the user for the target doc folder if not provided (e.g., `<content root>/transactions/manage-transactions/filter-transactions/`). Sources live inside that folder.
 
 **Each user guide page has its own `.assets/` folder**, co-located with the page file (e.g., `filter-transactions/.assets/`). If the folder does not exist, create it before copying any screenshots into it. Never place a page's screenshots in a parent folder's `.assets/` or in a shared assets directory — every page owns its own copy of the screenshots it embeds, even if those screenshots duplicate files from another page.
 
@@ -68,7 +70,7 @@ List the files present. Expected contents:
 - `.assets/*.png` — screenshots already selected and ready to embed in the doc.
 - `.assets/ref/*.png` — reference-only screenshots (read for context; never embed in the doc). This folder is optional. If it does not exist or is empty, treat all files directly in `.assets/` as both context and embeddable.
 
-Also check existing approved pages under the content root for contextual consistency — only after exhausting the source files. Do not copy structure or prose from them.
+Also check existing approved pages under the pair's content root for contextual consistency — only after exhausting the source files. Do not copy structure or prose from them.
 
 If neither `.sources/` nor `.assets/` exists, ask the user where the inputs are before proceeding.
 
@@ -143,14 +145,9 @@ Apply the template resolved in "Sources to load". Choose the structure decided i
 - **Merge a locate action with the click that acts on it.** When one step only finds/selects an item (a file, a row, a transaction) and the next step clicks a button to act on that same item, combine them into a single numbered step. Do not leave "find X" as its own step when the following step is "click Y" on that same X.
   - ✅ "In the receipts list, find the file and click **Upload**."
   - ⛔ "Find the file in the receipts list." *(as its own step)* / "Click **Upload**." *(as the next step)*
-- **Merge an input/selection with the commit click that immediately completes it — when all conditions hold.** When a step supplies input or makes a selection and the very next step commits it (**Save**, **Apply**, **OK**, **Submit**), combine them into one step. This project decision is **compatible with**, not directly mandated by, the routed source guides — cite both when this rule drives a change:
-  - Google Developer Style Guide — `${CLAUDE_PLUGIN_ROOT}/context/google-developer-style-guide/procedures/procedures.md`: "one action or one closely coupled action group per step… If pressing Enter is required, include it in the same step" (its own example combines a selection and the following **Save**).
-  - Microsoft Writing Style Guide — `${CLAUDE_PLUGIN_ROOT}/context/microsoft-style-guide/shared/procedures/step-by-step-instructions.md`: "Combine short actions only when they occur in the same place," and "Include the action that commits or completes the task, such as **Apply** or **OK**."
-  - **Merge only when every condition holds:** the actions occur in the same window, form, or panel (one uninterrupted UI context); together they complete one logical user action; the commit immediately follows the input/selection; no meaningful intermediate result, decision, warning, validation state, or explanation intervenes; and the combined step still scans easily.
-  - **Keep separate when any of these intervene:** the user moves to another location or phase; validation or review must happen before committing; the commit is destructive or needs a warning; an optional branch intervenes; the first step is already long or has complex substeps; or the commit produces a result that needs its own explanation or screenshot.
+- **Merge an input/selection with the commit click that immediately completes it — when all conditions hold.** The conditions, the keep-separate cases and the fixtures are in `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/procedure-steps.md`; apply them as written there. It is a project decision, compatible with but not mandated by the GDSG and MSSG procedure files that file cites; cite both when the rule drives a change.
   - ✅ (merge) "In the **Change password** window, enter the old and new password and click **Save**."
-  - ⛔ (needless split) "In the **Change password** window, enter the old and new password." *(step 3)* / "Click **Save**." *(step 4)*
-  - ✅ (keep separate — validation intervenes) "In the **Transfer** window, enter the amount." *(step 3)* / "Review the fee shown below the field, then click **Confirm**." *(step 4, a distinct review state before an irreversible commit)*
+  - ✅ (keep separate — a review state intervenes) "In the **Transfer** window, enter the amount." / "Review the fee shown below the field, then click **Confirm**."
 - **State the location before the action**, inside a merged or single step alike: "In the **Receipts** window, find the file and click **Upload**." — not "Find the file and click **Upload** in the **Receipts** window."
 - **Confirmation clicks: action first, reason last.** When a step's whole job is confirming a prior action in a dialog (e.g., a "Delete file" confirmation), state the click first and the reason afterward: "In the **Delete file** window, click **Delete** to confirm." — not "To confirm the deletion, in the **Delete file** window, click **Delete**."
   - This is narrower than the goal → action rule below: goal → action applies when the "to" clause states the operation's actual goal (e.g., applying a filter). Use action-first-reason-last only for a secondary confirmation of something already stated in a previous step.
@@ -163,7 +160,7 @@ Apply the template resolved in "Sources to load". Choose the structure decided i
 - Imperative mood, present tense for system reactions — see `formatting-conventions.md`'s sentence-style section for the resolved language.
 - No "you should" or "you need to" — just the imperative.
 - **Filter panel steps:** when the procedure involves selecting filters, do not enumerate each filter as a separate step. Use a single general step with an inline link to the reference section: "In the filter panel, select the [filters](#reference-information-<slug>) you need." Do not add a separate sentence pointing the reader at the reference section.
-- **Reference-information anchors:** the Reference information heading must carry an explicit ID so inline links resolve deterministically. Give it `{#reference-information-<slug>}` (uk: `{#довідкова-інформація-<slug>}`), where `<slug>` is the page's kebab-case slug (the same slug used for the output filename). On a page with multiple Reference information sections, give each its own id using that task's slug (`#reference-information-<task-slug>`) and link each inline where its fields are first mentioned. Every inline reference-information link must match the target heading's explicit id exactly — never a bare `#reference-information`.
+- **Reference-information anchors:** the Reference information heading must carry an explicit ID so inline links resolve deterministically. Give it `{#reference-information-<slug>}` (uk: the heading comment `{/* #reference-information-<slug> */}`, per `heading-anchors.md`; the link is `#reference-information-<slug>` in both languages), where `<slug>` is the page's kebab-case slug (the same slug used for the output filename). On a page with multiple Reference information sections, give each its own id using that task's slug (`#reference-information-<task-slug>`) and link each inline where its fields are first mentioned. Every inline reference-information link must match the target heading's explicit id exactly — never a bare `#reference-information`.
 
 **Screenshot rules:**
 - Only embed screenshots from `.assets/` (root). Never embed from `.assets/ref/` — those exist for your context only.
@@ -206,7 +203,8 @@ Apply the template resolved in "Sources to load". Choose the structure decided i
 - **Field reference order:** when a step involves a field inside a card or other named container, state the container first, then the field, then the action: "In the **X** card, in the **Y** field, enter the value." — not "In the **Y** field in the **X** card, enter the value."
 - **Active voice, second person — not the product as subject:** in procedural steps and Result blocks, always use the imperative or the second person; never a system/product noun ("the Partner", "Партнер") as the grammatical subject. See `formatting-conventions.md`'s sentence-style section for the resolved language.
 - **No concept explanations in procedure steps.** If background context is needed, link to a concept topic instead.
-- **Internal links to other doc pages follow the shared contract.** Build every page-to-page link exactly as `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` prescribes — site-root-relative, the declared UA URL prefix joined to the target's path relative to the content root, no `.md`/`.mdx`, anchors preserved (e.g. `#reference-information-add-cards`). That file is authoritative for what is and isn't a page link (asset links `./.assets/…` and intra-page anchors `#…` are exempt); do not restate its algorithm here.
+- **Heading ids (`uk` pages) follow the shared contract.** End every heading from `##` down with its `{/* #id */}` comment, and build every link to a heading from that id, exactly as `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/heading-anchors.md` prescribes. Do not restate its rules here.
+- **Internal links to other doc pages follow the shared contract.** Build every page-to-page link exactly as `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` prescribes — site-root-relative, the UA URL prefix of the target page's pair joined to the target's path relative to that pair's content root, no `.md`/`.mdx`, anchors preserved (e.g. `#reference-information-add-cards`). That file is authoritative for what is and isn't a page link (asset links `./.assets/…` and intra-page anchors `#…` are exempt); do not restate its algorithm here.
 - **No "you're signed in to the partner cabinet" as a prerequisite.** That is always assumed.
 - **Do not name the partner-cabinet context explicitly in page body text.** The reader is already in it. `uk`: avoid «кабінет партнера», use «меню» — wrong: «в розділі X у кабінеті партнера», right: «в меню X». `en`: avoid explicit "in the partner cabinet"; use "the menu" or the feature's own name instead.
 - **Voice:** the UI element must not be the subject of an action. The action happens to/in the object. ✅ "Transactions appear in the table." ⛔ "The table displays transactions." Applies to Result blocks too.
@@ -247,8 +245,10 @@ Before writing to disk, check:
 - No product/system noun used as the grammatical subject in steps or Result blocks (active voice, second person instead)
 - UI labels, status values, placeholders, and code-vs-concept rendering follow `formatting-conventions.md` Ж1–Ж4
 - No UI element is the subject of an action in steps or Result blocks
-- References to the reference-information section in steps are inline links, not separate sentences — and each link's anchor matches the target heading's explicit `{#reference-information-<slug>}` id (never a bare `#reference-information`)
-- Every link to another doc page follows `internal-links.md` (declared UA URL prefix + path, no `.md`); no `./`/`../` page links, no hardcoded `/docs/` (asset links `./.assets/…` and intra-page anchors `#…` are exempt)
+- References to the reference-information section in steps are inline links, not separate sentences — and each link's anchor matches the target heading's explicit `reference-information-<slug>` id (never a bare `#reference-information`)
+- On a `uk` page, every heading from `##` down ends with a well-formed, unique `{/* #id */}` per `heading-anchors.md`, and every `#…` link to a heading uses an id that exists
+- No template placeholder (`{slug}`, `{task-1-slug}`, any `{…}`) is left inside a heading id or a `#…` link, on a `uk` or an `en` page (`heading-anchors.md` rule 9)
+- Every link to another doc page follows `internal-links.md` (its pair's UA URL prefix + path, no `.md`); no `./`/`../` page links, no hardcoded `/docs/` (asset links `./.assets/…` and intra-page anchors `#…` are exempt)
 - No Атрибут/Опис reference table appears inside a numbered step or Accordion stage body
 - The Довідкова інформація table covers every visible field on each screen/form/table the user encounters, not only directly-interacted elements; read-only and display-only fields are included
 - Every attribute with a defined set of values uses `<ul><li>` in its description cell, not comma-separated prose
@@ -279,7 +279,7 @@ After the self-review passes, do a focused second read that targets the project-
 11. Steps and Result blocks — if a product/system noun appears as the grammatical subject, rewrite as imperative or second person.
 12. Prerequisites section — if no special prerequisites are listed: `en` page — add Variant A or Variant B standard sentence from the template; `uk` page — add Варіант А or Варіант Б from `ua-user-guide-template.md`.
 13. Adjacent steps — if one step only locates/selects an item and the next step clicks a button on that same item, merge them into one step with the location stated first.
-14. Adjacent steps — if one step supplies input or a selection and the next is a bare commit click (**Save**/**Apply**/**OK**/**Submit**) with no intervening validation, warning, branch, or result needing its own explanation, and both sit in the same UI context, merge them into one step (cite the GDSG/MSSG procedure rules named in Step 6). Do **not** merge when any keep-separate condition holds — flag a wrongly-merged commit and split it back out.
+14. Adjacent steps — if one step supplies input or a selection and the next is a bare commit click (**Save**/**Apply**/**OK**/**Submit**) with no intervening validation, warning, branch, or result needing its own explanation, and both sit in the same UI context, merge them into one step (`procedure-steps.md`, citing the GDSG/MSSG files it names). Do **not** merge when any keep-separate condition holds — flag a wrongly-merged commit and split it back out.
 15. Confirmation-dialog steps — if a step opens with "To confirm..., ...", rewrite so the click comes first and the reason comes last.
 16. **P1 — Inherited wording.** Diff every heading and bolded phrase against `.sources/`; rewrite any that were copied without normalization.
 17. **P2 — Heading language.** Flag and rewrite any heading that mixes languages or leaves a glossary concept in its source language.
@@ -293,7 +293,7 @@ Fix every issue found before saving.
 
 ### Step 9 — Save
 
-Save to `<content root>/<target-folder>/<slug>.md`, where the target folder was confirmed in Step 1 and the `<slug>` and page title follow `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` (canonical English title → kebab-case slug; folder and basename share the slug; UA/EN titles are semantic equivalents; imperative-verb-phrase title for a user guide). If this page already exists with a mismatched filename/title, do not silently rename it — report the mismatch per that file's "Existing pages" rule.
+Save to `<pair's content root>/<target-folder>/<slug>.md`, where the target folder was confirmed in Step 1 and the `<slug>` and page title follow `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` (canonical English title → kebab-case slug; folder and basename share the slug; UA/EN titles are semantic equivalents; a title too long for the sidebar stays whole and gets a shorter `sidebar_label:` naming the same subject; imperative-verb-phrase title for a user guide). If this page already exists with a mismatched filename/title, do not silently rename it — report the mismatch per that file's "Existing pages" rule.
 
 Do not update the sidebar config file (`sidebars.ts`, or a project's custom-id equivalent) — it's auto-generated.
 

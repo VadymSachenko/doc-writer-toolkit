@@ -20,7 +20,7 @@ You are proposing the documentation structure for one section. You read what alr
 
 ## Sources to load
 
-1. `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — resolve content root and language.
+1. `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — resolve the section folder's root pair (its content root) and the content language.
 2. `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` — the shared slug/title/filename convention. It is authoritative for every proposed slug and title (see "Slug rules" / "Title rules" below).
 3. `${CLAUDE_PLUGIN_ROOT}/context/style-guide-registry.md` — resolve the project's declared style guide token, then load **only the naming and titles topic file** from that corpus (via its ROUTING.md). Do not load the full corpus — only the file(s) that cover filename conventions, page title conventions, and topic-type naming rules (e.g. imperative mood for task-based titles). This is the only style-guide loading this skill does.
 4. The section's `.sources/section-readiness.json` — **required**. If absent, tell the user to run `section-readiness` first.
@@ -62,6 +62,7 @@ For each page that should exist in the final section, propose:
 | `slug` | the final folder/filename — **always lowercase kebab-case** (e.g. `view-account-balances/view-account-balances.md`) |
 | `docType` | `concept` / `user-guide` / `api` |
 | `title` | proposed human-readable page title — see title rules below |
+| `sidebarLabel` | (optional) a shorter sidebar name for a long title — same subject; see title rules below |
 | `rationale` | one line — why this page exists and why this action was chosen |
 | `mergesFrom` | (if `merge`) list of existing slugs being merged |
 | `splitsFrom` | (if `split`) the existing slug being split |
@@ -69,17 +70,11 @@ For each page that should exist in the final section, propose:
 
 ### Slug rules (apply to every proposed slug)
 
-Every slug follows the shared algorithm in `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` — do not restate it. In short: the canonical English title, lowercased, articles dropped, kebab-cased; folder name and filename basename share that slug (`add-funds/add-funds.md`, not `add-funds/index.md`). Load that file (see "Sources to load") before proposing any slug or title.
+Every slug follows the algorithm in `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` (loaded in "Sources to load" before any slug or title is proposed). That file is the only statement of it.
 
-### Title rules (apply to every proposed title, using the loaded style-guide naming file)
+### Title rules (apply to every proposed title)
 
-Title form by doc type comes from `naming-conventions.md` (loaded above), reconciled with the style-guide naming file:
-
-- **User guides (task-based):** imperative verb phrase — "Add funds", "Manage cards", "View account balances". Not "Adding funds", not "Fund addition", not "How to add funds".
-- **Concept topics (background knowledge):** noun phrase — "Balance overview", "Transaction lifecycle", "Card types". Not "Understanding balances", not "How balances work".
-- **API reference:** noun phrase matching the endpoint's resource — "Create payin transaction", "Retrieve transaction details".
-- The Ukrainian title is a natural, semantic equivalent of the English title; both locales share the path/filename (per `naming-conventions.md`).
-- Apply any additional title conventions from the loaded style-guide naming file. If the style guide conflicts with the rules above, the style guide wins — it is loaded precisely for this purpose.
+Title form by doc type, the UA title and `sidebar_label` come from `naming-conventions.md`. The loaded style-guide naming file adds conventions only where that file is silent; on a conflict, `naming-conventions.md` wins (it is a rank-0 project rule). When an accurate title is too long for the sidebar, propose a shorter `sidebarLabel` that names the same subject.
 
 ### Action rules
 

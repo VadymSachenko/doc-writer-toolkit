@@ -1,0 +1,52 @@
+{
+  "id": "tc-20a-updater-builds-root-link",
+  "description": "The brief gives a link as a relative .md path: the link doc-page-updater adds is the site-root route of the target page (/portal/settings/settings), and the existing links are untouched.",
+  "fixture": {
+    "shape": "single"
+  },
+  "setup": [
+    "mkdir -p portal/transactions/.sources && cat > portal/transactions/.sources/change-brief.md <<'EOF'\n# Change brief — export link\n\n## Page\nportal/transactions/transactions.md\n\n## What changed\n- The transaction list can now be exported to CSV. The export format is set on the settings page. Add a sentence that links to it: `../settings/settings.md`. — source: ticket #34\n\n## Where in the page\nThe section «Перегляд транзакцій», after «Список оновлюється автоматично.»\n\n## Screenshots\n- none\n\n## Terms\n- none\n\n## Do not touch\n- The sections «Фільтрування транзакцій» and «Повідомлення про платежі».\nEOF\ngit add -A && git commit -q -m 'Case setup'"
+  ],
+  "prompt": "use doc-page-updater with page `portal/transactions/transactions.md` and brief `portal/transactions/.sources/change-brief.md`",
+  "options": {
+    "maxTurns": 60,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)",
+      "Bash(node:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "new link is the root route",
+      "type": "match",
+      "path": "portal/transactions/transactions.md",
+      "pattern": "Список оновлюється(?:(?!\\n#)[\\s\\S])*?\\]\\(/portal/settings/settings(?:#[^)]*)?\\)"
+    },
+    {
+      "name": "page links are root-relative",
+      "type": "links",
+      "path": "portal/transactions/transactions.md",
+      "form": "root-relative"
+    },
+    {
+      "name": "existing links unchanged",
+      "type": "match",
+      "path": "portal/transactions/transactions.md",
+      "pattern": "\\[Вебхуки\\]\\(/webhooks/webhooks\\)"
+    },
+    {
+      "name": "nothing else changed",
+      "type": "diff-lines",
+      "path": "portal/transactions/transactions.md",
+      "allow": "settings/settings|CSV|експорт|Експорт"
+    },
+    {
+      "type": "changed-only",
+      "paths": [
+        "portal/transactions/",
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}

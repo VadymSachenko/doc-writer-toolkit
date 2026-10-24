@@ -20,15 +20,16 @@ You are resolving documentation markers — `{/* NEEDS CONFIRMATION: ... */}` an
 
 ## Sources to load
 
-1. `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — resolve content root.
+1. `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — resolve the section folder's root pair (its content root).
 2. The section's `.sources/app-notes.md` — **optional**. Load if present; skip if absent. This file is written by `app-explorer` when it has run — do not require it.
 3. The section's `.sources/sme-interview.md` — **optional**. Load if present.
 4. The section's `.assets/` folder — list what screenshots already exist there.
 5. The doc pages in the section — read each one to find markers.
 6. If `Admin UI: playwright` is declared in the project's `CLAUDE.md` — also load `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/value-realism.md` and `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-capture.md`.
-7. `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` — **only for Ж1a** (UI-label terminal-punctuation normalization), applied when a confirmed UI label is written into a bold span in prose (Step 4). Do not use it to rewrite surrounding prose.
+7. `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` — **only for Ж1a** (UI-label terminal-punctuation normalization), applied when a confirmed UI label is written into a bold span in prose (Step 3). Do not use it to rewrite surrounding prose.
+8. **`uk` pages only:** `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/native-ukrainian.md` — when a confirmed fact is written into the page as Ukrainian prose (Step 3), the words you write follow it. It doesn't license rewriting the rest of that sentence or the sentences around the marker.
 
-Do not load style-guide corpora (formatting-conventions.md is a project rank-0 file, not a corpus). This skill edits markers only — it does not rewrite prose beyond filling in the confirmed fact.
+Do not load style-guide corpora (formatting-conventions.md and native-ukrainian.md are project rank-0 files, not corpora). This skill edits markers only — it does not rewrite prose beyond filling in the confirmed fact.
 
 ## Step 0 — Build the evidence index
 
@@ -90,7 +91,7 @@ Rules for `screenshot-recapture`:
 For each `resolvable` marker:
 - Remove the `{/* NEEDS CONFIRMATION: ... */}` comment.
 - Replace the uncertain text with the confirmed answer.
-- Keep surrounding prose intact — only change what the marker flagged.
+- Keep surrounding prose intact — only change what the marker flagged. On a `uk` page, the words you write follow `native-ukrainian.md` (source 8); the rest of the sentence stays as it is.
 - Use the exact UI label/term as observed, not a paraphrase — but when it goes into **prose inside a bold span**, apply Ж1a of `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md`: strip decorative terminal punctuation (`Create!` → **Create**, `Receiving:` → **Receiving**, `What's new?` → **What's new**) while preserving internal symbols (`Save & close` stays **Save & close**). The observed literal (with punctuation) stays the evidence in `app-notes.md`; the normalized form is what the page shows. If normalization leaves no useful label, follow the icon-only-control workflow instead.
 
 For each `screenshot-available` marker:

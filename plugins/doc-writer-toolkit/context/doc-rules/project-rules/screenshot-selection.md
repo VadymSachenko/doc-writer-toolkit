@@ -19,7 +19,7 @@ Decide which case applies:
    1. Read `frames-index.json` (schema: `screenshot`, `seconds`, `timestamp`, `ocr_text`, `transcript_text`, `score`, `reasons`, `source`). It's text — tens of KB even for ~100 frames — read the whole thing, not a sample.
    2. For each step or section you plan to write, find candidates by matching against `ocr_text` (what's visibly on screen) and `transcript_text` (what the SME was saying), prioritizing higher `score`.
    3. **Open only the shortlisted candidates** — aim for 3–8 images for the whole page, not all of them. Confirm each one actually shows what the step needs before using it.
-   4. **Copy** (not move) the confirmed files into `.assets/` — `frames/` must stay a complete archive for `cleanup-unused-screenshots` to sweep later.
+   4. **Copy** (not move) the confirmed files into `.assets/` — `frames/` must stay a complete archive for `cleanup-unused-screenshots` to sweep later. Note each copied file's original `frames/` basename (the `screenshot` value from its index entry, e.g. `screen-00-19-42.jpg`) — step 4 below records it so cleanup can trace the renamed embed back to its origin.
    5. Continue to the rename/classify steps below on the copied files.
 3. **`.assets/` is empty and there is no `frames/` folder** (older run, or none extracted) — fall back to the plain "list `.assets/`" behavior and tell the user no `frames-index.json` exists, so they know why you can't do index-driven selection.
 4. **Neither folder exists** — ask the user where screenshots are before proceeding.
@@ -68,3 +68,26 @@ Use the embed syntax that matches the classification (note the leading dot on `.
 `{compact-width}` is the project's declared **`Compact image width:`** — resolve it from the "Documentation toolkit configuration" section of the host project's `CLAUDE.md` (see `screenshot-capture.md` Section 0). If undeclared, use `480` and offer once to persist the declaration. Do not hardcode a width other than this resolved value.
 
 This is the single source of truth for the embed markup — consuming skills reference this file rather than restating the JSX/width.
+
+### 4. Record which frame this embed came from
+
+This step is what later lets `cleanup-unused-screenshots` recognize a renamed embed as **used** and keep its original in `frames/` instead of sweeping it into `_unused/`. Without it, the published file (`transactions-page.png`) shares no name with its origin frame (`screen-00-19-42.jpg`), so cleanup — which matches by basename — can't connect the two and moves the *used* original into `_unused/`, losing traceability.
+
+- **Applies only to files copied from `frames/` (selection case 2).** For a file that was already curated in `.assets/` before you started (case 1), or added from elsewhere, there is no origin frame to record — skip it. Cleanup handles that gap with a warning rather than a blind sweep.
+- For each file you copied from `frames/` and renamed, open `.sources/frames/{video}-frames/frames-index.json`, find the entry whose `screenshot` equals the original frame basename you copied (the `.jpg` name noted in case 2, step 4 above — e.g. `screen-00-19-42.jpg`), and add a `published_as` field listing the final embedded basename(s):
+
+  ```json
+  {
+    "screenshot": "screen-00-19-42.jpg",
+    "seconds": 1182.0,
+    "ocr_text": "…",
+    "transcript_text": "…",
+    "score": 5,
+    "reasons": ["visual-reference"],
+    "source": "visual-dedup",
+    "published_as": ["transactions-page.png"]
+  }
+  ```
+
+- If `published_as` already exists on the entry (a prior run, or a second crop of the same frame published under a different name), **append** the new name and keep the list deduplicated — one source frame can legitimately become more than one published image.
+- Add only the `published_as` field. Preserve every other field on the entry and every other entry in the index unchanged — you are editing one field, not rewriting the file. The script never writes `published_as`, so this field is yours to maintain; nothing in the extraction pipeline overwrites it.

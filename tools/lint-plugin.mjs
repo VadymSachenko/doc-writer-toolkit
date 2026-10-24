@@ -7,6 +7,7 @@
 //      Gaps that exist today are listed in KNOWN_GAPS, each with the reason it's open.
 //   d. No tracked text file has CRLF line endings.
 //   e. Every screenshot-annotation style block in the plugin's Markdown draws a square, unfilled frame.
+//   f. Every SKILL.md carries the contract's content (CONTRIBUTING.md, "Skill file shape"), under whatever headings.
 // Prints `path:line: message` per finding and exits 1 when there is any. Known gaps print as `known (<reason>)`
 // and don't fail the run; a listed gap that no longer occurs does, so the list can only shrink.
 import fs from 'node:fs';
@@ -35,24 +36,16 @@ export const CORPORA = [
 // The repo is LF (.gitattributes); `--eol` is kept so older callers still work.
 export const EOL_CHECK = true;
 
-const UNREACHABLE = 'no ROUTING.md row reaches this rule file';
-const MSSG = `${PLUGIN}/context/microsoft-style-guide`;
+// Skills that write no file, so they need no self-review before saving.
+export const READ_ONLY_SKILLS = ['doc-alignment-checker', 'doc-style-reviewer', 'section-readiness'];
+
+const CONTRACT = 'skill contract: no ';
+const contractGap = (skill, part, reason) => ({ file: `${PLUGIN}/skills/${skill}/SKILL.md`, message: `${CONTRACT}${part}`, reason });
 
 // Findings that exist on main today, with the reason each is open. Matched on file and message prefix.
 export const KNOWN_GAPS = [
-  ...[
-    `${PLUGIN}/context/google-developer-style-guide/language/reference-verbs.md`,
-    ...['acronyms', 'capitalization', 'numbers', 'word-choice/contractions', 'word-choice/plain-and-precise-language']
-      .map((f) => `${MSSG}/en-us/${f}.md`),
-    ...['accessibility', 'ai-and-bots', 'bits-and-bytes', 'cloud-computing', 'computers-and-devices', 'date-and-time',
-      'keys-and-shortcuts', 'mouse-interactions', 'security', 'special-characters', 'touch-and-pen', 'units-of-measure']
-      .map((f) => `${MSSG}/en-us/terminology/term-collections/${f}.md`),
-    ...['inclusive-language/inclusive-and-accessible', 'language-standards/abbreviations-and-acronyms',
-      'language-standards/capitalization-descriptors-prepositions', 'language-standards/grammar-style-overlay',
-      'language-standards/orthography-precedence', 'language-standards/punctuation-localization',
-      'locale-formats/numbers-and-placeholders']
-      .map((f) => `${MSSG}/uk-ua/${f}.md`),
-  ].map((file) => ({ file, message: UNREACHABLE, reason: 'no routing row yet' })),
+  ...['cleanup-unused-screenshots', 'doc-style-fixer', 'extract-sme-screenshots']
+    .map((s) => contractGap(s, 'self-review', 'no self-review written yet')),
 ];
 
 const KEY_LINE =/^([A-Za-z][\w-]*): (\S.*)$/;
@@ -196,6 +189,22 @@ export function annotationProblems(text) {
   return problems;
 }
 
+// The contract by content, not by heading text: what a skill must say, under whatever headings it uses.
+// Fenced blocks are skipped, since report templates inside them have headings of their own.
+export function contractProblems(text, { readOnly = false } = {}) {
+  const body = text.replace(/\r\n/g, '\n').replace(/^---\n[\s\S]*?\n---\n/, '').replace(/^(```|~~~)[^\n]*\n[\s\S]*?^\1[^\n]*$/gm, '');
+  const headings = [...body.matchAll(/^#{2,4} (.+)$/gm)].map((m) => m[1]);
+  const has = (re) => headings.some((h) => re.test(h));
+  const parts = [
+    ['scope', has(/scope|overview/i) || /\*\*(in|out of) scope/i.test(body)],
+    ['sources to load', has(/sources|inputs?\b|\bload/i)],
+    ['ordered steps', headings.filter((h) => /\b(step|phase) \d/i.test(h)).length >= 2 || (has(/workflow|procedure/i) && /^\d+\. /m.test(body))],
+    ['self-review', readOnly || has(/self-review|checklist|before (saving|finishing)/i)],
+    ['invocation examples', has(/invocation examples|example invocations/i)],
+  ];
+  return parts.filter(([, ok]) => !ok).map(([part]) => ({ line: 1, message: `${CONTRACT}${part}` }));
+}
+
 export function lint(root, { eol = EOL_CHECK } = {}) {
   const findings = [];
   const add = (file, line, message) => findings.push({ file, line, message });
@@ -242,6 +251,13 @@ export function lint(root, { eol = EOL_CHECK } = {}) {
   // e. Annotation frames.
   for (const file of tracked.filter((f) => f.startsWith(`${PLUGIN}/`) && f.endsWith('.md'))) {
     for (const p of annotationProblems(read(file))) add(file, p.line, p.message);
+  }
+
+  // f. Skill contract.
+  for (const file of tracked) {
+    const skill = file.match(new RegExp(`^${PLUGIN}/skills/([^/]+)/SKILL\\.md$`));
+    if (!skill) continue;
+    for (const p of contractProblems(read(file), { readOnly: READ_ONLY_SKILLS.includes(skill[1]) })) add(file, p.line, p.message);
   }
 
   return findings.sort(byPlace);

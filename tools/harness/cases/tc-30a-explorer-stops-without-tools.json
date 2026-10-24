@@ -1,0 +1,40 @@
+{
+  "id": "tc-30a-explorer-stops-without-tools",
+  "description": "The host declares Admin UI: playwright and a collection runner, but no Playwright MCP server is connected and newman isn't installed: app-explorer stops at Step 0, names what's missing, and explores nothing.",
+  "fixture": {
+    "shape": "single"
+  },
+  "setup": [
+    "printf 'OPERATOR_BASE_URL=https://test.example.com\\nOPERATOR_USERNAME=tester\\nOPERATOR_PASSWORD=secret\\n' > .env && printf '%s\\n' '- **Admin UI:** playwright' '- **API test collection:** .sources/demo.postman_collection.json' '- **API collection runner:** newman' >> CLAUDE.md && mkdir -p .sources portal/transactions/.sources && printf '{\"info\":{\"name\":\"demo\"},\"item\":[]}\\n' > .sources/demo.postman_collection.json && printf '{\"section\":\"portal/transactions\",\"verdict\":\"needs-revision\",\"pages\":[\"transactions.md\"]}\\n' > portal/transactions/.sources/section-readiness.json && printf '.env\\n' >> .gitignore && git add -A && git commit -q -m 'Case setup'"
+  ],
+  "prompt": "use app-explorer for `portal/transactions/`",
+  "options": {
+    "maxTurns": 30,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)",
+      "Bash(which:*)",
+      "Bash(ls:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "names the missing Playwright MCP server",
+      "type": "match",
+      "path": "output",
+      "pattern": "Playwright[^\\n]{0,120}(not (available|connected|reachable)|unavailable|isn.t (available|connected)|missing|no [^\\n]{0,20}server)|(no|missing)[^\\n]{0,40}Playwright",
+      "flags": "i"
+    },
+    {
+      "name": "no app notes written",
+      "type": "absent",
+      "path": "portal/transactions/.sources/app-notes.md"
+    },
+    {
+      "type": "unchanged",
+      "ignore": [
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}

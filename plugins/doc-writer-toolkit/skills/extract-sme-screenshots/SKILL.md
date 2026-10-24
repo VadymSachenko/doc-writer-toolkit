@@ -1,6 +1,6 @@
 ---
 name: extract-sme-screenshots
-description: Extracts deduplicated screenshots (and, if needed, an auto-transcribed transcript) from a meeting recording placed in a doc page's .sources/ folder. Use when the user has dropped a video (and optionally a transcript) into .sources/ and wants screenshots ready for convert-sme-input or a doc-writing skill. Not for producing the final structured source note itself — that's convert-sme-input's job.
+description: 'Extracts deduplicated screenshots (and, if needed, an auto-transcribed transcript) from a meeting recording in a doc page''s .sources/ folder, ready for convert-sme-input or a doc-writing skill. Not for the structured source note itself (convert-sme-input does that). Explicit invocation only: use explicitly ("extract-sme-screenshots", "use extract-sme-screenshots on .sources/demo.mp4"), or by name from /doc-from-interview and convert-sme-input; never on a loose request about a recording.'
 ---
 
 # extract-sme-screenshots
@@ -140,3 +140,11 @@ This is also what a manual "second pass" after `convert-sme-input` finishes look
 
 - Writing the structured source note — hand off to `convert-sme-input` for that.
 - Deciding which of the extracted screenshots the final doc actually needs — that happens naturally when someone writes the doc and references the ones they want; use `cleanup-unused-screenshots` afterward to sweep up the rest.
+
+## Explicit invocation examples
+
+- "use extract-sme-screenshots on `docs/payments/.sources/demo.mp4`"
+- "extract-sme-screenshots: pull frames at 1:20 and 4:05 from the recording in `.sources/`"
+- By name, from `/doc-from-interview` (its extraction step) and from `convert-sme-input` (targeted extraction).
+
+A loose request ("I dropped a recording, get the screenshots") doesn't start this skill: ask whether to run it.

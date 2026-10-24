@@ -43,7 +43,7 @@ Read the host project's `CLAUDE.md`, section **Documentation toolkit configurati
 |---|---|
 | `Style guide:` | which rule corpus the draft and review run under |
 | `Content language:` | the language to write in |
-| `UA content root:` / `EN i18n root:` | where pages live |
+| `UA content root:` / `EN i18n root:` (per root pair) | where pages live; the doc folder's root pair decides which |
 | `Code reference repo:` | *(this command)* local path to the product's source repo, for verifying facts |
 | `Admin UI:` | *(this command)* `playwright` if the project has live-UI screenshot automation, or `none` |
 

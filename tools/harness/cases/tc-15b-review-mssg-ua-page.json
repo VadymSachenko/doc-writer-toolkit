@@ -1,0 +1,29 @@
+{
+  "id": "tc-15b-review-mssg-ua-page",
+  "description": "mssg-ua review of a UA page: the profile is named and nothing is written; the findings are compared blind.",
+  "fixture": {
+    "shape": "single"
+  },
+  "prompt": "/{plugin}:review-doc-style portal/transactions/transactions.md guide:mssg-ua",
+  "options": {
+    "maxTurns": 60,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "profile mssg-ua@uk",
+      "type": "match",
+      "path": "output",
+      "pattern": "mssg-ua@uk"
+    },
+    {
+      "type": "unchanged",
+      "ignore": [
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}

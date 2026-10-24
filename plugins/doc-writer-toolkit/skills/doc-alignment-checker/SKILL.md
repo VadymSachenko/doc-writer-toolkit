@@ -9,27 +9,28 @@ You are checking whether a Ukrainian documentation page and its English counterp
 
 ## Scope
 
-- **In scope:** any Markdown/MDX page that exists in both the project's UA content root and its EN i18n root (see Path mapping).
-- **Out of scope:** content quality review, translation accuracy, style-guide compliance beyond the rules listed below. English-only reference sections with no UA counterpart (e.g. an API reference `docs/` tree in a project that splits UA and EN content into separate roots) are not checked here.
+- **In scope:** any Markdown/MDX page that exists under both roots of a declared root pair: its UA content root and its EN i18n root (see Path mapping). The caller may name either the UA or the EN page.
+- **Out of scope:** content quality review, translation accuracy, style-guide compliance beyond the rules listed below. A page outside every declared root pair is not checked here.
 
 ## Sources to load
 
 Load these files at the start of the task. Do not load others unless the user references them explicitly.
 
-- Follow `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` to resolve this project's **UA content root**, **EN i18n root**, and **UA URL prefix**. Do not assume `partner-cabinet/` or any other default.
+- Follow `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` to resolve the page's **root pair** (its **UA content root** and **EN i18n root**) and the **UA URL prefix of every declared pair**, for Check 5. Do not assume any default.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` — the shared page-to-page link contract. Check 5 checks links against this file's algorithm; do not restate it here.
+- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/heading-anchors.md` — the shared heading-id contract. Check 2 checks UA heading ids against it; do not restate it here.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` — the shared slug/title/filename convention. Check 11 checks title form and slug/filename agreement against this file; do not restate it here.
 - The UA page being checked (at the path resolved above).
 - The EN counterpart page (at the path resolved above).
 
 ## Path mapping
 
-Resolve the project's actual roots via `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` before doing anything else — do not assume `partner-cabinet/`.
+Resolve the page's root pair via `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` ("Resolving a page's root pair") before doing anything else — do not assume any folder. A UA or an EN path both identify the pair; the counterpart comes from the same pair.
 
 | Role | Path |
 |---|---|
-| Ukrainian | `<UA content root>/<relative-path>.md` |
-| English | `<EN i18n root>/<relative-path>.md` |
+| Ukrainian | `<pair's UA content root>/<relative-path>.md` |
+| English | `<pair's EN i18n root>/<relative-path>.md` |
 
 ## Step 0 — Identify main and secondary
 
@@ -42,9 +43,30 @@ The user will state which version is **main** (e.g., "main: UA", "UA is main", "
 
 Read both files. If either file does not exist, stop immediately and tell the user which file is missing before doing anything else.
 
+## Step 1.5 — Run the structural script
+
+A Node script does the mechanical counting, so it is exact on long pages: dates, headings, heading ids, tables, code blocks, `<details>` blocks, markers, and image, link and admonition counts. Don't count these by hand when the script runs. Interpret its output.
+
+Run it with the main file first and the secondary file second:
+
+```bash
+node ${CLAUDE_PLUGIN_ROOT}/scripts/doc-align/doc-align.mjs <main-file> <secondary-file>
+```
+
+It prints one JSON report: `bugs[]`, `warnings[]` and `passed[]`. Each finding has a `check` (the Check number below), a `flag`, a `description`, a `line` and a `file`. The fields, flags and exit codes are in `${CLAUDE_PLUGIN_ROOT}/scripts/doc-align/README.md`. Read that file only when a finding is unclear.
+
+- Treat each finding as a candidate, not a verdict. The script never decides whether a difference is intended. You do, from both files, and you word the finding for the report.
+- Exit `0` means it ran, with findings or without. The `ua` field says which file it read as UA, from the Cyrillic text. If that is wrong, or a `HEADING-ID-SKIPPED` warning says it couldn't tell, run it again with `--ua main` or `--ua secondary`.
+- Findings with `check: null` (image, link and admonition counts) have no Check of their own. Report them as warnings.
+- A `passed[]` entry is a sub-check with no findings. List it under **Passed** with its Check number.
+
+If the script can't run (no Node, or an exit other than `0`), count by hand as each Check below describes, and say in the report that the counts were done by hand.
+
+The semantic checks are always yours, whether the script ran or not: Check 4 (Type column language), Check 5 (link prefixes, per `internal-links.md`), Check 9 (Cyrillic text in the EN file), Check 10 (untranslated prose) and Check 11 (naming).
+
 ## Step 2 — Run all checks
 
-Run every check below in order. Collect every finding before reporting.
+Run every check below in order. For the mechanical checks, interpret the script's findings (or count by hand if it didn't run). For the semantic checks, read the files yourself. Collect every finding before reporting.
 
 ### Check 1 — Frontmatter dates match
 
@@ -52,17 +74,21 @@ Extract `last_update.date` from both files. They must be identical.
 
 **Flag:** `[DATE MISMATCH]` — show both values.
 
+Script flag: `DATE-MISMATCH`.
+
 ### Check 2 — Section count and heading levels
 
 Extract every heading (`#`, `##`, `###`, `####`) from both files in order. Count and nesting level must match exactly.
 
 When comparing UA headings, strip the anchor comment (`{/* #slug */}`) before comparing structure. Additionally:
 
-- Every UA heading must have an `{/* #anchor */}` comment derived from the EN heading text in lowercase kebab-case. Flag any UA heading that is missing its anchor.
+- Every UA heading from `##` down must end with a well-formed `{/* #id */}` comment, per `heading-anchors.md`; the page title (`#`) takes none. The expected id is the one generated from the EN heading at the same position, or that heading's explicit `{#id}`. Flag a UA heading whose comment is missing or malformed, and an id used twice on the page.
 - EN headings must **not** have `{/* … */}` anchor comments.
 
 **Flag:** `[HEADING COUNT/LEVEL MISMATCH]` — list the position and differing headings side by side.
-**Flag:** `[UA HEADING MISSING ANCHOR]` — show the heading and the expected anchor.
+**Flag:** `[UA HEADING MISSING ANCHOR]` — show the heading and the expected anchor, and say that adding it changes the heading's fragment, so links to the old fragment change with it (`heading-anchors.md`, rule 8).
+
+Script flags: `HEADING-COUNT-MISMATCH`, `HEADING-LEVEL-MISMATCH`, `HEADING-ID-MISSING`, `HEADING-ID-MALFORMED`, `HEADING-ID-DUPLICATE`, `EN-HEADING-COMMENT`, `HEADING-ID-MISMATCH` (the EN heading's id differs from the UA id at the same position), `HEADING-ID-SKIPPED`.
 
 ### Check 3 — Table structure
 
@@ -72,6 +98,8 @@ For every Markdown table in the main file, find the corresponding table (by orde
 - Row count must match.
 
 **Flag:** `[TABLE MISMATCH]` — identify the table by its position or the preceding heading, and show the counts (main vs secondary).
+
+Script flag: `TABLE-MISMATCH`.
 
 ### Check 4 — Type column values must be English
 
@@ -83,7 +111,7 @@ This check applies regardless of which file is main.
 
 ### Check 5 — Internal link prefixes
 
-Every page-to-page link in both files must match the output of the route-building algorithm in `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` for this project's declared **UA URL prefix** (resolved in Path mapping above). Flag any page link that uses a bare relative path (`./`, `../`), a hardcoded prefix, a leftover `.md`/`.mdx` extension, or a prefix other than the declared one. Per that file, this is a **structural match check only** — do not verify the target page exists, and do not touch asset links (`./.assets/…`), external URLs, same-page anchors, or MDX imports.
+Every page-to-page link in both files must match the output of the route-building algorithm in `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` for **one of the declared UA URL prefixes**, validated as that file's "Validating a route" prescribes. Per that file, this is a **structural match check only** — do not verify the target page exists, and do not touch asset links (`./.assets/…`), external URLs, same-page anchors, or MDX imports.
 
 **Flag:** `[LINK — INCORRECT PREFIX]` — show the full offending link and line number.
 
@@ -93,11 +121,15 @@ Extract every fenced code block (` ``` `) from both files in order. Their conten
 
 **Flag:** `[CODE BLOCK MISMATCH]` — show the position (nth code block) and a side-by-side diff of the differing lines.
 
+Script flag: `CODE-BLOCK-MISMATCH`. Its `line` is the first line that differs; you still write the diff.
+
 ### Check 7 — `<details>` block count matches
 
 Count `<details>` elements in both files. They must match.
 
 **Flag:** `[DETAILS BLOCK COUNT MISMATCH]` — show both counts.
+
+Script flag: `DETAILS-BLOCK-COUNT-MISMATCH`.
 
 ### Check 8 — ToDo and NEEDS CONFIRMATION markers
 
@@ -105,6 +137,8 @@ Extract every `{/* ToDo: … */}` and `{/* NEEDS CONFIRMATION: … */}` comment 
 
 **Flag:** `[MARKER MISSING IN SECONDARY]` — show the marker text and location.
 **Flag:** `[MARKER MISSING IN MAIN]` — show the marker text and location.
+
+Script flags: `MARKER-MISSING-IN-SECONDARY`, `MARKER-MISSING-IN-MAIN`. It pairs markers section by section; you check the table row.
 
 ### Check 9 — No Ukrainian prose in the EN file
 
@@ -127,10 +161,11 @@ A structural check only, against `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/projec
 - Both files share one relative path and filename basename (the two locales are the same page in two roots). Flag a divergent basename.
 - The filename basename is the kebab-case slug of the **canonical English title** (drop articles); an explicit `slug:` frontmatter field, if present, still names the same topic. Flag a basename that names a different topic than the EN title, or an EN/UA title that name different topics from each other.
 - The title form matches the doc type per that file (user guide = imperative phrase; concept = noun phrase; API reference = resource noun phrase). Flag a form mismatch.
+- A `sidebar_label:`, in either file, names the same subject as that file's title, and the EN and UA labels name the same subject. Flag a label that names a different or a broader subject, or one present in only one of the two files.
 
 Per that file, **report the mismatch — never rename**. `index.md` and other generated files are exempt.
 
-**Flag:** `[NAMING — TITLE/SLUG MISMATCH]` — show the filename, both titles, and what disagrees.
+**Flag:** `[NAMING — TITLE/SLUG MISMATCH]` — show the filename, both titles (and labels), and what disagrees.
 
 ## Step 3 — Report
 
@@ -141,6 +176,7 @@ Format the report as follows:
 
 Main:      <path to main file>
 Secondary: <path to secondary file>
+Pair:      <pair id>          (only when the project declares more than one root pair)
 
 ### Bugs (must fix before publishing)
 - [FLAG TYPE] Description — line N (file)

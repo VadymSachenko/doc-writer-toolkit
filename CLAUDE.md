@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repository is
 
-This is the **source repository for a Claude Code plugin marketplace** (`doc-writer-toolkit`), not a documentation site itself. It contains skills, slash commands, and content-rule corpora that get installed into *other* Docusaurus documentation projects (currently only UniComPay's). There is no app to build — the deliverable is the Markdown/JSON content under `plugins/doc-writer-toolkit/`, consumed by Claude Code at runtime in a different repo. The checks (a lint, a skill visibility check and the tests of the two Node scripts behind the locale translation pipeline) run with one command (see Commands).
+This is the **source repository for a Claude Code plugin marketplace** (`doc-writer-toolkit`), not a documentation site itself. It contains skills, slash commands, and content-rule corpora that get installed into *other* Docusaurus documentation projects (currently only UniComPay's). There is no app to build — the deliverable is the Markdown/JSON content under `plugins/doc-writer-toolkit/`, consumed by Claude Code at runtime in a different repo. The checks (a lint, a skill visibility check and the tests of the two Node scripts behind the locale translation pipeline and the one behind the alignment check) run with one command (see Commands).
 
 Because of this, most SKILL.md files reference paths like `docs/`, `partner-cabinet/`, `i18n/en/...`, and `CLAUDE.md` that **do not exist in this repo** — they refer to the target project where the plugin is installed. Do not go looking for those paths here; they're part of the runtime contract the skills expect the host project to satisfy.
 
@@ -27,19 +27,20 @@ plugins/doc-writer-toolkit/
   context/microsoft-style-guide/         # distilled MSSG corpus, EN + UA localization (routed loading)
   scripts/ui-labels/                     # Node, no deps: UI label store, label check, rename sync (README + tests)
   scripts/locale-sync/                   # Node, no deps: stale detection, changed blocks, checks, state (README + tests)
+  scripts/doc-align/                     # Node, no deps: UA/EN structural counts and heading ids for doc-alignment-checker (README + tests)
   scripts/sme-video-context/             # standalone Python tool, not auto-loaded
 ```
 
-Two manifests gate everything: `marketplace.json` points at `./plugins/doc-writer-toolkit` as a plugin source, and that plugin's own `plugin.json` is what Claude Code reads once installed. If you add a new skill or command directory, no manifest edit is needed — both commands and skills are picked up by directory convention.
+Two manifests gate everything: `marketplace.json` points at `./plugins/doc-writer-toolkit` as a plugin source, and that plugin's own `plugin.json` is what Claude Code reads once installed. If you add a new skill or command directory, no manifest edit is needed — both commands and skills are picked up by directory convention. Neither manifest has a `version`, on purpose: an install tracks this repository's commits. Don't add one.
 
 ## Commands used when developing this repo
 
 There's no build. What you'll actually run:
 
-- **Run the regression set before a merge:** `node tools/regression.mjs` from the repo root runs the lint, the tools' tests, both script suites, `claude plugin validate` and the skill visibility check, and prints one row per step. CI runs the same on every pull request. See CONTRIBUTING.md, "Checks before a merge".
+- **Run the regression set before a merge:** `node tools/regression.mjs` from the repo root runs the lint, the tools' tests, the three script suites, `claude plugin validate` and the skill visibility check, and prints one row per step. CI runs the same on every pull request. See CONTRIBUTING.md, "Checks before a merge".
 - **Validate a manifest edit:** `python3 -m json.tool plugins/doc-writer-toolkit/.claude-plugin/plugin.json` (or `.claude-plugin/marketplace.json`) — just a JSON syntax check.
 - **Try a skill/command end-to-end:** it must be exercised from a *different* repo that has this plugin installed (see README's "Install into a project" section) or from a local checkout added via `extraKnownMarketplaces` pointing at a local path. There is no in-repo harness for running a skill.
-- **Test the locale pipeline scripts:** `npm test` in `plugins/doc-writer-toolkit/scripts/ui-labels/` and in `.../scripts/locale-sync/`. Offline (throwaway git repos and the `command` label adapter); the `locale-sync` suite takes about two minutes. Keep each script's `README.md` in step with its flags and output fields, and add a test with every behaviour change.
+- **Test the Node scripts:** `npm test` in `plugins/doc-writer-toolkit/scripts/ui-labels/`, `.../scripts/locale-sync/` and `.../scripts/doc-align/`. Offline (throwaway git repos and the `command` label adapter; `doc-align` uses inline fixtures); the `locale-sync` suite takes about two minutes. Keep each script's `README.md` in step with its flags and output fields, and add a test with every behaviour change.
 - **`scripts/sme-video-context/sme_video_context.py`:** the Python tool. Setup and run commands are documented in `plugins/doc-writer-toolkit/scripts/sme-video-context/README.md` (needs system `ffmpeg`/`tesseract` plus a Python venv) — follow that file rather than duplicating the steps here, since the `extract-sme-screenshots` skill's own instructions are the current source of truth for how it's actually invoked.
 
 ## Architecture
@@ -52,13 +53,17 @@ Skill *logic* is generic and reusable for any Docusaurus doc project. Product-sp
 
 ### Skill file shape
 
-Every `SKILL.md` follows the same contract; when writing a new one or editing an existing one, preserve it:
+Frontmatter `name` + `description` — the description doubles as the trigger spec. All authoring/translation/review skills are **explicit-invocation only** (they say so in their own description and end with explicit invocation examples) — they must never fire on an implicit request. Preserve that if you touch the description.
 
-- Frontmatter `name` + `description` — the description doubles as the trigger spec. All authoring/translation/review skills are **explicit-invocation only** (they say so in their own description and end with an "Explicit invocation examples" section) — they must never fire on an implicit request. Preserve that if you touch the description.
-- **Scope** section stating in-scope/out-of-scope up front, cross-referencing sibling skills by name so responsibilities don't overlap (e.g. style review vs. UA/EN structural alignment are deliberately separate skills).
-- **Sources to load** — an explicit, short allowlist of files loaded at task start; skills are written to *not* load anything beyond this list unless the user references it.
-- A numbered **Workflow** with a mandatory interview/question phase before drafting (the three `*-writer` skills), and a **self-review checklist** run before any file is saved.
-- **Explicit invocation examples** at the end, showing the phrasing that should trigger the skill.
+The contract is about content, not heading text. Every `SKILL.md` says:
+
+- **its scope**: what is in and out, naming the sibling skills that own the rest;
+- **its sources to load**: a short allowlist of files read at task start, and nothing beyond it unless the user names a file;
+- **its ordered steps**: numbered steps or `Step N` / `Phase N` headings; the three `*-writer` skills start with a mandatory interview;
+- **a self-review** run before any file is saved, in every skill that writes files;
+- **explicit invocation examples**: the phrasing that should trigger it.
+
+The headings shown in CONTRIBUTING.md are the shape for a new skill; an existing skill may keep the same content under other headings (style review vs. UA/EN structural alignment, for example, are deliberately separate skills, each with its own scope). The lint's check f (`tools/lint-plugin.mjs`) checks the five parts; a gap that exists today is listed there with its reason.
 
 Commands in `commands/*.md` are thin: they bind `$ARGUMENTS` to concrete paths and hand off with "strictly follow the skill's workflow" — business logic belongs in the skill, not the command.
 
@@ -82,9 +87,10 @@ No skill hardcodes a UA content root, an EN i18n root, a URL prefix, or a style-
 ```
 
 - `context/project-paths.md` is the single source of truth for the path-resolution procedure (and the ask-once, offer-to-persist fallback when a project hasn't declared these fields yet).
+- `project-paths.md` also resolves which root pair a page belongs to, for hosts that declare more than one; skills point at it.
 - `context/style-guide-registry.md` is the equivalent for the style-guide token, plus the corpus/router each token maps to.
 
-Host projects are free to differ in shape here, and none of that difference lives in a skill file: some split UA-first content and EN-native reference docs into two separate Docusaurus plugin instances with two i18n output paths (e.g. `partner-cabinet/` alongside a default-id `docs/`); others use a single tree. A skill never assumes which — it reads the declaration.
+Host projects are free to differ in shape here, and none of that difference lives in a skill file: some split content into two separate Docusaurus plugin instances with two i18n output paths (e.g. `portal/` alongside a default-id `docs/`), each a root pair; others use a single tree. A skill never assumes which — it reads the declaration.
 
 Across any project's tree(s), unresolved content is marked with `{/* ToDo: ... */}` and `{/* NEEDS CONFIRMATION: ... */}` HTML comments — every writing/translation/alignment skill knows to preserve, carry over, or check for these markers rather than resolving them silently.
 

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { annotationProblems, applyKnownGaps, checkFrontmatter, isRouted, MAX_DESCRIPTION, rootRefs, routedPaths, scalarProblem } from './lint-plugin.mjs';
+import { annotationProblems, applyKnownGaps, checkFrontmatter, contractProblems, isRouted, MAX_DESCRIPTION, rootRefs, routedPaths, scalarProblem } from './lint-plugin.mjs';
 
 const skill = (description, name = 'my-skill') => `---\nname: ${name}\ndescription: ${description}\n---\n\n# ${name}\n`;
 const messages = (findings) => findings.map((f) => `${f.line}: ${f.message}`);
@@ -129,4 +129,13 @@ test('annotations: a frame must be square and unfilled', () => {
   assert.equal(annotationProblems(block("  borderRadius: '0',")).length, 1);
   assert.equal(annotationProblems(block("  borderRadius: '0',\n  background: 'transparent',"))[0], undefined);
   assert.deepEqual(annotationProblems("Object.assign(el.style, { color: 'red' })"), []);
+});
+
+test('contract: the five parts are found under any heading, and each missing one is reported', () => {
+  const full = '---\nname: x\n---\n\n## Overview\n\n**Out of scope:** y\n\n## Inputs\n\n- a\n\n### Step 1 — A\n\n### Step 2 — B\n\n## Self-review before saving\n\n## Explicit invocation examples\n';
+  assert.deepEqual(contractProblems(full), []);
+  const bare = '---\nname: x\n---\n\n# x\n\nText.\n\n```md\n## Scope\n## Explicit invocation examples\n```\n';
+  assert.deepEqual(contractProblems(bare).map((p) => p.message.replace('skill contract: no ', '')), ['scope', 'sources to load', 'ordered steps', 'self-review', 'invocation examples']);
+  assert.deepEqual(contractProblems(bare, { readOnly: true }).map((p) => p.message).includes('skill contract: no self-review'), false);
+  assert.deepEqual(contractProblems('## Scope\n## Sources to load\n## Workflow\n\n1. Do it.\n\n## Checklist\n## Explicit invocation examples\n'), []);
 });

@@ -1,6 +1,6 @@
 # Contributing to doc-writer-toolkit
 
-This repo is a Claude Code plugin marketplace. The deliverable is the Markdown/JSON content under `plugins/doc-writer-toolkit/` — there is no app to build. A lint, a skill visibility check and the test suites of the two Node scripts run before every merge: see [Checks before a merge](#checks-before-a-merge). See [CLAUDE.md](CLAUDE.md) for a full architectural overview.
+This repo is a Claude Code plugin marketplace. The deliverable is the Markdown/JSON content under `plugins/doc-writer-toolkit/` — there is no app to build. A lint, a skill visibility check and the test suites of the three Node scripts run before every merge: see [Checks before a merge](#checks-before-a-merge). See [CLAUDE.md](CLAUDE.md) for a full architectural overview.
 
 ## How to add a skill
 
@@ -27,6 +27,16 @@ This repo is a Claude Code plugin marketplace. The deliverable is the Markdown/J
    ## Explicit invocation examples
    Phrasing that should trigger the skill. Mark it explicit-invocation only in the description.
    ```
+
+   The contract is about content, not heading text. Every `SKILL.md` says:
+   
+   - **its scope**: what is in and out, naming the sibling skills that own the rest;
+   - **its sources to load**: a short allowlist of files read at task start, and nothing beyond it unless the user names a file;
+   - **its ordered steps**: numbered steps or `Step N` / `Phase N` headings; the three `*-writer` skills start with a mandatory interview;
+   - **a self-review** run before any file is saved, in every skill that writes files;
+   - **explicit invocation examples**: the phrasing that should trigger it.
+
+   These headings are the shape for a new skill; the lint (check f) accepts the same content under other headings, since some existing skills use them (`## Inputs`, `### Step N`).
 
    Keep `description` in single quotes, writing a `'` inside it as `''`: an unquoted `: ` is invalid YAML, and the skill then loads with no description. The same goes for a command's `description`.
 
@@ -87,9 +97,9 @@ It prints one row per step, with the exit code and the result line. A step whose
 
 | Step | Command | Checks |
 |---|---|---|
-| `lint` | `node tools/lint-plugin.mjs` | Skill and command frontmatter that strict YAML accepts; every `${CLAUDE_PLUGIN_ROOT}/…` path exists; every style-guide rule file is reachable from its `ROUTING.md`; no file has CRLF line endings; every screenshot-annotation frame in a snippet is square and unfilled |
+| `lint` | `node tools/lint-plugin.mjs` | Skill and command frontmatter that strict YAML accepts; every `${CLAUDE_PLUGIN_ROOT}/…` path exists; every style-guide rule file is reachable from its `ROUTING.md`; no file has CRLF line endings; every skill carries the contract's five parts; every screenshot-annotation frame in a snippet is square and unfilled |
 | `tools-tests` | `node --test tools/lint-plugin.test.mjs tools/check-visibility.test.mjs tools/harness/harness.test.mjs` | The tools' own tests, including the skill harness (no model calls) |
-| `ui-labels`, `locale-sync` | `npm test` in each folder under `plugins/doc-writer-toolkit/scripts/` | The scripts' suites. `locale-sync` takes about two minutes |
+| `ui-labels`, `locale-sync`, `doc-align` | `npm test` in each folder under `plugins/doc-writer-toolkit/scripts/` | The scripts' suites. `locale-sync` takes about two minutes |
 | `validate` | `claude plugin validate plugins/doc-writer-toolkit` | The CLI's own plugin checks |
 | `visibility` | `node tools/check-visibility.mjs` | Every skill and command loads with its description. It reads a copy under a sentinel name, so an installed copy can't stand in for the tree under review |
 
@@ -112,4 +122,4 @@ python3 -m json.tool plugins/doc-writer-toolkit/.claude-plugin/plugin.json
 python3 -m json.tool .claude-plugin/marketplace.json
 ```
 
-Both manifests are static — adding skills/commands by directory convention does not require editing them.
+Both manifests are static — adding skills/commands by directory convention does not require editing them. Don't add a `version` to either: without one, an install tracks this repository's commits, and a pinned version would hold installs back until someone bumps it.

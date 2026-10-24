@@ -1,0 +1,9 @@
+{
+  "name": "doc-align",
+  "private": true,
+  "type": "module",
+  "description": "Count and pair the structural elements of a UA page and its EN counterpart, and check heading ids. No dependencies.",
+  "bin": { "doc-align": "./doc-align.mjs" },
+  "engines": { "node": ">=18.3" },
+  "scripts": { "test": "node --test test/doc-align.test.mjs" }
+}

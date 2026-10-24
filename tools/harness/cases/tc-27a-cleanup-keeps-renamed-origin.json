@@ -1,0 +1,59 @@
+{
+  "id": "tc-27a-cleanup-keeps-renamed-origin",
+  "description": "The page embeds transactions-page.png, published from screen-00-00-01.jpg (recorded in published_as) and names screen-00-00-03.jpg: cleanup keeps both and moves only screen-00-00-02.jpg to _unused/.",
+  "fixture": {
+    "shape": "single"
+  },
+  "setup": [
+    "mkdir -p portal/transactions/.sources/frames/demo-frames portal/transactions/.assets && for n in 01 02 03; do printf 'jpg' > portal/transactions/.sources/frames/demo-frames/screen-00-00-$n.jpg; done && printf 'png' > portal/transactions/.assets/transactions-page.png",
+    "cat > portal/transactions/.sources/frames/demo-frames/frames-index.json <<'EOF'\n[\n  {\n    \"screenshot\": \"screen-00-00-01.jpg\",\n    \"seconds\": 1.0,\n    \"ocr_text\": \"Транзакції\",\n    \"transcript_text\": \"Відкриваємо список транзакцій.\",\n    \"score\": 5,\n    \"reasons\": [\n      \"visual-reference\"\n    ],\n    \"source\": \"visual-dedup\",\n    \"published_as\": [\n      \"transactions-page.png\"\n    ]\n  },\n  {\n    \"screenshot\": \"screen-00-00-02.jpg\",\n    \"seconds\": 2.0,\n    \"ocr_text\": \"Налаштування\",\n    \"transcript_text\": \"Тут налаштування.\",\n    \"score\": 2,\n    \"reasons\": [\n      \"visual-change\"\n    ],\n    \"source\": \"visual-dedup\"\n  },\n  {\n    \"screenshot\": \"screen-00-00-03.jpg\",\n    \"seconds\": 3.0,\n    \"ocr_text\": \"Фільтри\",\n    \"transcript_text\": \"Відкриваємо фільтри.\",\n    \"score\": 4,\n    \"reasons\": [\n      \"visual-reference\"\n    ],\n    \"source\": \"visual-dedup\"\n  }\n]\nEOF",
+    "perl -0pi -e 's/(Список оновлюється автоматично\\.)/$1\\n\\n![Сторінка Транзакції](.\\/.assets\\/transactions-page.png)\\n\\nКадр фільтрів: `screen-00-00-03.jpg`./' portal/transactions/transactions.md && grep -q 'transactions-page.png' portal/transactions/transactions.md",
+    "git add -A && git commit -q -m 'Case setup'"
+  ],
+  "prompt": "use cleanup-unused-screenshots for `portal/transactions/transactions.md`",
+  "options": {
+    "maxTurns": 40,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)",
+      "Bash(mkdir:*)",
+      "Bash(mv:*)",
+      "Bash(ls:*)",
+      "Bash(cd:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "origin of the renamed embed kept",
+      "type": "exists",
+      "path": "portal/transactions/.sources/frames/demo-frames/screen-00-00-01.jpg"
+    },
+    {
+      "name": "frame named by its basename kept",
+      "type": "exists",
+      "path": "portal/transactions/.sources/frames/demo-frames/screen-00-00-03.jpg"
+    },
+    {
+      "name": "unused frame moved",
+      "type": "exists",
+      "path": "portal/transactions/.sources/frames/demo-frames/_unused/screen-00-00-02.jpg"
+    },
+    {
+      "name": "unused frame gone from the top level",
+      "type": "absent",
+      "path": "portal/transactions/.sources/frames/demo-frames/screen-00-00-02.jpg"
+    },
+    {
+      "name": "published_as kept in the index",
+      "type": "match",
+      "path": "portal/transactions/.sources/frames/demo-frames/frames-index.json",
+      "pattern": "\"published_as\"\\s*:\\s*\\[\\s*\"transactions-page\\.png\"\\s*\\]"
+    },
+    {
+      "type": "changed-only",
+      "paths": [
+        "portal/transactions/.sources/frames/demo-frames/"
+      ]
+    }
+  ]
+}

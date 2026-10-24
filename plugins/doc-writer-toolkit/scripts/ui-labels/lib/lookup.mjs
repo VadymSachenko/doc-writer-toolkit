@@ -4,8 +4,9 @@ import { isLib, loadStore, mergedLabels } from './store.mjs';
 const PLACEHOLDER = /\{\{[^}]*\}\}|\$\{[^}]*\}|\{[^}]*\}|%[sd]/;
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-// Case, whitespace and trailing ':' / '.' / '…' don't change which label a span is.
-export const normalize = (s) => s.normalize('NFC').replace(/\s+/g, ' ').trim().replace(/[:.…]+$/, '').trim().toLocaleLowerCase('uk');
+// Case, whitespace and trailing ':' / '.' / '…' / '!' / '?' don't change which label a span is: a page drops that
+// decoration from the bold span (`Create!` → **Create**).
+export const normalize = (s) => s.normalize('NFC').replace(/\s+/g, ' ').trim().replace(/[:.…!?]+$/, '').trim().toLocaleLowerCase('uk');
 
 // A bold span with markup inside (a link, `&nbsp;`, quotes, a `A > B` menu path) can't be checked as one label, so it
 // is looked up, and written, part by part.
@@ -28,7 +29,8 @@ function buildIndex(uk) {
   for (const [key, text] of Object.entries(uk)) {
     push(exact, text, key);
     const norm = normalize(text);
-    push(loose, norm, key);
+    // A label that is only punctuation (`?`, `…`) has no loose form: it would share one empty bucket with every other.
+    if (norm) push(loose, norm, key);
     const parts = norm.split(new RegExp(PLACEHOLDER.source, 'g'));
     if (parts.length > 1 && parts.join('').replace(/\s/g, '').length >= 3) {
       patterns.push({ key, re: new RegExp('^' + parts.map(escapeRe).join('(.+?)') + '$', 'u') });
@@ -38,10 +40,12 @@ function buildIndex(uk) {
 }
 
 function findKeys(index, span) {
-  const exact = index.exact.get(span);
-  if (exact) return { keys: exact, match: 'exact' };
   const norm = normalize(span);
-  const loose = index.loose.get(norm);
+  const exact = index.exact.get(span);
+  // An exact hit still names the keys only the normalized form reaches (`Видалити` for a button, `Видалити?` for a
+  // dialog title): a page that drops the decoration may mean either, and the binding pass decides.
+  if (exact) return { keys: exact, match: 'exact', looseKeys: (norm && index.loose.get(norm) || []).filter((k) => !exact.includes(k)).sort() };
+  const loose = norm ? index.loose.get(norm) : undefined;
   if (loose) return { keys: loose, match: 'normalized' };
   const pattern = index.patterns.filter((p) => p.re.test(norm)).map((p) => p.key);
   if (pattern.length) return { keys: pattern, match: 'pattern' };
@@ -75,7 +79,7 @@ export async function runLookup(settings, { spans, search, locales, limit = 20 }
 
   const index = buildIndex(labels.uk ?? {});
   const results = spans.map((span) => {
-    const { keys, match } = findKeys(index, span);
+    const { keys, match, looseKeys = [] } = findKeys(index, span);
     if (!keys.length) return { span, class: '?', status: 'no-match' };
     // Application keys beat library keys with the same strings. A library key whose strings differ from every
     // application key stays a candidate: the same UA text can be a library control (a date picker's OK) whose
@@ -87,7 +91,7 @@ export async function runLookup(settings, { spans, search, locales, limit = 20 }
     const rows = candidates.map((key) => ({ key, values: valuesFor(key) }));
     const identical = rows.every((r) => JSON.stringify(r.values) === JSON.stringify(rows[0].values));
     if (candidates.length > 1 && !identical) {
-      return { span, class: '?', status: 'ambiguous', match, candidates: rows };
+      return { span, class: '?', status: 'ambiguous', match, candidates: rows, ...(looseKeys.length ? { looseKeys } : {}) };
     }
     return {
       span,
@@ -96,6 +100,7 @@ export async function runLookup(settings, { spans, search, locales, limit = 20 }
       match,
       key: candidates[0],
       alsoKeys: candidates.slice(1),
+      ...(looseKeys.length ? { looseKeys } : {}),
       values: rows[0].values,
       ...(origin[candidates[0]] ? { overlay: origin[candidates[0]] } : {}),
       missingIn: show.filter((l) => rows[0].values[l] === null),
