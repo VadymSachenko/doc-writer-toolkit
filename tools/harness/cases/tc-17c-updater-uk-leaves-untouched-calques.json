@@ -1,0 +1,54 @@
+{
+  "id": "tc-17c-updater-uk-leaves-untouched-calques",
+  "description": "A brief renames a field whose step sentence, and a section the brief says not to touch, already hold calques: the updater changes only the label, and both calques stay byte-identical, although it now holds the natural-Ukrainian rules.",
+  "fixture": {
+    "shape": "single"
+  },
+  "setup": [
+    "node -e \"const fs=require('fs');const p='portal/transactions/transactions.md';let t=fs.readFileSync(p,'utf8');t=t.replace('2. Задайте період у полі **Дата**.','2. Задайте період у полі **Дата** — діалог календаря відкриється одразу.');t=t.replace('і виберіть статус платежу.','і виберіть статус платежу. Діалог **Фільтри** відкривається праворуч — і це зручно.');fs.writeFileSync(p,t)\"",
+    "mkdir -p portal/transactions/.sources && cat > portal/transactions/.sources/change-brief.md <<'EOF'\n# Change brief — renamed field\n\n## Page\nportal/transactions/transactions.md\n\n## What changed\n- The **Дата** field is now called **Дата операції**. — source: ticket #23\n\n## Where in the page\nThe section «Перегляд транзакцій».\n\n## Screenshots\n- none\n\n## Terms\n- none\n\n## Do not touch\n- The sections «Фільтрування транзакцій» and «Повідомлення про платежі».\nEOF",
+    "git add -A && git commit -q -m 'Case setup'"
+  ],
+  "prompt": "use doc-page-updater with page `portal/transactions/transactions.md` and brief `portal/transactions/.sources/change-brief.md`",
+  "options": {
+    "maxTurns": 60,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)",
+      "Bash(node:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "the label is renamed",
+      "type": "no-match",
+      "path": "portal/transactions/transactions.md",
+      "pattern": "\\*\\*Дата\\*\\*"
+    },
+    {
+      "name": "the host sentence changed only in its label",
+      "type": "match",
+      "path": "portal/transactions/transactions.md",
+      "pattern": "2\\. Задайте період у полі \\*\\*Дата операції\\*\\* — діалог календаря відкриється одразу\\."
+    },
+    {
+      "name": "the untouched section's calque stays",
+      "type": "match",
+      "path": "portal/transactions/transactions.md",
+      "pattern": "і виберіть статус платежу\\. Діалог \\*\\*Фільтри\\*\\* відкривається праворуч — і це зручно\\."
+    },
+    {
+      "name": "nothing else changed",
+      "type": "diff-lines",
+      "path": "portal/transactions/transactions.md",
+      "allow": "\\*\\*Дата\\*\\*"
+    },
+    {
+      "type": "changed-only",
+      "paths": [
+        "portal/transactions/",
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}
