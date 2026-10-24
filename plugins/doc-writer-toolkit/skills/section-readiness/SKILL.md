@@ -20,21 +20,21 @@ Because "what's missing" needs a notion of what *should* be there, this skill ne
 
 Load only these at task start. Do not load rule corpora, templates, or glossaries — this skill writes nothing and needs no style rules.
 
-1. `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — to resolve the project's content roots and language. Follow it; don't restate it.
+1. `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — to resolve the section folder's root pair and the project's language. Follow it; don't restate it.
 2. The host project's `CLAUDE.md`, section **Documentation toolkit configuration** — for the declared roots, language, and app-access fields.
 3. The target section folder and its `.sources/` / `.assets/` subfolders — directory listings and lightweight file reads (see Step 2 for how to read cheaply).
 
 ## Step 0 — Resolve the folder and project config
 
 1. The caller names a section folder (relative to the repo root, e.g. `docs/transactions`). If none is given, ask which folder, then stop until answered.
-2. Resolve the project's content root(s), content language, and UA URL prefix via `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`. If a needed field is undeclared, follow that file's ask-once/offer-to-persist fallback — this is the *only* interaction this skill performs.
+2. Resolve the section folder's root pair, the content language, and the pair's UA URL prefix via `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`. If a needed field is undeclared, follow that file's ask-once/offer-to-persist fallback — this is the *only* interaction this skill performs.
 3. Read the **Documentation toolkit configuration** section for the two app-access fields:
    - `Admin UI:` — `playwright` if live-UI capture is available, or `none`.
    - `API test collection:` — a path to a Postman/newman collection for seeding test-env scenarios, or `none`. *(This field may not exist yet in a given project. If absent, report it as `not declared` — do not ask, do not persist. Reporting its absence is the signal the later steps need.)*
 
 ## Step 1 — Confirm the folder exists
 
-If the named folder does not exist under the resolved content root, stop and say so plainly — a readiness scan of a non-existent folder has nothing to report. Do not create it.
+If the named folder does not exist under the resolved pair's content root, stop and say so plainly — a readiness scan of a non-existent folder has nothing to report. Do not create it.
 
 ## Step 2 — Inventory, reading cheaply
 
@@ -130,6 +130,8 @@ Write the machine-consumable report to **`<section folder>/.sources/section-read
   }
 }
 ```
+
+`project.pair` (the pair id, e.g. `"pair": "api-reference"`) is present only when the project declares more than one root pair; `contentRoot` and `uaUrlPrefix` are then that pair's.
 
 Then print a short human-readable summary to the conversation (two or three lines): the **verdict** and why, page count and their states, what sources exist, and the app-access verdict. Do not echo the full JSON back — point to the file.
 
