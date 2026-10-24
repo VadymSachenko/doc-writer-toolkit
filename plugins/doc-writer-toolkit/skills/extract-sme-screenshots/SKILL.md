@@ -43,12 +43,12 @@ Read your own phrasing back before asking: if it could plausibly be read as stee
 If no transcript exists at all (and none will be auto-generated, e.g. the user declines Whisper), Mode A is impossible — say so explicitly and proceed with Mode B.
 
 Once a mode is chosen (or Mode B is the only option), continue:
-- **Mode A:** skip Step 3 (venv) entirely — see "Targeted extraction" below for how `--plan-from-transcript` + `--extract-at` runs; ffmpeg on `PATH` is all that's needed.
+- **Mode A:** run Step 3's Mode A setup only (ffmpeg, tesseract, and the venv with Pillow), then plan and extract as "Targeted extraction" below describes.
 - **Mode B:** continue to Step 3.
 
 ### Step 3 — Ensure the environment
 
-The script (`${CLAUDE_PLUGIN_ROOT}/scripts/sme-video-context/sme_video_context.py`) needs `ffmpeg` and `tesseract` (system-installed — check with `which ffmpeg tesseract` first, don't assume) and a Python venv with `Pillow` + `imagehash` always, plus `faster-whisper` only when there's no transcript to import (it's a heavy dependency with a real model download — don't install it if a transcript already covers the whole recording).
+The script (`${CLAUDE_PLUGIN_ROOT}/scripts/sme-video-context/sme_video_context.py`) needs `ffmpeg` and `tesseract` (system-installed — check with `which ffmpeg tesseract` first, don't assume; the OCR asks for `eng+ukr+rus`, and with English data only tesseract warns and continues, but Cyrillic text comes out poorly — install the language data: `brew install tesseract-lang` on macOS, `tesseract-ocr-ukr tesseract-ocr-rus` on Debian/Ubuntu) and a Python venv with `Pillow` + `imagehash` always, plus `faster-whisper` only when there's no transcript to import (it's a heavy dependency with a real model download — don't install it if a transcript already covers the whole recording).
 
 Use a **persistent** venv, not a fresh one per run — recreating it (and re-downloading the Whisper model) on every invocation wastes real time and bandwidth for no benefit:
 
@@ -61,11 +61,21 @@ VENV=~/.cache/doc-writer-toolkit/sme-video-venv
 "$VENV/bin/pip" install --quiet faster-whisper==1.2.1
 ```
 
+**Mode A** needs the same `ffmpeg` and `tesseract`, and only Pillow in the venv: `--extract-at` OCRs each frame it pulls. No imagehash, no Whisper:
+
+```bash
+VENV=~/.cache/doc-writer-toolkit/sme-video-venv
+[ -d "$VENV" ] || python3 -m venv "$VENV"
+"$VENV/bin/pip" install --quiet --upgrade pip
+"$VENV/bin/pip" install --quiet Pillow==11.3.0
+```
+
 ### Step 4 — Run the script
 
 Run into a scratch output directory (not directly into `.sources/`), in the **background** — a full bulk pass on a long recording can take up to an hour, and nothing about this pipeline needs the conversation blocked while it runs:
 
 ```bash
+VENV=~/.cache/doc-writer-toolkit/sme-video-venv
 "$VENV/bin/python" "${CLAUDE_PLUGIN_ROOT}/scripts/sme-video-context/sme_video_context.py" \
   "<path-to-video>" \
   "<scratch-output-dir>" \
@@ -83,6 +93,7 @@ The destination is `.sources/frames/{video-basename}-frames/` (create it, includ
 
 - Merge `<scratch-output-dir>/images/` into the destination:
   ```bash
+  VENV=~/.cache/doc-writer-toolkit/sme-video-venv
   "$VENV/bin/python" "${CLAUDE_PLUGIN_ROOT}/scripts/sme-video-context/sme_video_context.py" \
     "<path-to-video>" ".sources/frames/{video-basename}-frames" --merge-from "<scratch-output-dir>/images"
   ```
@@ -99,17 +110,26 @@ State how many screenshots were kept (and how many were skipped as already-cover
 
 ## Targeted extraction (used standalone or from convert-sme-input)
 
-Guarantees a screenshot near one or more specific moments in an **already-existing** `.sources/frames/{video-basename}-frames/` folder, without re-running the full pipeline:
+Guarantees a screenshot near one or more specific moments in a `.sources/frames/{video-basename}-frames/` folder (created if it doesn't exist yet), without re-running the full pipeline. In Mode A, plan the moments first; this step needs no venv:
 
 ```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/sme-video-context/sme_video_context.py" --plan-from-transcript \
+  --transcript "<part1.txt>" --transcript "<part2.txt>@<offset-seconds>" > "<scratch-dir>/plan.json"
+```
+
+Pick the seconds worth a screenshot from `plan.json` (for example, `score` 4 or more), then extract them, with the same `--transcript` flags so each `frames-index.json` entry carries the transcript text and score:
+
+```bash
+VENV=~/.cache/doc-writer-toolkit/sme-video-venv
 "$VENV/bin/python" "${CLAUDE_PLUGIN_ROOT}/scripts/sme-video-context/sme_video_context.py" \
   "<path-to-video>" ".sources/frames/{video-basename}-frames" \
+  --transcript "<part1.txt>" --transcript "<part2.txt>@<offset-seconds>" \
   --extract-at "<seconds-1>,<seconds-2>,..."
 ```
 
 - Pass every needed timestamp in **one call**, comma-separated — don't call this once per timestamp. Each requested second is checked against what's already in the folder; a new frame is extracted via ffmpeg only for the ones not already covered.
 - `--tolerance` (default 15s) controls how close an existing screenshot must be to count as already covering a requested second.
-- This mode needs only `ffmpeg` on `PATH` — no Python packages, no persistent venv setup (Step 3 above doesn't apply here). That's what makes it cheap enough for `convert-sme-input` to call directly mid-workflow instead of only as a manual follow-up.
+- This mode needs `ffmpeg`, `tesseract` and the venv's Pillow (Step 3's Mode A setup) — no imagehash, no Whisper. That's what makes it cheap enough for `convert-sme-input` to call directly mid-workflow instead of only as a manual follow-up. Without `--transcript`, the call still extracts, but every new entry gets `score: 0`, no reasons and no transcript text.
 - This is also how Mode A's `--plan-from-transcript` output gets turned into screenshots: feed the seconds it picks straight into `--extract-at` as above.
 - Each new frame gets appended to `frames-index.json` (K8) alongside the existing entries — this call never overwrites the index, only adds to it.
 - Report how many new screenshots were extracted versus already covered.
