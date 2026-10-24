@@ -28,10 +28,7 @@ SCREENSHOTS: Place screenshots in `./.assets/` next to the document. Reference t
 
 INTERNAL LINKS: Links to other doc pages are absolute — the project's URL prefix + the target's path relative to the content root, with no `.md` extension (e.g. `/balance/add-cards/add-cards`). The skill is authoritative — see its internal-link rule. Asset links stay relative (`./.assets/…`).
 
-ICONS IN STEPS: For buttons and UI elements, apply this decision tree:
-1. UI element has a text label → bold text alone: click **Save**.
-2. No text label + the Iconify icon name is known → place the `<Icon>` component immediately before the bold action name: `<Icon icon="ic:sharp-edit" height="24" style={{ color: '#9564ff' }} /> **Edit**`.
-3. No text label + the icon name can't be determined → descriptive text for where to click: "click the pencil icon" / "click the delete button".
+ICONS IN STEPS: A control with a text label gets the bold label alone: click **Save**. An icon-only control follows Ж8 in `formatting-conventions.md`: its decision tree, the `Icon rendering:` form and the sentence pattern. Ж8 is authoritative; its rules are not repeated here.
 */}
 
 This guide describes how to {task, for example, manage} [{entity}s](/link/to/the/feature-overview).

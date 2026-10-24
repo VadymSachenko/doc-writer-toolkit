@@ -1,6 +1,6 @@
 ---
 name: Проєктні конвенції форматування
-description: Rank-0 project formatting conventions — what bold, code font and italic mean in this project's pages, how placeholders are written, how one entity is rendered consistently, and how a code entity differs from a human concept. Core section is language-neutral; UA and EN sections carry the per-language conventions. Loaded for every guide profile, in drafting and in review.
+description: Rank-0 project formatting conventions — what bold, code font and italic mean in this project's pages, how placeholders are written, how one entity is rendered consistently, how a code entity differs from a human concept, and how an icon-only control is named and shown. Core section is language-neutral; UA and EN sections carry the per-language conventions. Loaded for every guide profile, in drafting and in review.
 metadata:
   type: reference
 ---
@@ -46,6 +46,7 @@ metadata:
 | Що це | Рендер | Приклад (UA) | Приклад (EN) |
 |---|---|---|---|
 | Видима мітка елемента інтерфейсу | **жирний** | натисніть **Зберегти** | click **Save** |
+| Елемент керування лише з іконкою (Ж8) | іконка-орієнтир, **назва** жирним і дескриптор | натисніть кнопку `<іконка>` **Видалити** | click the `<icon>` **Delete** button |
 | Мітка пункту списку (термін і двокрапка) | **жирний** разом із двокрапкою, решта — звичайний текст; мітка UI — двокрапка зовні (Ж1a) | **Картка:** поля `CardNumber` і `CardCoded` заповнені | **Card:** the `CardNumber` and `CardCoded` fields are filled |
 | Літеральне значення, показане в UI | **жирний** + `code font` | вкладка **`QUASI`** | the **`QUASI`** tab |
 | Код-сутність: константа, поле БД, query-параметр, назва структури, модуля, репозиторію, шлях, файл | `code font` | параметр `paymentMethod` | the `paymentMethod` parameter |
@@ -58,7 +59,8 @@ metadata:
 
 Жирний позначає **тільки** видиму мітку елемента інтерфейсу (кнопку, поле, пункт меню,
 вкладку, підпис поля в адмінці) **і мітку пункту списку** (термін, що визначається, у форматі
-`- **Термін:** пояснення`). Це два дозволені випадки, і за їхні межі жирний не виходить. Для
+`- **Термін:** пояснення`). Це два дозволені випадки, і за їхні межі жирний не виходить. Назва
+елемента керування лише з іконкою (його підказка чи `aria-label`) — теж мітка UI для цього правила (Ж8). Для
 мітки UI написання зберігається дослівно таким, як його показує інтерфейс — **з єдиним
 винятком**: декоративна кінцева пунктуація нормалізується за Ж1a нижче.
 
@@ -146,8 +148,7 @@ UI, — тому й підпадає під той самий рендер.
 
 **Якщо після нормалізації від мітки не лишається корисного тексту** (мітка була лише знаком чи
 іконкою — напр. кнопка з самим `+` або `→`) — не залишай порожній жирний span; веди елемент за
-**процедурою для контролів лише з іконкою** (описуй елемент за призначенням/іконкою, як в inline
-`<Icon>`-кроках), а не за декоративною міткою.
+**Ж8** (елемент керування лише з іконкою), а не за декоративною міткою.
 
 **Джерела корпусу:** `GDSG-UI-001` (`technical-content/ui-elements-and-interaction.md`) —
 «preserve its displayed wording». **Проєктне рішення понад корпус:** саме нормалізація
@@ -325,6 +326,88 @@ tense for current behavior», а також розділ «Timeless documentatio
 **Проєктне рішення** — корпус одномовний (`languages: [en-US]`) і питання змішування мов у
 заголовку не розглядає взагалі. Регістр заголовків при цьому лишається за корпусом.
 
+### Ж8 — Іконки та кнопки без підпису (Icon-only controls)
+
+Деякі елементи керування мають лише іконку, без тексту. Крок усе одно називає такий елемент
+словами. Іконка в кроці — лише орієнтир, щоб читач знайшов елемент на екрані.
+
+**Дерево рішень.** Пройди його для кожного такого елемента в кроці:
+
+1. **Елемент має корисну текстову мітку після нормалізації за Ж1a** → лише жирна мітка (Ж1),
+   без іконки. Мітка з самого знака (`+`, `→`) після Ж1a порожня — такий елемент іде гілками 2–3.
+2. **Лише іконка, назва відома** — підказка (tooltip) або `aria-label` з доказів: `app-notes.md`,
+   нотатки автора, інтерв'ю SME → жирна назва й дескриптор, а перед назвою — іконка в рендері
+   `Icon rendering:` (таблиця нижче). Назву пиши дослівно, як у підказці, з нормалізацією за Ж1a.
+3. **Лише іконка, назви в доказах немає** → опиши елемент словами за формою й місцем («кнопка з
+   трьома крапками в рядку платежу»), постав у кінці рядка
+   `{/* NEEDS CONFIRMATION: назва кнопки з <форма> — у доказах немає підказки чи aria-label */}`
+   мовою сторінки (на англійській сторінці — англійською) і все одно додай іконку як орієнтир.
+   **Ніколи не вигадуй назву за формою іконки:** кошик не
+   означає «Видалити», доки цього не каже інтерфейс.
+
+Iconify дає зображення, а не назву. Назва приходить тільки з доказів.
+
+**Іконка не дублює текст.** Зображення іконки має `alt=""`: назва вже стоїть поруч текстом.
+Крок мусить читатися правильно, якщо зображення прибрати. Колір і розмір іконки не задаються з
+пам'яті: компонент успадковує колір тексту (`currentColor`), тому правильний і в темній темі;
+висота — `20`.
+
+**Рендер задає поле `Icon rendering:`** у блоці «Documentation toolkit configuration» проєкту,
+поруч зі `Style guide:` (`${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`). Поле розв'язують лише
+скіли, що пишуть нову розмітку іконки: три `*-writer`, `doc-page-updater` і `identify-ui-icon`, і
+лише тоді, коли сторінка справді має елемент лише з іконкою. Якщо поля немає:
+
+- **Сторінки сайту вже мають компонент `<Icon`** (`grep -rl '<Icon' <корені контенту>`) → не бери
+  типове значення. Один раз запитай, який рендер використовує сайт, першим запропонуй
+  `iconify-component`, і запропонуй дописати відповідь у декларацію. До відповіді не пиши
+  розмітку іконки й не зберігай сторінку. Це питання конфігурації, як шляхи в `project-paths.md`:
+  «пропусти питання» його не скасовує.
+- **Компонента `<Icon` на сайті немає** → бери `screenshot-crop` без питання, скажи про це у звіті
+  й один раз запропонуй дописати декларацію.
+
+`doc-translator`, `doc-style-reviewer` і `doc-style-fixer` поле не розв'язують, нічого не питають і
+дописати декларацію не пропонують: вони працюють з розміткою, яка вже є на сторінці.
+
+**Стару форму іконки на наявній сторінці** (напр. `<Icon … height="24" style={{ color: … }} />`)
+не виправляють механічно. Рецензент повідомляє її як знахідку, що потребує рішення (група 3,
+judgment-required, у `doc-style-fixer`), а не як заміну розмітки: форма могла бути свідомою, а
+рендер сайту, можливо, не задекларовано.
+
+| Значення | Що пише автор | Що потрібно сайту |
+|---|---|---|
+| `iconify-component` | `<Icon icon="mdi:delete-outline" height="20" /> **Видалити**` | Пакет `@iconify/react`; компонент `Icon` зареєстрований глобально в `MDXComponents` (swizzle) |
+| `iconify-svg` | `<img src={require('./.assets/delete-icon.svg').default} height="20" alt="" /> **Видалити**` | Перевірка до увімкнення (нижче) |
+| `screenshot-crop` (типово) | `<img src={require('./.assets/delete-icon.png').default} height="20" alt="" /> **Видалити**` | Нічого понад звичайні скріншоти |
+| `describe` | Без зображення: назва й дескриптор, а в гілці 3 — опис | Нічого |
+
+У таблиці — лише рендер іконки й назви. Дієслово й дескриптор стоять за правилами мовних
+розділів нижче. Вирізка й SVG лежать у `./.assets/` сторінки. Ім'я файлу — за дією, якщо її
+відомо, інакше за формою: `delete-icon.png`, `dots-vertical-icon.svg` (`screenshot-selection.md`,
+«Rename»). Компонентові `<Icon>` не додавай `style`,
+`color` чи `width`.
+
+**`iconify-svg` вмикай лише після перевірки сайту.** У Docusaurus `require('./x.svg').default`
+повертає або URL файлу, або React-компонент (SVGR). З компонентом `<img src={…}>` не працює, і
+тоді правильна форма — `require('./.assets/delete-icon.svg?url').default`. Збери одну сторінку з
+такою іконкою, подивися, що вийшло, і лише тоді декларуй `iconify-svg` з потрібною формою. SVG у
+`<img>` не бачить колір тексту сторінки, тож перевір іконку і в темній темі.
+
+**Коли потрібен скіл `identify-ui-icon`.** `iconify-component` і `iconify-svg` потребують id
+Iconify, `screenshot-crop` — вирізку кнопки. Якщо докази вже їх дають (id в `app-notes.md`, файл
+`*-icon.png` у `.assets/`), бери їх. Інакше виклич `identify-ui-icon`: він знаходить id або робить
+вирізку, а коли певності немає — повертає маркер. Назву він не визначає. Для `describe` скіл не
+потрібен.
+
+**Джерела корпусу:** `GDSG-UI-002` (`technical-content/ui-elements-and-interaction.md`) — «click a
+button, icon, link»; `GDSG-VISUALS` (`visuals/images-and-media.md`) — «Use empty alt text for a
+purely decorative image»; `MWSG-SHARED-UI-INTERACTIONS` (`shared/procedures/ui-interactions.md`) —
+«Include the noun after an icon label when needed»; `MWSG-SHARED-VISUAL-ACCESSIBILITY`
+(`shared/accessibility/visual-and-media-accessibility.md`) — «Do not duplicate nearby text in alt
+text», «Do not hard-code colors that become unreadable in high-contrast themes».
+
+**Проєктне рішення:** дерево з трьох гілок, маркер для невідомої назви, поле `Icon rendering:` і
+типове значення `screenshot-crop`.
+
 ### Чекліст ядра
 
 - [ ] Жодного жирного, який не є видимою міткою UI або міткою пункту списку (Ж1)?
@@ -341,6 +424,7 @@ tense for current behavior», а також розділ «Timeless documentatio
 - [ ] Назви репозиторіїв — у `code font` (Ж5)?
 - [ ] У тілі сторінки немає планів і майбутніх змін — вони в `{/* ToDo: … */}` (Ж6)?
 - [ ] Заголовки — однією мовою, мовою документа; код-сутності в них у `code font` (Ж7)?
+- [ ] Кожен елемент керування лише з іконкою названо жирною назвою з доказів і дескриптором, а без назви — описом і маркером `NEEDS CONFIRMATION`; іконка — у рендері `Icon rendering:`, з `alt=""`, без кольору й розміру з пам'яті (Ж8)? Стара форма іконки на наявній сторінці, яку зараз не пишуть, — знахідка-рішення (група 3, judgment-required), ніколи не механічна.
 
 ---
 
@@ -405,6 +489,20 @@ tense for current behavior», а також розділ «Timeless documentatio
   цифрами («128 символів»). Між числом і одиницею — нерозривний пробіл.
 - Косу риску не вживай замість «та/або»: ✅ «переглянути або редагувати», ⛔
   «переглянути/редагувати».
+
+### Елементи керування лише з іконкою (Ж8)
+
+- Порядок: контейнер, дія, дескриптор, іконка, назва. ✅ «На панелі інструментів натисніть кнопку
+  `<іконка>` **Більше**.»
+- Дієслово — за дескриптором: кнопку **натисніть**; піктограму **клацніть**, на сенсорному екрані —
+  **торкніться** (`MWSG-UK-DOCUMENTATION`, `uk-ua/documentation/titles-typography-and-ui.md`,
+  «Посилання на UI»). «Клацніть» — норма для піктограми, а не калька «клікнути».
+- Дескриптор: **кнопка**, коли елемент виглядає як кнопка; **піктограма**, коли це сама іконка й
+  її форма важлива. Не нанизуй два дескриптори: ⛔ «піктограма кнопки»
+  (`MWSG-UK-CAP-DESCRIPTORS-PREPOSITIONS`, `uk-ua/language-standards/capitalization-descriptors-prepositions.md`,
+  «Дескриптори»).
+- Гілка 3, назви немає: ✅ «У рядку платежу натисніть кнопку з трьома крапками `<іконка>`.» і
+  маркер у кінці рядка. ⛔ «натисніть кнопку **Меню**», коли «Меню» ніде в доказах немає.
 
 ### Кальки й слова-заборони
 
@@ -487,3 +585,15 @@ language-specific.
 - US spelling per the corpus — **with one project exception**: the transaction status value is
   `cancelled` (UK spelling), because it is a literal code value, not prose. It never becomes
   `canceled`. Prose around it still follows US spelling.
+
+### Icon-only controls (Ж8)
+
+- Name the control with its bold name and a noun, the icon in front of the name: "In the toolbar,
+  click the `<icon>` **More** button." The noun names the element type: **button** or **icon**.
+  It also keeps a name that reads like an action from standing bare (`MWSG-SHARED-UI-INTERACTIONS`).
+- The verb follows the project's declared style guide (`${CLAUDE_PLUGIN_ROOT}/context/style-guide-registry.md`):
+  **click** for `gdsg` (`GDSG-UI-002`), **select** for `mssg-en`. Don't mix the two on one page.
+- Branch 3, no name in the evidence: "In the payment row, click the three-dots button `<icon>`."
+  with the marker at the end of the line, in English: `{/* NEEDS CONFIRMATION: name of the
+  three-dots button — no tooltip or aria-label in the evidence */}`. Never "click the **Menu** button" when "Menu" appears
+  nowhere in the evidence.

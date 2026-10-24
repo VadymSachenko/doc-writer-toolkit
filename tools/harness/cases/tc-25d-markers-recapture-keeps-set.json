@@ -1,0 +1,50 @@
+{
+  "id": "tc-25d-markers-recapture-keeps-set",
+  "description": "Negative control (passes on main too, since there is no capture tool): with two screenshot locales and a recapture marker, resolve-markers keeps the marker and leaves both the UA and the EN image as they were. It guards against a change that writes or promotes something without a capture.",
+  "fixture": {
+    "shape": "single"
+  },
+  "setup": [
+    "printf 'OPERATOR_BASE_URL=https://test.example.com\\nOPERATOR_USERNAME=tester\\nOPERATOR_PASSWORD=secret\\n' > .env && printf '.env\\n' >> .gitignore && printf '%s\\n' '- **Admin UI:** playwright' '- **Screenshot locales:** `uk, en`' '- **Locale switch:** `url-prefix uk=/, en=/en/`' >> CLAUDE.md && mkdir -p portal/transactions/.assets i18n/en/docusaurus-plugin-content-docs-portal/current/transactions/.assets && printf 'uk image' > portal/transactions/.assets/filters-pane.png && printf 'en image' > i18n/en/docusaurus-plugin-content-docs-portal/current/transactions/.assets/filters-pane.png",
+    "perl -0pi -e 's/(Список оновлюється автоматично\\.)/$1\\n\\n![Панель фільтрів](.\\/.assets\\/filters-pane.png)\\n{\\/* ToDo: recapture screenshot — the filters pane changed *\\/}/' portal/transactions/transactions.md && grep -q 'recapture screenshot' portal/transactions/transactions.md",
+    "git add -A && git commit -q -m 'Case setup'"
+  ],
+  "prompt": "resolve-markers: portal/transactions",
+  "options": {
+    "maxTurns": 40,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)",
+      "Bash(which:*)",
+      "Bash(ls:*)",
+      "Bash(node:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "recapture marker kept",
+      "type": "match",
+      "path": "portal/transactions/transactions.md",
+      "pattern": "\\{/\\* ToDo: recapture screenshot"
+    },
+    {
+      "name": "image embed kept",
+      "type": "match",
+      "path": "portal/transactions/transactions.md",
+      "pattern": "!\\[[^\\]]*\\]\\(\\./\\.assets/filters-pane\\.png\\)"
+    },
+    {
+      "name": "UA and EN images untouched",
+      "type": "command",
+      "run": "[ \"$(cat portal/transactions/.assets/filters-pane.png)\" = 'uk image' ] && [ \"$(cat i18n/en/docusaurus-plugin-content-docs-portal/current/transactions/.assets/filters-pane.png)\" = 'en image' ]"
+    },
+    {
+      "name": "nothing promoted",
+      "type": "unchanged",
+      "ignore": [
+        ".doc-toolkit/",
+        "portal/transactions/.sources/"
+      ]
+    }
+  ]
+}

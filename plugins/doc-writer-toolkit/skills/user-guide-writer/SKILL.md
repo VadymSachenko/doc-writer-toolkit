@@ -153,10 +153,7 @@ Apply the template resolved in "Sources to load". Choose the structure decided i
   - This is narrower than the goal → action rule below: goal → action applies when the "to" clause states the operation's actual goal (e.g., applying a filter). Use action-first-reason-last only for a secondary confirmation of something already stated in a previous step.
 - Beyond locate+click, input+commit, and confirm+reason, keep one independent action per step — don't merge two unrelated clicks.
 - UI labels in **bold**: click **Save**, select **Transactions**.
-- **Icon-only buttons — decision tree:**
-  1. Button has a text label → bold text only.
-  2. No text label + Iconify icon name is known → `<Icon icon="..." height="24" style={{ color: '#9564ff' }} />` before the bold action name: `<Icon icon="ic:sharp-edit" height="24" style={{ color: '#9564ff' }} /> **Редагувати**`.
-  3. No text label + icon name unknown → descriptive text: «натисніть кнопку із зображенням олівця» / «натисніть кнопку видалення».
+- **Icon-only controls:** follow Ж8 of `formatting-conventions.md` — its decision tree, the resolved `Icon rendering:` value and the sentence form for the resolved language. The name comes from the evidence only (a tooltip or `aria-label` in `app-notes.md`, notes or the interview), never from the glyph. When the render needs an Iconify id or an icon crop that the evidence doesn't give, invoke the `identify-ui-icon` skill and use what it returns.
 - Imperative mood, present tense for system reactions — see `formatting-conventions.md`'s sentence-style section for the resolved language.
 - No "you should" or "you need to" — just the imperative.
 - **Filter panel steps:** when the procedure involves selecting filters, do not enumerate each filter as a separate step. Use a single general step with an inline link to the reference section: "In the filter panel, select the [filters](#reference-information-<slug>) you need." Do not add a separate sentence pointing the reader at the reference section.
@@ -183,7 +180,7 @@ Apply the template resolved in "Sources to load". Choose the structure decided i
   ```
   Markdown images use 2-space indent — same rule, no blank line before the image:
   ```
-  2. Click the <Icon icon="..." /> icon.
+  2. Click the <Icon icon="..." height="20" /> **Edit** button.
     ![alt](./.assets/image.png)
   3. Continue to the next step.
   ```
@@ -198,7 +195,7 @@ Apply the template resolved in "Sources to load". Choose the structure decided i
 **Additional rules:**
 - **Never invent facts.** Unconfirmed UI labels, field names, or behavior → `{/* NEEDS CONFIRMATION: ... */}`.
 - **Apply the glossary** resolved in "Sources to load".
-- **UCP naming, UI-label/status/placeholder rendering:** follow `formatting-conventions.md`'s Core section (Ж1–Ж7) and the Names/brands entry for the resolved language — do not restate them here.
+- **UCP naming, UI-label/status/placeholder rendering:** follow `formatting-conventions.md`'s Core section (Ж1–Ж8) and the Names/brands entry for the resolved language — do not restate them here.
 - **Prerequisites content:** the Prerequisites section must always be present. If no special prerequisites exist beyond reviewing reference information, use the template's own standard reference-information sentence (Variant A/B in the `en` template; Варіант А/Б from the Prerequisites section of `ua-user-guide-template.md`) rather than inventing new wording.
 - **Field reference order:** when a step involves a field inside a card or other named container, state the container first, then the field, then the action: "In the **X** card, in the **Y** field, enter the value." — not "In the **Y** field in the **X** card, enter the value."
 - **Active voice, second person — not the product as subject:** in procedural steps and Result blocks, always use the imperative or the second person; never a system/product noun ("the Partner", "Партнер") as the grammatical subject. See `formatting-conventions.md`'s sentence-style section for the resolved language.
@@ -244,6 +241,7 @@ Before writing to disk, check:
 - Prerequisites section is present and handled per the resolved language: `en` page — if no special prerequisites exist, Variant A or Variant B standard sentence from `user-guide-template.md` is used (not invented wording); `uk` page — if no special prerequisites exist, Варіант А or Варіант Б from `ua-user-guide-template.md` Prerequisites section is used
 - No product/system noun used as the grammatical subject in steps or Result blocks (active voice, second person instead)
 - UI labels, status values, placeholders, and code-vs-concept rendering follow `formatting-conventions.md` Ж1–Ж4
+- Every icon-only control follows Ж8: a bold name from the evidence with a noun, or a description with a `NEEDS CONFIRMATION` marker when no name is known; the icon in the resolved `Icon rendering:` form, with `alt=""` and no hardcoded color or size
 - No UI element is the subject of an action in steps or Result blocks
 - References to the reference-information section in steps are inline links, not separate sentences — and each link's anchor matches the target heading's explicit `reference-information-<slug>` id (never a bare `#reference-information`)
 - On a `uk` page, every heading from `##` down ends with a well-formed, unique `{/* #id */}` per `heading-anchors.md`, and every `#…` link to a heading uses an id that exists

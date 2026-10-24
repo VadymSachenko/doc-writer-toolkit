@@ -200,7 +200,7 @@ Everything product-specific lives in the docs repo, under `.doc-toolkit/`. The p
 
 **Two docs sections in one repo.** Some repos have two Docusaurus docs sections (two plugin instances), each with its own UA folder, EN folder and URL, for example user guides and an API reference. Each section is a *root pair*, declared in `CLAUDE.md` with its own fields (see `context/project-paths.md`, "More than one root pair"). One run covers every section. Each page is translated, linked and checked inside its own section. Its fingerprints are saved in that section's own state folder, so two pages with the same path in two sections never overwrite each other. The scripts then name every page with its section in front (`api-reference:transactions/transactions`). The glossary, the app's UI texts and the languages are shared. To translate one section only, pass `--pair <id>`. To keep a section out of every run, set its `Translation scope:` to `none`.
 
-**Screenshots.** Each language's screenshot is a link to the EN image, so the images are never duplicated. To give a language its own screenshot, replace the link with a real file; the script never touches a real file. If no EN screenshot exists yet, the link points to the UA image and the report says so.
+**Screenshots.** Each language's screenshot is a link to the EN image, so the images are never duplicated. To give a language its own screenshot, replace the link with a real file; the script never touches a real file. A language listed in `Screenshot locales:` gets real files from the screenshot captures (`context/doc-rules/project-rules/screenshot-locales.md`). If no EN screenshot exists yet, the link points to the UA image and the report says so.
 
 ## Using it in a new docs repo
 

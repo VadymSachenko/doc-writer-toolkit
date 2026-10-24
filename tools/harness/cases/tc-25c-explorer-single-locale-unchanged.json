@@ -1,0 +1,53 @@
+{
+  "id": "tc-25c-explorer-single-locale-unchanged",
+  "description": "Negative control: no Screenshot locales declared. app-explorer behaves as before: it stops for the missing Playwright MCP server, asks nothing about locales, and writes no manifest and no staging folder.",
+  "fixture": {
+    "shape": "single"
+  },
+  "setup": [
+    "printf 'OPERATOR_BASE_URL=https://test.example.com\\nOPERATOR_USERNAME=tester\\nOPERATOR_PASSWORD=secret\\n' > .env && printf '.env\\n' >> .gitignore && printf '%s\\n' '- **Admin UI:** playwright' '- **API test collection:** .sources/demo.postman_collection.json' '- **API collection runner:** newman' >> CLAUDE.md && mkdir -p .sources portal/transactions/.sources && printf '{\"info\":{\"name\":\"demo\"},\"item\":[]}\\n' > .sources/demo.postman_collection.json && printf '{\"section\":\"portal/transactions\",\"verdict\":\"needs-revision\",\"pages\":[\"transactions.md\"]}\\n' > portal/transactions/.sources/section-readiness.json && git add -A && git commit -q -m 'Case setup'"
+  ],
+  "prompt": "use app-explorer for `portal/transactions/`",
+  "options": {
+    "maxTurns": 30,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)",
+      "Bash(which:*)",
+      "Bash(ls:*)",
+      "Bash(node:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "names the missing Playwright MCP server",
+      "type": "match",
+      "path": "output",
+      "pattern": "Playwright[^\\n]{0,120}(not (available|connected|reachable)|unavailable|isn.t (available|connected)|missing|no [^\\n]{0,20}server)|(no|missing)[^\\n]{0,40}Playwright",
+      "flags": "i"
+    },
+    {
+      "name": "asks no locale question",
+      "type": "no-match",
+      "path": "output",
+      "pattern": "(screenshot locale|locale switch|which (UI )?(languages|locales))[^\\n]{0,120}\\?",
+      "flags": "i"
+    },
+    {
+      "name": "no manifest written",
+      "type": "absent",
+      "path": "portal/transactions/.sources/screenshot-manifest.json"
+    },
+    {
+      "name": "no staging folder",
+      "type": "absent",
+      "path": ".doc-toolkit/screenshot-staging"
+    },
+    {
+      "type": "unchanged",
+      "ignore": [
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}

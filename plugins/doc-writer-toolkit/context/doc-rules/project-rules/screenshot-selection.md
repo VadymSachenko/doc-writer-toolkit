@@ -36,7 +36,7 @@ For every file that ends up in `.assets/` (root), whichever case applied, work t
 - **Check the cropped result against this list** — faces and people's names; usernames and logins; hostnames, domains, IP addresses; environment labels (`PROD`, `TEST`); internal URLs; tokens, keys, session IDs; card and account numbers; customer personal data; other apps and personal desktop items. Look in toolbars and corners, not just the center of the frame — a sensitive label sitting in a place nobody looks is still disqualifying.
 - **If cropping can't remove something on the list** — for example a sensitive label sitting inside a table you need — **blur it instead**: apply `element.style.filter = 'blur(8px)'` via Playwright before re-capturing, or use PIL `ImageFilter.GaussianBlur(radius=12)` on the region bounding box via `ImageDraw` if re-capture is not practical. See `screenshot-capture.md` Section 4 for the full blur pattern. If neither is possible, do not embed the image — report the blocker.
 - **Save the cropped result as PNG**, regardless of the source frame's format (frames arrive as `screen-HH-MM-SS.jpg`, or `screen-HH-MM-SS_T.jpg` for a frame between whole seconds). Cropping already rewrites the file, so converting at this step costs nothing extra, and PNG suits UI screenshots better — this is also what keeps the `.png` extension in the rename pattern below accurate.
-- **Annotation** — if the step or section clearly points to one UI element and the screenshot does not already show an annotation (a red rectangular frame around the element), request a targeted re-capture with annotation via `resolve-markers` or `app-explorer` targeted mode (see `screenshot-capture.md` Section 3) rather than inserting an unannotated image.
+- **Annotation** — if the step or section clearly points to one UI element and the screenshot does not already show an annotation (a red rectangular frame around the element), request a targeted re-capture with annotation via `resolve-markers` or `app-explorer` targeted mode (see `screenshot-capture.md` Section 3) rather than inserting an unannotated image. That re-capture covers every screenshot locale the host declares (`screenshot-locales.md`).
 - These checks implement `GDSG-VISUALS` and `GDSG-EXAMPLE-001` from the loaded style guide corpus — consult those entries directly for the underlying rules; they are not repeated here.
 
 ### 2. Rename
@@ -50,6 +50,9 @@ If the filename is non-descriptive (e.g., `image.png`, `image copy.png`, a rando
 | Side panel / filter panel | `-pane` | `filters-pane.png` |
 | Standalone form | `-form` | `add-receipt-form.png` |
 | Confirmation banner / toast | `-banner` | `receipt-uploaded-banner.png` |
+| Icon of an icon-only control (crop or SVG) | `-icon` | `delete-icon.png` |
+
+An icon file is not a screenshot of the page: it sits inline in a step, with the markup in Ж8 of `formatting-conventions.md`, not with the two embed forms below.
 
 Use the Bash tool: `mv "./.assets/old-name.png" "./.assets/new-name.png"`. Rename before drafting so all embed references use the final filename.
 
@@ -68,6 +71,8 @@ Use the embed syntax that matches the classification (note the leading dot on `.
 `{compact-width}` is the project's declared **`Compact image width:`** — resolve it from the "Documentation toolkit configuration" section of the host project's `CLAUDE.md` (see `screenshot-capture.md` Section 0). If undeclared, use `480` and offer once to persist the declaration. Do not hardcode a width other than this resolved value.
 
 This is the single source of truth for the embed markup — consuming skills reference this file rather than restating the JSX/width.
+
+**Per-locale images.** Each locale's page links images from its own co-located `.assets/`. When the host declares `Screenshot locales:`, a captured image has the same file name in every locale's `.assets/`, so the embed markup is identical in every locale and a translation keeps the `./.assets/` paths as they are (`screenshot-locales.md`, "Where each locale's image goes").
 
 ### 4. Record which frame this embed came from
 
