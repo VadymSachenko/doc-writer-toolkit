@@ -1,6 +1,6 @@
 {
   "id": "tc-26g-identify-icon-no-network-fallback",
-  "description": "iconify-component declared, no id in the evidence, network and crop tools blocked: /identify-icon reports no Iconify id, falls back to a ToDo for the crop, and edits no page.",
+  "description": "iconify-component declared, no id in the evidence, network and crop tools blocked: /identify-icon reports no Iconify id, falls back to a ToDo for the crop or, when the screenshot does not show the control, a NEEDS CONFIRMATION marker, and edits no page.",
   "fixture": {
     "shape": "single"
   },
@@ -28,10 +28,10 @@
       "skill": "identify-ui-icon"
     },
     {
-      "name": "a ToDo for the crop (no crop tool allowed)",
+      "name": "a ToDo or a NEEDS CONFIRMATION marker in place of an id (the fixture screenshot is 1×1, so it may not show the control)",
       "type": "match",
       "path": "output",
-      "pattern": "ToDo"
+      "pattern": "ToDo|NEEDS CONFIRMATION"
     },
     {
       "name": "no Iconify id anywhere in the output",
