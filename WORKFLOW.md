@@ -68,7 +68,7 @@ flowchart TD
 | Explore app | `app-explorer` | Explores the live app + API-seeded state, writes `.sources/app-notes.md` |
 | Plan section | `section-planner` | Proposes IA (keep/merge/split/add) for a section, gated on approval |
 | Draft — concept | `concept-doc-writer` | Background topics: how a feature works, what a term means |
-| Draft — user guide | `user-guide-writer` | Task-based procedural docs for partner cabinet |
+| Draft — user guide | `user-guide-writer` | Task-based procedural docs for the product's UI |
 | Draft — API | `api-doc-writer` | One endpoint per page, API reference format |
 | Update a page | `doc-page-updater` | Applies a change brief to an approved page with the smallest edit; writes update-report.md for the scoped review / sync translation that follow |
 | Resolve markers | `resolve-markers` | Batch-answers `{/* NEEDS CONFIRMATION */}` markers from evidence |

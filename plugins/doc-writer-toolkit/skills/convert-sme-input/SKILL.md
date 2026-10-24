@@ -13,7 +13,7 @@ The output is **not** a user guide or concept topic. It is a processed source no
 
 ## Domain note
 
-The extraction checklist, the section-name examples, and the "Згадати у документації" categories further down are written for this project's payments domain (UCPay's partner cabinet: transactions, webhooks, disputes). If this skill runs against a different product, treat them as illustrations of the underlying principle — group facts by business concept, name sections after what's actually being explained, flag what a guide writer must not miss — and substitute that product's own categories rather than forcing UCPay-specific ones onto unrelated content.
+The extraction checklist, the section-name examples, and the "Згадати у документації" categories further down are written for a payments domain (transactions, webhooks, disputes). If this skill runs against a different product, treat them as illustrations of the underlying principle — group facts by business concept, name sections after what's actually being explained, flag what a guide writer must not miss — and substitute that product's own categories rather than forcing these payments categories onto unrelated content.
 
 ## Inputs
 
@@ -87,7 +87,7 @@ Always include `### Згадати у документації`. This section is
    - UI screens, buttons, fields, banners, modals, and tooltips
    - Statuses and their meaning in the partner cabinet context
    - Validations, errors, blockers, warnings, and exceptions
-   - Partner-side vs UCPay-side responsibilities
+   - Partner-side vs platform-side responsibilities
    - Webhook events and delivery conditions
    - Dependencies on API calls, external systems, or configuration
    - Open questions and SME uncertainty
@@ -123,7 +123,7 @@ When the user asks to compare raw and processed files:
 ## Writing rules
 
 - Write in Ukrainian.
-- Use canonical UCPay terms from `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-ua.md`: **Партнер**, **Транзакція**, **Вебхук**, **API-токен**, **Кабінет партнера**, **Вхідна транзакція**, **Вихідна транзакція**, etc.
+- Use canonical terms from `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-ua.md`: **Партнер**, **Транзакція**, **Вебхук**, **API-токен**, **Кабінет партнера**, **Вхідна транзакція**, **Вихідна транзакція**, etc.
 - Status values in `code font`: `new`, `in queue`, `in work`, `success`, `cancelled` (UK spelling).
 - UI labels in **bold**: натисніть **Зберегти**.
 - Keep source-ticket identifiers when they help trace a fact (e.g., `UCP-277`).

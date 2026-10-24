@@ -11,7 +11,7 @@ After `extract-sme-screenshots` produces a pool of candidate screenshots and som
 
 ## Inputs
 
-- A target doc file (e.g. `partner-cabinet/archive/archive.md`).
+- A target doc file (e.g. `docs/archive/archive.md`).
 - Optionally, which `.sources/frames/*-frames/` folder to check. If omitted, look for a single such folder under the doc's `.sources/frames/`; if there's more than one, ask which one before proceeding.
 
 ## Workflow

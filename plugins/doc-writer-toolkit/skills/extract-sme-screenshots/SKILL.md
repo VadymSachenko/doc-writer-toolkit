@@ -21,7 +21,7 @@ Both figures were measured on a near-idle 8-core machine and scale linearly with
 
 ## Inputs
 
-A `.sources/` folder (e.g. `partner-cabinet/archive/.sources/`) containing:
+A `.sources/` folder (e.g. `docs/archive/.sources/`) containing:
 
 - Exactly one video file.
 - Zero or more `.txt` transcript files (e.g. TurboScribe exports).
