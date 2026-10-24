@@ -17,7 +17,7 @@ You are writing a concept topic page for the UniComPay partner cabinet, in the c
 Load these files at the start of the task. Do not load others unless the user references them explicitly.
 
 **Content language (resolve first — decides which of the remaining bullets apply):**
-- Follow `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` to resolve this project's declared `Content language:` (`uk`, `en`, or `uk,en`) for the target file, plus its **UA URL prefix** (needed to build absolute links to other doc pages — see the internal-link rule in Step 5). For `uk,en`, the target file's location relative to the declared UA content root / EN i18n root decides which language you're drafting in. If undeclared, follow that file's fallback (ask once, offer to persist).
+- Follow `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` to resolve this project's declared `Content language:` (`uk`, `en`, or `uk,en`) for the target file, plus the **UA URL prefix of each link target's root pair** (needed to build absolute links to other doc pages — see the internal-link rule in Step 5). For `uk,en`, the target file's location — under any pair's UA content root or under any pair's EN i18n root — decides which language you're drafting in. If undeclared, follow that file's fallback (ask once, offer to persist).
 
 **Templates (load the one matching the resolved language):**
 - `uk` → `${CLAUDE_PLUGIN_ROOT}/context/doc-templates/ua-concept-topic-template.md`
@@ -57,7 +57,7 @@ Run the UI label check in `${CLAUDE_PLUGIN_ROOT}/context/ui-labels.md` before an
 
 ### Step 1 — Locate inputs
 
-Resolve this project's UA content root (or, on an `en` page, its EN i18n root — see `project-paths.md`) for the target location; do not assume `partner-cabinet/`. Ask the user for the target doc folder if not provided (e.g., `<content root>/transactions/transaction-lifecycle/`). Sources live inside that folder.
+Resolve the target page's root pair (for a new page, its folder's) via `project-paths.md` — its UA content root, or, on an `en` page, its EN i18n root; do not assume any folder. With more than one pair declared, name the pair you resolved. Ask the user for the target doc folder if not provided (e.g., `<content root>/transactions/transaction-lifecycle/`). Sources live inside that folder.
 
 **Each concept page has its own `.assets/` folder**, co-located with the page file. If the folder does not exist, create it before copying any screenshots into it. Never place a page's screenshots in a parent folder's `.assets/` or in a shared assets directory — every page owns its own copy of the screenshots it embeds, even if those screenshots duplicate files from another page.
 
@@ -69,7 +69,7 @@ List the files present. Expected contents:
 - `.assets/*.png` — screenshots already selected and ready to embed in the doc.
 - `.assets/ref/*.png` — reference-only screenshots (read for context; never embed in the doc). This folder is optional. If it does not exist or is empty, treat all files directly in `.assets/` as both context and embeddable.
 
-Also check existing approved pages under the content root for contextual consistency — only after exhausting the source files. Do not copy structure or prose from them.
+Also check existing approved pages under the pair's content root for contextual consistency — only after exhausting the source files. Do not copy structure or prose from them.
 
 If neither `.sources/` nor `.assets/` exists, ask the user where the inputs are before proceeding.
 
@@ -126,7 +126,7 @@ Rules:
 - **Apply the glossary** resolved in "Sources to load". Replace synonyms with the canonical term for the resolved language.
 - **No step-by-step procedures.** Instructions belong in user guides. Concept topics explain; they do not instruct.
 - **Heading ids (`uk` pages) follow the shared contract.** End every heading from `##` down with its `{/* #id */}` comment, and build every link to a heading from that id, exactly as `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/heading-anchors.md` prescribes. Do not restate its rules here.
-- **Internal links to other doc pages follow the shared contract.** Build every page-to-page link (in Prerequisites, Next steps, Related documents, or inline) exactly as `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` prescribes — site-root-relative, the declared UA URL prefix joined to the target's path relative to the content root, no `.md`/`.mdx`, anchors preserved. That file is authoritative for what is and isn't a page link (asset links `./.assets/…` and same-page anchors are exempt); do not restate its algorithm here.
+- **Internal links to other doc pages follow the shared contract.** Build every page-to-page link (in Prerequisites, Next steps, Related documents, or inline) exactly as `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` prescribes — site-root-relative, the UA URL prefix of the target page's pair joined to the target's path relative to that pair's content root, no `.md`/`.mdx`, anchors preserved. That file is authoritative for what is and isn't a page link (asset links `./.assets/…` and same-page anchors are exempt); do not restate its algorithm here.
 - **For flows and lifecycles:** prefer a Mermaid `sequenceDiagram` for multi-actor flows and a Mermaid `flowchart` for decision trees or status transitions.
 - **For screenshots:** only embed from `.assets/` (root) — never from `.assets/ref/`. Choose syntax based on the classification from Step 2:
   - **Full-page**: `![Descriptive alt text](./.assets/image.png)`
@@ -160,7 +160,7 @@ Before writing to disk, check:
 - All chosen sections are complete; bare placeholders are either filled or removed
 - Next steps links only to user guides; Related documents links to other concepts or references
 - On a `uk` page, every heading from `##` down ends with a well-formed, unique `{/* #id */}` per `heading-anchors.md`, and every `#…` link to a heading uses an id that exists
-- Every link to another doc page follows `internal-links.md` (declared UA URL prefix + path, no `.md`); no `./`/`../` page links, no hardcoded `/docs/` (asset links `./.assets/…` are exempt)
+- Every link to another doc page follows `internal-links.md` (its pair's UA URL prefix + path, no `.md`); no `./`/`../` page links, no hardcoded `/docs/` (asset links `./.assets/…` are exempt)
 - The draft conforms to every rule in the style-guide topical files loaded per "Sources to load" (resolved via `style-guide-registry.md`) — check against those files directly, don't rely on memory of past drafts
 - **P1 — Inherited wording normalized.** For every heading and every bolded fragment, confirm it is not lifted from `.sources/` (a heading, a bold label, an entire phrase) without normalization. The interview/notes are a source of *facts*, not of *wording* — a heading or emphasis pattern copied verbatim from `sme-interview.md` is a defect even if the fact itself is correct.
 - **P2 — Heading language (Ж7).** Every heading is in the resolved content language; a code entity inside one stays in `code font` but the surrounding words don't switch language.
@@ -190,7 +190,7 @@ Fix every issue found before saving.
 
 ### Step 8 — Save
 
-Save to `<content root>/<target-folder>/<slug>.md`, where the target folder was confirmed in Step 1 and the `<slug>` and page title follow `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` (canonical English title → kebab-case slug; folder and basename share the slug; UA/EN titles are semantic equivalents). If this page already exists with a mismatched filename/title, do not silently rename it — report the mismatch per that file's "Existing pages" rule.
+Save to `<pair's content root>/<target-folder>/<slug>.md`, where the target folder was confirmed in Step 1 and the `<slug>` and page title follow `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` (canonical English title → kebab-case slug; folder and basename share the slug; UA/EN titles are semantic equivalents). If this page already exists with a mismatched filename/title, do not silently rename it — report the mismatch per that file's "Existing pages" rule.
 
 Do not update the sidebar config file (`sidebars.ts`, or a project's custom-id equivalent) — it's auto-generated.
 
