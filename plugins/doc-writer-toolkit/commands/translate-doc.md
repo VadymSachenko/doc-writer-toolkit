@@ -1,13 +1,13 @@
 ---
 description: Translate an approved Ukrainian doc page into English using the doc-translator skill.
-argument-hint: "<relative-path>"
+argument-hint: "<path | pair:path>"
 ---
 
 Use the `doc-translator` skill to translate an approved Ukrainian documentation page into English.
 
-- **Doc path relative to the UA content root:** $ARGUMENTS.md
+- **Page:** $ARGUMENTS — relative to a UA content root, from the repo root, or `<pair>:<path>`; add `.md` if it is absent
 
-The skill resolves this project's actual UA content root and EN i18n root itself (via `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`) — do not hardcode a path here.
+The skill resolves the page's root pair itself (via `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`) — do not hardcode a path here.
 
 Strictly follow the skill's workflow.
 

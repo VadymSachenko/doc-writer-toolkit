@@ -1,0 +1,44 @@
+{
+  "id": "tc-02-translate-single-pair-repo-path",
+  "description": "One root pair, a repo path: doc-translator writes under the pair's EN root and carries the marker over.",
+  "fixture": {
+    "shape": "single"
+  },
+  "setup": [
+    "git rm -q i18n/en/docusaurus-plugin-content-docs-portal/current/settings/settings.md && git commit -q -m 'Remove the EN page'"
+  ],
+  "prompt": "use doc-translator to translate `portal/settings/settings.md`",
+  "options": {
+    "maxTurns": 40,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "type": "exists",
+      "path": "i18n/en/docusaurus-plugin-content-docs-portal/current/settings/settings.md"
+    },
+    {
+      "type": "changed-only",
+      "paths": [
+        "i18n/en/docusaurus-plugin-content-docs-portal/current/settings/",
+        "portal/settings/settings.md",
+        ".doc-toolkit/"
+      ]
+    },
+    {
+      "name": "marker carried over",
+      "type": "match",
+      "path": "i18n/en/docusaurus-plugin-content-docs-portal/current/settings/settings.md",
+      "pattern": "NEEDS CONFIRMATION"
+    },
+    {
+      "name": "no pair named in the output",
+      "type": "no-match",
+      "path": "output",
+      "pattern": "api-reference"
+    }
+  ]
+}
