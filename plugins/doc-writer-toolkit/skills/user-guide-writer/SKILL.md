@@ -1,6 +1,6 @@
 ---
 name: user-guide-writer
-description: Writes user guide pages (procedural docs) for the UniComPay partner cabinet, in the project's declared content language, following the authoring rules in CLAUDE.md. Use explicitly ("use user-guide-writer to document...", "user-guide-writer: write the Filter transactions page"). Follows ${CLAUDE_PLUGIN_ROOT}/context/doc-templates/ua-user-guide-template.md (Ukrainian, Операції/Етапи structure) or user-guide-template.md (English, single/multi-task structure), with a mandatory interview phase before drafting. Not for concept topics or API reference pages.
+description: 'Writes user guide pages (procedural docs) for the UniComPay partner cabinet, in the project''s declared content language, following the authoring rules in CLAUDE.md. Use explicitly ("use user-guide-writer to document...", "user-guide-writer: write the Filter transactions page"). Follows ${CLAUDE_PLUGIN_ROOT}/context/doc-templates/ua-user-guide-template.md (Ukrainian, Операції/Етапи structure) or user-guide-template.md (English, single/multi-task structure), with a mandatory interview phase before drafting. Not for concept topics or API reference pages.'
 ---
 
 # user-guide-writer
