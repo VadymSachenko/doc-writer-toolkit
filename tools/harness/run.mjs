@@ -27,8 +27,10 @@ export function loadCase(idOrPath) {
   const c = JSON.parse(fs.readFileSync(file, 'utf8'));
   for (const key of ['id', 'fixture', 'prompt', 'assertions']) if (!(key in c)) throw new Error(`${file}: missing '${key}'`);
   for (const a of c.assertions) {
-    if (typeof a.pattern !== 'string') continue;
-    try { new RegExp(a.pattern, a.flags ?? ''); } catch (e) { throw new Error(`${file}: assertion '${nameOf(a)}': ${e.message}`); }
+    for (const key of ['pattern', 'allow']) {
+      if (typeof a[key] !== 'string') continue;
+      try { new RegExp(a[key], a.flags ?? ''); } catch (e) { throw new Error(`${file}: assertion '${nameOf(a)}': ${e.message}`); }
+    }
   }
   return c;
 }
