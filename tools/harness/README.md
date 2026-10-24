@@ -95,6 +95,7 @@ One JSON file per case in `cases/`, named after its `id`:
 | `frontmatter` | `path` | the file starts with a closed `---` block of `key: value` lines (nested maps and lists allowed) whose values parse as the strings they show |
 | `links` | `path`, `form: "root-relative"` | every Markdown link to a page starts with `/`, with no `.md` and no `./` or `../` |
 | `skill-called`, `skill-not-called` | `skill` (its own name, without the plugin prefix) | the run called that skill through the `Skill` tool, or didn't |
+| `heading-ids` | `path` (a page, or a folder: every page under it), optional `except` (heading texts) | every heading from `##` down ends with a unique `{/* #id */}` and every `](#id)` link names one, per `heading-anchors.md`; headings listed in `except` may stay without |
 | `unchanged` | optional `ignore` (path prefixes) | `git status` shows no change outside `ignore` |
 | `changed-only` | `paths` (path prefixes) | every changed path starts with one of them |
 | `command` | `run`, optional `timeoutSeconds` | the shell command exits 0 in the host, such as a build |
