@@ -1,0 +1,56 @@
+{
+  "id": "tc-22b-fixer-merges-split-keeps-review",
+  "description": "The fixer, running its own review, merges the needlessly split password and Save steps, and keeps the transfer amount and the fee review as separate steps.",
+  "fixture": {
+    "shape": "single"
+  },
+  "setup": [
+    "mkdir -p portal/profile",
+    "cat > portal/profile/profile.md <<'EOF'\n---\ntitle: Профіль\nsidebar_label: Профіль\n---\n\n# Профіль\n\nНа сторінці **Профіль** ви змінюєте пароль і переказуєте кошти між рахунками.\n\n## Зміна пароля {/* #change-password */}\n\n1. У меню виберіть **Профіль**.\n2. Натисніть **Змінити пароль**.\n3. У вікні **Зміна пароля** введіть старий і новий пароль.\n4. Натисніть **Зберегти**.\n\n## Переказ коштів {/* #transfer-funds */}\n\n1. У меню виберіть **Профіль**.\n2. Натисніть **Переказати**.\n3. У вікні **Переказ** введіть суму переказу.\n4. Перевірте комісію під полем і натисніть **Підтвердити**.\nEOF",
+    "git add -A && git commit -q -m 'Case setup'"
+  ],
+  "prompt": "/{plugin}:fix-doc-style portal/profile/profile.md guide:mssg-ua apply:mechanical,substantive",
+  "options": {
+    "maxTurns": 80,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "no bare Save step",
+      "type": "no-match",
+      "path": "portal/profile/profile.md",
+      "pattern": "^\\d+\\. +Натисніть \\*\\*Зберегти\\*\\*\\.? *$",
+      "flags": "m"
+    },
+    {
+      "name": "passwords and Save in one step",
+      "type": "match",
+      "path": "portal/profile/profile.md",
+      "pattern": "^\\d+\\. [^\\n]*парол[^\\n]*\\*\\*Зберегти\\*\\*",
+      "flags": "m"
+    },
+    {
+      "name": "amount stays its own step",
+      "type": "match",
+      "path": "portal/profile/profile.md",
+      "pattern": "^\\d+\\. [^\\n]*сум[^\\n]*\\n\\d+\\. [^\\n]*комісі[^\\n]*\\*\\*Підтвердити\\*\\*",
+      "flags": "m"
+    },
+    {
+      "name": "cites the project rule",
+      "type": "match",
+      "path": "output",
+      "pattern": "procedure-steps"
+    },
+    {
+      "type": "changed-only",
+      "paths": [
+        "portal/profile/",
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}
