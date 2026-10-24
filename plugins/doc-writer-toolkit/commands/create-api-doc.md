@@ -7,7 +7,7 @@ Use the `api-doc-writer` skill to write an API reference page.
 
 - **Slug:** $ARGUMENTS
 - **Input file:** `/api-docs/api-references/$ARGUMENTS.md`
-- **Output:** `docs/api-reference/$ARGUMENTS/$ARGUMENTS.md`
+- **Output:** `<API reference root>/$ARGUMENTS/$ARGUMENTS.md`, where `<API reference root>` is the project's `API reference root:` declaration, resolved by the skill through `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — do not hardcode a path here
 
 Strictly follow the skill's workflow.
 

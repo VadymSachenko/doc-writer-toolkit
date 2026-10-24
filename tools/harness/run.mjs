@@ -26,6 +26,10 @@ export function loadCase(idOrPath) {
   const file = idOrPath.endsWith('.json') ? path.resolve(idOrPath) : path.join(here, 'cases', `${idOrPath}.json`);
   const c = JSON.parse(fs.readFileSync(file, 'utf8'));
   for (const key of ['id', 'fixture', 'prompt', 'assertions']) if (!(key in c)) throw new Error(`${file}: missing '${key}'`);
+  for (const a of c.assertions) {
+    if (typeof a.pattern !== 'string') continue;
+    try { new RegExp(a.pattern, a.flags ?? ''); } catch (e) { throw new Error(`${file}: assertion '${nameOf(a)}': ${e.message}`); }
+  }
   return c;
 }
 
@@ -141,12 +145,17 @@ export function runOnce(c, { copy, sentinel, ownSkills, dir, model, claude = 'cl
   const output = t.result?.result ?? '';
   const result = { exit: run.status, subtype: t.result?.subtype ?? null, turns: t.result?.num_turns ?? null, costUsd: t.result?.total_cost_usd ?? 0, seconds, output };
   fs.writeFileSync(path.join(dir, 'result.json'), `${JSON.stringify(result, null, 2)}\n`);
-  const checks = [
+  const checks = score(c, t, { host, output, status, sentinel, ownSkills });
+  fs.writeFileSync(path.join(dir, 'assertions.json'), `${JSON.stringify(checks, null, 2)}\n`);
+  return { ...result, checks };
+}
+
+// The built-in checks, then the case's own assertions. rescore.mjs reuses it on saved runs.
+export function score(c, t, { host, output, status, sentinel, ownSkills }) {
+  return [
     ...builtInChecks(t, sentinel, ownSkills),
     ...c.assertions.map((a) => ({ name: nameOf(a), ...check(a, { host, output, status }) })),
   ];
-  fs.writeFileSync(path.join(dir, 'assertions.json'), `${JSON.stringify(checks, null, 2)}\n`);
-  return { ...result, checks };
 }
 
 export function summarize(c, runs) {
@@ -179,6 +188,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     console.error('harness: off (HARNESS_MODE or tools/harness/local.json); no runs made');
     process.exit(3);
   }
+  // Every case loads, and its patterns compile, before the first run spends anything.
+  let order;
+  try { order = ids.map((id) => loadCase(id).id); } catch (e) {
+    console.error(`harness: ${e.message}`);
+    process.exit(2);
+  }
   const runs = Number(option('--runs', '3'));
   const out = path.resolve(option('--out', path.join(os.tmpdir(), 'doc-toolkit-harness')));
   const sentinel = `harness-${labelName}`;
@@ -196,6 +211,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     pass.cases = before.cases.filter((s) => s.runs === runs && wanted.includes(s.case));
     pass.costUsd = Number(pass.cases.reduce((sum, s) => sum + s.costUsd, 0).toFixed(4));
   }
+  const save = () => {
+    pass.cases.sort((x, y) => order.indexOf(x.case) - order.indexOf(y.case));
+    fs.writeFileSync(path.join(base, 'pass.json'), `${JSON.stringify(pass, null, 2)}\n`);
+  };
+  // pass.json is saved after every case, so a crash keeps what --resume needs.
   for (const id of ids) {
     const c = loadCase(id);
     if (pass.cases.some((s) => s.case === c.id)) continue;
@@ -226,12 +246,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       fs.writeFileSync(path.join(caseDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`);
       pass.cases.push(summary);
       pass.costUsd = Number((pass.costUsd + summary.costUsd).toFixed(4));
+      save();
     }
     if (pass.stopped) break;
   }
-  const order = ids.map((id) => loadCase(id).id);
-  pass.cases.sort((x, y) => order.indexOf(x.case) - order.indexOf(y.case));
-  fs.writeFileSync(path.join(base, 'pass.json'), `${JSON.stringify(pass, null, 2)}\n`);
+  save();
   for (const s of pass.cases) {
     console.log(`${s.case}: ${s.passedRuns}/${s.runs} runs passed, $${s.costUsd.toFixed(2)}`);
     for (const a of s.assertions) console.log(`  ${a.passed}/${s.runs}  ${a.name}`);

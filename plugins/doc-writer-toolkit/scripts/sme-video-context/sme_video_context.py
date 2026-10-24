@@ -146,6 +146,47 @@ def timestamp(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
 
+def timestamp_precise(seconds: float) -> str:
+    """HH:MM:SS, plus `.<tenths>` when the moment isn't on a whole second.
+
+    `timestamp()` rounds to a whole second, which is fine for human-readable clip
+    headers but makes a frames-index entry's `timestamp` disagree with its unrounded
+    `seconds` (58.6s would render "00:00:58"). Use this where the two must agree.
+    """
+    deciseconds = max(0, round(seconds * 10))
+    whole, tenths = divmod(deciseconds, 10)
+    base = timestamp(whole)
+    return base if tenths == 0 else f"{base}.{tenths}"
+
+
+def screenshot_name(seconds: float) -> str:
+    """Build the `screen-*.jpg` filename for a moment, unique to a tenth of a second.
+
+    Whole-second moments keep clean `screen-HH-MM-SS.jpg` names, so existing folders
+    and the fast regex path in parse_existing_screenshots stay unaffected. Sub-second
+    moments append `_<tenths>` (58.5s -> `screen-00-00-58_5.jpg`) so two frames that
+    round to the same whole second no longer build the same name and overwrite each
+    other on copy. This is the single source of truth for frame filenames — every
+    copy/reference site calls it, and SCREENSHOT_RE parses the names back.
+    """
+    return f"screen-{timestamp_precise(seconds).replace(':', '-').replace('.', '_')}.jpg"
+
+
+# Matches both clean whole-second names (screen-HH-MM-SS.jpg) and the sub-second form
+# screenshot_name() emits (screen-HH-MM-SS_T.jpg). Group 4 is the optional tenths digit.
+SCREENSHOT_RE = re.compile(r"screen-(\d{2})-(\d{2})-(\d{2})(?:_(\d))?\.jpg")
+
+
+def seconds_from_screenshot_name(name: str) -> Optional[float]:
+    """Recover the (possibly sub-second) seconds encoded in a screen-*.jpg name."""
+    match = SCREENSHOT_RE.fullmatch(name)
+    if not match:
+        return None
+    hours, minutes, secs = (int(part) for part in match.groups()[:3])
+    tenths = int(match.group(4) or 0)
+    return hours * 3600 + minutes * 60 + secs + tenths / 10
+
+
 def normalized_text(text: str) -> str:
     return " ".join(re.findall(r"[\w./:@-]+", text.lower(), flags=re.UNICODE))
 
@@ -398,7 +439,7 @@ def select_frames(
         candidates.append(candidate)
 
         if keep:
-            name = f"screen-{timestamp(seconds).replace(':', '-')}.jpg"
+            name = screenshot_name(seconds)
             shutil.copy2(frame, images / name)
             (ocr_dir / name.replace(".jpg", ".txt")).write_text(text + "\n", encoding="utf-8")
             # Repoint source at the persisted copy: `frame` lives in the raw-frames temp
@@ -532,7 +573,7 @@ def write_context(
     for item in kept:
         relative = timestamp(item.seconds)
         absolute = timestamp(source_offset + item.seconds)
-        image_name = f"screen-{relative.replace(':', '-')}.jpg"
+        image_name = screenshot_name(item.seconds)
         nearby = [
             segment for segment in transcript
             if segment["end"] >= item.seconds - 20 and segment["start"] <= item.seconds + 20
@@ -556,11 +597,9 @@ def write_context(
 def load_existing_selection(output: Path) -> list[Candidate]:
     kept = []
     for image in sorted((output / "images").glob("screen-*.jpg")):
-        match = re.fullmatch(r"screen-(\d{2})-(\d{2})-(\d{2})\.jpg", image.name)
-        if not match:
+        position = seconds_from_screenshot_name(image.name)
+        if position is None:
             continue
-        hours, minutes, seconds = map(int, match.groups())
-        position = hours * 3600 + minutes * 60 + seconds
         ocr_file = output / "ocr" / image.with_suffix(".txt").name
         text = ocr_file.read_text(encoding="utf-8") if ocr_file.exists() else ""
         kept.append(Candidate(image, position, None, text, None, True))
@@ -585,7 +624,7 @@ def write_key_package(
     (key_output / "images").mkdir(parents=True, exist_ok=True)
     (key_output / "ocr").mkdir(parents=True, exist_ok=True)
     for item in key_frames:
-        name = f"screen-{timestamp(item.seconds).replace(':', '-')}.jpg"
+        name = screenshot_name(item.seconds)
         shutil.copy2(item.source, key_output / "images" / name)
         (key_output / "ocr" / name.replace(".jpg", ".txt")).write_text(item.ocr, encoding="utf-8")
     write_context(key_output, source, key_frames, transcript, source_offset)
@@ -659,7 +698,7 @@ def extract_missing_frame(
 ) -> Optional[Candidate]:
     from PIL import Image
 
-    name = f"screen-{timestamp(seconds).replace(':', '-')}.jpg"
+    name = screenshot_name(seconds)
     target = output / "transcript-extracted" / name
     if not extract_frame_at(video, target, seconds):
         return None
@@ -671,14 +710,18 @@ def extract_missing_frame(
 
 
 def parse_existing_screenshots(folder: Path) -> list[tuple[float, Path]]:
-    """Read seconds back out of screen-HH-MM-SS.jpg filenames in a flat folder."""
+    """Read seconds back out of screen-*.jpg filenames in a flat folder.
+
+    Handles both clean whole-second names (screen-HH-MM-SS.jpg) and the sub-second
+    form screenshot_name() emits (screen-HH-MM-SS_T.jpg), so a folder that mixes the
+    two dedups and merges correctly.
+    """
     found = []
     for image in sorted(folder.glob("screen-*.jpg")):
-        match = re.fullmatch(r"screen-(\d{2})-(\d{2})-(\d{2})\.jpg", image.name)
-        if not match:
+        seconds = seconds_from_screenshot_name(image.name)
+        if seconds is None:
             continue
-        hours, minutes, seconds = map(int, match.groups())
-        found.append((float(hours * 3600 + minutes * 60 + seconds), image))
+        found.append((seconds, image))
     return found
 
 
@@ -735,7 +778,7 @@ def frames_index_entry(
     return {
         "screenshot": item.source.name,
         "seconds": item.seconds,
-        "timestamp": timestamp(item.seconds),
+        "timestamp": timestamp_precise(item.seconds),
         "ocr_text": collapse_whitespace(item.ocr)[:300],
         "transcript_text": transcript_text[:400],
         "score": score,
@@ -770,7 +813,7 @@ def extract_at_timestamps(
         if nearest is not None and abs(nearest[0] - seconds) <= tolerance:
             report.append({"requested": seconds, "status": "already-covered", "screenshot": nearest[1].name})
             continue
-        name = f"screen-{timestamp(seconds).replace(':', '-')}.jpg"
+        name = screenshot_name(seconds)
         target = screenshots_dir / name
         if not extract_frame_at(video, target, seconds):
             report.append({"requested": seconds, "status": "unavailable", "screenshot": "-"})
@@ -813,7 +856,7 @@ def merge_screenshots(source_dir: Path, destination_dir: Path, tolerance: float)
         entry = source_index.get(source.name) or {
             "screenshot": source.name,
             "seconds": seconds,
-            "timestamp": timestamp(seconds),
+            "timestamp": timestamp_precise(seconds),
             "ocr_text": "",
             "transcript_text": "",
             "score": 0,
@@ -862,7 +905,7 @@ def write_transcript_driven_package(
     (package / "images").mkdir(parents=True, exist_ok=True)
     (package / "ocr").mkdir(parents=True, exist_ok=True)
     for item in final_frames:
-        name = f"screen-{timestamp(item.seconds).replace(':', '-')}.jpg"
+        name = screenshot_name(item.seconds)
         shutil.copy2(item.source, package / "images" / name)
         (package / "ocr" / name.replace(".jpg", ".txt")).write_text(item.ocr, encoding="utf-8")
     write_context(package, video, final_frames, transcript, source_offset)
@@ -893,7 +936,7 @@ def main() -> None:
         "--extract-at", default=None, metavar="SECONDS[,SECONDS...]",
         help=(
             "skip the full pipeline; treat `output` as a flat folder of existing "
-            "screen-HH-MM-SS.jpg files and guarantee one near each listed second, "
+            "screen-HH-MM-SS[_T].jpg files and guarantee one near each listed second, "
             "extracting a new frame only where none already falls within --tolerance"
         ),
     )
@@ -901,7 +944,7 @@ def main() -> None:
     parser.add_argument(
         "--merge-from", type=Path, default=None, metavar="SOURCE_DIR",
         help=(
-            "skip the full pipeline; copy screen-HH-MM-SS.jpg candidates from SOURCE_DIR "
+            "skip the full pipeline; copy screen-HH-MM-SS[_T].jpg candidates from SOURCE_DIR "
             "into `output`, skipping any whose timestamp is already covered there within "
             "--tolerance (`output` is created if missing)"
         ),
@@ -941,7 +984,7 @@ def main() -> None:
             parser.error("output is required with --merge-from")
         report = merge_screenshots(args.merge_from, args.output, args.tolerance)
         for item in report:
-            print(f"{timestamp(item['seconds'])}: {item['status']} ({item['screenshot']})")
+            print(f"{timestamp_precise(item['seconds'])}: {item['status']} ({item['screenshot']})")
         copied = sum(1 for item in report if item["status"] == "copied")
         print(f"Copied {copied} screenshot(s); {len(report) - copied} already covered (skipped)")
         return
@@ -956,7 +999,7 @@ def main() -> None:
             args.video, args.output, timestamps, args.tolerance, transcript, args.ocr_language
         )
         for item in report:
-            print(f"{timestamp(item['requested'])}: {item['status']} ({item['screenshot']})")
+            print(f"{timestamp_precise(item['requested'])}: {item['status']} ({item['screenshot']})")
         extracted = sum(1 for item in report if item["status"] == "extracted")
         print(f"Extracted {extracted} new screenshot(s); {len(report) - extracted} already covered")
         return

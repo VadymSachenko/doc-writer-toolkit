@@ -112,7 +112,7 @@ This is a structural check only: it never looks for the target file.
 
 - **Authoring** skills (`concept-doc-writer`, `user-guide-writer`, `api-doc-writer`) build every new
   page-to-page link with this algorithm from the start, from the target page's pair.
-- **Repair** (`fix-doc-todos`) rewrites a relative or extensioned page link to the algorithm's output.
+- **Repair** (the `/fix-doc-todos` command) rewrites a relative or extensioned page link to the algorithm's output.
 - **Translation** (`doc-translator`) **preserves an already-correct route verbatim** — an EN page links
   to the same site-root-relative path as its UA source (the locales share one path; see
   `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md`). It does not

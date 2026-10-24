@@ -188,4 +188,31 @@ test('runner: off makes no run; the guard stops before a run; --resume skips fin
   assert.match(resumed.stderr, /second-case run 1\/1/);
   assert.doesNotMatch(resumed.stderr, /tc-01-translate-single-pair run 1\/1/);
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(out, 'x', 'pass.json'), 'utf8')).cases.map((s) => s.case), ['tc-01-translate-single-pair', 'second-case']);
+
+  // rescore: a corrected assertion re-checks the saved run, with no model call.
+  fs.writeFileSync(second, JSON.stringify({ id: 'second-case', fixture: { shape: 'single' }, prompt: 'p', assertions: [{ type: 'match', path: 'output', pattern: 'nope' }] }));
+  const rescore = (args) => spawnSync('node', [path.join(path.dirname(runner), 'rescore.mjs'), ...args], { encoding: 'utf8' });
+  assert.match(rescore(['--out', out, '--label', 'x', '--case', second]).stdout, /second-case: 0\/1 runs passed/);
+  fs.writeFileSync(second, JSON.stringify({ id: 'second-case', fixture: { shape: 'single' }, prompt: 'p', assertions: [{ type: 'match', path: 'output', pattern: '^ok$' }] }));
+  assert.match(rescore(['--out', out, '--label', 'x', '--case', second]).stdout, /second-case: 1\/1 runs passed/);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(out, 'x', 'pass.json'), 'utf8')).cases.find((s) => s.case === 'second-case').passedRuns, 1);
+});
+
+test('runner: a bad pattern fails before any run; a crash keeps the cases already finished', () => {
+  const dir = tmp();
+  const out = path.join(dir, 'out');
+  const claude = fakeClaude(dir);
+  const bad = path.join(dir, 'bad-case.json');
+  fs.writeFileSync(bad, JSON.stringify({ id: 'bad-case', fixture: { shape: 'single' }, prompt: 'p', assertions: [{ type: 'match', path: 'output', pattern: '(?i)x' }] }));
+  const refused = harness(['--label', 'x', '--case', `tc-01-translate-single-pair,${bad}`, '--runs', '1', '--out', out, '--claude', claude], { FAKE_SESSION: '10' });
+  assert.equal(refused.status, 2);
+  assert.match(refused.stderr, /bad-case\.json: assertion .*Invalid regular expression/);
+  assert.equal(fs.existsSync(out), false);
+
+  const crash = path.join(dir, 'crash-case.json');
+  fs.writeFileSync(crash, JSON.stringify({ id: 'crash-case', fixture: { shape: 'single' }, setup: ['exit 1'], prompt: 'p', assertions: [] }));
+  const crashed = harness(['--label', 'x', '--case', `tc-01-translate-single-pair,${crash}`, '--runs', '1', '--out', out, '--claude', claude], { FAKE_SESSION: '10' });
+  assert.notEqual(crashed.status, 0);
+  assert.match(crashed.stderr, /crash-case: setup 'exit 1' exited 1/);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(out, 'x', 'pass.json'), 'utf8')).cases.map((s) => s.case), ['tc-01-translate-single-pair']);
 });

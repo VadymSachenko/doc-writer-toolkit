@@ -99,7 +99,8 @@ python3 sme_video_context.py --plan-from-transcript \
 #    score: 0, reasons: [] even though the frame itself was chosen *because* of what was
 #    said nearby — the plan (step 1) already proved the relevance, this step just needs
 #    the same source to carry it into the index entry.
-python3 sme_video_context.py \
+VENV=~/.cache/doc-writer-toolkit/sme-video-venv   # needs Pillow: pip install Pillow==11.3.0
+"$VENV/bin/python" sme_video_context.py \
   /path/to/meeting.mp4 /path/to/output-package \
   --transcript part1.txt --transcript part2.txt@1500 \
   --extract-at "36,58.5,140,612"
@@ -117,7 +118,7 @@ python3 sme_video_context.py \
 
 ## `frames-index.json` (K8)
 
-Lives alongside a folder of `screen-HH-MM-SS.jpg` screenshots — `images/`, `transcript-key/images/`, or a merged destination folder like `.sources/frames/{video}-frames/`. One entry per screenshot in that folder:
+Lives alongside a folder of `screen-HH-MM-SS.jpg` screenshots — `images/`, `transcript-key/images/`, or a merged destination folder like `.sources/frames/{video}-frames/`. A frame taken between whole seconds gets the tenths too, `screen-HH-MM-SS_T.jpg` (`screen-00-00-58_5.jpg`), so two frames in the same second don't overwrite each other; its `timestamp` then reads `00:00:58.5`. Names sort in time order, and every mode reads both forms. One entry per screenshot in that folder:
 
 ```json
 [

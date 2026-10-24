@@ -246,7 +246,9 @@ async function readDocusaurusI18n(settings) {
 }
 
 // Target locales = configured i18n.locales minus the default locale and 'en'. Always returns the import set too.
-export async function resolveLocales(settings) {
+// `requireTargets: false` accepts a site with no target locales: the label store then holds the default locale and en
+// only. The locale pipeline keeps the default, which stops such a run.
+export async function resolveLocales(settings, { requireTargets = true } = {}) {
   let defaultLocale = 'uk';
   let targets;
   if (settings.explicitLocales) {
@@ -257,7 +259,7 @@ export async function resolveLocales(settings) {
     targets = cfg.locales;
   }
   targets = unique(targets).filter((l) => l !== defaultLocale && l !== 'en');
-  if (!targets.length) {
+  if (!targets.length && requireTargets) {
     throw new CliError('No target locales are configured yet: docusaurus.config.ts lists only the default locale and en.', { code: 2, data: { missing: ['target locales'] } });
   }
   return { defaultLocale, targets, all: unique([defaultLocale, 'en', ...targets]) };
