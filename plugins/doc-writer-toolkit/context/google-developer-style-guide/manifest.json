@@ -53,8 +53,8 @@
           "title": "Preserve semantic hierarchy"
         }
       ],
-      "bytes": 1789,
-      "sha256": "849d015ba66c05941070716f3cc6dc24ff0a3114e283a57252895fa67a0181b5"
+      "bytes": 1807,
+      "sha256": "b396f3a0918e51bbe8d43615ef964dd75f24a6fa435d1904d72f623e7728edd0"
     },
     {
       "path": "content-structure/lists.md",
@@ -83,8 +83,8 @@
           "title": "Make lists grammatical and parallel"
         }
       ],
-      "bytes": 1227,
-      "sha256": "8281826cb89ffea6abae38a80f71209942a5de1997aa13d43a577460fa0c0b3e"
+      "bytes": 1245,
+      "sha256": "86fbeccfc7f4bb2aff176ad2cbb326380ca7e0e8993143b608aac123ee121722"
     },
     {
       "path": "content-structure/notices-and-footnotes.md",
@@ -110,8 +110,8 @@
         "footnote"
       ],
       "rules": [],
-      "bytes": 1315,
-      "sha256": "bd7efa9057bd69d2094da95b44dd83a60b9db7b42298c1515afcfe963d7425da"
+      "bytes": 1333,
+      "sha256": "4c305086b636723aa206b3fdba4c196c37cabd048e9db7ad0b8fd7bac63547d2"
     },
     {
       "path": "content-structure/tables.md",
@@ -141,8 +141,8 @@
           "title": "Use a table for comparison"
         }
       ],
-      "bytes": 1199,
-      "sha256": "9c780dee458a1a55d2d20b8461acf03bfa7ae4dcc411580cf0c376d699617c97"
+      "bytes": 1217,
+      "sha256": "9f5e152761dfc4d51fb9617e9eb0af1f2bb33c8414469ddad74f94b59a0e2392"
     },
     {
       "path": "formatting/dates-and-times.md",
@@ -167,8 +167,8 @@
         "ISO 8601"
       ],
       "rules": [],
-      "bytes": 1286,
-      "sha256": "746e5524b0687fb41146887e1dac2263f6ed1cc5b0a44de06badb2b5313631a5"
+      "bytes": 1339,
+      "sha256": "f9ab6be7baca5569eaa36ebd461fd2987f62e0980a8252ac353272097ccb71c8"
     },
     {
       "path": "formatting/mathematical-notation-and-phone.md",
@@ -195,8 +195,8 @@
         "phone number"
       ],
       "rules": [],
-      "bytes": 1316,
-      "sha256": "00a20540ddfd7d0c4e8a5eff9570155254e492b5d67a4f35a2133f589a99b5f5"
+      "bytes": 1334,
+      "sha256": "dd8cd2be0ebad04f37c8c977eb2636dca5af82a5a367fbb198e9624fe2765b53"
     },
     {
       "path": "formatting/numbers-and-units.md",
@@ -232,8 +232,8 @@
           "title": "Join values and units correctly"
         }
       ],
-      "bytes": 2069,
-      "sha256": "b71760aea4a8475edd39ee34861beb22a66ae3685df39b8f885e2b9eb62bb271"
+      "bytes": 2087,
+      "sha256": "7508fc59f6d6ca328df1f3160a7a7b741df25f2ccb8e8b36839a3a6592dd32a8"
     },
     {
       "path": "formatting/text-formatting.md",
@@ -273,8 +273,8 @@
           "title": "Titles and letters as letters"
         }
       ],
-      "bytes": 2056,
-      "sha256": "29a4b339b6cc4cc454a1f340d1f82bba44b204e005b167645e66a7ca0a276bc5"
+      "bytes": 2074,
+      "sha256": "216e89ae7ffa26a8ae670dbebc9601f5af7a6a75986576c830cadb33e7587db6"
     },
     {
       "path": "language/abbreviations-and-capitalization.md",
@@ -323,8 +323,8 @@
           "title": "Use clear common contractions"
         }
       ],
-      "bytes": 2576,
-      "sha256": "d50a46f1c37df28fdaeddfcad453f6f04cdcad92048cbaf9dd1d7b94cdddb3c7"
+      "bytes": 2794,
+      "sha256": "8799f1f6b8fe176989d3146d6a9e287af02e2925c28305300c8d74e000136239"
     },
     {
       "path": "language/articles-plurals-and-possessives.md",
@@ -366,8 +366,8 @@
           "title": "Do not inflect protected or literal names"
         }
       ],
-      "bytes": 2548,
-      "sha256": "2f43694f33d8fe983bda439d281b60e76e808cacfefde068c6c3fbf00e761165"
+      "bytes": 2573,
+      "sha256": "9951d3a5e85ff426e5616bf362fc19e5ba8e794ba3d09bbfea3bdcb23c70dee5"
     },
     {
       "path": "language/grammar-person-and-voice.md",
@@ -427,8 +427,8 @@
           "title": "Natural prepositions are acceptable"
         }
       ],
-      "bytes": 3272,
-      "sha256": "d38eb639bdbddb0d9ee48a00d63e0d09189d67231dbf2351c9a4d2e5d2ece3ad"
+      "bytes": 3416,
+      "sha256": "4a6dba6dbb128cb8b0aba9f01f215e658b97457254305fe6c588d712ffe62878"
     },
     {
       "path": "language/reference-verbs.md",
@@ -458,8 +458,8 @@
           "title": "Describe what an element does"
         }
       ],
-      "bytes": 934,
-      "sha256": "80191fd4da1ad447223718eef0fe736b737083c50df3aa59d740e2549f826234"
+      "bytes": 952,
+      "sha256": "4d23bc4abe89ea6f96e727ad689a6d0db2407c1cb3dd38694f860409c9e5d28a"
     },
     {
       "path": "linking/anchors-and-targets.md",
@@ -484,8 +484,8 @@
         "deep link"
       ],
       "rules": [],
-      "bytes": 1102,
-      "sha256": "e6644275095580ecd62a8a6518e2860bb904b06c16a4b5644f61ea1605aea46d"
+      "bytes": 1120,
+      "sha256": "5f06f938e31aa8ae395507db4dcdf0b2155a3e402b898673cf40a99afdfed673"
     },
     {
       "path": "linking/links-and-cross-references.md",
@@ -519,8 +519,8 @@
           "title": "Link selectively"
         }
       ],
-      "bytes": 1580,
-      "sha256": "b76219777e729f718ec6f51d6cd89fa770fd1a61d6e907c531e99a9c23d9215e"
+      "bytes": 1598,
+      "sha256": "47a28756c7426f6202103c4c4731b0b4aca924a3c7ca229bf5ce542cd517caef"
     },
     {
       "path": "names-and-naming/filenames-and-file-types.md",
@@ -546,8 +546,8 @@
         "naming"
       ],
       "rules": [],
-      "bytes": 1101,
-      "sha256": "2ade1a376fef867d3e9b262d87184b069c36723b5792fd58b84012a1ad137414"
+      "bytes": 1119,
+      "sha256": "cdb54bd60e7fde038486c9a7b9b24b8f0ddd1fb062ca4ed6ec4b1a3c4a434fbc"
     },
     {
       "path": "names-and-naming/product-names-and-trademarks.md",
@@ -578,8 +578,8 @@
           "title": "Use a trademark as a modifier"
         }
       ],
-      "bytes": 1523,
-      "sha256": "9e1b5ad675da9537c3c609fe347c915bc75e9b63d8f71c58c28089288e896df7"
+      "bytes": 1541,
+      "sha256": "1b56b1effb32fc7ed423315fd92f794e69e24e8764deedef8fe3cd232b7e0323"
     },
     {
       "path": "names-and-naming/safe-example-data.md",
@@ -615,8 +615,8 @@
           "title": "Represent people inclusively"
         }
       ],
-      "bytes": 1408,
-      "sha256": "02339634d65836ff74372fe1360988704818efde3c4a26e80b9459b9cd9ce07a"
+      "bytes": 1426,
+      "sha256": "20621d0ee938d6bda201d387d92240699700bb56d747ce17952e82326a7881f8"
     },
     {
       "path": "principles/accessibility.md",
@@ -644,8 +644,8 @@
         "semantic HTML"
       ],
       "rules": [],
-      "bytes": 2316,
-      "sha256": "01397b16e07b480e3d0b49dd91ab35361da83460bac360644004c0be4e2e8aa0"
+      "bytes": 2334,
+      "sha256": "2bf835df5f259690295d2d03d11d2c58ccb22921fc80fd18fa3cb00f06df2fee"
     },
     {
       "path": "principles/global-audience.md",
@@ -670,8 +670,8 @@
         "ambiguity"
       ],
       "rules": [],
-      "bytes": 1563,
-      "sha256": "a710ad6e75fdf23859c668073c735a1618a68265bffe158c95eaa1abcb9f72f6"
+      "bytes": 1637,
+      "sha256": "d5f73d2eb5aa1b6e0161827b458a8239f328d4431e327087ab44b06b3386e2e5"
     },
     {
       "path": "principles/inclusive-language.md",
@@ -696,8 +696,8 @@
         "non-inclusive"
       ],
       "rules": [],
-      "bytes": 1781,
-      "sha256": "17b67cc760dc1ee7897cfc643762d261e8d07ea6ed7c83c7e7cf5b56f0c7199e"
+      "bytes": 1799,
+      "sha256": "96f1824a80b121bc0e7782d0374bf74c982d9742a022650f2814b0814b720a30"
     },
     {
       "path": "principles/jargon-and-prescriptive-writing.md",
@@ -727,8 +727,8 @@
         "recommendation"
       ],
       "rules": [],
-      "bytes": 1688,
-      "sha256": "c0d935ddf5bac33e2b095e63c67f942b959b81caadc1869e767c83ed77b22cc0"
+      "bytes": 1762,
+      "sha256": "05965355120c49529c75fb45c7a62e8c3dc8b012653e553cd01ef56bf6cb030b"
     },
     {
       "path": "principles/precision-and-longevity.md",
@@ -757,8 +757,8 @@
         "copyright"
       ],
       "rules": [],
-      "bytes": 2034,
-      "sha256": "ca5bd6f75688696de80864949211bfde2d3a0835ed2b7e513d985662dea4d367"
+      "bytes": 2052,
+      "sha256": "d6bb9cc30ba9854c5dbd64ad15a9f58879a6360bf3585073d365fc1767860aa0"
     },
     {
       "path": "principles/voice-and-tone.md",
@@ -802,8 +802,8 @@
           "title": "Keep emphasis rare"
         }
       ],
-      "bytes": 2267,
-      "sha256": "9c6a73cc3d54330f1481ce5cc0740fc56250720cb22568e52996385d09b51c35"
+      "bytes": 2285,
+      "sha256": "ff20093ee773688c8ff7de87ea2c00547b88d9d1ea1be4f98e2d784858d0d7a5"
     },
     {
       "path": "procedures/procedures.md",
@@ -837,8 +837,8 @@
           "title": "Write actionable steps"
         }
       ],
-      "bytes": 3239,
-      "sha256": "2907b62fe22b0c14f01e6ff79484f72c0d796651d1f99b9f0a66dd68add50330"
+      "bytes": 3257,
+      "sha256": "af21b0f3f1e9aefc9f1054e8f1edd2c8f7a3656a514ae7587a38df37702511c5"
     },
     {
       "path": "punctuation/commas-and-colons.md",
@@ -863,8 +863,8 @@
         "colon"
       ],
       "rules": [],
-      "bytes": 1509,
-      "sha256": "674b4e8f3a708846d5dd1e9d46fd626d3e0391b832aba5dc089d23affe9dc1aa"
+      "bytes": 1563,
+      "sha256": "93a51e57a7b4142066eba5a49ffd1b6ffe75b7b840ec583b58aea665564a2bf8"
     },
     {
       "path": "punctuation/dashes-hyphens-and-ranges.md",
@@ -903,8 +903,8 @@
           "title": "Use a hyphen for a range"
         }
       ],
-      "bytes": 1914,
-      "sha256": "0358582c6ef0e6bcd79056d410089537aa7599ce95c6b1e444830de60519757d"
+      "bytes": 2070,
+      "sha256": "e878fde7de5b98cf5f2854d3654dccfe15a9b9eed7466e226366dba84cde6632"
     },
     {
       "path": "punctuation/periods-semicolons-and-end-punctuation.md",
@@ -929,8 +929,8 @@
         "punctuation"
       ],
       "rules": [],
-      "bytes": 1241,
-      "sha256": "87e4c1001dda64612e0e09d4e42100cf023ca543b69c061b4002c3de2cb56e5c"
+      "bytes": 1296,
+      "sha256": "bd53b85ec235c7477487985337c63d5803ce9d5f15ab459363ece48036c6d15d"
     },
     {
       "path": "punctuation/quotes-parentheses-ellipses-and-slashes.md",
@@ -958,8 +958,8 @@
         "slash"
       ],
       "rules": [],
-      "bytes": 2386,
-      "sha256": "7be41cac7a5675cc784139654c24e6bb3c43dc4bd05376dbf90a5b555c2e7d2d"
+      "bytes": 2449,
+      "sha256": "990218c0861fb11cd8ac96d01318073f4f031a8817e3848979b77123972fb7de"
     },
     {
       "path": "technical-content/api-reference-comments.md",
@@ -994,8 +994,8 @@
           "title": "Do not merely restate the signature"
         }
       ],
-      "bytes": 1841,
-      "sha256": "5de0947ebe58df5a968b87c8cd20fd6ae823e24c5905e50f50e972a3afcb22de"
+      "bytes": 1859,
+      "sha256": "d6c4c713f913e45f2e6cf26393f4a93f02350f4542585aaadbccdbdc4db17831"
     },
     {
       "path": "technical-content/code-in-text-and-samples.md",
@@ -1032,8 +1032,8 @@
           "title": "Do not inflect literal code"
         }
       ],
-      "bytes": 2699,
-      "sha256": "fc427fe892d411b838e4003d187e377b443471e330c0f91543d07fa099ffd3c2"
+      "bytes": 2717,
+      "sha256": "18362c900422fc53ad7a2efd2128bf92c93677073d842dd4b6b18a90c1e6a049"
     },
     {
       "path": "technical-content/command-line-syntax.md",
@@ -1062,8 +1062,8 @@
         "exclusive"
       ],
       "rules": [],
-      "bytes": 1625,
-      "sha256": "d1b37f44853c0b3f60b16f0d677baacd2a78de26818fed51e321ae91936a2494"
+      "bytes": 1643,
+      "sha256": "bd3b87261d31149be90fa990ffb3ab98180aa2178fa8579293a83b4a11c09206"
     },
     {
       "path": "technical-content/html-markdown-and-semantics.md",
@@ -1097,8 +1097,8 @@
           "title": "Encode meaning, not appearance"
         }
       ],
-      "bytes": 1837,
-      "sha256": "e1a080dea7f7b782680f9f08d2b0e9df642c1e873b9f51da0307d3014167bb59"
+      "bytes": 1855,
+      "sha256": "ecc200b56a733be2695023b6a1cdabe0dc7b44d6729ac36aea207919af88e4e5"
     },
     {
       "path": "technical-content/placeholders.md",
@@ -1130,8 +1130,8 @@
           "title": "Make replacement values obvious"
         }
       ],
-      "bytes": 1784,
-      "sha256": "e8a74021bfb2cd73c49f4745779b744d2d1fef7e83a298255dd6e46037febb1b"
+      "bytes": 1802,
+      "sha256": "e3bec8a611a752359379b369574b12500d21988bf97120ea7cf156cceb3393c9"
     },
     {
       "path": "technical-content/ui-elements-and-interaction.md",
@@ -1170,8 +1170,8 @@
           "title": "Use exact element terms and actions"
         }
       ],
-      "bytes": 2824,
-      "sha256": "11e247dfe16a10d7ac072830c5058c73c78d86cd35b8a0f6f8064e147c7c82fd"
+      "bytes": 2842,
+      "sha256": "a7d8e87b54fbe88265c51b9cf3a28ffc1a30dcf0750a15e22d7d6d2c0948a3e9"
     },
     {
       "path": "terminology/a-z/0-9-01.md",
@@ -1194,8 +1194,8 @@
         "0-9"
       ],
       "rules": [],
-      "bytes": 715,
-      "sha256": "b2fbf2408afb6c41d893513e22cbcb455c2145b25896b80af1776bbaa15c8e8f"
+      "bytes": 716,
+      "sha256": "1bc24a25f7d9aed1ecd86394702e6c194ec5b7f4eb75c98f52aaa8dcfba0ab00"
     },
     {
       "path": "terminology/a-z/a-01.md",
@@ -1218,8 +1218,8 @@
         "a"
       ],
       "rules": [],
-      "bytes": 6148,
-      "sha256": "da7f1c6fd3edab53d42099bd3353ceac6a210582dda9f86b9e26650b1575295b"
+      "bytes": 5997,
+      "sha256": "8ca0ff8084e7c3bf077c3b5f7633d968c559eeb964f2cb82adc351b925a90547"
     },
     {
       "path": "terminology/a-z/a-02.md",
@@ -1242,8 +1242,8 @@
         "a"
       ],
       "rules": [],
-      "bytes": 5587,
-      "sha256": "423628fbfc38211f42098c099aadef80abc8ccfa064d6f72bd59cb9355b8d14f"
+      "bytes": 5438,
+      "sha256": "af5d95eb33b37d2c0a74a79b6354cab24016d9556d85130367286304f7d593f3"
     },
     {
       "path": "terminology/a-z/a-03.md",
@@ -1266,8 +1266,8 @@
         "a"
       ],
       "rules": [],
-      "bytes": 3667,
-      "sha256": "755afd7f37afe2253505f117da9f0d581483774e3f4b95da0296b7c7a7f912ed"
+      "bytes": 3572,
+      "sha256": "bb41ab6aea760f7e21e944242a46420185f937344ed0d5ece72fe70d62cd5a61"
     },
     {
       "path": "terminology/a-z/b-01.md",
@@ -1290,8 +1290,8 @@
         "b"
       ],
       "rules": [],
-      "bytes": 6744,
-      "sha256": "6efff05384e26b58ea5b53d46225f0de6effe546e06ea09a6fcd7cc37b0ad2ef"
+      "bytes": 6593,
+      "sha256": "0c8431fc16b66bd7a3db370ce12bed0d066b4488d8f84cae0a4b8f3e83504a41"
     },
     {
       "path": "terminology/a-z/b-02.md",
@@ -1314,8 +1314,8 @@
         "b"
       ],
       "rules": [],
-      "bytes": 3028,
-      "sha256": "442e1292f3241a0af56449bcf26e5dda7e82d6878d54e947c7967121fa2e6416"
+      "bytes": 2981,
+      "sha256": "f0a23eb5ce4c8982eb898195d9f0011368da0d2f0ff886e1fd30f654861b0817"
     },
     {
       "path": "terminology/a-z/c-01.md",
@@ -1338,8 +1338,8 @@
         "c"
       ],
       "rules": [],
-      "bytes": 6176,
-      "sha256": "e512d87716767a036c5ac95f7c01f20f219a841b5f5683aede8677cad2ee3246"
+      "bytes": 6028,
+      "sha256": "55a4c1c2bd6203efca6dee000c782a1adc29d031424d29d3cd7c93ef9ebdcfda"
     },
     {
       "path": "terminology/a-z/c-02.md",
@@ -1362,8 +1362,8 @@
         "c"
       ],
       "rules": [],
-      "bytes": 6562,
-      "sha256": "276a17b5050d48de3f097fd229d3b52c8cf5b7275b2bff5c0da47649a0c04e37"
+      "bytes": 6411,
+      "sha256": "ce5f3eccf89010715de131005f8d405158404f6c6b61fcde6969302b9938961f"
     },
     {
       "path": "terminology/a-z/c-03.md",
@@ -1386,8 +1386,8 @@
         "c"
       ],
       "rules": [],
-      "bytes": 2035,
-      "sha256": "307811e5e38930faa1b61cab2430368cb34b689f88dd5e6e875cd201c117f995"
+      "bytes": 1996,
+      "sha256": "6581d8fe13715317c3366028e9e126680d9bf8bad3a921a33a8ee29d4b003020"
     },
     {
       "path": "terminology/a-z/d-01.md",
@@ -1410,8 +1410,8 @@
         "d"
       ],
       "rules": [],
-      "bytes": 5649,
-      "sha256": "0bf7b19303c242a6f9be2d699ba4469d7debfb2e8aca65381cc85b069644e2a1"
+      "bytes": 5499,
+      "sha256": "e4316c52bc042c342de4c36c7910ce593a8c8033ea243cdca73edbfe8d955022"
     },
     {
       "path": "terminology/a-z/d-02.md",
@@ -1434,8 +1434,8 @@
         "d"
       ],
       "rules": [],
-      "bytes": 6661,
-      "sha256": "c35961fd968a87c361b7868a10f67213bfc919bb92025ebc5d31432e52b2e8f7"
+      "bytes": 6510,
+      "sha256": "150a5abf43539be2bc47c13efce3993a77bb029791c8a38bb42706974ddbb6e5"
     },
     {
       "path": "terminology/a-z/d-03.md",
@@ -1458,8 +1458,8 @@
         "d"
       ],
       "rules": [],
-      "bytes": 1147,
-      "sha256": "633a232b3d6af5f7ca19bb8a40f78b7fa05dce681dd1d97337ca9386d615ac12"
+      "bytes": 1140,
+      "sha256": "6d46b2275a799f81db28d8b77e87ff739067e382658b2146780fffe7ccf0e67f"
     },
     {
       "path": "terminology/a-z/e-01.md",
@@ -1482,8 +1482,8 @@
         "e"
       ],
       "rules": [],
-      "bytes": 7201,
-      "sha256": "97f1ba13178c71b22c7f3bd038f3595aae29880e4827791a2060a75b39f549b0"
+      "bytes": 7050,
+      "sha256": "b5931dcd0af8048d182f49a31101a36dca451aca8df16a04c1e112818ab767dd"
     },
     {
       "path": "terminology/a-z/e-02.md",
@@ -1506,8 +1506,8 @@
         "e"
       ],
       "rules": [],
-      "bytes": 1208,
-      "sha256": "7e9d33d62c08457c8e66de5740a7b470fb3757826869d3b254358105fac4733e"
+      "bytes": 1193,
+      "sha256": "f706439f79670f0ae53909caeba8e7ab771a4e528339bdd3fc06d8cc6763ea76"
     },
     {
       "path": "terminology/a-z/f-01.md",
@@ -1530,8 +1530,8 @@
         "f"
       ],
       "rules": [],
-      "bytes": 5894,
-      "sha256": "c88a664b7fd52b8ddeaaf8af6638d9b14b3b1126ea8e51c1a0ccd8047de9c46d"
+      "bytes": 5761,
+      "sha256": "911a17df8b8e16ff3e1bef10e27689445a74e3fec42be60ddcede85544e8c297"
     },
     {
       "path": "terminology/a-z/g-01.md",
@@ -1554,8 +1554,8 @@
         "g"
       ],
       "rules": [],
-      "bytes": 6003,
-      "sha256": "e2cf0d985395ee970390196cbd041ccdd8979bef924511fad9e116cf72524406"
+      "bytes": 5854,
+      "sha256": "8bf0cfd94e7db8001255c1949ae20ad7d96ba0beeda2a492335a3575a39872c5"
     },
     {
       "path": "terminology/a-z/g-02.md",
@@ -1578,8 +1578,8 @@
         "g"
       ],
       "rules": [],
-      "bytes": 3642,
-      "sha256": "ee399b4396fd216e9835ff232791d6964665dab50462f46b9e8a6c786cbbd619"
+      "bytes": 3563,
+      "sha256": "81f2e7528d8fd752382dca2dd7b271d6255b91131803cf6133ca35d3410ae73d"
     },
     {
       "path": "terminology/a-z/h-01.md",
@@ -1602,8 +1602,8 @@
         "h"
       ],
       "rules": [],
-      "bytes": 6826,
-      "sha256": "6deeb9bda89514ce5a2883c6a25699fc76b4d2e68a63da7986f310b1817e9372"
+      "bytes": 6675,
+      "sha256": "f8502447f6309635349ae181100a6b8df72a41f3f260a9c83bd90345a2c76ee9"
     },
     {
       "path": "terminology/a-z/h-02.md",
@@ -1626,8 +1626,8 @@
         "h"
       ],
       "rules": [],
-      "bytes": 1094,
-      "sha256": "c1890f142ec46293f1b612b36e352c0ac99808ec08ac575cbedf200162030863"
+      "bytes": 1079,
+      "sha256": "46c38e020184f1818e426a027e38567c32985483126fc9c88e0ea0a1f9dd7c34"
     },
     {
       "path": "terminology/a-z/i-01.md",
@@ -1650,8 +1650,8 @@
         "i"
       ],
       "rules": [],
-      "bytes": 6183,
-      "sha256": "51e8d6d920811a3605386b815993cd07fe0b5c61fd0bb859bce5c3bb99d185f1"
+      "bytes": 6034,
+      "sha256": "0080c1a59099bd7bd24fa2485a3467de437801939430867f350f6fc39c0801d8"
     },
     {
       "path": "terminology/a-z/i-02.md",
@@ -1674,8 +1674,8 @@
         "i"
       ],
       "rules": [],
-      "bytes": 1877,
-      "sha256": "67ed4800813659cff383bc7da093905c5ab56be4544b58d8847b73511a76dbf1"
+      "bytes": 1838,
+      "sha256": "72c7adc69487ec98f4ab825ce97164364bfbb94675c5a7eee2399524a30ccb1d"
     },
     {
       "path": "terminology/a-z/j-01.md",
@@ -1698,8 +1698,8 @@
         "j"
       ],
       "rules": [],
-      "bytes": 1312,
-      "sha256": "260cd4b465dbcd4bb13304147e29c09aac5abb2b3cbc4c9bf50e40f8ff29d5af"
+      "bytes": 1305,
+      "sha256": "43c982b3230834d4e55abf1465349ca21da17dcc38cb3d57b61f3ae7943e58a5"
     },
     {
       "path": "terminology/a-z/k-01.md",
@@ -1722,8 +1722,8 @@
         "k"
       ],
       "rules": [],
-      "bytes": 2994,
-      "sha256": "7c324ee76ef92952ef20699ba6a6eb2b6fa64f14a2bc33b0a74f690a51e31a8c"
+      "bytes": 2925,
+      "sha256": "8f1323d7cfa1c094695d944e9461f6a9ed1e08f8e7552244a2b0b329d5ead887"
     },
     {
       "path": "terminology/a-z/l-01.md",
@@ -1746,8 +1746,8 @@
         "l"
       ],
       "rules": [],
-      "bytes": 6057,
-      "sha256": "81cbbadfac2b6f49f7ace6b08ebde98f64ba4fad60707d25615c6b6ca10ff38a"
+      "bytes": 5906,
+      "sha256": "f7ce6755ff38a231b8e03887273d1fcace6938f8c14dd64398cc3f4e809bcf4a"
     },
     {
       "path": "terminology/a-z/l-02.md",
@@ -1770,8 +1770,8 @@
         "l"
       ],
       "rules": [],
-      "bytes": 1159,
-      "sha256": "5c1577328f0c1d8531e109882a50a1dbaf186fb88648776763de3db07a7d33a3"
+      "bytes": 1152,
+      "sha256": "02972d0e2e1d81ae5a2e4996ac6b657a7e638120cbaaa57fa08b14de9629babb"
     },
     {
       "path": "terminology/a-z/m-01.md",
@@ -1794,8 +1794,8 @@
         "m"
       ],
       "rules": [],
-      "bytes": 5639,
-      "sha256": "0e3dddf68d6e513436c2c212c381b1889af10fb6d1599e9a3e0a7ac117fac658"
+      "bytes": 5490,
+      "sha256": "27068ea5361dafd68971bf6eaa17b6528ac665168176ff4df9e3ea2c5ed39f7b"
     },
     {
       "path": "terminology/a-z/m-02.md",
@@ -1818,8 +1818,8 @@
         "m"
       ],
       "rules": [],
-      "bytes": 5300,
-      "sha256": "dbcbf34bfbb1da65833b078371a436f2f329e91fb0d3dd77c7c8cc1a52dc33db"
+      "bytes": 5181,
+      "sha256": "d002ddc55ac5b638a26f83087be1eb9ec571a38f526dc17bef41b2547b771331"
     },
     {
       "path": "terminology/a-z/n-01.md",
@@ -1842,8 +1842,8 @@
         "n"
       ],
       "rules": [],
-      "bytes": 5335,
-      "sha256": "c5196cd7909475e5b49a580e9f83fdf96692bd4fb81d39f4a3b871c1f38dde12"
+      "bytes": 5208,
+      "sha256": "4f927f3cdd3e19f32dfea935a374df03b96c143a6aa36dc8433d275e5072dafd"
     },
     {
       "path": "terminology/a-z/o-01.md",
@@ -1866,8 +1866,8 @@
         "o"
       ],
       "rules": [],
-      "bytes": 3159,
-      "sha256": "0be7818f2cc68d7a2c6c04c035921e7e0575a4a49522407f80976dcb148b3146"
+      "bytes": 3088,
+      "sha256": "37d5b2b116d6f8ca1b10ef01987cd5b7a90a95117de1d3155ef3bd4b90246288"
     },
     {
       "path": "terminology/a-z/p-01.md",
@@ -1890,8 +1890,8 @@
         "p"
       ],
       "rules": [],
-      "bytes": 6520,
-      "sha256": "28f86f86bce2c2b2b3d91267c37519939179b1d04a18760e099feff80bbf5598"
+      "bytes": 6369,
+      "sha256": "74b1867516e9b1f55dc24ce502617b88ca75e2c0e7444357f0839a023376784d"
     },
     {
       "path": "terminology/a-z/p-02.md",
@@ -1914,8 +1914,8 @@
         "p"
       ],
       "rules": [],
-      "bytes": 5229,
-      "sha256": "9633ea0da56cd568ae447bf3eec6f78d83a997dd9d652a4cf06dbbd5e0b29b71"
+      "bytes": 5078,
+      "sha256": "6929069d4ae71c6f8a2b807c47014b6b6c99b67ad601acc442b404a44ffd85b4"
     },
     {
       "path": "terminology/a-z/p-03.md",
@@ -1938,8 +1938,8 @@
         "p"
       ],
       "rules": [],
-      "bytes": 1206,
-      "sha256": "dcae7a860d58ddd71ac6cec1d4b01140a8719ac3a25db18d967ecf6a57c51346"
+      "bytes": 1191,
+      "sha256": "d7ec7c1fc94e1b530194317b2b0a254bcd005320ca91bc2a9e2b07e2ca363e0f"
     },
     {
       "path": "terminology/a-z/q-01.md",
@@ -1962,8 +1962,8 @@
         "q"
       ],
       "rules": [],
-      "bytes": 1192,
-      "sha256": "f3fc244defc3ec6e0eb0c7dc708ca214658a24a381f1cb53fbfd0225a8af44d9"
+      "bytes": 1185,
+      "sha256": "543b13dbeb40232281c130587b02868aa48637e2a80dbb61e6c44d70107dd608"
     },
     {
       "path": "terminology/a-z/r-01.md",
@@ -1986,8 +1986,8 @@
         "r"
       ],
       "rules": [],
-      "bytes": 6022,
-      "sha256": "5a412c4eb5cd7bdd9b91b68c666d0e1460ebd5f12980b4c3c96a574f11600fc7"
+      "bytes": 5871,
+      "sha256": "433583a46a2495d4b278ebc3a5921fc88807245f5328119b835095c09bab9cae"
     },
     {
       "path": "terminology/a-z/s-01.md",
@@ -2010,8 +2010,8 @@
         "s"
       ],
       "rules": [],
-      "bytes": 5993,
-      "sha256": "1ea57966df29e54d9db9fe8cbdfe62dc842fa87162c68d78a7d97c4d9666f102"
+      "bytes": 5844,
+      "sha256": "76635cfb11624480dde23b3527ea18ea3522d8fe805f164da9fb23dac73cec31"
     },
     {
       "path": "terminology/a-z/s-02.md",
@@ -2034,8 +2034,8 @@
         "s"
       ],
       "rules": [],
-      "bytes": 6887,
-      "sha256": "487118a7a001cf5c2aa8be1ed05e76b54839ad576d2f1057bbcc23216f5ce2dd"
+      "bytes": 6735,
+      "sha256": "49288856ee1c53922427e965bae117ad9f8ef44196c8cc55f1bf055e22053821"
     },
     {
       "path": "terminology/a-z/s-03.md",
@@ -2058,8 +2058,8 @@
         "s"
       ],
       "rules": [],
-      "bytes": 3499,
-      "sha256": "914c18d91929ff6da7829b36dad4767825cf4907967c8dd5ce13624d1fef6d49"
+      "bytes": 3414,
+      "sha256": "daaf70b4075b001428798d0884e47bac68a4be50e5e0702ffe772a68a6c07a7b"
     },
     {
       "path": "terminology/a-z/symbols-01.md",
@@ -2082,8 +2082,8 @@
         "symbols"
       ],
       "rules": [],
-      "bytes": 1541,
-      "sha256": "5108fdb4433aebfe9fc9d20ea647ae58ed4166cef06bf101aa53f32f86eedb14"
+      "bytes": 1525,
+      "sha256": "43858fc7df8b8f6ffac2e476bec0f21ea29cdb24a9786d77323d0262c21647bb"
     },
     {
       "path": "terminology/a-z/t-01.md",
@@ -2106,8 +2106,8 @@
         "t"
       ],
       "rules": [],
-      "bytes": 6654,
-      "sha256": "bf1474637def3839f71b930472e9728a9f4dc24aa8767b72216824f73d73d9b4"
+      "bytes": 6503,
+      "sha256": "e9333f3305755c1a5e276f599d87c7d453cf2532302bb6a78364a8d0aecff9d4"
     },
     {
       "path": "terminology/a-z/t-02.md",
@@ -2130,8 +2130,8 @@
         "t"
       ],
       "rules": [],
-      "bytes": 3436,
-      "sha256": "678229eb099ee886e3843e0412be4e89dae9b745ef45e392b06c74f3235f2916"
+      "bytes": 3349,
+      "sha256": "1fb1c3df50c3037c775763cc8b9904c0d05558553f252f47841a7f64d6c032ed"
     },
     {
       "path": "terminology/a-z/u-01.md",
@@ -2154,8 +2154,8 @@
         "u"
       ],
       "rules": [],
-      "bytes": 4711,
-      "sha256": "f4744615e45f61b4b84ba4491d9f8a26643422ab8b598e7da2713bd82a6e8bc7"
+      "bytes": 4576,
+      "sha256": "7198422084e85130f8a5c7dfde63c2674b5a01d93b3cb64dbf39ce568839b5c7"
     },
     {
       "path": "terminology/a-z/v-01.md",
@@ -2178,8 +2178,8 @@
         "v"
       ],
       "rules": [],
-      "bytes": 2875,
-      "sha256": "3b17dfba1cd587fd30b7b0a7e84c6f924e20f846638ce4f90d88601ab8c8f004"
+      "bytes": 2813,
+      "sha256": "74c833d7565262fb4c4c752052483e001cc323a32d98638298a527bbcaca4ac0"
     },
     {
       "path": "terminology/a-z/w-01.md",
@@ -2202,8 +2202,8 @@
         "w"
       ],
       "rules": [],
-      "bytes": 6347,
-      "sha256": "1f874c4414e3bbb178aa5cdedc84478ff16b0ecb823faad83fcbc54dd0afe5e2"
+      "bytes": 6196,
+      "sha256": "3fe32ed501be91734580ec9cd86281c5f1504fc6c4e19735e4b6fd2a8bb1d8c0"
     },
     {
       "path": "terminology/a-z/w-02.md",
@@ -2226,8 +2226,8 @@
         "w"
       ],
       "rules": [],
-      "bytes": 2484,
-      "sha256": "dbc4753bd7a18d8d44eead01700db28cf6597e76d23b63bc85b31bb0dd7f0a8e"
+      "bytes": 2429,
+      "sha256": "ce115c8dd491c61c1ebdea9a649ecd819e91c2a3bbb0bc1f08bd061986c7d433"
     },
     {
       "path": "terminology/a-z/y-01.md",
@@ -2250,8 +2250,8 @@
         "y"
       ],
       "rules": [],
-      "bytes": 831,
-      "sha256": "c6cdc5d0c6c7780653ae2f140d33b20e5b6e39d3348ace9d8c9eb2190de91923"
+      "bytes": 824,
+      "sha256": "a0759a4992e49c0a670c3578b4701a81d34164a01234848cbe504282c8dae994"
     },
     {
       "path": "terminology/a-z/z-01.md",
@@ -2274,8 +2274,8 @@
         "z"
       ],
       "rules": [],
-      "bytes": 683,
-      "sha256": "27739cd09f02420fa2c47b7672be1b4c96f05bd654278926bec89d040f26a1f8"
+      "bytes": 684,
+      "sha256": "df4cf5cbaf36672e7f4cbbedf1708b9245c8be3fd40349e625ed5a87a570c5bf"
     },
     {
       "path": "visuals/images-and-media.md",
@@ -2307,8 +2307,8 @@
           "title": "Use an image only when visual information matters"
         }
       ],
-      "bytes": 1421,
-      "sha256": "34b7561b49add2ea0a6e9e0b2e11c2a6a4742d5b5835a963f1739a5cd0279ad5"
+      "bytes": 1439,
+      "sha256": "3a7a6b76efdeeb103f0677283c2ce1a9e40f26abf8b8e094c3fbd7d21c55b3af"
     }
   ],
   "rules": [
