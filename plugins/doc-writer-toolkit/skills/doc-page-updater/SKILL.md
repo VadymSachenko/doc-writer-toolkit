@@ -20,6 +20,7 @@ You are changing an existing, approved page so that it is true again after a pro
 - The template matching the page's type, to know where a new block belongs: `${CLAUDE_PLUGIN_ROOT}/context/doc-templates/ua-user-guide-template.md`, `ua-concept-topic-template.md`, `api-reference-template.md` (or the EN equivalents on an `en` project). Detect the type from the page's structure and frontmatter.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-ua.md` (or `glossary-en.md`) and `formatting-conventions.md` — terms and formatting are rank 0.
 - `${CLAUDE_PLUGIN_ROOT}/context/changed-blocks.md` — the block vocabulary used in the report.
+- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/procedure-steps.md` — only when you add or edit a procedure step: it follows that file, and steps outside your blocks keep their grouping.
 
 Nothing else. Do not load style corpora; the reviewer does that afterwards.
 
