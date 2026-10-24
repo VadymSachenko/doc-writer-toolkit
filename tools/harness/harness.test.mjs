@@ -111,3 +111,11 @@ test('blind packet helpers: a seeded coin repeats, and masking hides labels and 
   assert.doesNotMatch(text, /main|run-1/);
   assert.match(text, /PLUGIN:doc-translator/);
 });
+
+test('the bundled cases load', () => {
+  const dir = path.join(path.dirname(new URL(import.meta.url).pathname), 'cases');
+  for (const f of fs.readdirSync(dir).filter((f) => f.endsWith('.json'))) {
+    const c = loadCase(path.join(dir, f));
+    assert.equal(`${c.id}.json`, f);
+  }
+});
