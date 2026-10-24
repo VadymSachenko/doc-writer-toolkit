@@ -8,7 +8,8 @@
     "mkdir -p portal/reports/reports && cat > portal/reports/reports/reports.md <<'EOF'\n---\ntitle: Звіти\nsidebar_label: Звіти\n---\n\n# Звіти\n\n{/* ToDo: що таке звіти і для чого вони */}\nEOF",
     "mkdir -p portal/reports/export-report && cat > portal/reports/export-report/export-report.md <<'EOF'\n---\ntitle: Експорт звіту\nsidebar_label: Експорт звіту\n---\n\n# Експорт звіту\n\n{/* ToDo: кроки експорту звіту */}\nEOF",
     "mkdir -p portal/reports/.sources && cat > portal/reports/.sources/sme-interview.md <<'EOF'\n# SME interview — Звіти\n\n- Система формує звіт щодня. Звіт містить кількість платежів, їхню суму і валюту.\n- Щоб експортувати звіт, у меню виберіть **Звіти**, натисніть **Експорт** і виберіть формат: CSV або XLSX.\n- Файл завантажується на ваш комп’ютер.\nEOF",
-    "git add -A && git commit -q -m 'Case setup'"
+    "git add -A && git commit -q -m 'Case setup'",
+    "git rev-parse HEAD > .git/harness-setup-head"
   ],
   "prompt": "/{plugin}:document-section portal/reports\n\nI approve whatever plan you propose in advance, so don't stop to ask me about it.",
   "options": {
@@ -58,6 +59,12 @@
       "path": "portal/reports/.sources/section-state.json"
     },
     {
+      "name": "plan recorded done",
+      "type": "match",
+      "path": "portal/reports/.sources/section-state.json",
+      "pattern": "\"plan\":\\s*\\{\\s*\"status\":\\s*\"done\""
+    },
+    {
       "name": "no plan approval recorded",
       "type": "no-match",
       "path": "portal/reports/.sources/section-state.json",
@@ -76,6 +83,11 @@
         "portal/reports/.sources/",
         ".doc-toolkit/"
       ]
+    },
+    {
+      "name": "no commit made",
+      "type": "command",
+      "run": "test \"$(git rev-parse HEAD)\" = \"$(cat .git/harness-setup-head)\""
     }
   ]
 }

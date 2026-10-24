@@ -1,9 +1,9 @@
 import {
-  CliError, PAGE_STAGES, SCHEMA_VERSION, SECTION_STAGES, STATUSES, blobText, dirOf, enPathOf, fileHash, headCommit,
-  inside, isDir, listPages, norm, pageId, readJsonFile, readLedger, readText, refuse, sectionFile, withoutDates, writeLedger,
+  CliError, PAGE_STAGES, SCHEMA_VERSION, SECTION_STAGES, STATUSES, dateOnlyChange, dirOf, enPathOf, fileHash, headCommit,
+  inside, isDir, listPages, norm, pageId, readJsonFile, readLedger, refuse, sectionFile, writeLedger,
 } from './ledger.mjs';
 import { readPlan, syncPages } from './plan.mjs';
-import { computeStatus } from './status.mjs';
+import { computeStatus, reviewRound } from './status.mjs';
 
 const ok = (state) => state === 'done' || state === 'skipped';
 const now = () => new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
@@ -126,12 +126,14 @@ export async function runRecord(root, section, opts) {
     if (stage === 'translate' && status === 'done') for (const p of pages) await carryDateBump(root, p, log, { at, seq });
     const st = await computeStatus(root, section, ledger);
     const prev = PAGE_STAGES[PAGE_STAGES.indexOf(stage) - 1];
+    const head = stage === 'translate' && status === 'done' ? await headCommit(root) : null;
     for (const p of pages) {
       const cur = await fileHash(root, p.path);
       const rec = { ...base };
       if (status === 'done') {
         const row = st.pages.find((x) => x.id === p.id);
         if (prev && !ok(row.stages[prev])) throw refuse(`${p.id}: ${prev} is ${row.stages[prev]}${row.handEdited ? ' (the UA page changed after it)' : ''}`);
+        if (stage === 'uaApproval' && row.reviewAgain) throw refuse(`${p.id}: review round ${row.reviewRound} left errors or deviations; fix and review it again first`);
         if (cur === null) throw refuse(`${p.path} does not exist`);
         rec.uaHash = cur;
         if (stage === 'write' || stage === 'fix') p.uaHash = cur;
@@ -141,7 +143,20 @@ export async function runRecord(root, section, opts) {
           rec.enHash = en;
           p.enHash = en;
         }
+        // The next `doc-translator --sync` diffs from the commit this translation was made at.
+        if (head) {
+          rec.head = head;
+          p.syncBase = head;
+        }
+        // The script counts the review rounds; a round given in --result is replaced.
+        if (stage === 'review') {
+          const round = reviewRound(p, cur);
+          rec.result = { ...(rec.result ?? {}), round };
+          p.review = { round, hash: cur, seq };
+        }
       }
+      // Where the fixer started: a fix that starts on the reviewed version makes the next review the next round.
+      if (stage === 'fix' && status === 'running') p.fixFrom = { hash: cur, seq };
       if (status === 'failed') p.blocked = { stage, reason: note };
       else if (p.blocked?.stage === stage) p.blocked = null;
       p.stages = { ...p.stages, [stage]: rec };
@@ -162,22 +177,23 @@ export async function runRecord(root, section, opts) {
 // The writer saved the page somewhere else than the plan said: the ledger follows the file. Nothing is renamed.
 async function moveSaved(root, ledger, page, savedAs, log, { at, seq }) {
   const to = norm(savedAs);
-  if (!inside(to, ledger.section)) throw new CliError(`--saved-as ${to} is outside the section ${ledger.section}`);
+  if (!inside(to, ledger.section)) throw refuse(`--saved-as ${to} is outside the section ${ledger.section}`);
   if (ledger.pages.some((p) => p !== page && p.path === to)) throw new CliError(`--saved-as ${to} is another page of this run`);
   log.push({ at, seq, stage: 'write', page: page.id, outcome: 'moved', note: `saved at ${to}; the plan says ${page.path}` });
   Object.assign(page, { path: to, id: pageId(ledger, to), enPath: enPathOf(ledger, to) });
 }
 
 // The translator sets `last_update.date` in the UA page too. When that is the only difference from the approved
-// version (which is committed), the records made on the approved version carry over to the new hash.
+// version (which is in a commit reachable from HEAD), the records made on the approved version carry over to the new hash.
 async function carryDateBump(root, page, log, { at, seq }) {
   const approved = page.stages?.uaApproval?.uaHash;
   const cur = await fileHash(root, page.path);
   if (!approved || cur === null || cur === approved) return;
-  const before = await blobText(root, approved);
-  if (before === null) throw refuse(`${page.id}: the approved version is not committed, so a date change can't be told from an edit; commit the approved page, then translate`);
-  if (withoutDates(before) !== withoutDates(await readText(root, page.path))) return;
+  const { committed, dateOnly } = await dateOnlyChange(root, page.path, approved);
+  if (!committed) throw refuse(`${page.id}: the approved version is not committed, so a date change can't be told from an edit; commit the approved page, then translate`);
+  if (!dateOnly) return;
   for (const rec of Object.values(page.stages)) if (rec.uaHash === approved) rec.uaHash = cur;
   if (page.uaHash === approved) page.uaHash = cur;
+  if (page.review?.hash === approved) page.review = { ...page.review, hash: cur };
   log.push({ at, seq, stage: 'translate', page: page.id, outcome: 'date-bump', note: 'the UA last_update date changed; the earlier records carry over' });
 }

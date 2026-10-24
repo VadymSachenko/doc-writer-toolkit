@@ -39,13 +39,13 @@ A page stage runs across all pages, in plan order, before the next stage starts.
 | `section` | string | The section folder, from the repo root. |
 | `pair` | string or null | The root pair id, when the host declares more than one (`project-paths.md`, "Resolving a page's root pair"). |
 | `roots` | object | `ua` and `en`: that pair's UA content root and EN i18n root. Page ids and EN paths derive from them. |
-| `baseCommit` | string | `HEAD` when the ledger was created. The base for `doc-translator --sync`. |
+| `baseCommit` | string | `HEAD` when the ledger was created. The base for a page's first `doc-translator --sync`; after that, the page's `syncBase`. |
 | `createdAt`, `updatedAt` | string | ISO 8601 date-time. |
 | `seq` | integer | Counts records. Each stage record carries the `seq` it was made at, so "ran after" needs no clock. |
 | `options` | object | The run's arguments, as the skill passed them: `interview` (`ask` or `skip`), `apply` (`mechanical` or `mechanical,substantive`). |
 | `stages` | object | `readiness`, `explore`, `plan`, `planApproval`, `resolve`: one stage record each. |
 | `pages` | array | One entry per page the run writes, from the approved plan. |
-| `listed` | array | Pages the run doesn't touch, for the final report: `{ path, reason, into? }`, `reason` being `delete`, `merged-away`, `split` or `keep-complete`. |
+| `listed` | array | Pages the run doesn't touch, for the final report: `{ path, reason, into? }`, `reason` being `delete`, `merged-away`, `split`, `keep-complete` or `api`. |
 | `runLog` | array | Append-only: `at`, `seq`, `stage`, `page` (page stages), `outcome`, `note`. |
 
 **Stage record:** `status` (`running` · `done` · `skipped` · `failed`), `seq`, `at`, `note` (the reason for `skipped` and `failed`), `result` (the stage's counts, below), and `evidence` (`[{ path, hash }]` of the files a section stage produced or approved). The readiness record also keeps `pages`, the section's page files when it ran.
@@ -62,10 +62,13 @@ A page stage runs across all pages, in plan order, before the next stage starts.
 | `from` | string[] | The pages it merges or splits from. |
 | `order` | integer | Its position in the plan. |
 | `uaHash`, `enHash` | string or null | The hash after the last write **by the pipeline**. At plan approval, `uaHash` is the hash of the page as it was (a stub), or null when it doesn't exist yet. |
-| `stages` | object | `write`, `fix`, `review`, `uaApproval`, `translate`, `align`: a stage record each, plus the `uaHash` (and, for `translate` and `align`, the `enHash`) it saw. |
+| `stages` | object | `write`, `fix`, `review`, `uaApproval`, `translate`, `align`: a stage record each, plus the `uaHash` (and, for `translate` and `align`, the `enHash`) it saw. A `translate` record also keeps `head`, `HEAD` when it was recorded. |
 | `blocked` | object or null | `{ stage, reason }` when a page stage failed. |
+| `review` | object | `{ round, hash, seq }` of the last review recorded done. A `running` record doesn't replace it. |
+| `fixFrom` | object | `{ hash, seq }`: the page's hash when the last fix started (`record --stage fix --status running`). |
+| `syncBase` | string | The `head` of the last `translate` done: the `--base` of the page's next `doc-translator --sync`, so a sync never re-translates blocks an earlier sync already did. |
 
-`result` by stage: write `{ skill, interview }`; fix `{ applied, left }`; review `{ errors, deviations, suggestions, round }`; align `{ bugs, warnings }`. The script stores what it is given.
+`result` by stage: write `{ skill, interview }`; fix `{ applied, left, open }`, `open` being the findings the fixer left unapplied (its bucket 3), one line each; review `{ errors, deviations, suggestions, round }`; align `{ bugs, warnings }`. The script stores what it is given, except the review `round`, which it counts (below).
 
 Plan actions become pages like this:
 
@@ -76,6 +79,9 @@ Plan actions become pages like this:
 | `split` | one page per new page; the old page is listed (`split`) |
 | `keep` on a `complete` page | listed (`keep-complete`), not edited in this version |
 | `delete` | listed (`delete`) |
+| any entry with `docType: api` | listed (`api`): `api-doc-writer` saves to the API reference root and writes English only, so the user runs it separately. Its path may be outside the section |
+
+A plan path that differs from a readiness report's page only in the extension (`.md`, `.mdx`) is that page, at the path on disk.
 
 The page's state comes from the readiness report. Nothing is deleted or moved: the user removes listed pages.
 
@@ -108,7 +114,7 @@ The page's state comes from the readiness report. Nothing is deleted or moved: t
       "uaHash": "c3b8…", "enHash": null,
       "stages": {
         "write": { "status": "done", "seq": 7, "at": "2026-10-24T10:58:00Z", "uaHash": "0e41…", "result": { "skill": "user-guide-writer", "interview": "asked 4" } },
-        "fix": { "status": "done", "seq": 9, "at": "2026-10-24T11:30:00Z", "uaHash": "c3b8…", "result": { "applied": 6, "left": 1 } }
+        "fix": { "status": "done", "seq": 9, "at": "2026-10-24T11:30:00Z", "uaHash": "c3b8…", "result": { "applied": 6, "left": 1, "open": ["Line 14: is «Звіт» a UI label here, or the concept?"] } }
       },
       "blocked": null
     }
@@ -120,19 +126,30 @@ The page's state comes from the readiness report. Nothing is deleted or moved: t
 
 ## When a stage is done
 
-| Stage | Done when |
-|---|---|
-| `readiness` | its evidence hash matches, and before plan approval the section's page files are the ones it saw |
-| `explore` | `skipped` with a reason, or its evidence (`app-notes.md`) hash matches |
-| `plan` | `section-plan.md` and `section-plan.json` exist; before approval, neither readiness nor explore ran after it |
-| `planApproval` | both plan files still have the approved hashes, and the plan didn't run after the approval |
-| `write` | the page exists |
-| `resolve` | no page was written after it ran |
-| `fix`, `review`, `uaApproval` | the record's `uaHash` equals the page's current hash |
-| `translate` | the record's `uaHash` equals the current hash, and the EN page exists |
-| `align` | the record's `uaHash` and `enHash` equal the current hashes |
+| Stage | Done when | `record … done` also needs | and stores |
+|---|---|---|---|
+| `readiness` | its evidence hash matches, and before plan approval the section's page files are the ones it saw | `.sources/section-readiness.json` parses | its hash, and the section's page files |
+| `explore` | `skipped` with a reason, or its evidence (`app-notes.md`) hash matches | `.sources/app-notes.md` exists | its hash |
+| `plan` | `section-plan.md` and `section-plan.json` exist; before approval, neither readiness nor explore ran after it | `section-plan.json` parses and every entry is valid | both hashes |
+| `planApproval` | both plan files still have the approved hashes, and the plan didn't run after the approval | the plan is done | both hashes; the ledger's `pages` and `listed` from the plan |
+| `write` | the page exists | | its hash, as the stage's and the page's `uaHash` |
+| `resolve` | no page was written after it ran | the plan approval is done | each page's current hash as its `uaHash` |
+| `fix` | the record's `uaHash` equals the page's current hash | | the same as `write` |
+| `review`, `uaApproval` | the record's `uaHash` equals the page's current hash | `uaApproval`: no other review round is due | the hash it saw; `review` its round |
+| `translate` | the record's `uaHash` equals the current hash, and the EN page exists | the date check (below) | both hashes, as the stage's and the page's, and `HEAD` |
+| `align` | the record's `uaHash` and `enHash` equal the current hashes | the EN page exists | both hashes |
 
-A page stage is done only when the page stage before it is done. A `done` is recorded only when that holds, so an approval can't be recorded on a page whose review is stale.
+A page stage is done only when the page stage before it is done, and a page stage's `done` also needs the plan approval to be done. A `done` is recorded only when all of that holds, so an approval can't be recorded on a page whose review is stale.
+
+## Review rounds
+
+A page gets at most 2 review rounds. The script counts them on `record --stage review --status done`:
+
+- the first review of a page, or the first after a hand edit, is round 1;
+- a review after a fix that started on the last reviewed version (`fixFrom`) is the next round;
+- the same version reviewed again keeps its round.
+
+A review below round 2 with errors or deviations sends the page back to `fix` (`reviewAgain` in `status`), and `uaApproval` is refused until the next review. A fix after it that changes nothing ends the rounds. What is left after the last round doesn't block the page: it goes to gate G5 as open findings, with the fixer's `open` list.
 
 ## What makes a done stage stale
 
@@ -147,7 +164,9 @@ A page stage is done only when the page stage before it is done. A `done` is rec
 | A page written after `resolve` ran | `resolve` |
 | A page added by hand after approval | nothing; `status` lists it under `outside` |
 
-Each pipeline write updates the page's `uaHash`, so the pipeline's own edits never look like hand edits. The translator also sets `last_update.date` in the UA page (`doc-translator`, Step 5). When `record --stage translate` finds that the UA page differs from the approved version only in a frontmatter `date:`, the records made on the approved version carry over to the new hash, and nothing goes stale. The approved version must be committed for that check: the script reads it from git.
+Each pipeline write updates the page's `uaHash`, so the pipeline's own edits never look like hand edits. The translator also sets `last_update.date` in the UA page (`doc-translator`, Step 5). When `record --stage translate --status done` finds that the UA page differs from the approved version only in its frontmatter `date:` keys (a `date:` key at the start of a line, or in a flow map; not the text `date:` inside a value), the records made on the approved version carry over to the new hash, and nothing goes stale. The approved version must be in a commit reachable from `HEAD` for that check, not merely staged: the script reads it from git, and refuses the record otherwise.
+
+A translation that stopped after the translator saved (its record `running` or `failed`) leaves the same date-only difference. `status` reads it the same way: the records still hold (`dateBump`), the commit gate ignores the date, and the next `translate` done carries the records over.
 
 ## Gates
 
@@ -157,7 +176,7 @@ Each pipeline write updates the page's `uaHash`, so the pipeline's own edits nev
 |---|---|
 | `plan` (G1) | the plan is done and its approval isn't |
 | `unknownDraft` (G3) | a page due for `write` exists on disk with a hash the ledger doesn't know: an interrupted writer saved it, or someone else did |
-| `uaApproval` (G5) | the next stage is `uaApproval` |
+| `uaApproval` (G5) | the next stage is `uaApproval`. The pages at G5 are `gate.pages` |
 | `commit` | the next stage is `translate` and an approved page has uncommitted changes. `doc-translator --sync` diffs committed UA only |
 
 The writer's interview (G2) and the fixer's bucket 2 choices (G4) happen inside those skills; they aren't in the ledger.

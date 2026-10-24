@@ -1,6 +1,20 @@
-import { PAGE_STAGES, fileHash, listPages, norm, sectionFile, uncommitted } from './ledger.mjs';
+import { PAGE_STAGES, dateOnlyChange, fileHash, headText, listPages, norm, readText, sectionFile, uncommitted, withoutDates } from './ledger.mjs';
 
 const ok = (state) => state === 'done' || state === 'skipped';
+
+// A page gets at most this many review rounds; what is left after the last one goes to UA approval as open findings.
+export const MAX_REVIEW_ROUNDS = 2;
+
+// The round a review of the page's current version is: the same version again keeps its round; a review after a fix
+// that started on the last reviewed version is the next round; anything else (a first review, a hand edit) is round 1.
+export function reviewRound(page, cur) {
+  const last = page.review;
+  if (!last) return 1;
+  if (cur === last.hash) return last.round;
+  const fix = page.stages?.fix;
+  if (fix?.status === 'done' && page.fixFrom?.hash === last.hash && page.fixFrom.seq > last.seq) return last.round + 1;
+  return 1;
+}
 
 async function evidenceMatches(root, rec) {
   for (const e of rec.evidence ?? []) if ((await fileHash(root, e.path)) !== e.hash) return false;
@@ -34,7 +48,7 @@ async function sectionStates(root, ledger, warnings) {
         }
       }
     }
-    out[name] = { state, note };
+    out[name] = { state, note, result: rec?.result ?? null };
   }
 
   {
@@ -57,7 +71,7 @@ async function sectionStates(root, ledger, warnings) {
         }
       }
     }
-    out.plan = { state, note };
+    out.plan = { state, note, result: rec?.result ?? null };
   }
 
   {
@@ -73,7 +87,7 @@ async function sectionStates(root, ledger, warnings) {
         note = 'the plan changed after it was approved';
       }
     }
-    out.planApproval = { state, note };
+    out.planApproval = { state, note, result: rec?.result ?? null };
   }
 
   // Resolve covers every page: a page written after it makes it stale.
@@ -88,15 +102,24 @@ async function sectionStates(root, ledger, warnings) {
         note = `written after it ran: ${later.map((p) => p.id).join(', ')}`;
       }
     }
-    out.resolve = { state, note };
+    out.resolve = { state, note, result: rec?.result ?? null };
   }
   return out;
 }
 
 // One page: each stage's state, from its record and the current hashes, in chain order.
-async function pageState(root, page, warnings) {
-  const cur = await fileHash(root, page.path);
+async function pageState(root, ledger, page, warnings) {
+  let cur = await fileHash(root, page.path);
   const curEn = await fileHash(root, page.enPath);
+  // A translation interrupted (or failed) after the translator saved: the UA page differs from the approved version
+  // only in its frontmatter dates. That is the translator's date bump, not an edit: the records still hold.
+  const approved = page.stages?.uaApproval?.status === 'done' ? page.stages.uaApproval.uaHash : null;
+  const tr = page.stages?.translate?.status;
+  let dateBump = false;
+  if (approved && cur !== null && cur !== approved && (tr === 'running' || tr === 'failed')) {
+    dateBump = (await dateOnlyChange(root, page.path, approved)).dateOnly;
+    if (dateBump) cur = approved;
+  }
   const stages = {};
   let prevOk = true;
   for (const name of PAGE_STAGES) {
@@ -120,9 +143,20 @@ async function pageState(root, page, warnings) {
   const handEdited = written && cur !== null && cur !== page.uaHash;
   const enHandEdited = Boolean(page.enHash) && curEn !== page.enHash;
   const unknownDraft = stages.write !== 'done' && cur !== null && cur !== page.uaHash;
+  const results = Object.fromEntries(PAGE_STAGES.filter((n) => page.stages?.[n]?.result).map((n) => [n, page.stages[n].result]));
+  const review = page.stages?.review;
+  const fix = page.stages?.fix;
+  const counts = review?.result ?? {};
+  const reviewRoundNow = (stages.review === 'done' ? review.result?.round : null) ?? page.review?.round ?? null;
+  // Errors or deviations left after a round below the cap: fix and review again, unless a fix already ran after it.
+  const reviewAgain = stages.review === 'done'
+    && (reviewRoundNow ?? 1) < MAX_REVIEW_ROUNDS
+    && (Number(counts.errors) || 0) + (Number(counts.deviations) || 0) > 0
+    && !(fix?.status === 'done' && fix.seq > review.seq);
   if (written && cur === null) warnings.push(`${page.id}: the page is missing; it is written again`);
   if (handEdited) warnings.push(`${page.id}: the UA page changed outside the pipeline; its fix, review, approval, translation and alignment run again`);
   if (enHandEdited) warnings.push(`${page.id}: the EN page changed outside the pipeline; only its alignment runs again`);
+  if (dateBump) warnings.push(`${page.id}: the UA page differs from the approved version only in its date (an interrupted translation); the records still hold`);
   return {
     id: page.id,
     path: page.path,
@@ -136,8 +170,13 @@ async function pageState(root, page, warnings) {
     handEdited,
     enHandEdited,
     unknownDraft,
+    dateBump,
     blocked: page.blocked ?? null,
     stages,
+    results,
+    reviewRound: reviewRoundNow,
+    reviewAgain,
+    syncBase: page.syncBase ?? ledger.baseCommit,
   };
 }
 
@@ -150,7 +189,7 @@ export async function computeStatus(root, section, ledger) {
   const warnings = [];
   const stages = await sectionStates(root, ledger, warnings);
   const pages = [];
-  for (const p of ledger.pages ?? []) pages.push(await pageState(root, p, warnings));
+  for (const p of ledger.pages ?? []) pages.push(await pageState(root, ledger, p, warnings));
 
   const known = new Set([...pages.map((p) => p.path), ...(ledger.listed ?? []).map((l) => l.path)]);
   const outside = ledger.stages?.planApproval?.status === 'done' ? (await listPages(root, ledger.section)).filter((p) => !known.has(p)) : [];
@@ -182,7 +221,7 @@ async function nextStage(root, stages, pages) {
     if (!ok(stages[name].state)) return { stage: name, state: stages[name].state, pages: [] };
   }
   const active = pages.filter((p) => !p.blocked);
-  const need = (name) => active.filter((p) => !ok(p.stages[name])).map((p) => p.id);
+  const need = (name) => active.filter((p) => !ok(p.stages[name]) || (name === 'fix' && p.reviewAgain)).map((p) => p.id);
   if (need('write').length) return { stage: 'write', pages: need('write') };
   if (pages.length && !ok(stages.resolve.state)) return { stage: 'resolve', state: stages.resolve.state, pages: [] };
   for (const name of PAGE_STAGES.slice(1)) {
@@ -190,12 +229,20 @@ async function nextStage(root, stages, pages) {
     if (!ids.length) continue;
     const out = { stage: name, pages: ids };
     if (name === 'translate') {
-      const dirty = await uncommitted(root, active.filter((p) => ids.includes(p.id)).map((p) => p.path));
-      out.uncommitted = active.filter((p) => dirty.has(p.path)).map((p) => p.id);
+      const due = active.filter((p) => ids.includes(p.id));
+      const dirty = await uncommitted(root, due.map((p) => p.path));
+      // A date bump of an interrupted translation is not a change to commit: the translation reads the commit before it.
+      for (const p of due) if (p.dateBump && dirty.has(p.path) && (await sameButDates(root, p.path))) dirty.delete(p.path);
+      out.uncommitted = due.filter((p) => dirty.has(p.path)).map((p) => p.id);
     }
     return out;
   }
   return { stage: null, pages: [] };
+}
+
+async function sameButDates(root, file) {
+  const [head, now] = [await headText(root, file), await readText(root, file)];
+  return head !== null && now !== null && withoutDates(head) === withoutDates(now);
 }
 
 function gateOf(stages, pages, next) {
@@ -219,7 +266,18 @@ export function renderMarkdown(st) {
   if (st.pages.length) {
     lines.push('', `| # | Page | Action | Type | ${PAGE_STAGES.join(' | ')} | Flags |`, `|---|---|---|---|${PAGE_STAGES.map(() => '---|').join('')}---|`);
     for (const p of st.pages) {
-      const flags = [p.blocked && `blocked at ${p.blocked.stage}: ${p.blocked.reason}`, p.handEdited && 'UA edited by hand', p.enHandEdited && 'EN edited by hand', p.unknownDraft && 'unknown draft on disk'].filter(Boolean).join('; ');
+      const r = p.results?.review;
+      const open = p.results?.fix?.open;
+      const flags = [
+        p.blocked && `blocked at ${p.blocked.stage}: ${p.blocked.reason}`,
+        p.handEdited && 'UA edited by hand',
+        p.enHandEdited && 'EN edited by hand',
+        p.unknownDraft && 'unknown draft on disk',
+        p.dateBump && 'UA date bumped',
+        r && `review round ${r.round ?? p.reviewRound ?? '?'}: ${r.errors ?? '?'} E, ${r.deviations ?? '?'} D, ${r.suggestions ?? '?'} S`,
+        p.reviewAgain && 'another review round due',
+        Array.isArray(open) && open.length && `${open.length} unapplied fixer finding(s)`,
+      ].filter(Boolean).join('; ');
       lines.push(`| ${p.order ?? ''} | \`${p.id}\` | ${p.action} | ${p.docType} | ${PAGE_STAGES.map((n) => short[p.stages[n]] ?? p.stages[n]).join(' | ')} | ${flags} |`);
     }
   }

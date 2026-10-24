@@ -25,7 +25,8 @@ Options
   --status <status>         record: running, done, skipped (explore, resolve), failed
   --page <id|path>          record: a page of the run, for a page stage; repeat it for several pages
   --note <text>             record: the reason, required for skipped and failed
-  --result <json>           record: the stage's counts, stored as given ({"errors":0,"round":1})
+  --result <json>           record: the stage's counts, stored as given ({"errors":0,"deviations":1}); a review's
+                            round is counted by the script
   --options <json>          record: the run's options, merged into the ledger ({"interview":"skip"})
   --ua-root <dir>           record: the section's UA content root; with --en-root, creates the ledger
   --en-root <dir>           record: the EN i18n root of the same root pair

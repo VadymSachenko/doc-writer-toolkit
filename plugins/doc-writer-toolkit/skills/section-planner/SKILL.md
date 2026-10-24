@@ -163,6 +163,7 @@ Then write the same inventory to `.sources/section-plan.json`, for `document-sec
 
 - One entry per row of the inventory table, with the same values. `order` is the `#` column.
 - `path`, `mergesFrom` and `splitsFrom` are page paths from the repo root (the section folder plus the slug), not slugs.
+- An `api` entry's `path` is where `api-doc-writer` saves it, under the API reference root (`project-paths.md`), which may be outside the section. `document-section` lists `api` pages for a separate `api-doc-writer` run and doesn't write them.
 - A `delete` entry has the existing page's `path` and no `docType`. A `split` has one entry per new page, each with the same `splitsFrom`.
 - `sourceEvidence` is `inferred` for a proposal neither `app-notes.md` nor `sme-interview.md` backs.
 

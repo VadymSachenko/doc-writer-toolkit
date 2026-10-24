@@ -9,11 +9,12 @@
     "mkdir -p portal/reports/export-report && cat > portal/reports/export-report/export-report.md <<'EOF'\n---\ntitle: Експорт звіту\nsidebar_label: Експорт звіту\n---\n\n# Експорт звіту\n\n{/* ToDo: кроки експорту звіту */}\nEOF",
     "mkdir -p portal/reports/.sources && cat > portal/reports/.sources/sme-interview.md <<'EOF'\n# SME interview — Звіти\n\n- Система формує звіт щодня. Звіт містить кількість платежів, їхню суму і валюту.\n- Щоб експортувати звіт, у меню виберіть **Звіти**, натисніть **Експорт** і виберіть формат: CSV або XLSX.\n- Файл завантажується на ваш комп’ютер.\nEOF",
     "mkdir -p portal/reports/.sources && cat > portal/reports/.sources/section-readiness.json <<'EOF'\n{\n  \"section\": \"portal/reports\",\n  \"generatedFrom\": \"section-readiness\",\n  \"verdict\": \"skeleton\",\n  \"verdictReason\": \"both pages are unfilled stubs\",\n  \"project\": {\n    \"contentLanguage\": \"uk\",\n    \"contentRoot\": \"portal/\",\n    \"uaUrlPrefix\": \"/portal/\"\n  },\n  \"appAccess\": {\n    \"liveUI\": \"none\",\n    \"apiSeed\": \"not-declared\",\n    \"existingAppNotes\": \"absent\"\n  },\n  \"pages\": [\n    {\n      \"path\": \"portal/reports/export-report/export-report.md\",\n      \"state\": \"stub\",\n      \"docType\": \"user-guide\",\n      \"markerCount\": 1,\n      \"reason\": \"one ToDo marker, no body\"\n    },\n    {\n      \"path\": \"portal/reports/reports/reports.md\",\n      \"state\": \"stub\",\n      \"docType\": \"concept\",\n      \"markerCount\": 1,\n      \"reason\": \"one ToDo marker, no body\"\n    }\n  ],\n  \"sources\": {\n    \"videos\": [],\n    \"transcripts\": [],\n    \"smeInterview\": \"present\",\n    \"appNotes\": \"absent\",\n    \"framesFolders\": [],\n    \"screenshotCount\": 0,\n    \"sectionPlan\": \"absent\",\n    \"sectionState\": \"absent\"\n  },\n  \"summary\": {\n    \"pageCount\": 2,\n    \"stubCount\": 2,\n    \"completeCount\": 0,\n    \"totalMarkers\": 2\n  }\n}\nEOF",
-    "S=$(ls ../../../.plugin/harness-*/scripts/section-state/section-state.mjs | head -n 1) && test -n \"$S\" && R() { node \"$S\" record portal/reports \"$@\" > /dev/null; } && R --stage readiness --status running --ua-root portal/ --en-root i18n/en/docusaurus-plugin-content-docs-portal/current/ --options '{\"interview\":\"ask\",\"apply\":\"mechanical\"}' && R --stage readiness --status done && R --stage explore --status skipped --note 'liveUI: none'",
+    "S=\"../../../.plugin/harness-$(basename \"$(cd ../../.. && pwd)\")/scripts/section-state/section-state.mjs\" && test -f \"$S\" && R() { node \"$S\" record portal/reports \"$@\" > /dev/null; } && R --stage readiness --status running --ua-root portal/ --en-root i18n/en/docusaurus-plugin-content-docs-portal/current/ --options '{\"interview\":\"ask\",\"apply\":\"mechanical\"}' && R --stage readiness --status done && R --stage explore --status skipped --note 'liveUI: none'",
     "mkdir -p portal/reports/.sources && cat > portal/reports/.sources/section-plan.json <<'EOF'\n{\n  \"schemaVersion\": 1,\n  \"section\": \"portal/reports\",\n  \"status\": \"awaiting-approval\",\n  \"basedOn\": [\n    \"section-readiness\",\n    \"sme-interview\"\n  ],\n  \"verdict\": \"skeleton\",\n  \"sidebarOrderDeviates\": false,\n  \"pages\": [\n    {\n      \"order\": 1,\n      \"action\": \"keep\",\n      \"path\": \"portal/reports/reports/reports.md\",\n      \"docType\": \"concept\",\n      \"title\": \"Reports\",\n      \"sidebarLabel\": null,\n      \"rationale\": \"Background first: what a report holds\",\n      \"mergesFrom\": [],\n      \"splitsFrom\": null,\n      \"sourceEvidence\": \"sme-interview\"\n    },\n    {\n      \"order\": 2,\n      \"action\": \"keep\",\n      \"path\": \"portal/reports/export-report/export-report.md\",\n      \"docType\": \"user-guide\",\n      \"title\": \"Export a report\",\n      \"sidebarLabel\": null,\n      \"rationale\": \"The one task in the section\",\n      \"mergesFrom\": [],\n      \"splitsFrom\": null,\n      \"sourceEvidence\": \"sme-interview\"\n    }\n  ],\n  \"openQuestions\": []\n}\nEOF",
     "mkdir -p portal/reports/.sources && cat > portal/reports/.sources/section-plan.md <<'EOF'\n# Section plan — Звіти\n\n**Status:** awaiting approval\n**Based on:** section-readiness.json, sme-interview.md\n**Verdict from readiness check:** skeleton\n**Sidebar order:** follows existing folder structure\n\n---\n\n## Proposed page inventory\n\n| # | Action | Slug | Type | Title | Rationale |\n|---|---|---|---|---|---|\n| 1 | keep | reports/reports.md | concept | Reports | Background first: what a report holds |\n| 2 | keep | export-report/export-report.md | user-guide | Export a report | The one task in the section |\n\n## Open questions (need your input before writing)\n\nNone.\nEOF",
-    "S=$(ls ../../../.plugin/harness-*/scripts/section-state/section-state.mjs | head -n 1) && test -n \"$S\" && R() { node \"$S\" record portal/reports \"$@\" > /dev/null; } && R --stage plan --status done",
-    "git add -A && git commit -q -m 'Case setup'"
+    "S=\"../../../.plugin/harness-$(basename \"$(cd ../../.. && pwd)\")/scripts/section-state/section-state.mjs\" && test -f \"$S\" && R() { node \"$S\" record portal/reports \"$@\" > /dev/null; } && R --stage plan --status done",
+    "git add -A && git commit -q -m 'Case setup'",
+    "git rev-parse HEAD > .git/harness-setup-head"
   ],
   "prompt": "/{plugin}:document-section portal/reports\n\nAbout the plan: I don't approve it yet. Split the export page in two: one page to export a report, and one to schedule a daily report export.",
   "options": {
@@ -55,6 +56,11 @@
       "pattern": "\"split\""
     },
     {
+      "name": "revised plan recorded done",
+      "type": "command",
+      "run": "node -e \"const l=require('./portal/reports/.sources/section-state.json'); const n=l.runLog.filter((e)=>e.stage==='plan'&&e.outcome==='done').length; process.exit(l.stages.plan.status==='done'&&n>=2?0:1)\""
+    },
+    {
       "name": "no plan approval recorded",
       "type": "no-match",
       "path": "portal/reports/.sources/section-state.json",
@@ -73,6 +79,11 @@
         "portal/reports/.sources/",
         ".doc-toolkit/"
       ]
+    },
+    {
+      "name": "no commit made",
+      "type": "command",
+      "run": "test \"$(git rev-parse HEAD)\" = \"$(cat .git/harness-setup-head)\""
     }
   ]
 }

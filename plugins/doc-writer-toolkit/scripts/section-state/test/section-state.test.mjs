@@ -30,8 +30,10 @@ const ROOTS = ['--ua-root', 'portal/', '--en-root', `${EN}/`];
 
 const page = (title, body, date = '9/8/2026') => `---\ntitle: ${title}\nlast_update:\n  date: ${date}\n---\n\n# ${title}\n\n${body}\n`;
 
-async function host() {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'section-state-'));
+// The docs site, in a fresh git repository. With `sub`, the site is that subfolder of the repository.
+async function host(sub = '') {
+  const top = await fs.mkdtemp(path.join(os.tmpdir(), 'section-state-'));
+  const dir = sub ? path.join(top, sub) : top;
   const files = {
     [S('overview/overview.md')]: page('Звіти', '{/* ToDo: опис розділу */}'),
     [S('export/export.md')]: page('Експорт звіту', 'Щоб експортувати звіт, натисніть **Експорт**.'),
@@ -40,7 +42,7 @@ async function host() {
     [`${EN}/reports/export/export.md`]: page('Export a report', 'To export a report, select **Export**.'),
   };
   for (const [rel, text] of Object.entries(files)) await write(dir, rel, text);
-  await git(dir, 'init', '-q', '-b', 'main');
+  await git(top, 'init', '-q', '-b', 'main');
   await commit(dir, 'Host');
   return dir;
 }
@@ -120,6 +122,10 @@ test('withoutDates blanks frontmatter dates only', () => {
   assert.equal(withoutDates(a), withoutDates(b));
   assert.notEqual(withoutDates(a), withoutDates(page('A', 'Body date: 2/2/2020')));
   assert.equal(withoutDates('---\nlast_update: { date: 9/8/2026, author: x }\n---\nA\n'), withoutDates('---\nlast_update: { date: 10/24/2026, author: x }\n---\nA\n'));
+  // `date:` inside a value is text, not a key: changing it is an edit.
+  const due = (when) => `---\ntitle: A\ndescription: "The due date: ${when}"\nlast_update:\n  date: 9/8/2026\n---\nA\n`;
+  assert.notEqual(withoutDates(due('monthly')), withoutDates(due('weekly')));
+  assert.notEqual(withoutDates('---\nnote: { text: "a date: 1" }\n---\n'), withoutDates('---\nnote: { text: "a date: 2" }\n---\n'));
   assert.equal(blobHash(Buffer.from('hello\n')), 'ce013625030ba8dba906f756967f9e9ca394464a');
 });
 
@@ -415,6 +421,9 @@ test('--saved-as: the ledger follows the path the writer saved', async () => {
   assert.equal(st.pages[1].enPath, `${EN}/reports/cards-management/cards-management.md`);
   assert.equal(st.pages[1].stages.write, 'done');
   assert.equal((await record(dir, 'write', 'done', '--page', OVERVIEW, '--page', CARDS, '--saved-as', 'x.md')).code, 2);
+  const outside = await record(dir, 'write', 'done', '--page', OVERVIEW, '--saved-as', 'portal/other/other.md');
+  assert.equal(outside.code, 1, 'a path outside the section is a refusal');
+  assert.match(outside.out.error, /nothing recorded: --saved-as .* is outside the section/);
 });
 
 test('usage errors exit 2 with a JSON error', async () => {
@@ -454,4 +463,208 @@ test('status --md: one row per stage and per page, the next stage and the gate',
   assert.match(md, /\*\*Listed, not processed:\*\* .*old\/old\.md` \(delete\)/);
   assert.match(md, /\*\*Next:\*\* uaApproval/);
   assert.match(md, /\*\*Gate:\*\* uaApproval/);
+});
+
+// Reviewed, approved and committed: ready to translate.
+async function readyToTranslate(dir) {
+  await reviewed(dir);
+  await record(dir, 'uaApproval', 'done', '--page', OVERVIEW, '--page', CARDS);
+  await commit(dir, 'Approved pages');
+}
+
+test('a docs site in a subfolder of its git repository: the commit gate still sees uncommitted pages', async () => {
+  const dir = await host('site');
+  await reviewed(dir);
+  await record(dir, 'uaApproval', 'done', '--page', OVERVIEW, '--page', CARDS);
+  let st = await status(dir);
+  assert.equal(st.next.stage, 'translate');
+  assert.deepEqual(st.next.uncommitted, [OVERVIEW, CARDS]);
+  assert.deepEqual(st.gate, { name: 'commit', pages: [OVERVIEW, CARDS] });
+  await commit(dir, 'Approved pages');
+  st = await status(dir);
+  assert.deepEqual(st.next.uncommitted, []);
+  assert.equal(st.gate, null);
+  // The date check reads the approved version from git in the subfolder too.
+  const ua = await read(dir, S('overview/overview.md'));
+  await write(dir, S('overview/overview.md'), ua.replace('9/8/2026', '10/24/2026'));
+  await write(dir, `${EN}/reports/overview/overview.md`, page('Reports', 'Text.', '10/24/2026'));
+  const tr = await record(dir, 'translate', 'done', '--page', OVERVIEW);
+  assert.equal(tr.code, 0, JSON.stringify(tr.out));
+});
+
+test('review rounds: the script counts them, a round with errors is fixed and reviewed again, at most 2', async () => {
+  const dir = await host();
+  await approved(dir);
+  await write(dir, S('overview/overview.md'), page('Звіти', 'Перша версія.'));
+  await write(dir, S('manage-cards/manage-cards.md'), page('Керування картками', 'Текст.'));
+  await record(dir, 'write', 'done', '--page', OVERVIEW, '--page', CARDS);
+  await record(dir, 'resolve', 'done');
+  await record(dir, 'fix', 'running', '--page', OVERVIEW, '--page', CARDS);
+  await record(dir, 'fix', 'done', '--page', OVERVIEW, '--page', CARDS, '--result', '{"applied":1,"left":1,"open":["Line 8: is «звіт» a UI label here?"]}');
+  // A round given by the caller is replaced by the script's count.
+  await record(dir, 'review', 'done', '--page', OVERVIEW, '--result', '{"errors":1,"deviations":0,"suggestions":2,"round":5}');
+  await record(dir, 'review', 'done', '--page', CARDS, '--result', '{"errors":0,"deviations":0,"suggestions":0}');
+  let st = await status(dir);
+  let [ov, cards] = st.pages;
+  assert.equal(ov.reviewRound, 1);
+  assert.deepEqual(ov.results.review, { errors: 1, deviations: 0, suggestions: 2, round: 1 });
+  assert.deepEqual(ov.results.fix.open, ['Line 8: is «звіт» a UI label here?']);
+  assert.equal(ov.reviewAgain, true);
+  assert.equal(cards.reviewAgain, false);
+  assert.deepEqual(st.next, { stage: 'fix', pages: [OVERVIEW] }, 'round 2 runs before the approval gate');
+  assert.equal(st.gate, null);
+  const early = await record(dir, 'uaApproval', 'done', '--page', OVERVIEW);
+  assert.equal(early.code, 1);
+  assert.match(early.out.error, /review round 1 left errors or deviations/);
+  assert.match((await cli(dir, 'status', SECTION, '--md')).out, /review round 1: 1 E, 0 D, 2 S; another review round due; 1 unapplied fixer finding/);
+
+  // Round 2: the fixer starts on the reviewed version.
+  await record(dir, 'fix', 'running', '--page', OVERVIEW);
+  await write(dir, S('overview/overview.md'), page('Звіти', 'Друга версія.'));
+  await record(dir, 'fix', 'done', '--page', OVERVIEW, '--result', '{"applied":1,"left":0,"open":[]}');
+  assert.deepEqual((await status(dir)).next, { stage: 'review', pages: [OVERVIEW] });
+  await record(dir, 'review', 'done', '--page', OVERVIEW, '--result', '{"errors":1,"deviations":1,"suggestions":0}');
+  st = await status(dir);
+  [ov] = st.pages;
+  assert.equal(ov.reviewRound, 2);
+  assert.equal(ov.reviewAgain, false, 'what is left after round 2 goes to the gate');
+  assert.deepEqual(st.gate, { name: 'uaApproval', pages: [OVERVIEW, CARDS] });
+
+  // A hand edit starts the rounds over.
+  await write(dir, S('overview/overview.md'), page('Звіти', 'Змінено вручну.'));
+  await record(dir, 'fix', 'running', '--page', OVERVIEW);
+  await record(dir, 'fix', 'done', '--page', OVERVIEW);
+  await record(dir, 'review', 'done', '--page', OVERVIEW, '--result', '{"errors":0,"deviations":1,"suggestions":0}');
+  st = await status(dir);
+  assert.equal(st.pages[0].reviewRound, 1);
+  assert.equal(st.pages[0].reviewAgain, true);
+
+  // A fix after the review that changes nothing ends the rounds.
+  await record(dir, 'fix', 'running', '--page', OVERVIEW);
+  await record(dir, 'fix', 'done', '--page', OVERVIEW, '--result', '{"applied":0,"left":1}');
+  st = await status(dir);
+  assert.equal(st.pages[0].stages.review, 'done');
+  assert.equal(st.pages[0].reviewAgain, false);
+  assert.equal(st.next.stage, 'uaApproval');
+});
+
+test('translate: each record keeps HEAD, and the next sync diffs from the last translation', async () => {
+  const dir = await host();
+  await readyToTranslate(dir);
+  const first = await git(dir, 'rev-parse', 'HEAD');
+  let st = await status(dir);
+  assert.equal(st.pages[0].syncBase, st.baseCommit, 'no translation yet: the ledger base');
+  await write(dir, `${EN}/reports/overview/overview.md`, page('Reports', 'Text.'));
+  await record(dir, 'translate', 'done', '--page', OVERVIEW);
+  await record(dir, 'align', 'done', '--page', OVERVIEW);
+  st = await status(dir);
+  assert.equal(st.pages[0].syncBase, first);
+  let ledger = JSON.parse(await read(dir, S('.sources/section-state.json')));
+  assert.equal(ledger.pages[0].stages.translate.head, first);
+
+  // The UA page changes and goes through the chain again: the base stays the last translation's HEAD.
+  await commit(dir, 'Translated');
+  await write(dir, S('overview/overview.md'), page('Звіти', 'Нова версія.'));
+  await record(dir, 'fix', 'running', '--page', OVERVIEW);
+  await record(dir, 'fix', 'done', '--page', OVERVIEW);
+  await record(dir, 'review', 'done', '--page', OVERVIEW, '--result', '{"errors":0,"deviations":0,"suggestions":0}');
+  await record(dir, 'uaApproval', 'done', '--page', OVERVIEW);
+  await commit(dir, 'Approved again');
+  st = await status(dir);
+  assert.equal(st.pages[0].syncBase, first);
+  assert.deepEqual(st.next, { stage: 'translate', pages: [OVERVIEW, CARDS], uncommitted: [] });
+  await write(dir, `${EN}/reports/overview/overview.md`, page('Reports', 'New text.'));
+  await record(dir, 'translate', 'running', '--page', OVERVIEW);
+  assert.equal((await status(dir)).pages[0].syncBase, first, 'a running record keeps the base');
+  await record(dir, 'translate', 'done', '--page', OVERVIEW);
+  const second = await git(dir, 'rev-parse', 'HEAD');
+  assert.notEqual(second, first);
+  assert.equal((await status(dir)).pages[0].syncBase, second);
+});
+
+test('the approved version only staged, not committed: translate is refused', async () => {
+  const dir = await host();
+  await reviewed(dir);
+  await record(dir, 'uaApproval', 'done', '--page', OVERVIEW);
+  await git(dir, 'add', '-A');
+  const ua = await read(dir, S('overview/overview.md'));
+  await write(dir, S('overview/overview.md'), ua.replace('9/8/2026', '10/24/2026'));
+  await write(dir, `${EN}/reports/overview/overview.md`, page('Reports', 'Text.'));
+  const r = await record(dir, 'translate', 'done', '--page', OVERVIEW);
+  assert.equal(r.code, 1);
+  assert.match(r.out.error, /approved version is not committed/);
+});
+
+test('a translation interrupted after the date bump: status keeps the records, no commit gate, then it records', async () => {
+  const dir = await host();
+  await readyToTranslate(dir);
+  await record(dir, 'translate', 'running', '--page', OVERVIEW);
+  const ua = await read(dir, S('overview/overview.md'));
+  await write(dir, S('overview/overview.md'), ua.replace('9/8/2026', '10/24/2026'));
+  await write(dir, `${EN}/reports/overview/overview.md`, page('Reports', 'Text.', '10/24/2026'));
+  let st = await status(dir);
+  const ov = st.pages[0];
+  assert.equal(ov.dateBump, true);
+  assert.equal(ov.handEdited, false);
+  assert.deepEqual([ov.stages.fix, ov.stages.review, ov.stages.uaApproval, ov.stages.translate], ['done', 'done', 'done', 'running']);
+  assert.deepEqual(st.next, { stage: 'translate', pages: [OVERVIEW, CARDS], uncommitted: [] });
+  assert.equal(st.gate, null);
+  assert.ok(st.warnings.some((w) => /only in its date/.test(w)));
+  assert.equal((await record(dir, 'translate', 'done', '--page', OVERVIEW)).code, 0);
+  st = await status(dir);
+  assert.equal(st.pages[0].stages.translate, 'done');
+  assert.equal(st.pages[0].dateBump, false);
+
+  // More than the date changed: the records go stale as for any hand edit.
+  await record(dir, 'translate', 'running', '--page', CARDS);
+  const cards = await read(dir, S('manage-cards/manage-cards.md'));
+  await write(dir, S('manage-cards/manage-cards.md'), cards.replace('9/8/2026', '10/24/2026').replace('Щоб', 'Аби'));
+  st = await status(dir);
+  assert.equal(st.pages[1].dateBump, false);
+  assert.equal(st.pages[1].stages.uaApproval, 'stale');
+});
+
+test('the plan: api pages and pages differing only in the extension', async () => {
+  const dir = await host();
+  await write(dir, S('cards/cards.mdx'), await read(dir, S('cards/cards.md')));
+  await fs.rm(path.join(dir, S('cards/cards.md')));
+  await write(dir, S('export/export.mdx'), await read(dir, S('export/export.md')));
+  await fs.rm(path.join(dir, S('export/export.md')));
+  await commit(dir, 'MDX pages');
+  await record(dir, 'readiness', 'running', ...ROOTS);
+  const mdx = { ...readiness, pages: readiness.pages.map((p) => ({ ...p, path: p.path.replace(/(cards|export)\.md$/, '$1.mdx') })) };
+  await write(dir, S('.sources/section-readiness.json'), JSON.stringify(mdx));
+  await record(dir, 'readiness', 'done');
+  await record(dir, 'explore', 'skipped', '--note', 'liveUI: none');
+  await write(dir, S('.sources/section-plan.md'), '# Plan\n');
+  await write(dir, S('.sources/section-plan.json'), JSON.stringify({
+    pages: [
+      { order: 1, action: 'keep', path: S('cards/cards.md'), docType: 'user-guide', title: 'Cards' },
+      { order: 2, action: 'keep', path: S('export/export.md'), docType: 'user-guide', title: 'Export a report' },
+      { order: 3, action: 'add', path: 'docs/api-reference/list-reports/list-reports.md', docType: 'api', title: 'List reports' },
+      { order: 4, action: 'add', path: S('report-api/report-api.md'), docType: 'api', title: 'Report API' },
+      { order: 5, action: 'add', path: 'docs/elsewhere/elsewhere.md', docType: 'concept', title: 'Elsewhere' },
+    ],
+  }));
+  const bad = await record(dir, 'plan', 'done');
+  assert.equal(bad.code, 1, 'only an api page may be outside the section');
+  assert.match(bad.out.error, /pages\[4\]: docs\/elsewhere\/elsewhere\.md is outside the section/);
+  assert.doesNotMatch(bad.out.error, /pages\[2\]/);
+  const plan = JSON.parse(await read(dir, S('.sources/section-plan.json')));
+  plan.pages.pop();
+  await write(dir, S('.sources/section-plan.json'), JSON.stringify(plan));
+  assert.equal((await record(dir, 'plan', 'done')).code, 0);
+  const out = (await record(dir, 'planApproval', 'done')).out;
+  assert.deepEqual(out.pages, ['reports/cards/cards']);
+  assert.deepEqual(out.listed, [
+    { path: S('export/export.mdx'), reason: 'keep-complete' },
+    { path: 'docs/api-reference/list-reports/list-reports.md', reason: 'api' },
+    { path: S('report-api/report-api.md'), reason: 'api' },
+  ]);
+  const st = await status(dir);
+  assert.equal(st.pages[0].path, S('cards/cards.mdx'), 'the file on disk, not the plan\'s extension');
+  assert.equal(st.pages[0].exists, true);
+  assert.equal(st.pages[0].unknownDraft, false);
+  assert.deepEqual(st.outside, [S('old/old.md'), S('overview/overview.md')]);
+  assert.match((await cli(dir, 'status', SECTION, '--md')).out, /list-reports\.md` \(api\)/);
 });

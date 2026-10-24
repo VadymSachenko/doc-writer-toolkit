@@ -97,19 +97,45 @@ export async function blobText(root, hash) {
   }
 }
 
-// Which of these files differ from HEAD (modified, staged or untracked).
+// Which of these files differ from HEAD (modified, staged or untracked). The files are relative to `root`, which may
+// be a subfolder of its git repository: porcelain paths are relative to the top level, so the prefix is stripped.
 export async function uncommitted(root, files) {
   if (!files.length) return new Set();
-  const out = await git(root, ['status', '--porcelain', '-z', '-uall', '--', ...files]);
+  const prefix = (await git(root, ['rev-parse', '--show-prefix'])).trim();
+  const out = await git(root, ['status', '--porcelain', '-z', '--untracked-files=all', '--', ...files]);
   const changed = new Set();
   const parts = out.split('\0');
   for (let i = 0; i < parts.length; i++) {
     const p = parts[i];
     if (p.length < 4) continue;
     if (p[0] === 'R' || p[0] === 'C') i++;
-    changed.add(p.slice(3));
+    const top = p.slice(3);
+    changed.add(top.startsWith(prefix) ? top.slice(prefix.length) : top);
   }
   return new Set(files.filter((f) => changed.has(f)));
+}
+
+// Whether the blob with this hash is the file's version in a commit reachable from HEAD (not merely staged).
+export async function committedBlob(root, file, hash) {
+  try {
+    if ((await git(root, ['rev-parse', '--verify', '-q', `HEAD:./${file}`])).trim() === hash) return true;
+  } catch {
+    // Not in HEAD: look further back.
+  }
+  try {
+    return Boolean((await git(root, ['log', '-1', '--format=%H', `--find-object=${hash}`, 'HEAD', '--', file])).trim());
+  } catch {
+    return false;
+  }
+}
+
+// The file's text at HEAD, or null when HEAD doesn't have it.
+export async function headText(root, file) {
+  try {
+    return await git(root, ['show', `HEAD:./${file}`]);
+  } catch {
+    return null;
+  }
 }
 
 // Every .md/.mdx page under the section folder, skipping folders and files whose name starts with a dot.
@@ -165,6 +191,19 @@ export function withoutDates(text) {
   if (!t.startsWith('---\n')) return t;
   const end = t.indexOf('\n---', 3);
   if (end === -1) return t;
-  const fm = t.slice(0, end).replace(/^([ \t]*date[ \t]*:).*$/gm, '$1').replace(/(\bdate[ \t]*:)[ \t]*[^,}\n]+/g, '$1');
+  // A `date:` key at the start of a line, or a `date:` key inside a one-line flow map. Not `date:` inside a value.
+  const fm = t
+    .slice(0, end)
+    .replace(/^([ \t]*date[ \t]*:).*$/gm, '$1')
+    .replace(/\{[^}\n]*\}/g, (map) => map.replace(/([{,][ \t]*date[ \t]*:)[ \t]*[^,}\n]+/g, '$1'));
   return fm + t.slice(end);
+}
+
+// Compares the file with an earlier version of it, the one with this hash, with every frontmatter `date:` blanked.
+// `committed` is false when that version is not in a commit reachable from HEAD: then nothing is compared.
+export async function dateOnlyChange(root, file, hash) {
+  if (!(await committedBlob(root, file, hash))) return { committed: false, dateOnly: false };
+  const before = await blobText(root, hash);
+  const now = await readText(root, file);
+  return { committed: true, dateOnly: before !== null && now !== null && withoutDates(before) === withoutDates(now) };
 }

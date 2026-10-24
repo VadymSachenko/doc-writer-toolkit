@@ -88,7 +88,9 @@ One JSON file per case in `cases/`, named after its `id`:
 
 `options` also takes `disallowedTools` and `model`. An assertion can carry a `name`, which is what the reports show.
 
-A `setup` command can run a script of the tree under review: from the host, the copy is `../../../.plugin/harness-<label>/` (steps 1 and 2 of "What a run does"). The `document-section` cases (`tc-29*`) build their ledger that way, with `scripts/section-state/`, so the ledger always has the shape the script reads.
+A `setup` command can run a script of the tree under review: from the host, the copy is `../../../.plugin/harness-<label>/` (steps 1 and 2 of "What a run does"), and the label is the name of the folder `../../..`, so `harness-$(basename "$(cd ../../.. && pwd)")` names the current label's copy. The `document-section` cases (`tc-29*`) build their ledger that way, with `scripts/section-state/`, so the ledger always has the shape the script reads.
+
+A `command` assertion gets no value from the setup. To compare with the state the setup left, write it where `git status` doesn't look, such as `.git/`: the `tc-29*` cases end their setup with `git rev-parse HEAD > .git/harness-setup-head`, and their "no commit made" assertion compares `HEAD` with it.
 
 | Type | Fields | Passes when |
 |---|---|---|
