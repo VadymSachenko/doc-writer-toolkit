@@ -46,7 +46,7 @@ Load these files at the start of the task. Do not load others unless the user re
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/doc-examples/user-guide-examples/user-guide-example-create-branches.md`
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/doc-examples/user-guide-examples/user-guide-example-edit-links.md`
 
-These examples illustrate prose density, step phrasing, screenshot placement, admonition use, and result block formatting. They do **not** define the target structure, and their own language does not dictate yours. For sections, headings, and required content, follow the template. When an example and the template disagree, the template wins.
+These examples illustrate prose density, step phrasing, screenshot placement, admonition use, and result block formatting. They do **not** define the target structure, and their own language does not dictate yours. For sections, headings, and required content, follow the template. When an example and the template disagree, the template wins. Their page links (`/docs/…`) belong to the example's own site: never copy one, and build every link from `internal-links.md`.
 
 ## Workflow
 

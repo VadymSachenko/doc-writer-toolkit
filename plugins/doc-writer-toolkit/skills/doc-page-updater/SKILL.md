@@ -20,6 +20,7 @@ You are changing an existing, approved page so that it is true again after a pro
 - The template matching the page's type, to know where a new block belongs: `${CLAUDE_PLUGIN_ROOT}/context/doc-templates/ua-user-guide-template.md`, `ua-concept-topic-template.md`, `api-reference-template.md` (or the EN equivalents on an `en` project). Detect the type from the page's structure and frontmatter.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-ua.md` (or `glossary-en.md`) and `formatting-conventions.md` — terms and formatting are rank 0.
 - `${CLAUDE_PLUGIN_ROOT}/context/changed-blocks.md` — the block vocabulary used in the report.
+- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` — only when a block you write links to another page.
 
 Nothing else. Do not load style corpora; the reviewer does that afterwards.
 
@@ -48,6 +49,7 @@ Run the UI label check in `${CLAUDE_PLUGIN_ROOT}/context/ui-labels.md` before an
 4. **Screenshots.** Reference new or re-captured files exactly by the names the brief gives, in the page's `.assets/` folder, with the project's screenshot embedding conventions. Never create or modify image files.
 5. **Frontmatter.** Update `last_update.date` if the page has it. Touch nothing else in the frontmatter unless the brief names the field (e.g. `description` must change because the page's scope changed).
 6. **MDX.** Never touch import lines or component props unless the brief names them.
+7. **Links.** A link you add to another page is built as `internal-links.md` prescribes, from the target page's root pair: site-root-relative, no `.md`/`.mdx`, never `./` or `../`. A link the brief gives as a file path is converted the same way. An existing link outside your blocks stays as it is.
 
 ## Step 3 — Self-review before saving
 
@@ -58,6 +60,7 @@ Run the UI label check in `${CLAUDE_PLUGIN_ROOT}/context/ui-labels.md` before an
 - New terms match the glossary; UI labels match the brief exactly.
 - Markers read as plain writer's notes.
 - Code blocks and inline code are byte-identical unless the brief changed them.
+- Every page link you added follows `internal-links.md`.
 
 Fix anything that fails, then save.
 
