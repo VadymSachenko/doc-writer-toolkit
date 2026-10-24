@@ -22,7 +22,7 @@
       "name": "says no product kit is declared",
       "type": "match",
       "path": "output",
-      "pattern": "\\bno product kit\\b|\\bproduct kit\\b[^.\\n]{0,40}\\b(not declared|undeclared|isn't declared|wasn't declared|none)\\b|немає набору продукту|без набору продукту|набір продукту[^.\\n]{0,40}не (оголошено|задекларовано|вказано)",
+      "pattern": "\\bno product kit\\b|\\b(doesn't|does not|didn't|did not) declare (a|any) product kit\\b|\\bproduct kit\\b[^.\\n]{0,40}\\b(not declared|undeclared|isn't declared|wasn't declared|none)\\b|немає набору продукту|без набору продукту|набір продукту[^.\\n]{0,40}не (оголошено|задекларовано|вказано)",
       "flags": "i"
     },
     {
