@@ -1,0 +1,108 @@
+{
+  "description": "The product content the plugin carried up to 701654b, as a host kit: the glossaries, the product facts, the rules split out of formatting-conventions.md and the five templates, with their pointers to plugin paths that no longer exist turned to the kit. Cases that ran on that content take this kit, so a run on main and a run after the move read the same inputs.",
+  "files": {
+    "glossary-ua.md": {
+      "git": "701654b:plugins/doc-writer-toolkit/context/doc-rules/project-rules/glossary-ua.md"
+    },
+    "glossary-en.md": {
+      "git": "701654b:plugins/doc-writer-toolkit/context/doc-rules/project-rules/glossary-en.md"
+    },
+    "glossary.md": {
+      "git": "701654b:plugins/doc-writer-toolkit/context/doc-rules/project-rules/glossary.md",
+      "replace": [
+        [
+          "- UA docs: `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-ua.md`",
+          "- UA docs: `doc-kit/glossary-ua.md`"
+        ],
+        [
+          "- EN docs: `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-en.md`",
+          "- EN docs: `doc-kit/glossary-en.md`"
+        ]
+      ]
+    },
+    "product-facts.md": {
+      "git": "701654b:plugins/doc-writer-toolkit/context/doc-rules/project-rules/api-integration-context.md"
+    },
+    "product-rules.md": [
+      "# Product rules\n\n## Таблиця рендерів\n\n",
+      {
+        "git": "701654b:plugins/doc-writer-toolkit/context/doc-rules/project-rules/formatting-conventions.md",
+        "lines": "46-47,55"
+      },
+      "\n## Ж5 — Назва репозиторію (Repository name)\n\n",
+      {
+        "git": "701654b:plugins/doc-writer-toolkit/context/doc-rules/project-rules/formatting-conventions.md",
+        "lines": "256-259"
+      },
+      "\n## Українською — Термінологія\n\n",
+      {
+        "git": "701654b:plugins/doc-writer-toolkit/context/doc-rules/project-rules/formatting-conventions.md",
+        "lines": "440-445"
+      },
+      "\n## Українською — Назви, бренди, латинка\n\n",
+      {
+        "git": "701654b:plugins/doc-writer-toolkit/context/doc-rules/project-rules/formatting-conventions.md",
+        "lines": "450-451,455-456"
+      },
+      "\n## Українською — Кальки й слова-заборони\n\n",
+      {
+        "git": "701654b:plugins/doc-writer-toolkit/context/doc-rules/project-rules/formatting-conventions.md",
+        "lines": "511-512,514"
+      },
+      "\n## English — Terminology\n\n",
+      {
+        "git": "701654b:plugins/doc-writer-toolkit/context/doc-rules/project-rules/formatting-conventions.md",
+        "lines": "543-548"
+      },
+      "\n## English — Names, brands, abbreviations\n\n",
+      {
+        "git": "701654b:plugins/doc-writer-toolkit/context/doc-rules/project-rules/formatting-conventions.md",
+        "lines": "553-554"
+      },
+      "\n## English — Sentence style\n\n",
+      {
+        "git": "701654b:plugins/doc-writer-toolkit/context/doc-rules/project-rules/formatting-conventions.md",
+        "lines": "585-587"
+      }
+    ],
+    "templates/api-reference-template.md": {
+      "git": "701654b:plugins/doc-writer-toolkit/context/doc-templates/api-reference-template.md"
+    },
+    "templates/concept-topic-template.md": {
+      "git": "701654b:plugins/doc-writer-toolkit/context/doc-templates/concept-topic-template.md",
+      "replace": [
+        [
+          "- Terms come from `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-en.md`.",
+          "- Terms come from `doc-kit/glossary-en.md`."
+        ]
+      ]
+    },
+    "templates/ua-concept-topic-template.md": {
+      "git": "701654b:plugins/doc-writer-toolkit/context/doc-templates/ua-concept-topic-template.md",
+      "replace": [
+        [
+          "- Терміни: з глосарію `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-ua.md`.",
+          "- Терміни: з глосарію `doc-kit/glossary-ua.md`."
+        ]
+      ]
+    },
+    "templates/ua-user-guide-template.md": {
+      "git": "701654b:plugins/doc-writer-toolkit/context/doc-templates/ua-user-guide-template.md",
+      "replace": [
+        [
+          "- Терміни: з глосарію `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-ua.md`.",
+          "- Терміни: з глосарію `doc-kit/glossary-ua.md`."
+        ]
+      ]
+    },
+    "templates/user-guide-template.md": {
+      "git": "701654b:plugins/doc-writer-toolkit/context/doc-templates/user-guide-template.md",
+      "replace": [
+        [
+          "- Terms come from `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-en.md`.",
+          "- Terms come from `doc-kit/glossary-en.md`."
+        ]
+      ]
+    }
+  }
+}

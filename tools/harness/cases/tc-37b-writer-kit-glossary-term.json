@@ -1,0 +1,45 @@
+{
+  "id": "tc-37b-writer-kit-glossary-term",
+  "description": "A declared product kit whose UA glossary names the monthly statement «відомість руху коштів» and bans «виписка»: user-guide-writer reads the kit glossary and uses the kit term on the uk page.",
+  "fixture": {
+    "shape": "single",
+    "kit": "sentinel-term"
+  },
+  "prompt": "use user-guide-writer for `portal/reports/monthly-digest/`. Skip questions and draft with your best guess, then save the page. Facts: the user selects **Звіти** in the menu, selects a month in the **Місяць** field and clicks **Завантажити**. The monthly statement of account movements downloads as a PDF: one row per credit or debit, with the date, amount, currency and the balance after it. The statement for a month is ready on the first day of the next month.",
+  "options": {
+    "maxTurns": 60,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "one page saved",
+      "type": "command",
+      "run": "test $(find portal/reports/monthly-digest -maxdepth 1 -name '*.md' | wc -l) -eq 1"
+    },
+    {
+      "name": "kit UA glossary read",
+      "type": "read",
+      "path": "doc-kit/glossary-ua.md"
+    },
+    {
+      "name": "uses the kit term",
+      "type": "command",
+      "run": "grep -rqE '(В|в)ідом(ість|ості|істю) руху коштів' portal/reports/monthly-digest"
+    },
+    {
+      "name": "no banned synonym",
+      "type": "command",
+      "run": "! grep -rqE '(В|в)иписк' portal/reports/monthly-digest"
+    },
+    {
+      "type": "changed-only",
+      "paths": [
+        "portal/reports/monthly-digest/",
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}

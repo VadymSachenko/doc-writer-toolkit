@@ -2,7 +2,8 @@
   "id": "tc-17c-updater-uk-leaves-untouched-calques",
   "description": "A brief renames a field whose step sentence, and a section the brief says not to touch, already hold calques: the updater changes only the label, and both calques stay byte-identical, although it now holds the natural-Ukrainian rules.",
   "fixture": {
-    "shape": "single"
+    "shape": "single",
+    "kit": "migrated-701654b"
   },
   "setup": [
     "node -e \"const fs=require('fs');const p='portal/transactions/transactions.md';let t=fs.readFileSync(p,'utf8');t=t.replace('2. Задайте період у полі **Дата**.','2. Задайте період у полі **Дата** — діалог календаря відкриється одразу.');t=t.replace('і виберіть статус платежу.','і виберіть статус платежу. Діалог **Фільтри** відкривається праворуч — і це зручно.');fs.writeFileSync(p,t)\"",

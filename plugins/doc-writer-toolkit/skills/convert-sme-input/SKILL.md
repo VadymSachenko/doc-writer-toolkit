@@ -35,7 +35,7 @@ When converting or comparing information, use this order:
 2. Existing processed source Markdown, if present, for current structure and previously accepted wording.
 3. API brief documents in `/api-docs/api-references/` if the topic covers API-facing behavior.
 4. `frames-index.json` inside `.sources/frames/{video-basename}-frames/` for self-checking visual/UI claims against the recording — see the self-check Workflow step below. This is **not** the same folder as `.assets/`, which holds only the curated screenshots someone already chose to embed in the published doc; don't confuse the two.
-5. Project glossary (`${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-ua.md`) for terminology consistency.
+5. The product kit's `glossary-ua.md`, read with `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/glossary-format.md`, for terminology consistency. How the kit is found, and what to do when none is declared, is in `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`, "Product kit".
 
 If sources conflict, do not silently choose. Record the conflict under `### Питання або потребує уточнення`.
 
@@ -123,7 +123,7 @@ When the user asks to compare raw and processed files:
 ## Writing rules
 
 - Write in Ukrainian.
-- Use canonical terms from `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-ua.md`: **Партнер**, **Транзакція**, **Вебхук**, **API-токен**, **Кабінет партнера**, **Вхідна транзакція**, **Вихідна транзакція**, etc.
+- Use canonical terms from the product kit's `glossary-ua.md`: **Партнер**, **Транзакція**, **Вебхук**, **API-токен**, **Кабінет партнера**, **Вхідна транзакція**, **Вихідна транзакція**, etc.
 - Status values in `code font`: `new`, `in queue`, `in work`, `success`, `cancelled` (UK spelling).
 - UI labels in **bold**: натисніть **Зберегти**.
 - Keep source-ticket identifiers when they help trace a fact (e.g., `UCP-277`).

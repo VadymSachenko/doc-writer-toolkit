@@ -2,7 +2,8 @@
   "id": "tc-07b-updater-heading-ids",
   "description": "doc-page-updater adds a section to a uk page whose headings have no ids: the new heading gets a unique {/* #id */}, and the existing headings stay as they were.",
   "fixture": {
-    "shape": "multi"
+    "shape": "multi",
+    "kit": "migrated-701654b"
   },
   "setup": [
     "cat > docs/.sources/change-brief-retry-schedule.md <<'EOF'\n# Change brief — retry schedule\n\n## Page\ndocs/webhooks/webhooks.md\n\n## What changed\n- A new section describes the retry schedule: the system retries after 1, 5 and 30 minutes. — source: release notes 2026-10-01\n\n## Where in the page\nA new section after «Повторні спроби».\n\n## Do not touch\n- The sections «Налаштування вебхука» and «Повторні спроби».\nEOF\ngit add -A && git commit -q -m 'Case setup'"

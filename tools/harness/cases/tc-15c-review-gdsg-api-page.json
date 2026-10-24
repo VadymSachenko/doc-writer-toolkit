@@ -2,7 +2,8 @@
   "id": "tc-15c-review-gdsg-api-page",
   "description": "gdsg review of an EN API page that describes several methods, two with a vague lead-in and one in the imperative: the profile is named, nothing is written, and the vague lead-in is flagged.",
   "fixture": {
-    "shape": "multi"
+    "shape": "multi",
+    "kit": "migrated-701654b"
   },
   "setup": [
     "mkdir -p i18n/en/docusaurus-plugin-content-docs/current/api-reference/sdk-methods && cat > i18n/en/docusaurus-plugin-content-docs/current/api-reference/sdk-methods/sdk-methods.md <<'EOF'\n---\ntitle: SDK methods\ndescription: The methods of the payments SDK.\n---\n\n# SDK methods\n\n## createPayment\n\nThis method is used to create a payment. Returns the payment identifier.\n\n## getPayment\n\nGet a payment by its identifier.\n\n## listPayments\n\nThis method is used to list the payments for a period.\nEOF\ngit add -A && git commit -q -m 'Case setup'"

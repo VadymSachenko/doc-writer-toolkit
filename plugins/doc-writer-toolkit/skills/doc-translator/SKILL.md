@@ -30,7 +30,9 @@ Load these files at the start of the task.
 **Project paths (resolve first):**
 - Follow `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` to resolve the page's **root pair**: its **UA content root** and **EN i18n root**. Do not assume any default. If either is undeclared, follow that file's fallback (ask once, offer to persist to the project's `CLAUDE.md`).
 
-- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-en.md` — canonical EN terminology. Use it to replace UA terms with their correct EN equivalents.
+- **Product kit** (the host's own files; `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`, "Product kit", resolves the folder and says what to do when none is declared or a file is missing):
+  - `<kit>/glossary-en.md` — canonical EN terminology, read with `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/glossary-format.md`. Use it to replace UA terms with their correct EN equivalents. Below, `glossary-en.md` means this file.
+  - `<kit>/product-rules.md`, if present — rules for this product only, such as how its name is written. Rank 0, like `formatting-conventions.md`.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` — rank-0 project formatting conventions. Core section and English section apply. Outranks this skill's own body for any rule both cover.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` — the shared page-to-page link contract. Translation **preserves an already-correct route verbatim** (see "Never translate" and Step 4); do not re-derive or localize a path.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/heading-anchors.md` — the shared heading-id contract (see Heading IDs below).

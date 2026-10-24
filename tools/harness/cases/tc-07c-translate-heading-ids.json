@@ -2,7 +2,8 @@
   "id": "tc-07c-translate-heading-ids",
   "description": "doc-translator on a uk page whose headings carry ids: EN headings are the ids' words with no comment, the reference heading keeps its id explicitly, and #links are copied verbatim.",
   "fixture": {
-    "shape": "single"
+    "shape": "single",
+    "kit": "migrated-701654b"
   },
   "setup": [
     "git rm -q i18n/en/docusaurus-plugin-content-docs-portal/current/transactions/transactions.md && cat > portal/transactions/transactions.md <<'EOF'\n---\ntitle: Транзакції\nsidebar_label: Транзакції\n---\n\n# Транзакції\n\nНа сторінці **Транзакції** видно всі платежі вашого акаунта за вибраний період. Про зміни статусу дивіться [повідомлення про платежі](#payment-notifications).\n\n## Перегляд транзакцій {/* #transaction-list */}\n\n1. У меню виберіть **Транзакції**.\n2. Задайте період у полі **Дата**.\n\nСписок оновлюється автоматично.\n\n## Фільтрування транзакцій {/* #filter-transactions */}\n\nЩоб звузити список, натисніть **Фільтри** і виберіть [статус платежу](#reference-information-filter-transactions). Валюту за замовчуванням задають у [налаштуваннях](/portal/settings/settings).\n\n## Повідомлення про платежі {/* #payment-notifications */}\n\nПро кожну зміну статусу система може надсилати повідомлення на ваш сервер. Докладніше: [Вебхуки](/webhooks/webhooks).\n\n## Довідкова інформація {/* #reference-information-filter-transactions */}\n\n| Атрибут | Опис |\n|---|---|\n| **Статус** | Стан платежу: новий, успішний або скасований. |\nEOF\ngit add -A && git commit -q -m 'Case setup'"

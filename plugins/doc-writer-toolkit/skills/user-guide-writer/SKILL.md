@@ -22,12 +22,16 @@ Load these files at the start of the task. Do not load others unless the user re
 **Templates (load the one matching the resolved language):**
 - `uk` → `${CLAUDE_PLUGIN_ROOT}/context/doc-templates/ua-user-guide-template.md` — Операції/Етапи structure.
 - `en` → `${CLAUDE_PLUGIN_ROOT}/context/doc-templates/user-guide-template.md` — single/multi-task, single/multi-phase structure.
+- A template of the same name in `<kit>/templates/` replaces the plugin's (`project-paths.md`, "Product kit").
 - Read the Design rules section of whichever one you load before drafting. Authoritative structure either way. When the template and examples disagree, the template wins.
 
+**Product kit (the host's own files; `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`, "Product kit", resolves the folder and says what to do when none is declared or a file is missing):**
+- `<kit>/glossary-ua.md` (`uk`) or `<kit>/glossary-en.md` (`en`) — canonical terminology for the resolved language, read with `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/glossary-format.md`.
+- `<kit>/product-facts.md` — cross-cutting facts about the product and its API. Always applicable background.
+- `<kit>/product-rules.md`, if present — rules for this product only (its name, key terms, UI section names). Rank 0, like `formatting-conventions.md`.
+
 **Project rules:**
-- `uk` → `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-ua.md`; `en` → `glossary-en.md` — canonical terminology for the resolved language.
 - **`uk` only** → `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/native-ukrainian.md` — rank-0 natural-Ukrainian prose rules (literal-English syntax, ambiguous reference, mechanical repetition, «вікно» not «діалог», self-reference «ця сторінка» not «цей посібник», discretionary dashes). Load only on a `uk` page; it has no `en` counterpart. Drives the native-Ukrainian reread in Step 8.
-- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/api-integration-context.md` — cross-cutting facts about the API (balances, transaction lifecycle, webhooks, disputes, auth, business rules). Always applicable background.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` — rank-0 project formatting conventions (what bold/italic/code font mean here, placeholder form, one-entity-one-render, code-entity vs. human concept). Outranks everything else loaded for this task, including this skill's own body. Loaded regardless of resolved language.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-selection.md` — shared screenshot selection procedure: three-folder model, four selection cases, sensitive-content screening, rename pattern, full-page vs. compact classification.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` — the shared page-to-page link contract (see the link rule in Step 6).
@@ -195,7 +199,7 @@ Apply the template resolved in "Sources to load". Choose the structure decided i
 **Additional rules:**
 - **Never invent facts.** Unconfirmed UI labels, field names, or behavior → `{/* NEEDS CONFIRMATION: ... */}`.
 - **Apply the glossary** resolved in "Sources to load".
-- **UCP naming, UI-label/status/placeholder rendering:** follow `formatting-conventions.md`'s Core section (Ж1–Ж8) and the Names/brands entry for the resolved language — do not restate them here.
+- **Product naming, UI-label/status/placeholder rendering:** follow `formatting-conventions.md`'s Core section (Ж1–Ж8), the Names/brands entry for the resolved language and the kit's `product-rules.md` — do not restate them here.
 - **Prerequisites content:** the Prerequisites section must always be present. If no special prerequisites exist beyond reviewing reference information, use the template's own standard reference-information sentence (Variant A/B in the `en` template; Варіант А/Б from the Prerequisites section of `ua-user-guide-template.md`) rather than inventing new wording.
 - **Field reference order:** when a step involves a field inside a card or other named container, state the container first, then the field, then the action: "In the **X** card, in the **Y** field, enter the value." — not "In the **Y** field in the **X** card, enter the value."
 - **Active voice, second person — not the product as subject:** in procedural steps and Result blocks, always use the imperative or the second person; never a system/product noun ("the Partner", "Партнер") as the grammatical subject. See `formatting-conventions.md`'s sentence-style section for the resolved language.

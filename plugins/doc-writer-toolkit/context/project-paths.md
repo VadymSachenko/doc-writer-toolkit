@@ -1,6 +1,6 @@
 ---
 name: project-paths
-description: Shared procedure for resolving a project's declarations — content language, UA content root, EN i18n root, UA URL prefix, the root pair a page belongs to, and the label-store and locale-translation fields — from its CLAUDE.md, with the ask-once fallback if any is undeclared. Referenced by every skill that reads/writes UA or EN doc files by path, needs the project's content language, or uses the UI label store — never copy this procedure into another skill file.
+description: Shared procedure for resolving a project's declarations — content language, UA content root, EN i18n root, UA URL prefix, the root pair a page belongs to, the product kit, and the label-store and locale-translation fields — from its CLAUDE.md, with the ask-once fallback if any is undeclared (the product kit has its own fallback). Referenced by every skill that reads/writes UA or EN doc files by path, needs the project's content language, or uses the UI label store — never copy this procedure into another skill file.
 ---
 
 # Project paths
@@ -17,9 +17,9 @@ None of these is safe to hardcode in a skill file — different projects install
 
 ## Resolving a project's declarations
 
-1. Check the invoking project's `CLAUDE.md` for the "Documentation toolkit configuration" section (the same section that declares the project's style guide — see `${CLAUDE_PLUGIN_ROOT}/context/style-guide-registry.md`) and read the fields this run needs: `Content language:`, `UA content root:`, `EN i18n root:`, `UA URL prefix:` and the same fields of every further root pair (`<Name> UA content root:` …), and, for a run that uses the label store or translates into further locales, the fields in "Label store and locale translation" below.
+1. Check the invoking project's `CLAUDE.md` for the "Documentation toolkit configuration" section (the same section that declares the project's style guide — see `${CLAUDE_PLUGIN_ROOT}/context/style-guide-registry.md`) and read the fields this run needs: `Content language:`, `UA content root:`, `EN i18n root:`, `UA URL prefix:` and the same fields of every further root pair (`<Name> UA content root:` …), `Product kit:` for a run that loads a glossary, product facts, product rules or a template (see "Product kit"), and, for a run that uses the label store or translates into further locales, the fields in "Label store and locale translation" below.
 2. If the fields this run needs are present, use them for every path this skill reads or writes, and for every language decision it makes, in this run.
-3. If a needed field is missing: **ask the user once** — for the paths, "What's this project's UA content folder, and where does its English translation get published?"; for the language, "What language is this project's documentation authored in — `uk`, `en`, or both?" — and offer to write the answer back into that project's `CLAUDE.md` under the same "Documentation toolkit configuration" section, so the question isn't repeated on the next invocation.
+3. If a needed field is missing (any field but `Product kit:`, which is never asked for): **ask the user once** — for the paths, "What's this project's UA content folder, and where does its English translation get published?"; for the language, "What language is this project's documentation authored in — `uk`, `en`, or both?" — and offer to write the answer back into that project's `CLAUDE.md` under the same "Documentation toolkit configuration" section, so the question isn't repeated on the next invocation.
 4. Never guess a folder name (e.g. never assume `portal/` or `docs/` by default), never guess the content language from the one file in hand, never silently fall back to one project's layout because it's the one this skill happened to be written against, and never use the primary pair for a page under another pair's root.
 5. `Content language:` is the one field a skill may proceed without: if it's absent, a skill working on a single file may fall back to that file's own language, but must say so and offer to persist a declaration (see the style-guide registry's "Resolving which guide a project uses," step 3).
 
@@ -54,6 +54,7 @@ A link's target is a page too: its route uses the target's own pair (see `${CLAU
 - **EN i18n root:** `i18n/en/docusaurus-plugin-content-docs/current/`
 - **UA URL prefix:** `/`
 - **API reference root:** `docs/api-reference/`
+- **Product kit:** `doc-kit/`
 - **Icon rendering:** `screenshot-crop`
 - **Screenshot frame:** `3px, #CC0000`
 - **Screenshot scope:** `container`
@@ -75,6 +76,33 @@ A project that splits content into two Docusaurus plugin instances states which 
 
 - A second tree that is UA-authored, with its own EN translation, is a further root pair (see "More than one root pair"). The content language stays as declared.
 - A second tree that is English-native, with no UA source, is not a root pair. The project declares `Content language: uk,en`, and that tree stays outside every root pair: the translator and the alignment checker don't cover it.
+
+## Product kit
+
+The plugin ships no product content. A host keeps its product's terms, facts and own rules in a *product kit*: one folder in its repo, declared in the same block:
+
+```md
+- **Product kit:** `doc-kit/`
+```
+
+The folder is the host's own, committed with its pages. It sits outside every content root, or Docusaurus renders its files as pages. Its file names are fixed:
+
+| File | Holds | Optional |
+|---|---|---|
+| `glossary-ua.md`, `glossary-en.md` | The approved terms for Ukrainian and English pages, with their render. Read with `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/glossary-format.md`, which says how to read the table. | no |
+| `product-facts.md` | Facts about the product and its API, read as background. | no |
+| `product-rules.md` | Rules for this product only, such as its name and short name, key terms and the names of its UI sections. | yes |
+| `templates/<name>` | A page template under the plugin's file name. It replaces `${CLAUDE_PLUGIN_ROOT}/context/doc-templates/<name>` for this host. | yes |
+| `glossary.md` | A bilingual list for people. No skill reads it. | yes |
+
+Each skill's "Sources to load" names the kit files it reads. Kit files are rank 0, like `formatting-conventions.md` (`${CLAUDE_PLUGIN_ROOT}/context/style-guide-registry.md`, "Project rank-0 layer"). The skeletons are in `${CLAUDE_PLUGIN_ROOT}/context/starter-kit/`. A skill names that folder and never copies it.
+
+**Resolving the kit:**
+
+1. **Not declared:** go on with no glossary, no product facts and no product rules. Say so in your first status line and in your report: "No product kit declared: no glossary, product facts or product rules loaded." Offer to declare the field, and name `${CLAUDE_PLUGIN_ROOT}/context/starter-kit/` as the place to start one. Don't ask and don't stop: a run finds its pages without the kit, so this field is never asked for the way the path fields are ("Resolving a project's declarations", step 3).
+2. **Declared, but the folder doesn't exist:** stop before you write anything. Name the path you looked for, and say to create the folder or fix the field.
+3. **Declared and there:** read the kit files your skill names. A file that isn't there is skipped: name it in your report as not present. A missing file that isn't optional is also named in your first status line.
+4. **A template:** read `<kit>/templates/<name>` when it exists. Otherwise, and with no kit, read `${CLAUDE_PLUGIN_ROOT}/context/doc-templates/<name>`. Say in your report which one you used. A host template keeps the structure of the plugin's: skills refer to its variants and sections by name.
 
 ## Label store and locale translation
 

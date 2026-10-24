@@ -232,7 +232,7 @@ DESIGN RULES — DO NOT INCLUDE IN THE FINAL DOCUMENT
 ### Prerequisites
 
 - List only conditions common to **every** task/phase on the page. A condition specific to one task belongs inside that task's own description, not in the shared Prerequisites section.
-- "You're signed in to the partner cabinet" is never listed — it's assumed.
+- "You're signed in to the app" is never listed — it's assumed.
 - Always include the reference-information prompt sentence (Variant A for a single Reference information section, Variant B for multiple) — don't invent new wording for it.
 
 ### The Result block
@@ -278,7 +278,7 @@ Don't add a block with nothing substantive in it:
 
 ### Terminology and formatting
 
-- Terms come from `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-en.md`.
+- Terms come from the product kit's `glossary-en.md` (`${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`, "Product kit").
 - UI labels and UI-visible status values: **bold**, no quotation marks. System/API values not shown as such in the UI: `code font`.
 - Reader-replaced placeholders: `*`\``UPPER_CASE`\``*`.
 - Expand an abbreviation at its first mention, then use the short form only.

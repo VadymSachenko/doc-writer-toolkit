@@ -14,7 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { makeFixture } from './fixture.mjs';
+import { makeFixture, resolveKit } from './fixture.mjs';
 import { check, label as nameOf } from './assertions.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -26,6 +26,7 @@ export function loadCase(idOrPath) {
   const file = idOrPath.endsWith('.json') ? path.resolve(idOrPath) : path.join(here, 'cases', `${idOrPath}.json`);
   const c = JSON.parse(fs.readFileSync(file, 'utf8'));
   for (const key of ['id', 'fixture', 'prompt', 'assertions']) if (!(key in c)) throw new Error(`${file}: missing '${key}'`);
+  try { resolveKit(c.fixture.kit); } catch (e) { throw new Error(`${file}: ${e.message}`); }
   for (const a of c.assertions) {
     for (const key of ['pattern', 'allow']) {
       if (typeof a[key] !== 'string') continue;
@@ -44,11 +45,12 @@ export function sentinelCopy(tree, sentinel, dir) {
   return copy;
 }
 
-// The init and result events of a stream-json transcript, and every Skill call.
+// The init and result events of a stream-json transcript, every Skill call and the path of every Read call.
 export function readTranscript(text) {
   let init = null;
   let result = null;
   const skills = [];
+  const reads = [];
   for (const line of text.split('\n')) {
     if (!line.trim()) continue;
     let e;
@@ -56,10 +58,13 @@ export function readTranscript(text) {
     if (e.type === 'system' && e.subtype === 'init') init = e;
     if (e.type === 'result') result = e;
     if (e.type === 'assistant') {
-      for (const c of e.message?.content ?? []) if (c.type === 'tool_use' && c.name === 'Skill') skills.push(c.input?.skill ?? '');
+      for (const c of e.message?.content ?? []) {
+        if (c.type === 'tool_use' && c.name === 'Skill') skills.push(c.input?.skill ?? '');
+        if (c.type === 'tool_use' && c.name === 'Read' && c.input?.file_path) reads.push(path.normalize(c.input.file_path));
+      }
     }
   }
-  return { init, result, skills };
+  return { init, result, skills, reads };
 }
 
 // The two checks every run makes before its case's own assertions.
@@ -156,7 +161,7 @@ export function runOnce(c, { copy, sentinel, ownSkills, dir, model, claude = 'cl
 export function score(c, t, { host, output, status, sentinel, ownSkills }) {
   return [
     ...builtInChecks(t, sentinel, ownSkills),
-    ...c.assertions.map((a) => ({ name: nameOf(a), ...check(a, { host, output, status, skills: t.skills }) })),
+    ...c.assertions.map((a) => ({ name: nameOf(a), ...check(a, { host, output, status, skills: t.skills, reads: t.reads }) })),
   ];
 }
 

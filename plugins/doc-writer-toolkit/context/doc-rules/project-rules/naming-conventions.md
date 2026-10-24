@@ -40,7 +40,7 @@ semantic relationship, set out below.
     funds", "Fund addition", or "How to add funds".
   - **Concept topic** (background knowledge): noun phrase — "Balance overview", "Transaction
     lifecycle". Not "Understanding balances".
-  - **API reference**: noun phrase matching the endpoint's resource — "Create payin transaction",
+  - **API reference**: noun phrase matching the endpoint's resource — "Create refund",
     "Retrieve transaction details".
 - **An explicit `slug:` frontmatter field does not license a semantically unrelated filename or
   title.** If a page declares a slug, it still names the same topic as the title and the filename.

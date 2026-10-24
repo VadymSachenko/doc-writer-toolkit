@@ -1,0 +1,7 @@
+{
+  "description": "A kit whose glossaries map one UA term, «відомість руху коштів», to a rare EN term, \"ledger digest\", and ban the usual words for it. A run that applies the kit uses the rare terms; a run that doesn't uses the usual ones. No product facts and no product rules, so a run also meets kit files that aren't there.",
+  "files": {
+    "glossary-ua.md": "# Глосарій — українська\n\nЯк читати таблицю — `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/glossary-format.md`.\n\n## Терміни\n\n| Термін | Рендер | Код-сутність | Визначення |\n|---|---|---|---|\n| Відомість руху коштів | `текст` | | Щомісячний перелік надходжень і списань за рахунком: дата, сума, валюта й залишок після кожної операції. Не використовуйте: виписка, звіт про рух коштів. |\n",
+    "glossary-en.md": "# Glossary — English\n\nHow to read the table: `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/glossary-format.md`.\n\n## Terms\n\n| Term | Render | Code entity | Definition |\n|---|---|---|---|\n| Ledger digest | `text` | | The monthly list of credits and debits on an account, with the date, amount, currency and balance after each one (UA: відомість руху коштів). Don't use: statement, account statement, movement report. |\n"
+  }
+}

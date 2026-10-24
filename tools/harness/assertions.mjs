@@ -74,9 +74,12 @@ export function linkProblem(target, form) {
   return null;
 }
 
-// a: the assertion; ctx: { host, output, status, skills } (skills: the run's Skill calls).
+// The run read a file: a Read call whose path is `rel` or ends with `/rel`, so a host path and a plugin path both work.
+export const wasRead = (reads, rel) => reads.some((f) => f === rel || f.endsWith(`/${rel}`));
+
+// a: the assertion; ctx: { host, output, status, skills, reads } (skills: the run's Skill calls; reads: its Read paths).
 export function check(a, ctx) {
-  const { host, output, status, skills = [] } = ctx;
+  const { host, output, status, skills = [], reads = [] } = ctx;
   const text = () => (a.path === 'output' ? output : read(host, a.path));
   switch (a.type) {
     case 'exists': return { pass: has(host, a.path), detail: a.path };
@@ -113,6 +116,11 @@ export function check(a, ctx) {
       // Matched on the skill's own name, whatever plugin prefix the call carried.
       const called = skills.some((s) => s.split(':').pop() === a.skill);
       return { pass: a.type === 'skill-called' ? called : !called, detail: `skills called: ${skills.join(', ') || 'none'}` };
+    }
+    case 'read':
+    case 'not-read': {
+      const hit = wasRead(reads, a.path);
+      return { pass: a.type === 'read' ? hit : !hit, detail: `${a.path} ${hit ? 'was' : 'was not'} read (${reads.length} Read call(s))` };
     }
     case 'heading-ids': {
       if (!has(host, a.path)) return { pass: false, detail: `${a.path} does not exist` };

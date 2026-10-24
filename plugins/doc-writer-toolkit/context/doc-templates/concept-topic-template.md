@@ -1,6 +1,6 @@
 ---
 title: {Meta title in sentence case noun phrase—for example, Transaction lifecycle}
-description: {Meta description—for example, Learn about how transactions flow through the Unicompay system}
+description: {Meta description—for example, Learn about how transactions flow through the system}
 last_update:
   date: {date in the m/d/yyyy format—for example, 2/22/2026}
 ---
@@ -115,6 +115,6 @@ Admonitions supplement the text; they don't replace it.
 
 ### Terminology and formatting
 
-- Terms come from `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-en.md`.
+- Terms come from the product kit's `glossary-en.md` (`${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`, "Product kit").
 - Expand an abbreviation at its first mention: "API token (Application Programming Interface)"; use the short form after that.
 - UI labels, status values, placeholders, and code-vs-concept rendering follow `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` (Ж1–Ж7) — don't restate those rules here.

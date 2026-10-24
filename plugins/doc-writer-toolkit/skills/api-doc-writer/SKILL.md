@@ -10,7 +10,7 @@ You are writing an English API reference page for the host product. The authorin
 ## Scope
 
 - **In scope:** one endpoint per page, following `${CLAUDE_PLUGIN_ROOT}/context/doc-templates/api-reference-template.md`.
-- **Out of scope:** partner cabinet user guides, concept topics for the partner cabinet, Ukrainian translations, sidebar changes. Narrative API pages that describe concepts (authentication overview, webhook delivery model, status lifecycle, error handling) are **out of scope** — use `concept-doc-writer` instead, which loads `api-integration-context.md` and handles concept topics for any domain including API. When the user requests a narrative API page, say: "This is a concept topic — I'll use concept-doc-writer which has the right template and API context loaded."
+- **Out of scope:** partner cabinet user guides, concept topics for the partner cabinet, Ukrainian translations, sidebar changes. Narrative API pages that describe concepts (authentication overview, webhook delivery model, status lifecycle, error handling) are **out of scope** — use `concept-doc-writer` instead, which loads the product kit's `product-facts.md` and handles concept topics for any domain including API. When the user requests a narrative API page, say: "This is a concept topic — I'll use concept-doc-writer which has the right template and API context loaded."
 
 ## Sources to load
 
@@ -21,10 +21,14 @@ Load these files at the start of the task. Do not load others unless the user re
 
 **Templates:**
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-templates/api-reference-template.md` — the authoritative structure. When the template and examples disagree, the template wins.
+- A template of the same name in `<kit>/templates/` replaces the plugin's (`project-paths.md`, "Product kit").
+
+**Product kit (the host's own files; `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`, "Product kit", resolves the folder and says what to do when none is declared or a file is missing):**
+- `<kit>/glossary-en.md` — canonical EN terminology, read with `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/glossary-format.md`.
+- `<kit>/product-facts.md` — cross-cutting facts about the product and its API. Always applicable background.
+- `<kit>/product-rules.md`, if present — rules for this product only (its name, key terms, UI section names). Rank 0, like `formatting-conventions.md`.
 
 **Project rules:**
-- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-en.md` — canonical EN terminology.
-- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/api-integration-context.md` — cross-cutting facts about the API (balances, transaction lifecycle, webhooks, disputes, auth, business rules). Always applicable background.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` — rank-0 project formatting conventions (what bold/italic/code font mean here, placeholder form, one-entity-one-render, code-entity vs. human concept). Outranks everything else loaded for this task, including this skill's own body. API reference pages are always English, so only its Core section and English section apply.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-selection.md` — shared screenshot selection procedure: three-folder model, four selection cases, sensitive-content screening, rename pattern, full-page vs. compact classification.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` — the shared page-to-page link contract (see the link rule in Step 5).

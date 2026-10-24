@@ -1,0 +1,41 @@
+{
+  "id": "tc-37c-writer-no-kit-says-so",
+  "description": "No product kit declared: user-guide-writer asks nothing about it, drafts and saves the page, and its report says that no kit, glossary or product rules were loaded.",
+  "fixture": {
+    "shape": "single"
+  },
+  "prompt": "use user-guide-writer for `portal/reports/monthly-digest/`. Skip questions and draft with your best guess, then save the page. Facts: the user selects **Звіти** in the menu, selects a month in the **Місяць** field and clicks **Завантажити**. The monthly statement of account movements downloads as a PDF: one row per credit or debit, with the date, amount, currency and the balance after it. The statement for a month is ready on the first day of the next month.",
+  "options": {
+    "maxTurns": 60,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "one page saved",
+      "type": "command",
+      "run": "test $(find portal/reports/monthly-digest -maxdepth 1 -name '*.md' | wc -l) -eq 1"
+    },
+    {
+      "name": "says no kit is declared",
+      "type": "match",
+      "path": "output",
+      "pattern": "\\b(no|not|without)\\b[^.\\n]{0,40}\\b(product )?kit\\b|\\bproduct kit\\b[^.\\n]{0,40}\\b(not declared|undeclared|none|absent)|\\b(no|without)\\b[^.\\n]{0,20}\\bglossary",
+      "flags": "i"
+    },
+    {
+      "name": "no plugin glossary read",
+      "type": "not-read",
+      "path": "project-rules/glossary-ua.md"
+    },
+    {
+      "type": "changed-only",
+      "paths": [
+        "portal/reports/monthly-digest/",
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}

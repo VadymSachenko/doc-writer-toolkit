@@ -2,7 +2,8 @@
   "id": "tc-17b-updater-uk-no-walkthrough-calque",
   "description": "A brief asks for an intro that 'walks you through' the page: the Ukrainian sentence states the page's purpose directly, with no «проведе вас через» and no «цей посібник», and nothing else changes.",
   "fixture": {
-    "shape": "single"
+    "shape": "single",
+    "kit": "migrated-701654b"
   },
   "setup": [
     "mkdir -p portal/transactions/.sources && cat > portal/transactions/.sources/change-brief.md <<'EOF'\n# Change brief — intro sentence\n\n## Page\nportal/transactions/transactions.md\n\n## What changed\n- The page needs a one-sentence intro at the top: this guide walks you through viewing and filtering transactions. — source: ticket #22\n\n## Where in the page\nThe intro paragraph under the title.\n\n## Screenshots\n- none\n\n## Terms\n- none\n\n## Do not touch\n- The sections «Фільтрування транзакцій» and «Повідомлення про платежі».\nEOF\ngit add -A && git commit -q -m 'Case setup'"

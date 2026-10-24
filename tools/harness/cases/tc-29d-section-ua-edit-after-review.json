@@ -2,7 +2,8 @@
   "id": "tc-29d-section-ua-edit-after-review",
   "description": "Both pages were reviewed and wait at UA approval; then the export page was edited by hand. With approve:all, the edited page is not approved: its fix and review run again, and nothing is translated.",
   "fixture": {
-    "shape": "single"
+    "shape": "single",
+    "kit": "migrated-701654b"
   },
   "setup": [
     "mkdir -p portal/reports/reports && cat > portal/reports/reports/reports.md <<'EOF'\n---\ntitle: Звіти\nsidebar_label: Звіти\n---\n\n# Звіти\n\n{/* ToDo: що таке звіти і для чого вони */}\nEOF",

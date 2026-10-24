@@ -1,0 +1,43 @@
+{
+  "id": "tc-37d-missing-kit-stops",
+  "description": "A product kit declared as `doc-kit/` that doesn't exist: doc-translator stops before writing, names the path, and changes nothing.",
+  "fixture": {
+    "shape": "single",
+    "kit": {
+      "files": {}
+    }
+  },
+  "setup": [
+    "git rm -q i18n/en/docusaurus-plugin-content-docs-portal/current/transactions/transactions.md && git commit -q -m 'Remove the EN page'"
+  ],
+  "prompt": "use doc-translator to translate `transactions/transactions`",
+  "options": {
+    "maxTurns": 40,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "names the missing kit path",
+      "type": "match",
+      "path": "output",
+      "pattern": "doc-kit/?"
+    },
+    {
+      "name": "says it stopped",
+      "type": "match",
+      "path": "output",
+      "pattern": "stop|did not|didn't|not (translate|write)|no (file|page)|nothing (was )?(written|changed)|cannot|can't|doesn't exist|does not exist|missing|not found",
+      "flags": "i"
+    },
+    {
+      "type": "absent",
+      "path": "i18n/en/docusaurus-plugin-content-docs-portal/current/transactions/transactions.md"
+    },
+    {
+      "type": "unchanged"
+    }
+  ]
+}

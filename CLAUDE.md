@@ -18,7 +18,8 @@ plugins/doc-writer-toolkit/
   .claude-plugin/plugin.json             # plugin manifest (name/description/author)
   skills/<name>/SKILL.md                 # one skill per directory
   commands/<name>.md                     # slash-command wrappers around skills
-  context/doc-rules/                     # style guide, UA grammar, glossary, project rules
+  context/doc-rules/                     # UA grammar, project rules, the glossary format
+  context/starter-kit/                   # skeletons for a host's product kit: glossaries, product facts, product rules
   context/doc-templates/                 # page templates (API reference, user guide, concept topic)
   context/locale-translation.md          # rules for translating into the further (non-EN) locales
   context/ui-labels.md                   # the UI label check procedure every docs task starts with
@@ -50,9 +51,14 @@ There's no build. What you'll actually run:
 
 ### Generic vs. product-specific seam
 
-Skill *logic* is generic and reusable for any Docusaurus doc project. Product-specific terminology and examples live only in `context/doc-rules/project-rules/` (`glossary-en.md`, `glossary-ua.md`, `api-integration-context.md`), `context/doc-rules/doc-examples/`, and `context/doc-templates/` — all currently specific to that one host product. Every skill references these exclusively through `${CLAUDE_PLUGIN_ROOT}`, so splitting a second product out into its own plugin would mean swapping that directory's contents, not touching skill logic. Keep new product-specific content inside that seam rather than hardcoding it into a skill.
+Skill *logic* and the plugin's content are generic and reusable for any Docusaurus doc project. Product content lives in the host, not here. Each host keeps a *product kit*: a folder in its own repo, outside every content root (`doc-kit/`), declared as `Product kit:` in its `CLAUDE.md`. It has fixed file names: `glossary-ua.md`, `glossary-en.md`, `product-facts.md`, `product-rules.md` and, optionally, `templates/` and a human-facing bilingual `glossary.md` that no skill loads. Kit files are rank 0, like `formatting-conventions.md`.
 
-`context/doc-rules/project-rules/glossary.md` is a bilingual EN↔UA *human-facing* alignment reference; skills themselves never load it directly — they load the language-specific `glossary-en.md`/`glossary-ua.md` instead.
+- `context/project-paths.md` ("Product kit") is the single source of truth for finding the kit. No kit declared: the run goes on with no glossary, product facts or product rules, and says so. A declared folder that doesn't exist: the run stops and names the path, writing nothing.
+- The plugin ships only neutral skeletons in `context/starter-kit/`, which skills name but never copy, and `context/doc-rules/glossary-format.md`, the generic contract for reading a glossary table that `formatting-conventions.md` Ж1, Ж3 and Ж4 rely on.
+- `context/doc-templates/` stays in the plugin, with neutral examples, because skill bodies refer to its structure. A host overrides a template with a file of the same name in `<kit>/templates/`.
+- `context/doc-rules/doc-examples/` is not product-specific: its worked examples are unrelated third-party content, kept as a prose voice and density reference.
+
+Keep new product content out of the plugin: a product term, fact or rule belongs in the host's kit. Some skill bodies still carry product rules (a term table, the assumed reader); moving them into the kit's `product-rules.md` is the next step.
 
 ### Skill file shape
 
@@ -87,6 +93,7 @@ No skill hardcodes a UA content root, an EN i18n root, a URL prefix, or a style-
 - **UA content root:** `docs/`
 - **EN i18n root:** `i18n/en/docusaurus-plugin-content-docs/current/`
 - **UA URL prefix:** `/`
+- **Product kit:** `doc-kit/`
 ```
 
 - `context/project-paths.md` is the single source of truth for the path-resolution procedure (and the ask-once, offer-to-persist fallback when a project hasn't declared these fields yet).
@@ -145,5 +152,7 @@ All five templates in `context/doc-templates/` are live — none are dead code. 
 - `user-guide-writer` loads `ua-user-guide-template.md` (`uk`) or `user-guide-template.md` (`en`).
 - `concept-doc-writer` loads `ua-concept-topic-template.md` (`uk`) or `concept-topic-template.md` (`en`).
 - `api-doc-writer` loads `api-reference-template.md` (language-agnostic).
+
+A host may override any of them with a file of the same name in its product kit's `templates/` (`context/project-paths.md`, "Product kit"). The plugin's templates keep neutral examples.
 
 Do **not** delete the EN-named templates. Known gap: they are thinner than their `ua-` twins (the skill bodies encode far more UA-specific structure), so `en` output is currently under-supported — treat that as a parity gap to close, not as evidence the files are unused. Always check what a skill actually loads before editing a template.

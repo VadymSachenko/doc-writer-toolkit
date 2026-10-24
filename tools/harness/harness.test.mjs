@@ -4,8 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { makeFixture } from './fixture.mjs';
-import { changedPaths, check, frontmatterProblem, headingIdProblems, linkProblem, pageLinks } from './assertions.mjs';
+import { kitSource, makeFixture, resolveKit } from './fixture.mjs';
+import { changedPaths, check, frontmatterProblem, headingIdProblems, linkProblem, pageLinks, wasRead } from './assertions.mjs';
 import { builtInChecks, harnessSettings, loadCase, overLimit, parseUsage, readTranscript, summarize } from './run.mjs';
 import { compare, verdict } from './compare.mjs';
 import { coin, mask } from './blind.mjs';
@@ -32,6 +32,53 @@ test('fixture: single has one pair and one commit; multi adds the API reference 
   const en = fs.readFileSync(path.join(multi, 'i18n/en/docusaurus-plugin-content-docs/current/transactions/transactions.md'), 'utf8').match(/^## /gm).length;
   assert.equal(uk - en, 1, 'the API EN page misses exactly one section');
   assert.throws(() => makeFixture(multi, 'multi'), /not empty/);
+});
+
+test('fixture: a product kit is declared and written; with no files it is declared only', () => {
+  const host = tmp();
+  const files = makeFixture(host, 'single', { kit: { files: { 'glossary-en.md': '# Glossary\n', 'templates/a.md': ['one\n', 'two\n'] } } });
+  assert.match(fs.readFileSync(path.join(host, 'CLAUDE.md'), 'utf8'), /^- \*\*Product kit:\*\* `doc-kit\/`$/m);
+  assert.ok(files.includes('doc-kit/glossary-en.md'));
+  assert.equal(fs.readFileSync(path.join(host, 'doc-kit/templates/a.md'), 'utf8'), 'one\ntwo\n');
+  assert.equal(git(host, 'status', '--porcelain'), '');
+
+  const missing = tmp();
+  makeFixture(missing, 'single', { kit: { folder: 'kit', files: {} } });
+  assert.match(fs.readFileSync(path.join(missing, 'CLAUDE.md'), 'utf8'), /Product kit:\*\* `kit\/`/);
+  assert.equal(fs.existsSync(path.join(missing, 'kit')), false);
+
+  const none = tmp();
+  makeFixture(none, 'single');
+  assert.doesNotMatch(fs.readFileSync(path.join(none, 'CLAUDE.md'), 'utf8'), /Product kit/);
+});
+
+test('fixture: kit sources from git, with lines and replacements; kit names resolve', () => {
+  assert.equal(kitSource({ git: 'HEAD:tools/harness/README.md', lines: '1,1-1' }), '# Skill harness\n# Skill harness\n');
+  assert.equal(kitSource({ git: 'HEAD:tools/harness/README.md', lines: '1', replace: [['Skill', 'Case']] }), '# Case harness\n');
+  assert.throws(() => kitSource({ git: 'HEAD:tools/harness/README.md', lines: '1', replace: [['nowhere', 'x']] }, 'a.md'), /a\.md: 'nowhere' is not in/);
+  assert.throws(() => resolveKit({ files: { 'a.md': { path: 'x' } } }), /a source is a string/);
+  assert.throws(() => resolveKit('no-such-kit'), /unknown kit 'no-such-kit'/);
+  const kit = resolveKit('migrated-701654b');
+  assert.equal(kit.folder, 'doc-kit/');
+  for (const f of ['glossary-ua.md', 'glossary-en.md', 'product-facts.md', 'product-rules.md', 'templates/ua-user-guide-template.md']) assert.ok(f in kit.files, f);
+  assert.equal(resolveKit(null), null);
+});
+
+test('assertions: read and not-read, from the Read calls of a transcript', () => {
+  const lines = [
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Read', input: { file_path: '/out/x/case/run-1/host/doc-kit/glossary-en.md' } }] } }),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Read', input: { file_path: '/out/x/.plugin/harness-x/context/doc-rules/glossary-format.md' } }] } }),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'cat doc-kit/product-rules.md' } }] } }),
+  ].join('\n');
+  const { reads } = readTranscript(lines);
+  assert.equal(reads.length, 2);
+  const run = (a) => check(a, { host: tmp(), output: '', status: '', reads }).pass;
+  assert.equal(run({ type: 'read', path: 'doc-kit/glossary-en.md' }), true);
+  assert.equal(run({ type: 'read', path: 'context/doc-rules/glossary-format.md' }), true);
+  assert.equal(run({ type: 'not-read', path: 'doc-kit/glossary-en.md' }), false);
+  assert.equal(run({ type: 'read', path: 'kit/glossary-en.md' }), false, 'a path matches whole segments');
+  assert.equal(run({ type: 'read', path: 'doc-kit/product-rules.md' }), false, 'only Read calls count');
+  assert.equal(wasRead([], 'a.md'), false);
 });
 
 test('assertions: files, patterns, frontmatter, links and the changed paths', () => {

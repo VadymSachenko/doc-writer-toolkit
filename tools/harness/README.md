@@ -25,7 +25,7 @@ node tools/harness/blind.mjs /tmp/harness main after
 | `rescore.mjs` | Re-checks a pass's saved runs against the cases' current assertions, with no model run, for a case whose assertion turned out to be wrong: `--out <dir> --label <name> --case <id>[,<id>…]`. Rewrites `assertions.json`, `summary.json` and `pass.json`; the cost stays as run |
 | `compare.mjs` | One row per case and assertion with both labels' pass counts, and a verdict: `regressed` (passed in every baseline run, fails in some after run), `fixed`, `same: pass`, `same: fail` or `mixed`. Exits 1 when anything regressed |
 | `blind.mjs` | For each case, run 1 of each label as `X` or `Y` by a seeded coin flip: `output.md` (the final answer) and `diff.patch`, with labels, sentinel names and run paths masked. The key goes to `<packet>.key.json`, beside the packet |
-| `fixture.mjs` | Writes a fixture host by hand, to look at it or try a prompt: `node tools/harness/fixture.mjs <dest> single\|multi [--locales de,pl] [--docusaurus]` |
+| `fixture.mjs` | Writes a fixture host by hand, to look at it or try a prompt: `node tools/harness/fixture.mjs <dest> single\|multi [--locales de,pl] [--docusaurus] [--kit <name>]` |
 
 Keep `--out` outside the repo: run outputs never belong in it.
 
@@ -65,8 +65,11 @@ Both shapes are neutral: a portal and an API, with no real product.
 - **`multi`:** adds an API reference pair, `docs/` and `i18n/en/docusaurus-plugin-content-docs/current/`. Its transactions page has 5 sections, and its EN page misses one. A webhooks page exists in this pair only and holds a `ToDo` marker. There are SME notes, a change brief, an API page, and `docs-archive/`, which shares the `docs` stem but is no root.
 - **`locales`:** further locales in `docusaurus.config.ts`, for the locale pipeline.
 - **`docusaurus`:** `package.json` and `sidebars.js`, so that `npm install && npx docusaurus build` works. Pair it with a `command` assertion.
+- **`kit`:** a product kit, declared as `Product kit:` in `CLAUDE.md` and written to its folder (`context/project-paths.md`, "Product kit"). Without it, no kit is declared. It is an object, `{ "folder": "doc-kit/", "files": { "<path in the kit>": <source> } }`, or the name of a file in `kits/` that holds one. A source is the file's text, `{ "git": "<rev>:<path>" }` read from this repo's history (optional `lines`, such as `"3-5,9"`, and `replace`, a list of `[old, new]` pairs each found exactly once), or a list of both, joined. A kit with no files is declared but not written: the case of a declared folder that is missing.
+  - `kits/migrated-701654b.json` is the product content the plugin carried up to `701654b`, as a host kit. The cases whose skills read that content then take it, so a baseline run and a run after the move read the same inputs. Its files come from git history, so it needs a clone with that commit.
+  - `kits/sentinel-term.json` maps one UA term to a rare EN term, for the cases that show a kit glossary is applied.
 
-The host's `CLAUDE.md` declares the fields of the "Documentation toolkit configuration" section.
+The host's `CLAUDE.md` declares the fields of the "Documentation toolkit configuration" section. The fixture's own pages are neutral; a case's kit may not be.
 
 ## Write a case
 
@@ -101,6 +104,7 @@ A `command` assertion gets no value from the setup. To compare with the state th
 | `diff-lines` | `path`, optional `allow` (a regex) and `flags` | every line the run removed from the file comes back among its added lines (list numbers aside), whole or with text appended to it, or matches `allow`: nothing outside what the brief names changed |
 | `skill-called`, `skill-not-called` | `skill` (its own name, without the plugin prefix) | the run called that skill through the `Skill` tool, or didn't |
 | `heading-ids` | `path` (a page, or a folder: every page under it), optional `except` (heading texts) | every heading from `##` down ends with a unique `{/* #id */}` and every `](#id)` link names one, per `heading-anchors.md`; headings listed in `except` may stay without |
+| `read`, `not-read` | `path` (from the host or the plugin root, such as `doc-kit/glossary-en.md` or `context/doc-rules/glossary-format.md`) | the run made a `Read` call on a file whose path is `path` or ends with `/path`, or made none. A file read another way, such as `cat` in `Bash`, doesn't count |
 | `unchanged` | optional `ignore` (path prefixes) | `git status` shows no change outside `ignore` |
 | `changed-only` | `paths` (path prefixes) | every changed path starts with one of them |
 | `command` | `run`, optional `timeoutSeconds` | the shell command exits 0 in the host, such as a build |
@@ -115,4 +119,4 @@ A `command` assertion gets no value from the setup. To compare with the state th
 node --test tools/harness/harness.test.mjs
 ```
 
-The tests cover the fixtures, the assertions, the built-in checks, the summaries, the compare verdicts and the blind-packet helpers. They make no model calls.
+The tests cover the fixtures and their kits, the assertions, the built-in checks, the summaries, the compare verdicts and the blind-packet helpers. They make no model calls.

@@ -2,7 +2,8 @@
   "id": "tc-29f-section-blocked-page-others-go-on",
   "description": "Both pages are translated. The export page is blocked at alignment (its EN page misses a heading); the other page's alignment is pending. The run retries the blocked page, which stays blocked, aligns the other page, and reports the block without re-translating or editing anything.",
   "fixture": {
-    "shape": "single"
+    "shape": "single",
+    "kit": "migrated-701654b"
   },
   "setup": [
     "mkdir -p portal/reports/reports && cat > portal/reports/reports/reports.md <<'EOF'\n---\ntitle: Звіти\nsidebar_label: Звіти\n---\n\n# Звіти\n\n{/* ToDo: що таке звіти і для чого вони */}\nEOF",
