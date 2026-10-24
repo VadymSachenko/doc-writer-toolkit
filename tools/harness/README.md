@@ -93,6 +93,7 @@ One JSON file per case in `cases/`, named after its `id`:
 | `match`, `no-match` | `path` (a file, or `output` for the final answer), `pattern` (a regex), optional `flags` | the text matches, or doesn't |
 | `frontmatter` | `path` | the file starts with a closed `---` block of `key: value` lines (nested maps and lists allowed) whose values parse as the strings they show |
 | `links` | `path`, `form: "root-relative"` | every Markdown link to a page starts with `/`, with no `.md` and no `./` or `../` |
+| `diff-lines` | `path`, optional `allow` (a regex) and `flags` | every line the run removed from the file comes back among its added lines (list numbers aside), or matches `allow`: nothing outside what the brief names changed |
 | `unchanged` | optional `ignore` (path prefixes) | `git status` shows no change outside `ignore` |
 | `changed-only` | `paths` (path prefixes) | every changed path starts with one of them |
 | `command` | `run`, optional `timeoutSeconds` | the shell command exits 0 in the host, such as a build |

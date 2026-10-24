@@ -79,6 +79,16 @@ export function check(a, ctx) {
       const bad = pageLinks(text()).map((t) => [t, linkProblem(t, a.form)]).filter(([, p]) => p);
       return { pass: !bad.length, detail: bad.length ? bad.map(([t, p]) => `${t}: ${p}`).join('; ') : `all ${a.form}` };
     }
+    case 'diff-lines': {
+      // Every line the run removed from the file comes back among the added lines (list numbers aside), or matches `allow`.
+      const diff = spawnSync('git', ['diff', '-U0', '--', a.path], { cwd: host, encoding: 'utf8' }).stdout ?? '';
+      const lines = diff.split('\n').filter((l) => /^[-+]/.test(l) && !/^(---|\+\+\+) /.test(l));
+      const strip = (l) => l.slice(1).replace(/^(\s*)\d+\. /, '$1');
+      const added = new Set(lines.filter((l) => l.startsWith('+')).map(strip));
+      const allow = a.allow ? new RegExp(a.allow, a.flags ?? '') : null;
+      const bad = lines.filter((l) => l.startsWith('-')).map(strip).filter((l) => !added.has(l) && !allow?.test(l));
+      return { pass: !bad.length, detail: bad.length ? `changed outside what the brief names: ${bad.slice(0, 5).join(' | ')}` : 'every changed line is one the brief names' };
+    }
     case 'unchanged': {
       const changed = changedPaths(status).filter((p) => !(a.ignore ?? []).some((i) => p.startsWith(i)));
       return { pass: !changed.length, detail: changed.length ? `changed: ${changed.join(', ')}` : 'no changes' };

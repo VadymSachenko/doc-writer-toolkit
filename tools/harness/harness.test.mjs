@@ -55,6 +55,13 @@ test('assertions: files, patterns, frontmatter, links and the changed paths', ()
   assert.equal(run({ type: 'command', run: 'test -f new.md' }), true);
   assert.equal(run({ type: 'command', run: 'exit 3' }), false);
   assert.equal(run({ type: 'nonsense' }), false);
+  const page = 'portal/transactions/transactions.md';
+  const before = fs.readFileSync(path.join(host, page), 'utf8');
+  fs.writeFileSync(path.join(host, page), before.replace('1. У меню', '0. Відкрийте кабінет.\n1. У меню').replace('**Фільтри**', '**Фільтрування**'));
+  const after = { ...ctx, status: git(host, 'status', '--porcelain') };
+  assert.equal(check({ type: 'diff-lines', path: page, allow: 'Фільтри' }, after).pass, true);
+  assert.equal(check({ type: 'diff-lines', path: page }, after).pass, false);
+  fs.writeFileSync(path.join(host, page), before);
 });
 
 test('assertions: helpers', () => {
