@@ -21,7 +21,7 @@ node tools/harness/blind.mjs /tmp/harness main after
 
 | Command | Does |
 |---|---|
-| `run.mjs` | Runs each case `--runs` times (default 3) and prints pass counts per assertion and the cost (the CLI's API-price estimate; on a plan, see `/usage` instead). `--resume` continues a pass the guard stopped. `--case` takes ids from `cases/` or paths, comma-separated. `--model` overrides the model, for cheap smoke runs. `--out` defaults to the OS temp folder |
+| `run.mjs` | Runs each case `--runs` times (default 3) and prints pass counts per assertion and the cost (the CLI's API-price estimate; on a plan, see `/usage` instead). `--resume` continues a pass the guard stopped or a crash ended. `--case` takes ids from `cases/` or paths, comma-separated. `--model` overrides the model, for cheap smoke runs. `--out` defaults to the OS temp folder |
 | `compare.mjs` | One row per case and assertion with both labels' pass counts, and a verdict: `regressed` (passed in every baseline run, fails in some after run), `fixed`, `same: pass`, `same: fail` or `mixed`. Exits 1 when anything regressed |
 | `blind.mjs` | For each case, run 1 of each label as `X` or `Y` by a seeded coin flip: `output.md` (the final answer) and `diff.patch`, with labels, sentinel names and run paths masked. The key goes to `<packet>.key.json`, beside the packet |
 | `fixture.mjs` | Writes a fixture host by hand, to look at it or try a prompt: `node tools/harness/fixture.mjs <dest> single\|multi [--locales de,pl] [--docusaurus]` |
@@ -52,7 +52,9 @@ Every run is a full session on your plan. Measured on one plan: one run of `tc-0
    - `sentinel-loaded`: the session's plugins include `harness-<label>@inline`, which proves it read the tree under review;
    - `no-foreign-skill`: no `Skill` call went to another copy of this plugin.
 
-`<out>/<label>/<case>/summary.json` holds the pass counts and the cost per case, and `<out>/<label>/pass.json` holds the whole pass.
+Before the first run, every case loads and every `pattern` compiles, so a broken case exits 2 without spending anything. JavaScript takes no inline flags such as `(?i)`; put them in `flags`.
+
+`<out>/<label>/<case>/summary.json` holds the pass counts and the cost per case, and `<out>/<label>/pass.json` holds the whole pass. `pass.json` is saved after every case, so `--resume` also continues a pass that crashed.
 
 ## Fixtures
 
