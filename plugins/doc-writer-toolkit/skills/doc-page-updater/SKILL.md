@@ -16,7 +16,7 @@ You are changing an existing, approved page so that it is true again after a pro
 
 - The change brief (path given by the caller; format in `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/input-templates/change-brief-template.md`).
 - The target page.
-- `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — resolve the host project's declarations from the **host project path the caller passes** (or the current project if none is passed). Refuse a page that lives under the EN i18n root: this skill edits the authored language only.
+- `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — resolve the host project's declarations from the **host project path the caller passes** (or the current project if none is passed). Resolve the page's root pair there too. Refuse a page under any root pair's EN i18n root: this skill edits the authored language only.
 - The template matching the page's type, to know where a new block belongs: `${CLAUDE_PLUGIN_ROOT}/context/doc-templates/ua-user-guide-template.md`, `ua-concept-topic-template.md`, `api-reference-template.md` (or the EN equivalents on an `en` project). Detect the type from the page's structure and frontmatter.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-ua.md` (or `glossary-en.md`) and `formatting-conventions.md` — terms and formatting are rank 0.
 - `${CLAUDE_PLUGIN_ROOT}/context/changed-blocks.md` — the block vocabulary used in the report.
