@@ -222,13 +222,14 @@ Failures have a `check` name; warnings never block.
 
 | Check | Fails when |
 |---|---|
-| `frontmatter` | Keys differ (`last_update` excepted), a non-prose value changed, or `title` / `description` still equal the UA text (a `title` may equal it when the locale's term memory or label store has that string, as for a loanword). |
+| `frontmatter` | Keys differ (`last_update` excepted), a non-prose value changed, or `title` / `description` still equal the UA text (a `title` may equal it when the locale's term memory or label store has that string, as for a loanword). Also a one-line value that would not parse as the string it shows: an unquoted `: ` or ` #`, a leading YAML indicator, or an unclosed quote; the failure names the key. |
 | `headings` | Count, levels or `{/* #anchor */}` comments differ. |
 | `structure` | A section's sequence of blocks differs from UA (a paragraph split or merged). Sentences inside a block may move freely. This keeps later runs mappable. |
 | `counts` | List items, numbered steps, table rows or admonition types per section differ. |
 | `code` | A fenced code block differs. Mermaid flowcharts compare with their labels blanked; other diagram types by first line and length. |
 | `inline-code` | A code-like inline span (no Cyrillic) is missing or changed. Inline code that holds Cyrillic is UI text and is translated. |
 | `links` | Link targets or URLs differ (as a multiset, so sentences may be reordered). |
+| `link-form` | A page link is not a site-root-relative route, or keeps `.md`/`.mdx` (`context/doc-rules/project-rules/internal-links.md`). It fails even when the UA page has the same link, because the locale build breaks on it: fix the UA page. Links to assets, anchors and other sites are exempt. |
 | `images` | Image paths differ. |
 | `tags` | MDX/HTML tag names, attribute names or non-prose attribute values differ. `title`, `alt`, `label`, `description`, `caption`, `placeholder`, `aria-label`, `summary` values are prose. |
 | `markers` | The number of `ToDo` / `NEEDS CONFIRMATION` markers, or of other `{/* … */}` comments, differs. |

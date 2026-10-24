@@ -1849,3 +1849,41 @@ test('root pairs: declarations that cannot work are configuration errors (exit 2
   await withLines(`- **Primary UA content root:** \`${G_UA}/\`\n- **Primary EN i18n root:** \`${G_EN}/\`\n`);
   assert.match((await cli(f.dir, 'status')).out.error, /can't be called 'primary'/);
 });
+
+test('check: frontmatter that would not parse, a page link in file form, and a broken image fail; record refuses the page', async () => {
+  const f = await translatedFixture();
+  const cases = [
+    ['an unquoted ": " in description', (t) => edit(t, 'description: Filtrelerle nasıl çalışacağınızı öğrenin', 'description: Filtreler: nasıl çalışacağınızı öğrenin'), 'frontmatter', /'description'/],
+    ['a broken quote in title', (t) => edit(t, 'title: Filtreler', "title: 'Filtreler"), 'frontmatter', /'title'/],
+    ['a quoted ": " passes', (t) => edit(t, 'description: Filtrelerle nasıl çalışacağınızı öğrenin', "description: 'Filtreler: nasıl çalışacağınızı öğrenin'"), null],
+  ];
+  for (const [name, mutate, expected, message] of cases) {
+    const r = await checks(f, mutate);
+    if (expected === null) {
+      assert.equal(r.code, 0, `${name}: ${JSON.stringify(r.failures)}`);
+      continue;
+    }
+    assert.equal(r.code, 1, name);
+    assert.ok(r.checks.includes(expected), `${name}: expected '${expected}' in ${JSON.stringify(r.checks)}`);
+    assert.match(r.failures.find((x) => x.check === expected).message, message, name);
+  }
+
+  // A page link in file form fails even when the UA page has the same link: the locale build breaks on it either way.
+  const uaFile = path.join(f.dir, 'docs/filters/filters.md');
+  const ua = await fs.readFile(uaFile, 'utf8');
+  await fs.writeFile(uaFile, ua.replace('(/filters/)', '(/docs/filters/filters.md)'));
+  let r = await checks(f, (t) => edit(t, '(/filters/)', '(/docs/filters/filters.md)'));
+  assert.equal(r.code, 1);
+  assert.ok(r.checks.includes('link-form'), JSON.stringify(r.checks));
+  assert.match(r.failures.find((x) => x.check === 'link-form').message, /UA page/);
+  await fs.writeFile(uaFile, ua);
+
+  // A broken image link fails.
+  r = await checks(f, (t) => edit(t, '![Filtre penceresi](./.assets/dialog.png)', '![Filtre penceresi](./.assets/missing.png)'));
+  assert.ok(r.checks.includes('assets') || r.checks.includes('images'), JSON.stringify(r.checks));
+
+  // record refuses a page whose checks fail.
+  await f.write(`${TR_ROOT}/filters/filters.md`, edit(TR, 'description: Filtrelerle nasıl çalışacağınızı öğrenin', 'description: Filtreler: nasıl çalışacağınızı öğrenin'));
+  const rec = await cli(f.dir, 'record', 'filters', '--locales', 'tr');
+  assert.notEqual(rec.code, 0);
+});
