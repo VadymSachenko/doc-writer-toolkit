@@ -13,7 +13,7 @@ const claude = process.env.CLAUDE_BIN || 'claude';
 
 const STEPS = [
   { id: 'lint', cmd: 'node', args: ['tools/lint-plugin.mjs'] },
-  { id: 'tools-tests', cmd: 'node', args: ['--test', 'tools/lint-plugin.test.mjs', 'tools/check-visibility.test.mjs'] },
+  { id: 'tools-tests', cmd: 'node', args: ['--test', 'tools/lint-plugin.test.mjs', 'tools/check-visibility.test.mjs', 'tools/harness/harness.test.mjs'] },
   { id: 'ui-labels', cmd: 'npm', args: ['test'], cwd: `${scripts}/ui-labels` },
   { id: 'locale-sync', cmd: 'npm', args: ['test'], cwd: `${scripts}/locale-sync` },
   { id: 'validate', cmd: claude, args: ['plugin', 'validate', 'plugins/doc-writer-toolkit'] },

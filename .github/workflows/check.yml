@@ -32,7 +32,7 @@ jobs:
         run: node tools/lint-plugin.mjs
       - name: Test the tools
         if: ${{ !cancelled() }}
-        run: node --test tools/lint-plugin.test.mjs tools/check-visibility.test.mjs
+        run: node --test tools/lint-plugin.test.mjs tools/check-visibility.test.mjs tools/harness/harness.test.mjs
       - name: Test ui-labels
         if: ${{ !cancelled() }}
         run: npm test
