@@ -1,6 +1,6 @@
 ---
 name: convert-sme-input
-description: Converts raw SME interview notes, meeting transcripts, or rough text into a structured Markdown source file for this project's documentation. Use when you need to turn unprocessed SME input into a clean `.sources/sme-interview.md`, compare raw SME files against processed source notes, or extract facts for guide writing.
+description: 'Converts raw SME interview notes, meeting transcripts, or rough text into a structured `.sources/sme-interview.md` for this project''s documentation, compares raw SME files against processed notes, or extracts facts for guide writing. Explicit invocation only: use explicitly ("convert-sme-input", "use convert-sme-input on .sources/"), or by name from /doc-from-interview; never on a loose request about notes or a transcript.'
 ---
 
 # convert-sme-input
@@ -181,3 +181,11 @@ Before finishing:
   - **If the input was a video transcript:** for every section that describes a screen, button, form, or other UI element, count its timestamp citations. Zero citations in a UI-describing section means the self-check step was skipped — say so plainly. (Calibration: a 42 KB `sme-interview.md` with a single timestamp citation total is a failure.)
   - **If the input was `app-notes.md` or no `.sources/frames/` folder exists:** timestamps are not applicable. Instead confirm that every UI fact cites a screenshot filename or "observed directly" as its source. Zero sourced facts in a UI section is the failure condition here, not zero timestamps.
 - The final response explains what changed and whether anything needs SME follow-up.
+
+## Explicit invocation examples
+
+- "use convert-sme-input on `docs/payments/.sources/`"
+- "convert-sme-input: turn `.sources/meeting-transcript.txt` into `sme-interview.md`"
+- By name, from `/doc-from-interview` (its conversion step).
+
+A loose request ("here are my meeting notes") doesn't start this skill: ask whether to run it.

@@ -46,8 +46,6 @@ const contractGap = (skill, part, reason) => ({ file: `${PLUGIN}/skills/${skill}
 
 // Findings that exist on main today, with the reason each is open. Matched on file and message prefix.
 export const KNOWN_GAPS = [
-  ...['cleanup-unused-screenshots', 'convert-sme-input', 'extract-sme-screenshots']
-    .map((s) => contractGap(s, 'invocation examples', 'examples come with the explicit-invocation wording')),
   ...['cleanup-unused-screenshots', 'doc-style-fixer', 'extract-sme-screenshots']
     .map((s) => contractGap(s, 'self-review', 'no self-review written yet')),
   ...[
