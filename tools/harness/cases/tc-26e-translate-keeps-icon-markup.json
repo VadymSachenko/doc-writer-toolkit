@@ -1,11 +1,11 @@
 {
   "id": "tc-26e-translate-keeps-icon-markup",
-  "description": "doc-translator keeps an inline icon's <img require> markup byte for byte with its empty alt, names the control after the icon, and carries the branch-3 marker over without inventing a name for the unnamed button.",
+  "description": "doc-translator keeps inline icon markup (<img require> with its empty alt, and an <Icon> component) byte for byte, copies the icon crops into the EN .assets/, names the control after the icon, carries the branch-3 marker over without inventing a name, and doesn't offer to declare Icon rendering.",
   "fixture": {
     "shape": "single"
   },
   "setup": [
-    "mkdir -p portal/payments/delete-payment/.assets && echo iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII= | base64 --decode > portal/payments/delete-payment/.assets/delete-icon.png && echo iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII= | base64 --decode > portal/payments/delete-payment/.assets/dots-vertical-icon.png && cat > portal/payments/delete-payment/delete-payment.md <<'EOF'\n---\ntitle: Видалення платежу\nsidebar_label: Видалення платежу\n---\n\n# Видалення платежу\n\nНа сторінці **Платежі** ви видаляєте або архівуєте платіж, який ще не оброблено.\n\n## Видалення платежу зі списку {/* #delete-a-payment */}\n\n1. У меню виберіть **Платежі**.\n2. У рядку платежу натисніть кнопку <img src={require('./.assets/delete-icon.png').default} height=\"20\" alt=\"\" /> **Видалити**.\n3. У вікні **Видалення платежу** натисніть **Видалити**, щоб підтвердити.\n\n**Результат:** платіж зникає зі списку.\n\n## Архівування платежу {/* #archive-a-payment */}\n\n1. У рядку платежу натисніть кнопку з трьома крапками <img src={require('./.assets/dots-vertical-icon.png').default} height=\"20\" alt=\"\" />. {/* NEEDS CONFIRMATION: назва кнопки з трьома крапками — у доказах немає підказки чи aria-label */}\n2. У меню виберіть **Архівувати**.\n\n**Результат:** платіж переходить на вкладку **Архів**.\nEOF\ngit add -A && git commit -q -m 'Case setup'"
+    "mkdir -p portal/payments/delete-payment/.assets && echo iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII= | base64 --decode > portal/payments/delete-payment/.assets/delete-icon.png && echo iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII= | base64 --decode > portal/payments/delete-payment/.assets/dots-vertical-icon.png && cat > portal/payments/delete-payment/delete-payment.md <<'EOF'\n---\ntitle: Видалення платежу\nsidebar_label: Видалення платежу\n---\n\n# Видалення платежу\n\nНа сторінці **Платежі** ви видаляєте або архівуєте платіж, який ще не оброблено.\n\n## Видалення платежу зі списку {/* #delete-a-payment */}\n\n1. У меню виберіть **Платежі**.\n2. У рядку платежу натисніть кнопку <img src={require('./.assets/delete-icon.png').default} height=\"20\" alt=\"\" /> **Видалити**.\n3. У вікні **Видалення платежу** натисніть **Видалити**, щоб підтвердити.\n\n**Результат:** платіж зникає зі списку.\n\n## Редагування платежу {/* #edit-a-payment */}\n\n1. У рядку платежу натисніть кнопку <Icon icon=\"mdi:pencil-outline\" height=\"20\" /> **Редагувати**.\n2. У вікні **Редагування платежу** змініть **Призначення** й натисніть **Зберегти**.\n\n**Результат:** у списку видно нове призначення.\n\n## Архівування платежу {/* #archive-a-payment */}\n\n1. У рядку платежу натисніть кнопку з трьома крапками <img src={require('./.assets/dots-vertical-icon.png').default} height=\"20\" alt=\"\" />. {/* NEEDS CONFIRMATION: назва кнопки з трьома крапками — у доказах немає підказки чи aria-label */}\n2. У меню виберіть **Архівувати**.\n\n**Результат:** платіж переходить на вкладку **Архів**.\nEOF\ngit add -A && git commit -q -m 'Case setup'"
   ],
   "prompt": "use doc-translator to translate `payments/delete-payment/delete-payment`",
   "options": {
@@ -37,6 +37,28 @@
       "type": "match",
       "path": "i18n/en/docusaurus-plugin-content-docs-portal/current/payments/delete-payment/delete-payment.md",
       "pattern": "<img src=\\{require\\('\\./\\.assets/dots-vertical-icon\\.png'\\)\\.default\\} height=\"20\" alt=\"\" />"
+    },
+    {
+      "name": "the <Icon> component kept byte for byte",
+      "type": "match",
+      "path": "i18n/en/docusaurus-plugin-content-docs-portal/current/payments/delete-payment/delete-payment.md",
+      "pattern": "<Icon icon=\"mdi:pencil-outline\" height=\"20\" />"
+    },
+    {
+      "name": "the trash crop copied into the EN .assets/",
+      "type": "exists",
+      "path": "i18n/en/docusaurus-plugin-content-docs-portal/current/payments/delete-payment/.assets/delete-icon.png"
+    },
+    {
+      "name": "the three-dots crop copied into the EN .assets/",
+      "type": "exists",
+      "path": "i18n/en/docusaurus-plugin-content-docs-portal/current/payments/delete-payment/.assets/dots-vertical-icon.png"
+    },
+    {
+      "name": "no offer to declare the icon render",
+      "type": "no-match",
+      "path": "output",
+      "pattern": "Icon rendering"
     },
     {
       "name": "a bold English name after the trash icon",

@@ -67,7 +67,7 @@ Every bucket 2 finding gets its own explicit decision — the point is that the 
 
 The fix would change terminology or structure, and the skill has no basis to prefer one outcome over another — that basis lives in a person's knowledge of the product or the glossary, not in the report.
 
-Examples: translating an English term that has no approved glossary entry yet, renaming a heading, deciding whether a bolded phrase is a UI label (bold stays) or emphasis on a concept (bold must go and the phrase becomes plain text).
+Examples: translating an English term that has no approved glossary entry yet, renaming a heading, deciding whether a bolded phrase is a UI label (bold stays) or emphasis on a concept (bold must go and the phrase becomes plain text). An existing page's icon markup that differs from Ж8 of `formatting-conventions.md` (an `<Icon>` with a color or another height, for example) is always this bucket: the site's render may need it, so never rewrite it as a mechanical fix.
 
 For this bucket, **do not propose a single fix** — ask a question instead, and if the user gives no answer, leave the text exactly as-is and list it in the final report under "left unresolved."
 

@@ -1,6 +1,6 @@
 {
   "id": "tc-26g-identify-icon-no-network-fallback",
-  "description": "iconify-component declared, no id in the evidence, network tools blocked: /identify-icon reports no Iconify id, falls back to a crop, a marker or a ToDo, and edits no page.",
+  "description": "iconify-component declared, no id in the evidence, network and crop tools blocked: /identify-icon reports no Iconify id, falls back to a ToDo for the crop, and edits no page.",
   "fixture": {
     "shape": "single"
   },
@@ -28,16 +28,16 @@
       "skill": "identify-ui-icon"
     },
     {
-      "name": "a fallback",
+      "name": "a ToDo for the crop (no crop tool allowed)",
       "type": "match",
       "path": "output",
-      "pattern": "NEEDS CONFIRMATION|ToDo|crop"
+      "pattern": "ToDo"
     },
     {
-      "name": "no Iconify id reported",
+      "name": "no Iconify id anywhere in the output",
       "type": "no-match",
       "path": "output",
-      "pattern": "Iconify id: *`?[a-z0-9-]+:[a-z0-9-]+"
+      "pattern": "\\b(mdi|lucide|tabler|material-symbols|uiw):[a-z0-9-]+"
     },
     {
       "name": "no page edited",

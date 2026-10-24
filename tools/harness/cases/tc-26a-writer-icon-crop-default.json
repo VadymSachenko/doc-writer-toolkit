@@ -38,6 +38,17 @@
       "run": "grep -qE \"delete-icon\\.png'\\)\\.default\\}[^>]*/> *\\*\\*Видалити\\*\\*\" portal/payments/delete-payment/*.md"
     },
     {
+      "name": "the crop markup is Ж8's: height 20, empty alt, no width",
+      "type": "command",
+      "run": "t=$(grep -ohE \"<img src=\\{require\\('\\./\\.assets/delete-icon\\.png'\\)\\.default\\}[^>]*/>\" portal/payments/delete-payment/*.md) && test -n \"$t\" && echo \"$t\" | grep -q 'height=\"20\"' && echo \"$t\" | grep -q 'alt=\"\"' && ! echo \"$t\" | grep -q 'width='"
+    },
+    {
+      "name": "the report notes the default render",
+      "type": "match",
+      "path": "output",
+      "pattern": "screenshot-crop"
+    },
+    {
       "name": "no <Icon> component under screenshot-crop",
       "type": "command",
       "run": "! grep -q '<Icon' portal/payments/delete-payment/*.md"

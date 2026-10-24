@@ -33,9 +33,9 @@
       "run": "grep -q 'dots-vertical-icon.png' portal/payments/archive-payment/*.md"
     },
     {
-      "name": "a marker asks for the name",
+      "name": "a NEEDS CONFIRMATION marker asks for the control's name",
       "type": "command",
-      "run": "grep -qiE 'NEEDS CONFIRMATION:[^}]*(назв|підказ|aria-label|tooltip|name)' portal/payments/archive-payment/*.md"
+      "run": "grep -ohE '\\{/\\* NEEDS CONFIRMATION:[^}]*\\*/\\}' portal/payments/archive-payment/*.md | grep -iE 'назв[аиуі]|name' | grep -qiE 'кнопк|елемент|піктограм|button|control|icon'"
     },
     {
       "name": "no bold name right after the icon",

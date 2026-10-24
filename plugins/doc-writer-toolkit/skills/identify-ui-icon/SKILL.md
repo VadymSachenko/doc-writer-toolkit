@@ -31,43 +31,46 @@ If neither a crop nor a screenshot with the control's place is given, ask once f
 
 ## Workflow
 
-1. **Resolve the render.** Read `Icon rendering:` as `project-paths.md` describes. If it is absent, use `screenshot-crop`, say so, and offer once to persist the declaration. What each value needs:
+1. **Resolve the render.** Read `Icon rendering:` as `project-paths.md` describes. If it is absent, follow Ж8: when the site's pages already use `<Icon`, ask once which render the site uses (offer `iconify-component` first), offer to persist the answer, and stop until it comes; otherwise use `screenshot-crop`, say so, and offer once to persist the declaration. What each value needs:
    - `iconify-component`: an Iconify id;
    - `iconify-svg`: an Iconify id and its SVG file;
    - `screenshot-crop`: a crop file (no id);
    - `describe`: nothing. Report "no image needed" and stop.
-2. **Reuse the evidence.** In `app-notes.md`, the control's line under "Icon-only controls" may give an Iconify id taken from the DOM. For `screenshot-crop`, a `*-icon.png` in `.assets/` that shows this control is the crop. If the evidence gives what the render needs, make no network call: go to step 11 for `iconify-component` and `screenshot-crop`, or to step 7 for `iconify-svg`, which still fetches the SVG.
-3. **`screenshot-crop`: crop, don't search.** Go to step 9. The render needs no id.
-4. **Name the glyph.** Write one to three English search keywords and a synonym or two, biased by what the control does when the evidence says: a trash can on a row is `delete`, `trash`; a floppy disk is `save`, `content-save`; three vertical dots are `dots-vertical`, `more`. The keywords serve the search only. They never become the control's name on the page.
-5. **Search.**
+2. **Reuse the evidence.** In `app-notes.md`, the control's line under "Icon-only controls" may give an Iconify id taken from the DOM. For `screenshot-crop`, a `*-icon.png` in `.assets/` that shows this control is the crop. If the evidence gives what the render needs, make no network call: go to step 13 for `iconify-component` and `screenshot-crop`, or to step 8 for `iconify-svg`, which still fetches the SVG.
+3. **`screenshot-crop`: crop, don't search.** Go to step 10. The render needs no id.
+4. **Make a scratch folder.** Before the first download, run `mktemp -d` once and reuse the path it prints in every later command (shell variables don't survive between commands). Candidate SVGs, rasterized PNGs and API responses go there, never into `.assets/` or the page folder. Only the final chosen file goes to `.assets/` (steps 7 and 9).
+5. **Name the glyph.** Write one to three English search keywords and a synonym or two, biased by what the control does when the evidence says: a trash can on a row is `delete`, `trash`; a floppy disk is `save`, `content-save`; three vertical dots are `dots-vertical`, `more`. The keywords serve the search only. They never become the control's name on the page.
+6. **Search.**
    - Pick the icon sets once per run. Use the sets the site already uses, most used first: `grep -rhoE 'icon="[a-z0-9-]+:' <UA content root> | sort | uniq -c | sort -rn`. With none found, use `mdi,lucide,tabler,material-symbols`. A caller's `prefixes:` wins.
    - Run `curl -sS --fail --max-time 10 --retry 3 'https://api.iconify.design/search?query=<keyword>&prefixes=<sets>&limit=32'` and keep only what you need: `jq -c '{icons, licenses: ((.collections // {}) | map_values(.license.spdx // .license.title))}'` (or the same in `python3 -c`). `limit` can't go below 32.
    - If the list is thin, try up to two synonyms.
-6. **Choose.**
+7. **Choose.**
    - One name matches the glyph and the action without doubt (`mdi:delete-outline` for an outlined trash can): take it, with no visual check.
-   - Several names fit and differ in shape (vertical or horizontal dots, filter or sliders, share or export, outline or filled): check visually. Fetch each candidate's SVG (`https://api.iconify.design/<prefix>:<name>.svg`), rasterize it locally to a small PNG (`rsvg-convert -w 64`, `resvg -w 64`, or `magick -background white`), Read the PNGs and compare them with the control. Don't use the API's `.png` endpoint: it returns an empty body.
-   - Probe for a rasterizer once (`command -v rsvg-convert resvg magick convert`). With none, say so, skip the visual check, and treat an ambiguous match as no match (step 8).
-7. **Confirm the id and read the license.**
-   - Fetch the id's SVG. A non-empty `<svg` body proves the id exists. An id from the evidence is confirmed the same way when the render saves its SVG.
-   - Read the set's license: the `licenses` kept in step 5, or `curl … 'https://api.iconify.design/collections?prefixes=<prefix>'`, field `<prefix>.license`.
+   - Several names fit and differ in shape (vertical or horizontal dots, filter or sliders, share or export, outline or filled): check visually. Fetch each candidate's SVG into the scratch folder (`https://api.iconify.design/<prefix>/<name>.svg`; the `<prefix>:<name>` form returns `404`), rasterize it there to a small PNG (`rsvg-convert -w 64`, `resvg -w 64`, or `magick -background white`), Read the PNGs and compare them with the control. Don't use the API's `.png` endpoint: it returns an empty body.
+   - Probe for a rasterizer once (`command -v rsvg-convert resvg magick convert`). With none, say so, skip the visual check, and treat an ambiguous match as no match (step 9).
+8. **Confirm the id and read the license.**
+   - Check that the id exists: `curl -sS --fail --max-time 10 --retry 3 'https://api.iconify.design/<prefix>.json?icons=<name>'`. The id exists when the answer lists it under `icons` and not under `not_found`. One call checks several names of one set. For `iconify-svg`, fetch `https://api.iconify.design/<prefix>/<name>.svg` into the scratch folder instead: a non-empty `<svg` body proves the id. An id from the evidence is confirmed the same way when the render saves its SVG.
+   - Read the set's license: the `licenses` kept in step 6, or `curl … 'https://api.iconify.design/collections?prefixes=<prefix>'`, field `<prefix>.license`.
    - Permissive: `MIT`, `Apache-2.0`, `ISC`, `BSD-2-Clause`, `BSD-3-Clause`, `CC0-1.0`, `Unlicense`. Any other license, or none, is flagged.
-   - `iconify-svg`: save the SVG as `./.assets/<name>-icon.svg` only from a permissive set. For a flagged set, save nothing: report the set and its license, and offer an icon from a permissive set or a crop. Save it only after the user confirms that set.
+   - `iconify-svg`: copy the SVG from the scratch folder to `./.assets/<name>-icon.svg` only from a permissive set, and only after checking that the name is free (step 10). For a flagged set, save nothing: report the set and its license, and offer an icon from a permissive set or a crop. Save it only after the user confirms that set.
    - `iconify-component`: nothing is saved. Report the license with the id.
-8. **Fall back. Never guess an id.** When there is no confident match, the glyph is a brand or app-specific mark, the set is flagged and not confirmed, or the API is unavailable:
-   - if a screenshot shows the control, crop it (step 9). The page then shows this one icon in the `screenshot-crop` form, whatever `Icon rendering:` says;
-   - with no screenshot, return `{/* NEEDS CONFIRMATION: Iconify id for the <glyph> button */}` for the writer to place.
-9. **Crop.** Cut the control's bounding box from the screenshot with a margin of about 2 px, at the screenshot's own scale. Save it as PNG to `./.assets/<name>-icon.png` with `magick <screenshot> -crop <W>x<H>+<X>+<Y> +repage <file>` or Pillow. Read the crop once: it shows the whole control and nothing else, with no text, no data and no neighbouring control. Probe for a crop tool once. With none, return `{/* ToDo: add the icon crop for the <glyph> button, from <screenshot> */}` instead.
+9. **Fall back. Never guess an id.** When there is no confident match, the glyph is a brand or app-specific mark, the set is flagged and not confirmed, or the API is unavailable:
+   - if a screenshot shows the control, crop it (step 10). The page then shows this one icon in the `screenshot-crop` form, whatever `Icon rendering:` says;
+   - with no screenshot, return a marker for the writer to place, written in the page's language: `{/* NEEDS CONFIRMATION: id іконки Iconify для кнопки з <форма> */}` on a `uk` page, `{/* NEEDS CONFIRMATION: Iconify id for the <glyph> button */}` on an `en` page.
+10. **Crop.** Check first that `./.assets/<name>-icon.png` doesn't exist yet. Cut the control's bounding box from the screenshot with a margin of about 2 px, at the screenshot's own scale. Save it as PNG to `./.assets/<name>-icon.png` with `magick <screenshot> -crop <W>x<H>+<X>+<Y> +repage <file>` or Pillow. Read the crop once: it shows the whole control and nothing else, with no text, no data and no neighbouring control. Probe for a crop tool once. With none, return a ToDo in the page's language instead: `{/* ToDo: додати вирізку іконки кнопки з <форма> зі скріншота <screenshot> */}` on a `uk` page, `{/* ToDo: add the icon crop for the <glyph> button, from <screenshot> */}` on an `en` page.
    - `<name>` is kebab-case: the action when the evidence names it (`delete-icon.png`), else the glyph (`dots-vertical-icon.png`). Never overwrite a file: if the name is taken by another icon, add `-2`.
-10. **When the API fails.** `curl --retry 3` already backs off (1 s, 2 s, 4 s) on a timeout, a `429` or a `5xx`, and honours `Retry-After`. If a request still fails, make no further API call in this run and write no retry loop of your own. Every control not yet resolved goes to step 8, and the report says the API was unavailable.
-11. **Self-review**, below, then report.
+11. **When the API fails.** `curl --retry 3` already backs off (1 s, 2 s, 4 s) on a timeout, a `429` or a `5xx`, and honours `Retry-After`. If a request still fails, make no further API call in this run and write no retry loop of your own. Every control not yet resolved goes to step 9, and the report says the API was unavailable.
+12. **Clean up.** Delete the scratch folder (`rm -r <path>`). If the host doesn't allow it, name the folder in the report.
+13. **Self-review**, below, then report.
 
-## Self-review before saving
+## Self-review before reporting
 
 - Every id returned came from the evidence or resolved to a non-empty SVG in this run.
 - Every ambiguous match was checked visually, or went to the fallback.
 - No id was guessed. Every unresolved control has a crop, a marker or a ToDo.
 - No SVG from a flagged set was saved without the user's confirmation.
-- Every file written sits in the page's `.assets/`, is named `*-icon.png` or `*-icon.svg`, and overwrote nothing.
+- Every file written sits in the page's `.assets/`, is named `*-icon.png` or `*-icon.svg`, and its name was checked free before it was written: nothing was overwritten.
+- No candidate SVG, rasterized PNG or API response was left in `.assets/` or the page folder. The scratch folder is deleted, or named in the report.
 - No page was edited, and no control got a name the evidence doesn't give.
 - No API call was made after the API failed.
 
@@ -96,7 +99,7 @@ After the blocks: the files written, the network calls made (or "none: evidence"
 ## Token discipline
 
 - Filter by `prefixes` and keep only `icons` and the licenses from a search.
-- Fetch several icons of one set in one call: `https://api.iconify.design/<prefix>.json?icons=a,b,c`.
+- Check or fetch several icons of one set in one call: `https://api.iconify.design/<prefix>.json?icons=a,b,c` (missing ones come back under `not_found`).
 - Skip the visual check when the name is unambiguous.
 - Read each rasterized PNG and each crop once.
 
