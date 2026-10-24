@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { makeFixture } from './fixture.mjs';
 import { changedPaths, check, frontmatterProblem, linkProblem, pageLinks } from './assertions.mjs';
-import { builtInChecks, loadCase, readTranscript, summarize } from './run.mjs';
+import { builtInChecks, harnessSettings, loadCase, overLimit, parseUsage, readTranscript, summarize } from './run.mjs';
 import { compare, verdict } from './compare.mjs';
 import { coin, mask } from './blind.mjs';
 
@@ -118,4 +118,74 @@ test('the bundled cases load', () => {
     const c = loadCase(path.join(dir, f));
     assert.equal(`${c.id}.json`, f);
   }
+});
+
+test('usage: parses the /usage bars, and the limits stop at or above the threshold', () => {
+  const text = 'Current session: 81% used · resets Oct 24 at 3:40pm (Europe/Kiev)\nCurrent week (all models): 12% used · resets Oct 31 at 6am (Europe/Kiev)\n';
+  const usage = parseUsage(text);
+  assert.deepEqual(usage.session, { percent: 81, resets: 'Oct 24 at 3:40pm (Europe/Kiev)' });
+  assert.equal(usage.week.percent, 12);
+  assert.match(overLimit(usage, { maxSessionPercent: 80, maxWeekPercent: 50 }), /5-hour session is at 81%/);
+  assert.equal(overLimit(usage, { maxSessionPercent: 90, maxWeekPercent: 50 }), null);
+  assert.match(overLimit(usage, { maxSessionPercent: 90, maxWeekPercent: 12 }), /week is at 12%/);
+  assert.deepEqual(parseUsage('You are using an API key'), { session: null, week: null });
+  assert.equal(overLimit(parseUsage(''), { maxSessionPercent: 0, maxWeekPercent: 0 }), null);
+});
+
+test('settings: defaults, then local.json, then HARNESS_* variables', () => {
+  const dir = tmp();
+  const file = path.join(dir, 'local.json');
+  assert.deepEqual(harnessSettings({}, file), { mode: 'on', maxSessionPercent: 80, maxWeekPercent: 50 });
+  fs.writeFileSync(file, JSON.stringify({ mode: 'off', maxWeekPercent: 20 }));
+  assert.deepEqual(harnessSettings({}, file), { mode: 'off', maxSessionPercent: 80, maxWeekPercent: 20 });
+  assert.deepEqual(harnessSettings({ HARNESS_MODE: 'on', HARNESS_MAX_SESSION_PERCENT: '30' }, file), { mode: 'on', maxSessionPercent: 30, maxWeekPercent: 20 });
+});
+
+// A stand-in for the CLI: `/usage` prints FAKE_SESSION% and FAKE_WEEK%; a run prints a passing transcript.
+function fakeClaude(dir) {
+  const bin = path.join(dir, 'fake-claude.mjs');
+  fs.writeFileSync(bin, `#!/usr/bin/env node
+const args = process.argv.slice(2);
+if (args[1] === '/usage') {
+  console.log('Current session: ' + process.env.FAKE_SESSION + '% used · resets soon');
+  console.log('Current week (all models): ' + (process.env.FAKE_WEEK ?? '1') + '% used · resets later');
+  process.exit(0);
+}
+const sentinel = args[args.indexOf('--plugin-dir') + 1].split('/').pop();
+console.log(JSON.stringify({ type: 'system', subtype: 'init', plugins: [{ source: sentinel + '@inline' }] }));
+console.log(JSON.stringify({ type: 'result', subtype: 'success', num_turns: 1, total_cost_usd: 0.01, result: 'ok' }));
+`);
+  fs.chmodSync(bin, 0o755);
+  return bin;
+}
+
+const runner = path.join(path.dirname(new URL(import.meta.url).pathname), 'run.mjs');
+const plugin = path.join(path.dirname(new URL(import.meta.url).pathname), '..', '..', 'plugins', 'doc-writer-toolkit');
+const harness = (args, env) => spawnSync('node', [runner, '--tree', plugin, ...args], { encoding: 'utf8', env: { ...process.env, HARNESS_MAX_SESSION_PERCENT: '', HARNESS_MAX_WEEK_PERCENT: '', HARNESS_MODE: '', ...env } });
+
+test('runner: off makes no run; the guard stops before a run; --resume skips finished cases', () => {
+  const dir = tmp();
+  const out = path.join(dir, 'out');
+  const claude = fakeClaude(dir);
+  const off = harness(['--label', 'x', '--case', 'tc-01-translate-single-pair', '--out', out, '--claude', claude], { HARNESS_MODE: 'off' });
+  assert.equal(off.status, 3);
+  assert.equal(fs.existsSync(out), false);
+
+  const stopped = harness(['--label', 'x', '--case', 'tc-01-translate-single-pair', '--runs', '1', '--out', out, '--claude', claude], { FAKE_SESSION: '95' });
+  assert.equal(stopped.status, 4);
+  assert.match(stopped.stdout, /stopped before tc-01-translate-single-pair run 1: the 5-hour session is at 95%/);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(out, 'x', 'pass.json'), 'utf8')).cases.length, 0);
+
+  const first = harness(['--label', 'x', '--case', 'tc-01-translate-single-pair', '--runs', '1', '--out', out, '--claude', claude], { FAKE_SESSION: '10' });
+  assert.equal(first.status, 0, first.stderr);
+  const run = JSON.parse(fs.readFileSync(path.join(out, 'x', 'tc-01-translate-single-pair', 'run-1', 'assertions.json'), 'utf8'));
+  assert.equal(run.find((c) => c.name === 'sentinel-loaded').pass, true);
+
+  const second = path.join(dir, 'second-case.json');
+  fs.writeFileSync(second, JSON.stringify({ id: 'second-case', fixture: { shape: 'single' }, prompt: 'p', assertions: [] }));
+  const resumed = harness(['--label', 'x', '--case', `tc-01-translate-single-pair,${second}`, '--runs', '1', '--out', out, '--claude', claude, '--resume'], { FAKE_SESSION: '10' });
+  assert.equal(resumed.status, 0, resumed.stderr);
+  assert.match(resumed.stderr, /second-case run 1\/1/);
+  assert.doesNotMatch(resumed.stderr, /tc-01-translate-single-pair run 1\/1/);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(out, 'x', 'pass.json'), 'utf8')).cases.map((s) => s.case), ['tc-01-translate-single-pair', 'second-case']);
 });
