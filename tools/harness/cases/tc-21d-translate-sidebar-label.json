@@ -1,0 +1,46 @@
+{
+  "id": "tc-21d-translate-sidebar-label",
+  "description": "The UA page has a short sidebar_label: the EN page gets an English label for the same subject, not the UA text and not the full title.",
+  "fixture": {
+    "shape": "single"
+  },
+  "setup": [
+    "mkdir -p portal/payment-status-webhook-notifications i18n/en/docusaurus-plugin-content-docs-portal/current/payment-status-webhook-notifications",
+    "cat > portal/payment-status-webhook-notifications/payment-status-webhook-notifications.md <<'EOF'\n---\ntitle: Вебхук-повідомлення про статуси платежів\nsidebar_label: Вебхук-повідомлення\n---\n\n# Вебхук-повідомлення про статуси платежів\n\nСервер партнера отримує повідомлення щоразу, коли змінюється статус платежу.\n\n## Вміст повідомлення {/* #message-content */}\n\nПовідомлення містить ідентифікатор платежу і його новий статус.\nEOF",
+    "git add -A && git commit -q -m 'Case setup'"
+  ],
+  "prompt": "use doc-translator to translate `portal/payment-status-webhook-notifications/payment-status-webhook-notifications.md`",
+  "options": {
+    "maxTurns": 40,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "type": "frontmatter",
+      "path": "i18n/en/docusaurus-plugin-content-docs-portal/current/payment-status-webhook-notifications/payment-status-webhook-notifications.md"
+    },
+    {
+      "name": "EN label is English and short",
+      "type": "match",
+      "path": "i18n/en/docusaurus-plugin-content-docs-portal/current/payment-status-webhook-notifications/payment-status-webhook-notifications.md",
+      "pattern": "^sidebar_label: ['\"]?(?=[^\\n]*[Ww]ebhook)(?![^\\n]*[Pp]ayment status)[A-Za-z][^\\nА-Яа-яІіЇїЄєҐґ]{0,40}$",
+      "flags": "m"
+    },
+    {
+      "name": "no Cyrillic in the frontmatter",
+      "type": "no-match",
+      "path": "i18n/en/docusaurus-plugin-content-docs-portal/current/payment-status-webhook-notifications/payment-status-webhook-notifications.md",
+      "pattern": "^---\\n[^]*?[А-Яа-яІіЇїЄєҐґ][^]*?\\n---"
+    },
+    {
+      "type": "changed-only",
+      "paths": [
+        "i18n/en/docusaurus-plugin-content-docs-portal/current/payment-status-webhook-notifications/",
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}
