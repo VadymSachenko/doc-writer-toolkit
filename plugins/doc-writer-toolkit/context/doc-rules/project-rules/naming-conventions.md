@@ -51,6 +51,13 @@ semantic relationship, set out below.
   add a shorter `sidebar_label:`.
 - `sidebar_label` must stay **unambiguous** and **must not change the page's subject** — it is a
   shorter name for the same topic, never a different one.
+- A page that has one carries it in both locales; the EN label is the semantic equivalent of the UA one.
+
+| Title | `sidebar_label` | |
+|---|---|---|
+| Configure webhook notifications for payment statuses | Webhook notifications | pass: shorter, same subject |
+| Configure webhook notifications for payment statuses | Notifications | fail: broader, ambiguous |
+| Configure webhook notifications for payment statuses | Payment statuses | fail: a different subject |
 
 ## Pass / fail fixtures
 
@@ -88,5 +95,7 @@ rules), and the two locale titles don't match each other either:
   filename and titles from it.
 - **Translation** (`doc-translator`) — keeps the shared path/filename, writes the UA/EN title as the
   semantic equivalent of its counterpart, never re-slugs.
-- **Alignment** (`doc-alignment-checker`) and **style review** (`doc-style-reviewer`) — check title
-  form and slug/title/filename agreement, and report a mismatch rather than renaming.
+- **Alignment** (`doc-alignment-checker`) — checks title form, slug/title/filename agreement and the
+  `sidebar_label`, and reports a mismatch rather than renaming.
+- **Style review** (`doc-style-reviewer`) — checks title form only: it sees one file, and the agreement
+  checks need both locales.

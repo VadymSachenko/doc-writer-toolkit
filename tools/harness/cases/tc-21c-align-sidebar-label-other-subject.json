@@ -1,0 +1,36 @@
+{
+  "id": "tc-21c-align-sidebar-label-other-subject",
+  "description": "Path and titles agree, but sidebar_label names a different subject (refunds): the checker reports it.",
+  "fixture": {
+    "shape": "single"
+  },
+  "setup": [
+    "mkdir -p portal/payment-status-webhook-notifications i18n/en/docusaurus-plugin-content-docs-portal/current/payment-status-webhook-notifications",
+    "cat > portal/payment-status-webhook-notifications/payment-status-webhook-notifications.md <<'EOF'\n---\ntitle: Вебхук-повідомлення про статуси платежів\nsidebar_label: Повернення коштів\n---\n\n# Вебхук-повідомлення про статуси платежів\n\nСервер партнера отримує повідомлення щоразу, коли змінюється статус платежу.\n\n## Вміст повідомлення {/* #message-content */}\n\nПовідомлення містить ідентифікатор платежу і його новий статус.\nEOF",
+    "cat > i18n/en/docusaurus-plugin-content-docs-portal/current/payment-status-webhook-notifications/payment-status-webhook-notifications.md <<'EOF'\n---\ntitle: Payment status webhook notifications\nsidebar_label: Refunds\n---\n\n# Payment status webhook notifications\n\nThe partner's server receives a notification every time a payment status changes.\n\n## Message content\n\nA message contains the payment ID and its new status.\nEOF",
+    "git add -A && git commit -q -m 'Case setup'"
+  ],
+  "prompt": "use doc-alignment-checker on `portal/payment-status-webhook-notifications/payment-status-webhook-notifications.md`, main: ua",
+  "options": {
+    "maxTurns": 40,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "reports the label",
+      "type": "match",
+      "path": "output",
+      "pattern": "sidebar_label[\\s\\S]{0,400}(subject|тем|предмет|different|інш)|(subject|тем|предмет|different|інш)[\\s\\S]{0,400}sidebar_label",
+      "flags": "i"
+    },
+    {
+      "type": "unchanged",
+      "ignore": [
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}
