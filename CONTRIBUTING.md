@@ -112,4 +112,4 @@ python3 -m json.tool plugins/doc-writer-toolkit/.claude-plugin/plugin.json
 python3 -m json.tool .claude-plugin/marketplace.json
 ```
 
-Both manifests are static — adding skills/commands by directory convention does not require editing them.
+Both manifests are static — adding skills/commands by directory convention does not require editing them. Don't add a `version` to either: without one, an install tracks this repository's commits, and a pinned version would hold installs back until someone bumps it.
