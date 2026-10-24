@@ -11,7 +11,7 @@ After `extract-sme-screenshots` produces a pool of candidate screenshots and som
 
 ## Inputs
 
-- A target doc file (e.g. `partner-cabinet/archive/archive.md`).
+- A target doc file (e.g. `docs/archive/archive.md`).
 - Optionally, which `.sources/frames/*-frames/` folder to check. If omitted, look for a single such folder under the doc's `.sources/frames/`; if there's more than one, ask which one before proceeding.
 
 ## Workflow
@@ -36,6 +36,13 @@ After `extract-sme-screenshots` produces a pool of candidate screenshots and som
    ```
 
    Show the `→ published_as` mapping on the Kept line only where a link exists. Omit the `Warning:` block entirely when every renamed embed traced back through `published_as`.
+
+### Self-review before reporting
+
+- No file was deleted: every frame classified unused is now in `_unused/`, and the files an earlier run left there are still there.
+- No frame that the doc uses, by its own basename or through `published_as`, was moved.
+- `frames-index.json` has as many entries as before; each moved entry points into `_unused/`, with `published_as` and its other fields unchanged.
+- The report carries the warning exactly when frames were moved and an untraceable renamed embed exists (step 5).
 
 ## Non-negotiables
 

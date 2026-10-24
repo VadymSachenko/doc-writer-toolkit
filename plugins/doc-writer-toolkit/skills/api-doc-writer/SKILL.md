@@ -1,11 +1,11 @@
 ---
 name: api-doc-writer
-description: 'Writes API reference documentation pages for UniComPay following the authoring rules in CLAUDE.md. Use explicitly ("use api-doc-writer to document...", "api-doc-writer: write the Create payin transaction page"). Produces one endpoint per page following ${CLAUDE_PLUGIN_ROOT}/context/doc-templates/api-reference-template.md, with a mandatory interview phase before drafting. Saves to the project-declared API reference root. Not for user guides, concept topics, or narrative API pages (route those to concept-doc-writer).'
+description: 'Writes API reference documentation pages for the host product following the authoring rules in CLAUDE.md. Use explicitly ("use api-doc-writer to document...", "api-doc-writer: write the Create payin transaction page"). Produces one endpoint per page following ${CLAUDE_PLUGIN_ROOT}/context/doc-templates/api-reference-template.md, with a mandatory interview phase before drafting. Saves to the project-declared API reference root. Not for user guides, concept topics, or narrative API pages (route those to concept-doc-writer).'
 ---
 
 # api-doc-writer
 
-You are writing an English API reference page for UniComPay. The authoring contract in `CLAUDE.md` is already loaded; this skill adds the procedure for producing an API page end-to-end.
+You are writing an English API reference page for the host product. The authoring contract in `CLAUDE.md` is already loaded; this skill adds the procedure for producing an API page end-to-end.
 
 ## Scope
 
@@ -72,7 +72,7 @@ Read every available input file. Extract:
 - Any prerequisites (partner configuration, tokens, feature flags)
 - Any related endpoints or flows the user should know about
 
-**Screenshots (only if the brief includes any — most endpoint pages have none).** An API reference page occasionally needs a partner-cabinet screenshot (e.g., where to find a setting mentioned in Prerequisites). Each API doc page has its own `.assets/` folder, co-located with the page file — create it if it does not exist before copying any screenshots into it. If `.assets/` or `.sources/frames/{video}-frames/` exist next to the input file, follow `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-selection.md` — it covers the three-folder model, the four selection cases, the sensitive-content screening requirement, the rename pattern, and the full-page vs. compact classification. Apply every rule in that file before embedding or renaming any screenshot. If neither folder exists, this page simply has no screenshots — proceed without one.
+**Screenshots (only if the brief includes any — most endpoint pages have none).** An API reference page occasionally needs a UI screenshot (e.g., where to find a setting mentioned in Prerequisites). Each API doc page has its own `.assets/` folder, co-located with the page file — create it if it does not exist before copying any screenshots into it. If `.assets/` or `.sources/frames/{video}-frames/` exist next to the input file, follow `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-selection.md` — it covers the three-folder model, the four selection cases, the sensitive-content screening requirement, the rename pattern, and the full-page vs. compact classification. Apply every rule in that file before embedding or renaming any screenshot. If neither folder exists, this page simply has no screenshots — proceed without one.
 
 Choose the embed syntax based on the classification:
 - **Full-page**: `![Descriptive alt text](./.assets/image.png)`

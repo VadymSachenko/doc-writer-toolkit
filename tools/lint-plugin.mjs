@@ -40,13 +40,9 @@ export const EOL_CHECK = true;
 export const READ_ONLY_SKILLS = ['doc-alignment-checker', 'doc-style-reviewer', 'section-readiness'];
 
 const CONTRACT = 'skill contract: no ';
-const contractGap = (skill, part, reason) => ({ file: `${PLUGIN}/skills/${skill}/SKILL.md`, message: `${CONTRACT}${part}`, reason });
 
-// Findings that exist on main today, with the reason each is open. Matched on file and message prefix.
-export const KNOWN_GAPS = [
-  ...['cleanup-unused-screenshots', 'doc-style-fixer', 'extract-sme-screenshots']
-    .map((s) => contractGap(s, 'self-review', 'no self-review written yet')),
-];
+// Findings that exist on main today, with the reason each is open. Matched on file and message prefix. None are open.
+export const KNOWN_GAPS = [];
 
 const KEY_LINE =/^([A-Za-z][\w-]*): (\S.*)$/;
 const SINGLE_QUOTED = /^'(?:[^']|'')*'$/;

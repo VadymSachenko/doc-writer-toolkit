@@ -37,7 +37,7 @@ Every option can be a flag. Missing flags are read from the `Documentation toolk
 | `--ua-root`, `--en-root` | `UA content root:`, `EN i18n root:` | Needed by `sync`: the primary root pair. Locale roots are derived by replacing the `en` path segment of the EN root. |
 | | `<Name> UA content root:`, `<Name> EN i18n root:` | One more root pair per `<Name>` (a second docs plugin instance). `sync` patches each pair's own files. The name's id (`API reference` → `api-reference`) and the rules are in the `locale-sync` README, "Root pairs". |
 | `--pair` | | `sync` only these root pairs (comma-separated ids; the unprefixed pair is `primary`). Default: every declared pair. |
-| `--ticket` | | Ticket number(s), comma-separated. Default: the leading numbers of the current git branch (`1139-x-doc` → `1139`, `90-94-x` → `90`, `94`). |
+| `--ticket` | | Ticket number(s), comma-separated. Default: the leading numbers of the current git branch (`123-x-doc` → `123`, `45-46-x` → `45`, `46`). |
 
 Locale file matching:
 - A file matches a docs locale by language code: `es-AR.json` → `es`, `tr-TR.json` → `tr`.

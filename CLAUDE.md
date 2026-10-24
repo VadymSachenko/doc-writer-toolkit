@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repository is
 
-This is the **source repository for a Claude Code plugin marketplace** (`doc-writer-toolkit`), not a documentation site itself. It contains skills, slash commands, and content-rule corpora that get installed into *other* Docusaurus documentation projects (currently only UniComPay's). There is no app to build — the deliverable is the Markdown/JSON content under `plugins/doc-writer-toolkit/`, consumed by Claude Code at runtime in a different repo. The checks (a lint, a skill visibility check and the tests of the two Node scripts behind the locale translation pipeline, the one behind the alignment check and the one behind multilocale screenshots) run with one command (see Commands).
+This is the **source repository for a Claude Code plugin marketplace** (`doc-writer-toolkit`), not a documentation site itself. It contains skills, slash commands, and content-rule corpora that get installed into *other* Docusaurus documentation projects (currently a single host project). There is no app to build — the deliverable is the Markdown/JSON content under `plugins/doc-writer-toolkit/`, consumed by Claude Code at runtime in a different repo. The checks (a lint, a skill visibility check and the tests of the two Node scripts behind the locale translation pipeline, the one behind the alignment check and the one behind multilocale screenshots) run with one command (see Commands).
 
-Because of this, most SKILL.md files reference paths like `docs/`, `partner-cabinet/`, `i18n/en/...`, and `CLAUDE.md` that **do not exist in this repo** — they refer to the target project where the plugin is installed. Do not go looking for those paths here; they're part of the runtime contract the skills expect the host project to satisfy.
+Because of this, most SKILL.md files reference paths like `docs/`, `portal/`, `i18n/en/...`, and `CLAUDE.md` that **do not exist in this repo** — they refer to the target project where the plugin is installed. Do not go looking for those paths here; they're part of the runtime contract the skills expect the host project to satisfy.
 
 ## Repository structure
 
@@ -48,7 +48,7 @@ There's no build. What you'll actually run:
 
 ### Generic vs. product-specific seam
 
-Skill *logic* is generic and reusable for any Docusaurus doc project. Product-specific terminology and examples live only in `context/doc-rules/project-rules/` (`glossary-en.md`, `glossary-ua.md`, `api-integration-context.md`), `context/doc-rules/doc-examples/`, and `context/doc-templates/` — all currently UCPay-specific. Every skill references these exclusively through `${CLAUDE_PLUGIN_ROOT}`, so splitting a second product out into its own plugin would mean swapping that directory's contents, not touching skill logic. Keep new product-specific content inside that seam rather than hardcoding it into a skill.
+Skill *logic* is generic and reusable for any Docusaurus doc project. Product-specific terminology and examples live only in `context/doc-rules/project-rules/` (`glossary-en.md`, `glossary-ua.md`, `api-integration-context.md`), `context/doc-rules/doc-examples/`, and `context/doc-templates/` — all currently specific to that one host product. Every skill references these exclusively through `${CLAUDE_PLUGIN_ROOT}`, so splitting a second product out into its own plugin would mean swapping that directory's contents, not touching skill logic. Keep new product-specific content inside that seam rather than hardcoding it into a skill.
 
 `context/doc-rules/project-rules/glossary.md` is a bilingual EN↔UA *human-facing* alignment reference; skills themselves never load it directly — they load the language-specific `glossary-en.md`/`glossary-ua.md` instead.
 

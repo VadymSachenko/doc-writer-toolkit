@@ -79,7 +79,7 @@ function currentBranch(root) {
   }
 }
 
-// Ticket numbers = the leading numeric segments of the docs branch name ('1139-x-doc' -> 1139, '90-94-x' -> 90, 94).
+// Ticket numbers = the leading numeric segments of the docs branch name ('123-x-doc' -> 123, '45-46-x' -> 45, 46).
 export function ticketsFromBranch(branch) {
   const name = branch.split('/').pop();
   const m = name.match(/^((?:\d+-)*\d+)(?:-|$)/);
