@@ -73,7 +73,7 @@ UA headings from `##` down carry an id comment, per `heading-anchors.md`: `## П
 When translating to English:
 - The text inside `{/* #... */}` is the canonical EN anchor slug. Derive the EN heading from it (convert kebab-case to title/sentence words).
 - **Remove** the `{/* #... */}` comment from the EN output — EN headings do not carry anchor comments; Docusaurus generates their anchors automatically from the heading text.
-- When the EN heading can't read as the id's words (an id that names a parent, such as `reference-information-<slug>`, or a heading reworded after its id was set), write the EN heading naturally and give it the id explicitly, never as a comment: `## Reference information {#reference-information-create-payment}`. The EN heading's id always equals the UA comment's id.
+- Use the id's words even when a closer translation of the UA text exists (`## Перегляд транзакцій {/* #transaction-list */}` → `## Transaction list`). Only when the id's words can't head the section (the id names a parent, such as `reference-information-<slug>`, or its words say something the UA heading no longer says), write the EN heading naturally and give it the id explicitly, never as a comment: `## Reference information {#reference-information-create-payment}`. The EN heading's id always equals the UA comment's id.
 
 ```md
 UA:  ## Передумови {/* #prerequisites */}

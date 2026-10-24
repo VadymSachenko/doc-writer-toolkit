@@ -36,9 +36,11 @@ verbatim, lands on the right heading in every locale.
 5. **Links use the id.** A link to a heading, on the same page (`#transaction-statuses`) or on another
    page (`/archive/archive#transaction-statuses`), uses the id. Never a slug of the Ukrainian text.
 6. **English.** The EN heading carries no comment. Write it as the id's words (`#transaction-statuses`
-   → `## Transaction statuses`), so Docusaurus generates the same id. When the EN heading can't read as
-   the id's words (the id names a parent, or the heading was reworded and kept its id), give the EN
-   heading the id explicitly: `## Reference information {#reference-information-create-payment}`.
+   → `## Transaction statuses`), so Docusaurus generates the same id, even when a closer translation of
+   the UA text exists: `## Перегляд транзакцій {/* #transaction-list */}` → `## Transaction list`. Give
+   the EN heading the id explicitly only when the id's words can't head the section: the id names a
+   parent (`## Reference information {#reference-information-create-payment}`), or its words say
+   something the UA heading no longer says.
 7. **Further locales.** The comment stays verbatim; only the heading text is translated.
 8. **Adding an id to an existing heading** changes that heading's fragment. Whoever adds it also
    rewrites, in the same change, every link that used the old fragment (search the content roots for

@@ -28,11 +28,11 @@
       "flags": "mi"
     },
     {
-      "name": "reference heading keeps its id explicitly",
+      "name": "reference heading keeps its id",
       "type": "match",
       "path": "i18n/en/docusaurus-plugin-content-docs-portal/current/transactions/transactions.md",
-      "pattern": "^## [^\\n{]*\\{#reference-information-filter-transactions\\}$",
-      "flags": "m"
+      "pattern": "^## (?:Reference information:? Filter transactions|[^\\n{]*\\{#reference-information-filter-transactions\\})$",
+      "flags": "mi"
     },
     {
       "name": "no id comment in EN",
