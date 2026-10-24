@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyKnownGaps, checkFrontmatter, contractProblems, isRouted, MAX_DESCRIPTION, rootRefs, routedPaths, scalarProblem } from './lint-plugin.mjs';
+import { annotationProblems, applyKnownGaps, checkFrontmatter, contractProblems, isRouted, MAX_DESCRIPTION, rootRefs, routedPaths, scalarProblem } from './lint-plugin.mjs';
 
 const skill = (description, name = 'my-skill') => `---\nname: ${name}\ndescription: ${description}\n---\n\n# ${name}\n`;
 const messages = (findings) => findings.map((f) => `${f.line}: ${f.message}`);
@@ -119,6 +119,16 @@ test('known gaps: a listed gap that no longer occurs fails, so the list can only
   assert.equal(listed.length, 0);
   assert.equal(failing.length, 1);
   assert.match(failing[0].message, /known gap no longer occurs.*remove it/);
+});
+
+test('annotations: a frame must be square and unfilled', () => {
+  const block = (props) => `x\n\`\`\`javascript\nObject.assign(box.style, {\n  border: '3px solid red',\n${props}\n});\n\`\`\`\n`;
+  assert.deepEqual(annotationProblems(block("  borderRadius: '0',\n  background: 'transparent',")), []);
+  assert.deepEqual(annotationProblems(block("  borderRadius: '6px',\n  background: 'transparent',")).map((p) => p.message), ["annotation frame without borderRadius: '0'"]);
+  assert.deepEqual(annotationProblems(block("  borderRadius: '0',\n  backgroundColor: 'rgba(255,0,0,.2)',")).map((p) => p.message), ["annotation frame without background: 'transparent'", 'annotation frame with a fill or an outline']);
+  assert.equal(annotationProblems(block("  borderRadius: '0',")).length, 1);
+  assert.equal(annotationProblems(block("  borderRadius: '0',\n  background: 'transparent',"))[0], undefined);
+  assert.deepEqual(annotationProblems("Object.assign(el.style, { color: 'red' })"), []);
 });
 
 test('contract: the five parts are found under any heading, and each missing one is reported', () => {

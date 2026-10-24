@@ -6,6 +6,7 @@
 //   c. Every style-guide rule file is reachable from a row of its corpus's ROUTING.md (consumers load nothing else).
 //      Gaps that exist today are listed in KNOWN_GAPS, each with the reason it's open.
 //   d. No tracked text file has CRLF line endings.
+//   e. Every screenshot-annotation style block in the plugin's Markdown draws a square, unfilled frame.
 //   f. Every SKILL.md carries the contract's content (CONTRIBUTING.md, "Skill file shape"), under whatever headings.
 // Prints `path:line: message` per finding and exits 1 when there is any. Known gaps print as `known (<reason>)`
 // and don't fail the run; a listed gap that no longer occurs does, so the list can only shrink.
@@ -173,6 +174,21 @@ export function applyKnownGaps(findings, known = KNOWN_GAPS) {
 
 const byPlace = (x, y) => x.file.localeCompare(y.file) || x.line - y.line;
 
+// Annotation overlays (`Object.assign(<el>.style, { … })` with a `border:`) are rectangular and unfilled: each sets
+// `borderRadius: '0'` and `background: 'transparent'`, and none sets a fill or an outline.
+export function annotationProblems(text) {
+  const problems = [];
+  for (const m of text.matchAll(/Object\.assign\(\w+\.style,\s*\{([\s\S]*?)\}\)/g)) {
+    const body = m[1];
+    if (!/\bborder\s*:/.test(body)) continue;
+    const line = text.slice(0, m.index).split('\n').length;
+    if (!/\bborderRadius\s*:\s*'0'/.test(body)) problems.push({ line, message: "annotation frame without borderRadius: '0'" });
+    if (!/\bbackground\s*:\s*'transparent'/.test(body)) problems.push({ line, message: "annotation frame without background: 'transparent'" });
+    if (/\b(backgroundColor|outline)\s*:|\bbackground\s*:\s*'(?!transparent')/.test(body)) problems.push({ line, message: 'annotation frame with a fill or an outline' });
+  }
+  return problems;
+}
+
 // The contract by content, not by heading text: what a skill must say, under whatever headings it uses.
 // Fenced blocks are skipped, since report templates inside them have headings of their own.
 export function contractProblems(text, { readOnly = false } = {}) {
@@ -230,6 +246,11 @@ export function lint(root, { eol = EOL_CHECK } = {}) {
       const tab = entry.indexOf('\t');
       if (/^i\/(crlf|mixed)\b/.test(entry.slice(0, tab))) add(entry.slice(tab + 1), 1, 'CRLF line endings; .gitattributes expects LF');
     }
+  }
+
+  // e. Annotation frames.
+  for (const file of tracked.filter((f) => f.startsWith(`${PLUGIN}/`) && f.endsWith('.md'))) {
+    for (const p of annotationProblems(read(file))) add(file, p.line, p.message);
   }
 
   // f. Skill contract.

@@ -178,7 +178,7 @@ Before finishing, verify:
 3. Every screenshot saved to `.assets/` is named descriptively and represents a real UI state.
 4. Every dialog/modal/dropdown has two shots: a `-trigger.png` and a `-dialog.png` or `-dropdown.png`.
 5. Every screenshot that contains sensitive data (amounts, IDs, card numbers, customer names) had blur applied before shooting — no raw sensitive values visible in any saved file.
-6. Every trigger-context shot (Shot 1) has the trigger element annotated with a red outline.
+6. Every trigger-context shot (Shot 1) has the trigger element annotated with a red rectangular frame (`screenshot-capture.md`).
 7. Any scope-ladder fallback to full viewport is logged in `app-notes.md` under the relevant screen.
 8. No credentials appear anywhere in `app-notes.md` or in any screenshot filename.
 9. No production URL was accessed — only the test environment.
