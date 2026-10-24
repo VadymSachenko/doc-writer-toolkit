@@ -56,9 +56,9 @@ export function linkProblem(target, form) {
   return null;
 }
 
-// a: the assertion; ctx: { host, output, status }.
+// a: the assertion; ctx: { host, output, status, skills } (skills: the run's Skill calls).
 export function check(a, ctx) {
-  const { host, output, status } = ctx;
+  const { host, output, status, skills = [] } = ctx;
   const text = () => (a.path === 'output' ? output : read(host, a.path));
   switch (a.type) {
     case 'exists': return { pass: has(host, a.path), detail: a.path };
@@ -78,6 +78,12 @@ export function check(a, ctx) {
       if (!has(host, a.path)) return { pass: false, detail: `${a.path} does not exist` };
       const bad = pageLinks(text()).map((t) => [t, linkProblem(t, a.form)]).filter(([, p]) => p);
       return { pass: !bad.length, detail: bad.length ? bad.map(([t, p]) => `${t}: ${p}`).join('; ') : `all ${a.form}` };
+    }
+    case 'skill-called':
+    case 'skill-not-called': {
+      // Matched on the skill's own name, whatever plugin prefix the call carried.
+      const called = skills.some((s) => s.split(':').pop() === a.skill);
+      return { pass: a.type === 'skill-called' ? called : !called, detail: `skills called: ${skills.join(', ') || 'none'}` };
     }
     case 'unchanged': {
       const changed = changedPaths(status).filter((p) => !(a.ignore ?? []).some((i) => p.startsWith(i)));
