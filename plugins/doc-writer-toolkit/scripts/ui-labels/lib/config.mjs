@@ -227,7 +227,8 @@ function braceBlock(text, from) {
   return null;
 }
 
-async function readDocusaurusI18n(settings) {
+// The i18n block of docusaurus.config: { defaultLocale, locales } exactly as listed (no locale is added).
+export async function readDocusaurusI18n(settings) {
   const candidates = settings.docusaurusConfig
     ? [path.resolve(settings.root, settings.docusaurusConfig)]
     : ['docusaurus.config.ts', 'docusaurus.config.js', 'docusaurus.config.mjs', 'docusaurus.config.cjs'].map((f) => path.join(settings.root, f));

@@ -1,0 +1,51 @@
+{
+  "id": "tc-25a-explorer-asks-unknown-screenshot-locale",
+  "description": "The host declares Screenshot locales uk, en, de, but docusaurus.config has only uk and en: app-explorer stops at Step 0, names de as a locale it can't place, asks instead of guessing a folder, and writes nothing.",
+  "fixture": {
+    "shape": "single"
+  },
+  "setup": [
+    "printf 'OPERATOR_BASE_URL=https://test.example.com\\nOPERATOR_USERNAME=tester\\nOPERATOR_PASSWORD=secret\\n' > .env && printf '.env\\n' >> .gitignore && printf '%s\\n' '- **Admin UI:** playwright' '- **API test collection:** .sources/demo.postman_collection.json' '- **API collection runner:** newman' >> CLAUDE.md && mkdir -p .sources portal/transactions/.sources && printf '{\"info\":{\"name\":\"demo\"},\"item\":[]}\\n' > .sources/demo.postman_collection.json && printf '{\"section\":\"portal/transactions\",\"verdict\":\"needs-revision\",\"pages\":[\"transactions.md\"]}\\n' > portal/transactions/.sources/section-readiness.json && printf '%s\\n' '- **Screenshot locales:** `uk, en, de`' '- **Locale switch:** `url-prefix uk=/, en=/en/, de=/de/`' >> CLAUDE.md && git add -A && git commit -q -m 'Case setup'"
+  ],
+  "prompt": "use app-explorer for `portal/transactions/`",
+  "options": {
+    "maxTurns": 30,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)",
+      "Bash(which:*)",
+      "Bash(ls:*)",
+      "Bash(node:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "names de as the locale that can't be placed",
+      "type": "match",
+      "path": "output",
+      "pattern": "\\bde\\b[^\\n]{0,160}(docusaurus|not (a )?(configured|declared|listed)|isn.t (configured|listed|declared)|unknown|can.t be (derived|placed|resolved))|docusaurus[^\\n]{0,160}\\bde\\b",
+      "flags": "i"
+    },
+    {
+      "name": "no de folder guessed",
+      "type": "absent",
+      "path": "i18n/de"
+    },
+    {
+      "name": "no manifest written",
+      "type": "absent",
+      "path": "portal/transactions/.sources/screenshot-manifest.json"
+    },
+    {
+      "name": "no app notes written",
+      "type": "absent",
+      "path": "portal/transactions/.sources/app-notes.md"
+    },
+    {
+      "type": "unchanged",
+      "ignore": [
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}
