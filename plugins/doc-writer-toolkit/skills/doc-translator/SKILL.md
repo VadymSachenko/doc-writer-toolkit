@@ -40,7 +40,7 @@ Load these files at the start of the task.
 **Style guide (project-declared, resolved before translating):**
 - Follow `${CLAUDE_PLUGIN_ROOT}/context/style-guide-registry.md` — "Resolving which guide a project uses" section — to find this project's declared `Style guide:` token, then that file's "Loading procedure per guide" for the resolved token, mapping the content you're about to translate (terminology, tone, notation, procedures, punctuation) to the matched topical files.
 - If the project has no declared style guide, follow the registry's fallback: ask once, offer to persist the answer to that project's `CLAUDE.md`.
-- Do not hand-copy a guide name, corpus path, or individual rule into this skill file. `context/doc-rules/style-guide-rules/` is a retired, unmaintained digest — do not load it.
+- Do not hand-copy a guide name, corpus path, or individual rule into this skill file.
 
 ## What to translate
 
