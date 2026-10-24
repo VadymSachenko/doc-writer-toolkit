@@ -216,6 +216,8 @@ For every `.assets/` file the UA page references (markdown images and `<img src=
 
 With no EN asset, the link points to the UA asset (`fallback: true`, listed in `assetFallbacks`; `record` stores them). `orphans` lists symlinks next to the page that no UA page in the folder references. They are reported, never deleted. `--dry-run` writes nothing.
 
+A locale the host lists in `Screenshot locales:` gets its own captures (`context/doc-rules/project-rules/screenshot-locales.md`). They are real files, so `link-assets` reports them as `override` and leaves them alone.
+
 ## Checks (`check`)
 
 Failures have a `check` name; warnings never block.

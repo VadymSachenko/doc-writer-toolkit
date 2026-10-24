@@ -25,7 +25,7 @@ You are resolving documentation markers — `{/* NEEDS CONFIRMATION: ... */}` an
 3. The section's `.sources/sme-interview.md` — **optional**. Load if present.
 4. The section's `.assets/` folder — list what screenshots already exist there.
 5. The doc pages in the section — read each one to find markers.
-6. If `Admin UI: playwright` is declared in the project's `CLAUDE.md` — also load `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/value-realism.md` and `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-capture.md`.
+6. If `Admin UI: playwright` is declared in the project's `CLAUDE.md` — also load `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/value-realism.md` and `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-capture.md`. If `CLAUDE.md` also declares `Screenshot locales:`, load `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-locales.md` too (which locales a capture covers, and when new images replace the old ones; `SL` below is the script it names). Without that field, don't load it and don't run `SL`: everything below that starts "With `Screenshot locales:` declared" doesn't apply.
 7. `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` — **only for Ж1a** (UI-label terminal-punctuation normalization), applied when a confirmed UI label is written into a bold span in prose (Step 3). Do not use it to rewrite surrounding prose.
 8. **`uk` pages only:** `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/native-ukrainian.md` — when a confirmed fact is written into the page as Ukrainian prose (Step 3), the words you write follow it. It doesn't license rewriting the rest of that sentence or the sentences around the marker.
 
@@ -37,8 +37,8 @@ Collect every source of evidence available. Work through them in order — later
 
 1. **`app-notes.md`** (if present) — answers to specific questions, screenshot descriptions, observed UI labels. Best source: direct observation.
 2. **`sme-interview.md`** (if present) — confirmed facts from SME or transcript. Good for conceptual and business-rule questions.
-3. **`.assets/` contents** — screenshots already saved. A screenshot of the right UI state can answer a `{/* ToDo: add a screenshot */}` marker directly without needing `app-notes.md`.
-4. **Live app via Playwright** (if `Admin UI: playwright` is declared in `CLAUDE.md`) — for markers that none of the above answer, navigate to the relevant screen, observe directly, and record the answer. Do not capture new screenshots unless a `{/* ToDo: add a screenshot */}` marker specifically needs one. When capturing a screenshot, apply the scope, annotation, and blur rules from `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-capture.md`. Read credentials from `.env` — never hardcode them, never use production. Apply the **"Value realism rule — mandatory"** from `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/value-realism.md` for any values entered into the UI.
+3. **`.assets/` contents** — screenshots already saved. A screenshot of the right UI state can answer a `{/* ToDo: add a screenshot */}` marker directly without needing `app-notes.md`. With `Screenshot locales:` declared, also list, for each image, which screenshot locales have it: the same file name in the `.assets/` next to each locale's page (the locale roots that `SL config` prints).
+4. **Live app via Playwright** (if `Admin UI: playwright` is declared in `CLAUDE.md`) — for markers that none of the above answer, navigate to the relevant screen, observe directly, and record the answer. Do not capture new screenshots unless a `{/* ToDo: add a screenshot */}` marker specifically needs one. When capturing a screenshot, apply the scope, annotation, and blur rules from `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-capture.md`. With `Screenshot locales:` declared, capture through the locale contract in `screenshot-locales.md`: resolve the screenshot locales first (its Section 0), and capture in every screenshot locale the host declares. If they can't be resolved, capture nothing and ask the one question that section prescribes; on any other unexpected `SL` result, stop and report it. This skill seeds nothing, so a re-capture uses the scenario's data the manifest names, and fails the locale when that data is gone (`screenshot-locales.md` Section 4, step 3). Read credentials from `.env` — never hardcode them, never use production. Apply the **"Value realism rule — mandatory"** from `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/value-realism.md` for any values entered into the UI.
 
 Build an internal index:
 - Every confirmed answer → source + answer text
@@ -77,11 +77,12 @@ Rules for `screenshot-available`:
 - Applies only to `{/* ToDo: add a screenshot — ... */}` markers (not `recapture`).
 - Match by what the screenshot shows against what the marker needs.
 - Only classify as `screenshot-available` if the screenshot genuinely shows the right UI state.
-- If the marker needs a screenshot and none exists but `Admin UI: playwright` is declared, capture it now (read `.env` for credentials, test env only) and then classify as `screenshot-available`.
+- With `Screenshot locales:` declared, an image is available only when every screenshot locale has it (source 3). An image that only some locales have is not: capture the full set as below, or, without `Admin UI: playwright`, leave the marker and report which locales lack the image.
+- If the marker needs a screenshot and none exists but `Admin UI: playwright` is declared, capture it now (read `.env` for credentials, test env only) and then classify as `screenshot-available`. With `Screenshot locales:` declared, the capture follows `screenshot-locales.md` Section 4, and the marker is `screenshot-available` only when `SL promote` put the image in place in every required locale. Otherwise leave the marker and report the failed locales.
 
 Rules for `screenshot-recapture`:
 - Applies only to `{/* ToDo: recapture screenshot — ... */}` markers. This marker is **authored by hand** for now (e.g. when you know a screen changed) — no skill emits it automatically yet; a future `doc-freshness-checker` will become its producer. Treat it as a valid, expected input even though the writers never generate it.
-- Always re-capture via Playwright regardless of what is already in `.assets/` — overwrite the existing file.
+- Always re-capture via Playwright regardless of what is already in `.assets/` — overwrite the existing file. With `Screenshot locales:` declared, re-capture the shot's full set through `screenshot-locales.md` Section 4: the existing images are replaced only by `SL promote`, in every required locale at once. A marker that names a locale (`{/* ToDo: recapture screenshot (en) — … */}`) is a locale-scoped request for that locale only.
 - Use the context around the marker (alt text of the existing image, step text, `app-notes.md` navigation path and selectors) to determine what screen to navigate to and what element to capture.
 - Apply all rules from `screenshot-capture.md`: scope ladder (Section 1), two-shot pattern if the marker is adjacent to a dialog step (Section 2), annotation (Section 3), blur (Section 4).
 - If `Admin UI: playwright` is not declared, classify as `unresolvable` and report it.
@@ -103,8 +104,8 @@ For each `screenshot-available` marker:
 
 For each `screenshot-recapture` marker:
 - Re-capture the screenshot via Playwright (see Rules for `screenshot-recapture` above).
-- Overwrite the existing file in `.assets/` with the new capture.
-- Remove the `{/* ToDo: recapture screenshot */}` comment.
+- Overwrite the existing file in `.assets/` with the new capture. With `Screenshot locales:` declared, `SL promote` does this for every required locale at once.
+- Remove the `{/* ToDo: recapture screenshot */}` comment. With `Screenshot locales:` declared, remove it only when the shot is promoted; if it isn't, keep the marker: the previous images are still live in every locale.
 - Leave the existing image embed in place — the filename stays the same, the file on disk is now the fresh capture.
 
 For `unresolvable` markers: leave them exactly as they are.
@@ -116,6 +117,7 @@ For `unresolvable` markers: leave them exactly as they are.
 3. No invented facts — every replacement is traceable to a source.
 4. No `unresolvable` markers touched.
 5. Surrounding prose still reads naturally.
+6. With `Screenshot locales:` declared: `SL status` shows every shot of this run `complete`, or lists it in the report with each failed locale and its reason. No shot is `mixed`, and no screenshot marker was removed for a shot that wasn't promoted.
 
 ## Step 5 — Report
 
@@ -124,6 +126,7 @@ Tell the user:
 - Which evidence sources were used
 - What remains unresolved — list each with file, marker text, and why it couldn't be answered
 - Which files were edited
+- With `Screenshot locales:` declared: the shots promoted and their locales, the failed locales with their reasons, and the folders `SL promote` created (`screenshot-locales.md` Section 7)
 
 ## Explicit invocation examples
 

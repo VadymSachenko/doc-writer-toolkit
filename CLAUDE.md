@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repository is
 
-This is the **source repository for a Claude Code plugin marketplace** (`doc-writer-toolkit`), not a documentation site itself. It contains skills, slash commands, and content-rule corpora that get installed into *other* Docusaurus documentation projects (currently a single host project). There is no app to build — the deliverable is the Markdown/JSON content under `plugins/doc-writer-toolkit/`, consumed by Claude Code at runtime in a different repo. The checks (a lint, a skill visibility check and the tests of the two Node scripts behind the locale translation pipeline and the one behind the alignment check) run with one command (see Commands).
+This is the **source repository for a Claude Code plugin marketplace** (`doc-writer-toolkit`), not a documentation site itself. It contains skills, slash commands, and content-rule corpora that get installed into *other* Docusaurus documentation projects (currently a single host project). There is no app to build — the deliverable is the Markdown/JSON content under `plugins/doc-writer-toolkit/`, consumed by Claude Code at runtime in a different repo. The checks (a lint, a skill visibility check and the tests of the two Node scripts behind the locale translation pipeline, the one behind the alignment check and the one behind multilocale screenshots) run with one command (see Commands).
 
 Because of this, most SKILL.md files reference paths like `docs/`, `portal/`, `i18n/en/...`, and `CLAUDE.md` that **do not exist in this repo** — they refer to the target project where the plugin is installed. Do not go looking for those paths here; they're part of the runtime contract the skills expect the host project to satisfy.
 
@@ -28,6 +28,7 @@ plugins/doc-writer-toolkit/
   scripts/ui-labels/                     # Node, no deps: UI label store, label check, rename sync (README + tests)
   scripts/locale-sync/                   # Node, no deps: stale detection, changed blocks, checks, state (README + tests)
   scripts/doc-align/                     # Node, no deps: UA/EN structural counts and heading ids for doc-alignment-checker (README + tests)
+  scripts/screenshot-locales/            # Node, no deps: screenshot locales, per-locale paths, staging, all-or-nothing promotion (README + tests)
   scripts/sme-video-context/             # standalone Python tool, not auto-loaded
 ```
 
@@ -37,10 +38,10 @@ Two manifests gate everything: `marketplace.json` points at `./plugins/doc-write
 
 There's no build. What you'll actually run:
 
-- **Run the regression set before a merge:** `node tools/regression.mjs` from the repo root runs the lint, the tools' tests, the three script suites, `claude plugin validate` and the skill visibility check, and prints one row per step. CI runs the same on every pull request. See CONTRIBUTING.md, "Checks before a merge".
+- **Run the regression set before a merge:** `node tools/regression.mjs` from the repo root runs the lint, the tools' tests, the four script suites, `claude plugin validate` and the skill visibility check, and prints one row per step. CI runs the same on every pull request. See CONTRIBUTING.md, "Checks before a merge".
 - **Validate a manifest edit:** `python3 -m json.tool plugins/doc-writer-toolkit/.claude-plugin/plugin.json` (or `.claude-plugin/marketplace.json`) — just a JSON syntax check.
 - **Try a skill/command end-to-end:** it must be exercised from a *different* repo that has this plugin installed (see README's "Install into a project" section) or from a local checkout added via `extraKnownMarketplaces` pointing at a local path. There is no in-repo harness for running a skill.
-- **Test the Node scripts:** `npm test` in `plugins/doc-writer-toolkit/scripts/ui-labels/`, `.../scripts/locale-sync/` and `.../scripts/doc-align/`. Offline (throwaway git repos and the `command` label adapter; `doc-align` uses inline fixtures); the `locale-sync` suite takes about two minutes. Keep each script's `README.md` in step with its flags and output fields, and add a test with every behaviour change.
+- **Test the Node scripts:** `npm test` in `plugins/doc-writer-toolkit/scripts/ui-labels/`, `.../scripts/locale-sync/`, `.../scripts/doc-align/` and `.../scripts/screenshot-locales/`. Offline (throwaway git repos and the `command` label adapter; `doc-align` uses inline fixtures, `screenshot-locales` throwaway folders); the `locale-sync` suite takes about two minutes. Keep each script's `README.md` in step with its flags and output fields, and add a test with every behaviour change.
 - **`scripts/sme-video-context/sme_video_context.py`:** the Python tool. Setup and run commands are documented in `plugins/doc-writer-toolkit/scripts/sme-video-context/README.md` (needs system `ffmpeg`/`tesseract` plus a Python venv) — follow that file rather than duplicating the steps here, since the `extract-sme-screenshots` skill's own instructions are the current source of truth for how it's actually invoked.
 
 ## Architecture
@@ -114,6 +115,10 @@ Four skills move a whole menu *section* (not just one page) toward publish-ready
 4. `resolve-markers` — batch-answers `{/* NEEDS CONFIRMATION */}` markers from app/interview evidence.
 
 `/explore-and-resolve` chains `app-explorer` → `resolve-markers`. There is **no single `/document-section` orchestrator yet** that chains readiness → explore → plan → write → review; that, plus a resumable `.sources/section-state.json` ledger, is the toolkit's headline unbuilt feature.
+
+### Screenshot locales
+
+A host that needs screenshots in more than one UI language declares `Screenshot locales:` (separate from `Content language:`) and `Locale switch:`. Every Playwright consumer (`app-explorer`, `resolve-markers`, and the writers through them) then follows one contract, `context/doc-rules/project-rules/screenshot-locales.md`: one scenario per page or section, one capture per locale into a staging folder, and `scripts/screenshot-locales/` (no AI) to derive each locale's `.assets/` path from the root pairs and `docusaurus.config`, keep the per-section ledger (`.sources/screenshot-manifest.json`), and move a set into the docs only when every locale is there. `screenshot-capture.md` stays the one-shot, one-locale mechanic. A host without the declaration runs no new step: it captures once, into the `.assets/` the consuming skill names, as before. Further locales that aren't screenshot locales keep their `locale-sync link-assets` links to the EN images.
 
 ### Locale translation pipeline (`locale-translator`, `/translate-locales`)
 

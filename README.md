@@ -15,7 +15,7 @@ A [Claude Code plugin marketplace](https://code.claude.com/docs/en/plugin-market
 - **`context/google-developer-style-guide/`** — complete distilled corpus of the public Google Developer Documentation Style Guide (121 files), with routed loading for token efficiency.
 - **`context/microsoft-style-guide/`** — complete distilled corpus of the Microsoft Writing Style Guide (English + Ukrainian localization, 168 files), with routed loading for token efficiency.
 - **`context/doc-templates/`** — page templates for API reference pages, user guides, and concept topics.
-- **`scripts/`** — non-skill utilities that plugin skills shell out to: `ui-labels/` and `locale-sync/` (Node, no dependencies, tested with `npm test`) for the locale translation pipeline, `doc-align/` (Node, no dependencies, tested with `npm test`) for the structural counts of `doc-alignment-checker`, and `sme-video-context/` (Python) for the SME video pipeline.
+- **`scripts/`** — non-skill utilities that plugin skills shell out to: `ui-labels/` and `locale-sync/` (Node, no dependencies, tested with `npm test`) for the locale translation pipeline, `doc-align/` (Node, no dependencies, tested with `npm test`) for the structural counts of `doc-alignment-checker`, `screenshot-locales/` (Node, no dependencies, tested with `npm test`) for screenshots in every declared UI language, and `sme-video-context/` (Python) for the SME video pipeline.
 
 ### Generic vs. product-specific
 

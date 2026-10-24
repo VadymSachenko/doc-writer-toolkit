@@ -7,7 +7,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { diffSnapshots } from '../lib/diff.mjs';
-import { resolveLocaleFiles, ticketsFromBranch, parseSource, deriveLocaleRoot } from '../lib/config.mjs';
+import { resolveLocaleFiles, ticketsFromBranch, parseSource, deriveLocaleRoot, readDocusaurusI18n } from '../lib/config.mjs';
 import { replaceBold } from '../lib/sync.mjs';
 import { normalize } from '../lib/lookup.mjs';
 import { gitBlobHash } from '../lib/util.mjs';
@@ -91,6 +91,13 @@ test('config helpers', () => {
   assert.equal(deriveLocaleRoot('i18n/en/docusaurus-plugin-content-docs/current/', 'tr'), 'i18n/tr/docusaurus-plugin-content-docs/current/');
   assert.equal(parseSource('github Org/Repo@feat/x src/locales/*.json').branch, 'feat/x');
   assert.throws(() => parseSource('command cat labels.json'), (e) => e.exitCode === 2);
+});
+
+test('readDocusaurusI18n returns the locales as listed, without adding en', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ui-labels-i18n-'));
+  await fs.writeFile(path.join(root, 'docusaurus.config.ts'), "export default {\n  // locales: ['xx'],\n  i18n: { defaultLocale: 'uk', locales: ['uk', 'de'] },\n};\n");
+  assert.deepEqual(await readDocusaurusI18n({ root }), { defaultLocale: 'uk', locales: ['uk', 'de'] });
+  await fs.rm(root, { recursive: true, force: true });
 });
 
 test('replaceBold skips code fences and reports lines', () => {
