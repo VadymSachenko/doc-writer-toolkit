@@ -16,7 +16,7 @@ This skill does **not** write documentation pages. It does not plan structure. I
 
 ## Sources to load
 
-1. `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — resolve content root and language.
+1. `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — resolve the section folder's root pair (its content root) and the content language.
 2. `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/value-realism.md` — mandatory rules for all values entered into the UI via Playwright. Load before any UI interaction step.
 3. `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-capture.md` — scope ladder, two-shot pattern, annotation patterns, blur patterns. Load before any screenshot step.
 4. The host project's `CLAUDE.md` — for `Admin UI:`, `API test collection:`, and credentials (via `.env`).

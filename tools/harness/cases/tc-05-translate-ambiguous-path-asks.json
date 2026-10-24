@@ -1,0 +1,35 @@
+{
+  "id": "tc-05-translate-ambiguous-path-asks",
+  "description": "Two pairs both hold transactions/transactions: doc-translator asks, lists both candidates and writes nothing.",
+  "fixture": {
+    "shape": "multi"
+  },
+  "prompt": "use doc-translator to translate `transactions/transactions`",
+  "options": {
+    "maxTurns": 40,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "names the primary candidate",
+      "type": "match",
+      "path": "output",
+      "pattern": "portal/transactions/transactions"
+    },
+    {
+      "name": "names the API reference candidate",
+      "type": "match",
+      "path": "output",
+      "pattern": "docs/transactions/transactions"
+    },
+    {
+      "type": "unchanged",
+      "ignore": [
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}
