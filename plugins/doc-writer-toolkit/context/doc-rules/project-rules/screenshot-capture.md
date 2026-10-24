@@ -27,7 +27,7 @@ Frame **thickness and color**, default scope, compact-image width, and blur radi
 
 ### Annotation shape invariant (not overridable)
 
-The annotation frame is **always a rectangle with square corners and no fill**: `border-radius: 0`, `backgroundColor` unset (transparent), a solid border only. No rounded corners, no translucent region fill, no circles, arrows, or freehand marks. A project **cannot** override this through config.
+The annotation frame is **always a rectangle with square corners and no fill**: `border-radius: 0`, `background: transparent`, a solid border only. No rounded corners, no translucent region fill, no circles, arrows, or freehand marks. A project **cannot** override this through config.
 
 **Legacy shape config — deprecate, warn, normalize.** Older projects may still declare a three-part `Screenshot frame:` value like `rounded, 3px, #CC0000` or `match-element, 3px, #CC0000`, or a separate shape field. When you read a shape token other than `rectangular`:
 
@@ -136,7 +136,7 @@ For state changes that do not open a separate overlay (e.g., a table refreshes i
 
 Draw the frame as a **separate overlay `<div>` positioned over the element**, not as an `outline`/`border` on the element itself. This is deliberate: an `outline` on the element inherits the element's own `border-radius`, so a rounded button would get a rounded frame. A standalone overlay makes the frame a **rectangle with square corners regardless of the element** — which is the required shape (Section 0 invariant).
 
-The overlay is **border-only and rectangular**: `border-radius: 0` and no background fill, always. Only the border's `thickness` and `color` come from config; the shape never does. Do not read a `{frame.shape}` value — there isn't one.
+The overlay is **border-only and rectangular**: `border-radius: 0` and `background: transparent`, always. Only the border's `thickness` and `color` come from config; the shape never does. Do not read a `{frame.shape}` value — there isn't one.
 
 **Visual-thickness normalization.** A full-page screenshot is displayed at roughly `{doc.content.width} / viewport_width` scale in the doc, while a compact screenshot is displayed at `{compact-width} / clip_width` scale. A fixed CSS `border-width` that looks correct in a compact clip will appear proportionally thinner on a full-page shot. To keep the perceived frame the same across both shot types, compute an `adjustedThickness` before injecting:
 
@@ -174,6 +174,7 @@ await page.locator(selector).evaluate((el, frame) => {
     height: r.height + 'px',
     border: `${frame.thickness}px solid ${frame.color}`,
     borderRadius: '0',              // rectangular invariant — never rounded or element-matched
+    background: 'transparent',      // no fill — border only
     boxSizing: 'content-box',
     pointerEvents: 'none',
     zIndex: '2147483647',
@@ -209,7 +210,8 @@ await page.locator(selector).evaluate((el, frame) => {
     height: r.height + 'px',
     border: `${frame.thickness}px solid ${frame.color}`,
     borderRadius: '0',              // rectangular invariant
-    boxSizing: 'content-box',       // no backgroundColor — border-only, transparent
+    background: 'transparent',      // no fill — border only
+    boxSizing: 'content-box',
     pointerEvents: 'none',
     zIndex: '2147483647',
   });
