@@ -1,0 +1,41 @@
+{
+  "id": "tc-36-writer-single-pair-first-message",
+  "description": "One pair: user-guide-writer names root portal/, names no pair and starts its interview without writing.",
+  "fixture": {
+    "shape": "single"
+  },
+  "prompt": "use user-guide-writer for `portal/settings/currency-rules/`",
+  "options": {
+    "maxTurns": 40,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "names the portal root",
+      "type": "match",
+      "path": "output",
+      "pattern": "portal/"
+    },
+    {
+      "name": "no pair named",
+      "type": "no-match",
+      "path": "output",
+      "pattern": "api-reference"
+    },
+    {
+      "name": "asks interview questions",
+      "type": "match",
+      "path": "output",
+      "pattern": "\\?"
+    },
+    {
+      "type": "unchanged",
+      "ignore": [
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "id": "tc-16-align-api-pair",
+  "description": "Two pairs: the checker compares the docs/ page with the API reference EN page, reports the one missing H2 and names the pair.",
+  "fixture": {
+    "shape": "multi"
+  },
+  "prompt": "use doc-alignment-checker on `docs/transactions/transactions.md`, main: ua",
+  "options": {
+    "maxTurns": 40,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "reports the missing section",
+      "type": "match",
+      "path": "output",
+      "pattern": "(?i)Отримання транзакції|Get a transaction"
+    },
+    {
+      "name": "names the pair",
+      "type": "match",
+      "path": "output",
+      "pattern": "api-reference"
+    },
+    {
+      "name": "does not compare with the portal EN page",
+      "type": "no-match",
+      "path": "output",
+      "pattern": "docusaurus-plugin-content-docs-portal/current/transactions"
+    },
+    {
+      "type": "unchanged",
+      "ignore": [
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}
