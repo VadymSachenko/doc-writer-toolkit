@@ -9,3 +9,8 @@ tasks/
 
 # Task run logs — local only
 test-results/
+
+# Python bytecode and virtual environments (the SME video tool)
+__pycache__/
+*.pyc
+.venv*/
