@@ -1,0 +1,36 @@
+{
+  "id": "tc-27-review-api-en-page-no-prompt",
+  "description": "Two pairs: reviewing a page under the API reference EN root runs as gdsg@en without a language prompt.",
+  "fixture": {
+    "shape": "multi"
+  },
+  "prompt": "/{plugin}:review-doc-style i18n/en/docusaurus-plugin-content-docs/current/transactions/transactions.md",
+  "options": {
+    "maxTurns": 60,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "profile gdsg@en",
+      "type": "match",
+      "path": "output",
+      "pattern": "gdsg@en"
+    },
+    {
+      "name": "no language prompt",
+      "type": "no-match",
+      "path": "output",
+      "pattern": "(isn't|is not|not) (among|one of) the (project's )?declared|which language|proceed anyway",
+      "flags": "i"
+    },
+    {
+      "type": "unchanged",
+      "ignore": [
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}

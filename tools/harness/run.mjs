@@ -154,7 +154,7 @@ export function runOnce(c, { copy, sentinel, ownSkills, dir, model, claude = 'cl
 export function score(c, t, { host, output, status, sentinel, ownSkills }) {
   return [
     ...builtInChecks(t, sentinel, ownSkills),
-    ...c.assertions.map((a) => ({ name: nameOf(a), ...check(a, { host, output, status }) })),
+    ...c.assertions.map((a) => ({ name: nameOf(a), ...check(a, { host, output, status, skills: t.skills }) })),
   ];
 }
 

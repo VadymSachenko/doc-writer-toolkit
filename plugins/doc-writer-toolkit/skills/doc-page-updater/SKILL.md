@@ -16,11 +16,12 @@ You are changing an existing, approved page so that it is true again after a pro
 
 - The change brief (path given by the caller; format in `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/input-templates/change-brief-template.md`).
 - The target page.
-- `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — resolve the host project's declarations from the **host project path the caller passes** (or the current project if none is passed). Refuse a page that lives under the EN i18n root: this skill edits the authored language only.
+- `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — resolve the host project's declarations from the **host project path the caller passes** (or the current project if none is passed). Resolve the page's root pair there too. Refuse a page under any root pair's EN i18n root: this skill edits the authored language only.
 - The template matching the page's type, to know where a new block belongs: `${CLAUDE_PLUGIN_ROOT}/context/doc-templates/ua-user-guide-template.md`, `ua-concept-topic-template.md`, `api-reference-template.md` (or the EN equivalents on an `en` project). Detect the type from the page's structure and frontmatter.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-ua.md` (or `glossary-en.md`) and `formatting-conventions.md` — terms and formatting are rank 0.
 - `${CLAUDE_PLUGIN_ROOT}/context/changed-blocks.md` — the block vocabulary used in the report.
-- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` — only when a block you write links to another page.
+- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` — only when a block you write links to another page (Step 2.8).
+- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/heading-anchors.md` — heading ids on a `uk` page (Step 2.7).
 
 Nothing else. Do not load style corpora; the reviewer does that afterwards.
 
@@ -49,7 +50,8 @@ Run the UI label check in `${CLAUDE_PLUGIN_ROOT}/context/ui-labels.md` before an
 4. **Screenshots.** Reference new or re-captured files exactly by the names the brief gives, in the page's `.assets/` folder, with the project's screenshot embedding conventions. Never create or modify image files.
 5. **Frontmatter.** Update `last_update.date` if the page has it. Touch nothing else in the frontmatter unless the brief names the field (e.g. `description` must change because the page's scope changed).
 6. **MDX.** Never touch import lines or component props unless the brief names them.
-7. **Links.** A link you add to another page is built as `internal-links.md` prescribes, from the target page's root pair: site-root-relative, no `.md`/`.mdx`, never `./` or `../`. A link the brief gives as a file path is converted the same way. An existing link outside your blocks stays as it is.
+7. **Heading ids (`uk` pages).** A heading you add ends with its `{/* #id */}` comment, per `heading-anchors.md`. A heading you reword keeps its comment unchanged. Never add a comment to an existing heading unless the brief asks; when it does, rewrite the links to the old fragment in the same change (that file's rule 8) and list them in the report.
+8. **Links.** A link you add to another page is built as `internal-links.md` prescribes, from the target page's root pair: site-root-relative, no `.md`/`.mdx`, never `./` or `../`. A link the brief gives as a file path is converted the same way. An existing link outside your blocks stays as it is.
 
 ## Step 3 — Self-review before saving
 
@@ -61,6 +63,7 @@ Run the UI label check in `${CLAUDE_PLUGIN_ROOT}/context/ui-labels.md` before an
 - Markers read as plain writer's notes.
 - Code blocks and inline code are byte-identical unless the brief changed them.
 - Every page link you added follows `internal-links.md`.
+- On a `uk` page, every heading you added ends with a well-formed `{/* #id */}` that is unique on the page; no existing heading's comment changed.
 
 Fix anything that fails, then save.
 
@@ -100,7 +103,7 @@ Counts from the report header, the list of changed sections, and every "Not appl
 - The brief targets a section that does not exist → add it per the template's placement; report "added".
 - The page is a multi-procedure guide and the brief adds a whole procedure → add it as a sibling of the existing ones with the same heading pattern; report "added".
 - The brief's fact contradicts an existing marker → apply the fact, remove that marker, report both.
-- A page in the EN root → refuse with the reason; suggest running on the UA page and then the translator's sync mode.
+- A page under any pair's EN i18n root → refuse with the reason; suggest running on the UA page and then the translator's sync mode.
 - The brief is empty or every item is "already present" → no edit, report only.
 
 ## Explicit invocation examples
