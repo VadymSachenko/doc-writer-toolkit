@@ -290,6 +290,7 @@ Before saving, check:
 - All code blocks are byte-for-byte identical to the source
 - No `{/* #anchor */}` comments appear in EN headings
 - Every EN heading's id, generated from its text or explicit `{#id}`, equals its UA heading's comment id (`heading-anchors.md`)
+- No explicit `{#id}` contains a `{…}` placeholder (`heading-anchors.md` rule 9); a placeholder in the UA comment is reported, not carried into EN
 - No "UCPay" or "UniComPay" in prose — only "UCP"
 - `## Передумови` translated as `## Prerequisites` with the correct EN sentence (Variant A if a single reference section; Variant B if multiple)
 - After colons in prose: first word is capitalized if it is a regular word (not a UI element name, proper name, or code value)
