@@ -109,7 +109,8 @@ Apply the API reference template. Single endpoint per page.
 Rules:
 - **Never invent API facts.** Fields, headers, error codes, status values — if a fact is not in the sources, flag it with `{/* NEEDS CONFIRMATION: ... */}`, don't guess. **Exception:** adjust obviously malformed example values in JSON samples (e.g. `Test`, `7777777`) to realistic values that correlate with field names and types. Flag every such adjustment with `// NEEDS CONFIRMATION: original value was <ORIGINAL_VALUE>` as an inline JSON comment. Use Ukraine-based values where applicable (Ukrainian phone format, common Ukrainian names, etc.).
 - **Apply the glossary.** Replace synonyms with canonical EN terms (Partner, Transaction, Webhook, etc.).
-- **Sentence style, UI labels, status values, placeholders, code-vs-concept rendering:** follow `formatting-conventions.md`'s Core section (Ж1–Ж7) and its English section — do not restate them here.
+- **Sentence style, UI labels, status values, placeholders, code-vs-concept rendering:** follow `formatting-conventions.md`'s Core section (Ж1–Ж8) and its English section — do not restate them here.
+- **Icon-only controls**, when the page names one (a UI setting in Prerequisites, for example): follow Ж8 of `formatting-conventions.md`, Core and English. When the render needs an Iconify id or an icon crop that the evidence doesn't give, invoke the `identify-ui-icon` skill.
 - **Match the template's section structure.** Prerequisites (if applicable), Authentication, endpoint action, Request, Response, Possible errors, Next steps.
 - **Heading ids (`uk` pages) follow the shared contract.** End every heading from `##` down with its `{/* #id */}` comment, and build every link to a heading from that id, exactly as `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/heading-anchors.md` prescribes. Do not restate its rules here.
 - **Internal links to other doc pages follow the shared contract.** Build every page-to-page link (Authentication page, Next steps, Other management options, error-codes page, etc.) exactly as `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` prescribes — site-root-relative, the UA URL prefix of the target page's pair joined to the target's path relative to that pair's content root, no `.md`/`.mdx`, anchors preserved. That file is authoritative for what is and isn't a page link (asset links `./.assets/…` are exempt); do not restate its algorithm here.
@@ -131,6 +132,7 @@ Before writing to disk, check:
 - Every fact is traceable to an input source or a user answer from Step 4
 - All required template sections are present; optional ones are either filled or omitted (not left as empty placeholders)
 - UI labels, status values, placeholders, and code-vs-concept rendering follow `formatting-conventions.md` Ж1–Ж4
+- Every icon-only control the page names follows Ж8: a bold name from the evidence with a noun, or a description with a `NEEDS CONFIRMATION` marker
 - The draft conforms to every rule in the style-guide topical files loaded per "Sources to load" (resolved via `style-guide-registry.md`) — check against those files directly, don't rely on memory of past drafts
 - **P1 — Inherited wording normalized.** For every heading and every bolded fragment, confirm it is not lifted from the brief or `.sources/sme-interview.md` without normalization. Intermediate notes are a source of *facts*, not of *wording*.
 - **P2 — Heading language (Ж7).** Every heading is in English; a code entity inside one stays in `code font` but the surrounding words don't switch language.

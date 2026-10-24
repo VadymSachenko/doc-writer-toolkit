@@ -1,0 +1,64 @@
+{
+  "id": "tc-26a-writer-icon-crop-default",
+  "description": "No Icon rendering: declared, so the render is screenshot-crop. app-notes gives the trash button's tooltip and .assets/ holds its crop: user-guide-writer shows the crop inline with an empty alt, then the bold name; no <Icon> component, no hardcoded color, no icon lookup.",
+  "fixture": {
+    "shape": "single"
+  },
+  "setup": [
+    "mkdir -p portal/payments/delete-payment/.sources portal/payments/delete-payment/.assets && echo iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII= | base64 --decode > portal/payments/delete-payment/.assets/payments-page.png && echo iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII= | base64 --decode > portal/payments/delete-payment/.assets/delete-icon.png && echo iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII= | base64 --decode > portal/payments/delete-payment/.assets/delete-payment-dialog.png && cat > portal/payments/delete-payment/.sources/app-notes.md <<'EOF'\n# App notes — Платежі\n\n**Explored:** 2026-10-01\n**Scenarios seeded:** one new payment\n\n---\n\n## Screens observed\n\n### Платежі\n\n**Path:** menu › Платежі\n**States captured:** loaded\n\n**UI elements:**\n- Buttons: Створити платіж\n- Columns: Дата, Сума, Статус\n- Icon-only controls: end of each payment row — trash can — name: Видалити (tooltip) — Iconify id: none\n\n**Screenshots:** payments-page.png, delete-icon.png, delete-payment-dialog.png\n\n**Notes:** The trash can opens the **Видалення платежу** window with the buttons **Скасувати** and **Видалити**. After **Видалити** the payment disappears from the list. delete-icon.png is a crop of the trash button.\n\n---\n\n## Answers to open questions\n\nNone.\n\n---\n\n## New findings\n\nNone.\n\n---\n\n## Unanswered questions\n\nNone.\nEOF\ngit add -A && git commit -q -m 'Case setup'"
+  ],
+  "prompt": "use user-guide-writer for `portal/payments/delete-payment/`. Skip questions and draft with your best guess, then save the page. The facts are in `.sources/app-notes.md`.",
+  "options": {
+    "maxTurns": 60,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)"
+    ],
+    "disallowedTools": [
+      "WebFetch",
+      "WebSearch",
+      "Bash(curl:*)",
+      "Bash(wget:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "one page saved",
+      "type": "command",
+      "run": "test $(find portal/payments/delete-payment -maxdepth 1 -name '*.md' | wc -l) -eq 1"
+    },
+    {
+      "name": "the crop inline, with an empty alt",
+      "type": "command",
+      "run": "grep -qE \"require\\('\\./\\.assets/delete-icon\\.png'\\)\\.default\\}[^>]*alt=\\\"\\\"\" portal/payments/delete-payment/*.md"
+    },
+    {
+      "name": "the bold name right after the icon",
+      "type": "command",
+      "run": "grep -qE \"delete-icon\\.png'\\)\\.default\\}[^>]*/> *\\*\\*Видалити\\*\\*\" portal/payments/delete-payment/*.md"
+    },
+    {
+      "name": "no <Icon> component under screenshot-crop",
+      "type": "command",
+      "run": "! grep -q '<Icon' portal/payments/delete-payment/*.md"
+    },
+    {
+      "name": "no hardcoded icon color",
+      "type": "command",
+      "run": "! grep -qE \"color: *'#|style=\\{\\{\" portal/payments/delete-payment/*.md"
+    },
+    {
+      "name": "the evidence covers the render: no icon lookup",
+      "type": "skill-not-called",
+      "skill": "identify-ui-icon"
+    },
+    {
+      "type": "changed-only",
+      "paths": [
+        "portal/payments/delete-payment/",
+        ".doc-toolkit/",
+        "CLAUDE.md"
+      ]
+    }
+  ]
+}

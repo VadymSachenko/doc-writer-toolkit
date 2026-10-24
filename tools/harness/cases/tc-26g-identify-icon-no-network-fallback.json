@@ -1,0 +1,55 @@
+{
+  "id": "tc-26g-identify-icon-no-network-fallback",
+  "description": "iconify-component declared, no id in the evidence, network tools blocked: /identify-icon reports no Iconify id, falls back to a crop, a marker or a ToDo, and edits no page.",
+  "fixture": {
+    "shape": "single"
+  },
+  "setup": [
+    "printf -- '- **Icon rendering:** `iconify-component`\\n' >> CLAUDE.md && mkdir -p portal/payments/archive-payment/.assets && echo iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII= | base64 --decode > portal/payments/archive-payment/.assets/payments-page.png && git add -A && git commit -q -m 'Case setup'"
+  ],
+  "prompt": "/{plugin}:identify-icon portal/payments/archive-payment/.assets/payments-page.png the three-dots button at the end of each payment row",
+  "options": {
+    "maxTurns": 30,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)",
+      "Bash(grep:*)"
+    ],
+    "disallowedTools": [
+      "WebFetch",
+      "WebSearch",
+      "Bash(curl:*)",
+      "Bash(wget:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "type": "skill-called",
+      "skill": "identify-ui-icon"
+    },
+    {
+      "name": "a fallback",
+      "type": "match",
+      "path": "output",
+      "pattern": "NEEDS CONFIRMATION|ToDo|crop"
+    },
+    {
+      "name": "no Iconify id reported",
+      "type": "no-match",
+      "path": "output",
+      "pattern": "Iconify id: *`?[a-z0-9-]+:[a-z0-9-]+"
+    },
+    {
+      "name": "no page edited",
+      "type": "command",
+      "run": "test -z \"$(git status --porcelain -- '*.md' '*.mdx')\""
+    },
+    {
+      "type": "changed-only",
+      "paths": [
+        "portal/payments/archive-payment/.assets/",
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}

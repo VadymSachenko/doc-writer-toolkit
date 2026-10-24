@@ -2,7 +2,7 @@
 
 Canonical list of what the plugin ships. One line per skill; the invocation phrasing is what triggers it (all skills are explicit-invocation only). `WORKFLOW.md` at the repo root maps these to the writing process.
 
-## Skills (16)
+## Skills (17)
 
 | Skill | What it does | Invoke with |
 |---|---|---|
@@ -22,8 +22,9 @@ Canonical list of what the plugin ships. One line per skill; the invocation phra
 | `locale-translator` | Translates the approved UA pages into every further locale the site declares (not EN), only where UA changed and block by block: label check first, UI labels from the app's dictionaries, per-locale term memory, one worker per locale, scripted checks, build and a per-page report. Never commits | "/translate-locales", "locale-translator: translate the settings section into kk only" |
 | `doc-alignment-checker` | Checks a UA page and its EN counterpart for structural alignment | "check-doc-alignment balance/balance" |
 | `cleanup-unused-screenshots` | Moves candidate screenshots a page never referenced into `_unused/` (never deletes) | "cleanup-unused-screenshots for docs/routing" |
+| `identify-ui-icon` | Finds the picture for an icon-only control in the project's `Icon rendering:` form: an Iconify id (evidence first, then the Iconify API), its SVG, or a screenshot crop; falls back to a crop or a marker, never guesses an id and never names the control. The writers call it by name | "identify-ui-icon: the trash button in docs/payments/.assets/payments-page.png" |
 
-## Commands (12)
+## Commands (13)
 
 | Command | Underlying skill(s) |
 |---|---|
@@ -39,5 +40,6 @@ Canonical list of what the plugin ships. One line per skill; the invocation phra
 | `/translate-doc` | `doc-translator` |
 | `/check-doc-alignment` | `doc-alignment-checker` |
 | `/translate-locales` | `locale-translator` |
+| `/identify-icon` | `identify-ui-icon` |
 
 Commands are thin wrappers: they bind arguments to paths and hand off to the skill's workflow. Shared procedures every skill points to instead of copying: `context/project-paths.md` (content roots, language), `context/style-guide-registry.md` (guide tokens and routed loading), `context/changed-blocks.md` (what "the changed part of a page" means), `context/ui-labels.md` (the UI label check at the start of a docs task), `context/locale-translation.md` (rules for translating into the further locales). The scripts the locale pipeline runs, `scripts/ui-labels/` and `scripts/locale-sync/`, and the one `doc-alignment-checker` runs, `scripts/doc-align/`, each have a README.

@@ -60,6 +60,7 @@ Load these files at the start of the task.
 - HTTP methods and paths (`POST /transaction/create`)
 - Reader-replaced placeholders: `*`\``UPPER_CASE`\``*`
 - MDX component names and attribute names (`<details>`, `<summary>`, `:::note`, `<Icon>`, etc.)
+- The inline icon of an icon-only control (Ж8 in `formatting-conventions.md`), whole: an `<Icon icon="…" … />` component, or an `<img src={require('./.assets/…-icon.png').default} … alt="" />` (`.svg` too, `?url` included). Its `alt=""` stays empty; the name next to it is translated as a UI label
 - Frontmatter keys (`title`, `sidebar_position`, `slug`, etc.) — translate values only
 - URLs and `href` values — copy link paths verbatim from the Ukrainian source. Per `internal-links.md`, the two locales share one site-root-relative route; an already-correct UA page link is the EN page link unchanged. Do not re-derive, localize, or "fix" a path here.
 - Status values in code font: `new`, `in queue`, `in work`, `success`, `cancelled` — these are already English
@@ -198,12 +199,12 @@ Examples:
 
 A step that consists only of clicking or tapping a UI element — with no explanation of what it achieves — is an isolated step. It must be expanded.
 
-Expand by prepending the purpose: **`To {purpose}, click <Icon…>.`**
+Expand by prepending the purpose, and name an icon-only control in the English sentence form of Ж8 (`formatting-conventions.md`): **`To {purpose}, click the <icon> **{Name}** button.`**
 
-- ⛔ `2. Click <Icon icon="ei:plus" color="#F79F14" width="20"/>.`
-- ✓ `2. To create a dispute ticket, click <Icon icon="ei:plus" color="#F79F14" width="20"/>.`
+- ⛔ `2. Click <Icon icon="mdi:plus" height="20" />.`
+- ✓ `2. To create a dispute ticket, click the <Icon icon="mdi:plus" height="20" /> **Create** button.`
 
-Derive the purpose from the surrounding context (accordion title, adjacent steps, or the result statement).
+Derive the purpose from the surrounding context (accordion title, adjacent steps, or the result statement). Take the name only from the UA step. When the UA step has none (Ж8 branch 3: a description and a `NEEDS CONFIRMATION` marker), translate the description, carry the marker over, and never supply a name yourself. Keep the icon markup as the UA page has it. The verb is the one Ж8 gives for the declared style guide (**click** or **select**).
 
 ### Fixed patterns
 
@@ -304,6 +305,7 @@ Before saving, check:
 - Cross-reference link text does not repeat the subject when it matches the link label
 - No intro sentence where the sentence restates the enclosing heading or accordion title AND no admonition or prose paragraph precedes the numbered steps — remove it
 - No isolated step that consists only of clicking a UI element — expanded to "To {purpose}, click …"
+- Every inline icon of an icon-only control is byte-identical to the UA source, its `alt=""` still empty; no icon-only control got a name the UA step doesn't give (Ж8)
 - Paperclip icon labeled `receipts icon <Icon icon="uiw:paper-clip" color="#F79F14" />` — never "receipt management icon" or any other variant
 - `## Prerequisites` always uses the heading + standard sentence — never a bare sentence without the heading, even if the UA source omits the heading
 

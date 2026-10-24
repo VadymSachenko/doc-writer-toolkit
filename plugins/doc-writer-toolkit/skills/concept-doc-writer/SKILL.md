@@ -136,7 +136,8 @@ Rules:
 - **Do not name the partner-cabinet context explicitly in page body text.** The reader is already in it. `uk`: avoid «кабінет партнера», use «меню» for navigation references — wrong: «в розділі X у кабінеті партнера», right: «в меню X». `en`: avoid explicit "in the partner cabinet"; use "the menu" or the feature's own name instead.
 - **Attribute column text:** text in a reference table's attribute-description column (**Атрибути** / **Attribute**) must not be bold.
 - **Colon over dash in bullet lists:** when labelling items, prefer `:` over `—`. If the label is a UI element name, do not bold the colon (`**UI element**: description`); if the label is plain text, bold both label and colon (`**Label:** description`).
-- **UI labels and status values, placeholders, code-vs-concept rendering:** follow `formatting-conventions.md`'s Core section (Ж1–Ж7) — do not restate its rules here.
+- **UI labels and status values, placeholders, code-vs-concept rendering:** follow `formatting-conventions.md`'s Core section (Ж1–Ж8) — do not restate its rules here.
+- **Icon-only controls**, when the page names one: follow Ж8 of `formatting-conventions.md` (name from the evidence only, never from the glyph; icon in the resolved `Icon rendering:` form). When the render needs an Iconify id or an icon crop that the evidence doesn't give, invoke the `identify-ui-icon` skill.
 - **Follow the style-guide topical files loaded above** for anything not covered by the project-specific rules in this list (formula/notation formatting, code sample conventions, accessibility, etc.) — check the corpus rather than guessing.
 - **Mark writer decisions needing follow-up** with `{/* ToDo: ... */}`.
 
@@ -153,6 +154,7 @@ Before writing to disk, check:
 - On a `uk` page: no calques from `formatting-conventions.md`'s "Кальки й слова-заборони" (не «являється», «даний», «в залежності від»)
 - No marketing adjectives
 - UI labels, status values, placeholders, and code-vs-concept rendering follow `formatting-conventions.md` Ж1–Ж4
+- Every icon-only control the page names follows Ж8: a bold name from the evidence with a noun, or a description with a `NEEDS CONFIRMATION` marker
 - No product/UI element used as the grammatical subject where the reader should be (active voice, second person — `formatting-conventions.md` sentence-style section)
 - Every fact in the page is traceable to an input source or a user answer from Step 4
 - The overview is present and covers: what the concept is, why it exists, and why the reader needs it
