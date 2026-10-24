@@ -38,7 +38,7 @@ This file holds no product terms (they come from the label store and term memory
 
 - **S1. One block for one block, in the same place.** This covers headings (same level and order), paragraphs, list items and steps (same count and nesting), table rows and columns, admonitions (same type), MDX components, code blocks and comments. Never split or merge blocks, and never move a sentence into another block. `locale-sync check` fails a page that doesn't mirror UA, and later incremental runs map blocks by position.
 - **S2. No EN restructuring.** Don't remove procedure intro sentences, expand isolated steps, or add standard Prerequisites wording. Those are `doc-translator` rules for EN.
-- **S3. Keep every `{/* #anchor */}` heading comment verbatim.** Anchors generated from translated heading text would break `#anchor` links.
+- **S3. Keep every `{/* #anchor */}` heading comment verbatim.** Anchors generated from translated heading text would break `#anchor` links. The contract is `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/heading-anchors.md`.
 - **S4. Formatting mirrors UA.** A span that is bold, italic or in code font in UA has the same formatting in the translation, whatever its class (§4).
 - **S5. Write only the blocks you were given.** In an incremental run, replace each changed block's `target.text` exactly, and insert added blocks where `locale-sync blocks` says. Every other byte of the target file stays identical. An `unmapped` change is reported with its UA text and never written into a guessed place.
 
