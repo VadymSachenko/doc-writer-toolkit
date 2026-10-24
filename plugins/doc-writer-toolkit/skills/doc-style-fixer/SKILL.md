@@ -30,7 +30,7 @@ You are applying fixes for a `doc-style-reviewer` findings report against exactl
 
 - The `doc-style-reviewer` report (from conversation context, or produced by invoking that skill — see Step 1).
 - The target file itself.
-- **`uk` page only:** `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/native-ukrainian.md`, read only to apply a finding that cites it the way that file says: its preferred forms, and its negative controls (§4b) left alone. It adds no finding of its own.
+- **Only when a finding in the report cites it:** `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/native-ukrainian.md`. Use it to apply that finding: take the file's preferred form when the finding's suggestion differs from it, and leave its negative controls (§4b) alone. It adds no finding of its own.
 - Nothing else. This skill does not re-load style-guide corpora or other project rules — the report already did that classification work; this skill only reads the report's own citations back to the user when showing why a fix applies.
 
 ## Step 1 — Get the report

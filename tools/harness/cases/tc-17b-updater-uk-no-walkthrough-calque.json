@@ -18,6 +18,13 @@
   },
   "assertions": [
     {
+      "name": "the intro was written",
+      "type": "match",
+      "path": "portal/transactions/transactions.md",
+      "pattern": "переглядати[^\\n]*фільтрувати|фільтрувати[^\\n]*переглядати",
+      "flags": "i"
+    },
+    {
       "name": "no walk-through calque",
       "type": "no-match",
       "path": "portal/transactions/transactions.md",
