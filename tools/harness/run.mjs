@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 // Runs harness cases against one plugin tree under one label, N times each, every run in a fresh fixture host.
 //   node tools/harness/run.mjs --tree <plugin dir> --label <name> --case <id>[,<id>…] [--runs 3] [--out <dir>]
-//                              [--model <model>] [--claude <bin>]
+//                              [--model <model>] [--claude <bin>] [--resume]
 // The tree is copied under the sentinel name `harness-<label>`, the installed copy of the plugin is switched off
 // for the run, and every run checks that the session loaded the sentinel (sentinel-loaded) and called no skill
 // of another copy (no-foreign-skill). Writes <out>/<label>/<case>/run-<n>/ and a summary per case and per label.
+// Every run is a full session on the caller's plan. HARNESS_MODE=off (or "mode": "off" in tools/harness/local.json)
+// turns the harness off: it makes no run and exits 3. Before each run it reads `claude -p /usage` and stops, exit 4,
+// once the 5-hour session or the week is at its limit (default 80% and 50%; HARNESS_MAX_SESSION_PERCENT,
+// HARNESS_MAX_WEEK_PERCENT, or maxSessionPercent and maxWeekPercent in local.json).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -60,6 +64,46 @@ export function builtInChecks({ init, skills }, sentinel, ownSkills) {
     { name: 'sentinel-loaded', pass: loaded, detail: loaded ? `${sentinel}@inline` : `plugins: ${(init?.plugins ?? []).map((p) => p.source).join(', ') || 'no init event'}` },
     { name: 'no-foreign-skill', pass: !foreign.length, detail: foreign.length ? `called ${foreign.join(', ')}` : `skills called: ${skills.join(', ') || 'none'}` },
   ];
+}
+
+// Settings from tools/harness/local.json (untracked, per machine), overridden by HARNESS_* variables.
+export function harnessSettings(env = process.env, file = path.join(here, 'local.json')) {
+  let local = {};
+  try { local = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* no local settings */ }
+  const num = (v) => (v === undefined || v === '' ? undefined : Number(v));
+  return {
+    mode: env.HARNESS_MODE ?? local.mode ?? 'on',
+    maxSessionPercent: num(env.HARNESS_MAX_SESSION_PERCENT) ?? local.maxSessionPercent ?? 80,
+    maxWeekPercent: num(env.HARNESS_MAX_WEEK_PERCENT) ?? local.maxWeekPercent ?? 50,
+  };
+}
+
+// The plan's usage bars from `/usage`. Either is null when the output has none (an API key has no plan limits).
+export function parseUsage(text) {
+  const bar = (re) => {
+    const m = re.exec(text);
+    return m ? { percent: Number(m[1]), resets: m[2]?.trim() ?? null } : null;
+  };
+  return {
+    session: bar(/Current session:\s*(\d+)% used(?:\s*·\s*resets ([^\n]+))?/),
+    week: bar(/Current week \(all models\):\s*(\d+)% used(?:\s*·\s*resets ([^\n]+))?/),
+  };
+}
+
+// Why the next run must not start, or null.
+export function overLimit(usage, settings) {
+  if (usage.session && usage.session.percent >= settings.maxSessionPercent) {
+    return `the 5-hour session is at ${usage.session.percent}% (limit ${settings.maxSessionPercent}%), resets ${usage.session.resets ?? 'later'}`;
+  }
+  if (usage.week && usage.week.percent >= settings.maxWeekPercent) {
+    return `the week is at ${usage.week.percent}% (limit ${settings.maxWeekPercent}%), resets ${usage.week.resets ?? 'later'}`;
+  }
+  return null;
+}
+
+function readUsage(claude) {
+  const run = spawnSync(claude, ['-p', '/usage'], { cwd: os.tmpdir(), encoding: 'utf8', timeout: 60 * 1000 });
+  return parseUsage(`${run.stdout ?? ''}${run.stderr ?? ''}`);
 }
 
 function claudeArgs(c, prompt, copy, model) {
@@ -127,8 +171,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const labelName = option('--label');
   const ids = (option('--case') ?? '').split(',').filter(Boolean);
   if (!tree || !labelName || !ids.length) {
-    console.error('usage: node tools/harness/run.mjs --tree <plugin dir> --label <name> --case <id>[,<id>…] [--runs 3] [--out <dir>] [--model <m>]');
+    console.error('usage: node tools/harness/run.mjs --tree <plugin dir> --label <name> --case <id>[,<id>…] [--runs 3] [--out <dir>] [--model <m>] [--resume]');
     process.exit(2);
+  }
+  const settings = harnessSettings();
+  if (settings.mode === 'off') {
+    console.error('harness: off (HARNESS_MODE or tools/harness/local.json); no runs made');
+    process.exit(3);
   }
   const runs = Number(option('--runs', '3'));
   const out = path.resolve(option('--out', path.join(os.tmpdir(), 'doc-toolkit-harness')));
@@ -138,13 +187,33 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const copy = sentinelCopy(path.resolve(tree), sentinel, path.join(base, '.plugin'));
   const ownSkills = new Set([...fs.readdirSync(path.join(copy, 'skills')), ...fs.readdirSync(path.join(copy, 'commands')).map((f) => f.replace(/\.md$/, ''))]);
   const options = { copy, sentinel, ownSkills, model: option('--model'), claude: option('--claude', process.env.CLAUDE_BIN || 'claude') };
-  const pass = { label: labelName, tree: path.resolve(tree), sentinel, model: options.model ?? 'default', cases: [], costUsd: 0 };
+  const pass = { label: labelName, tree: path.resolve(tree), sentinel, model: options.model ?? 'default', cases: [], costUsd: 0, stopped: null };
+  let warned = false;
+  // --resume keeps the cases a stopped pass already finished with the same number of runs.
+  if (process.argv.includes('--resume') && fs.existsSync(path.join(base, 'pass.json'))) {
+    const before = JSON.parse(fs.readFileSync(path.join(base, 'pass.json'), 'utf8'));
+    const wanted = ids.map((id) => loadCase(id).id);
+    pass.cases = before.cases.filter((s) => s.runs === runs && wanted.includes(s.case));
+    pass.costUsd = Number(pass.cases.reduce((sum, s) => sum + s.costUsd, 0).toFixed(4));
+  }
   for (const id of ids) {
     const c = loadCase(id);
+    if (pass.cases.some((s) => s.case === c.id)) continue;
     const caseDir = path.join(base, c.id);
     fs.rmSync(caseDir, { recursive: true, force: true });
     const results = [];
     for (let n = 1; n <= runs; n++) {
+      const usage = readUsage(options.claude);
+      if (!usage.session && !usage.week && !warned) {
+        console.error('harness: /usage shows no plan limits (an API key?); running without the usage guard');
+        warned = true;
+      }
+      const reason = overLimit(usage, settings);
+      if (reason) {
+        pass.stopped = { before: `${c.id} run ${n}`, reason };
+        console.error(`harness: stopped before ${c.id} run ${n}: ${reason}`);
+        break;
+      }
       const dir = path.join(caseDir, `run-${n}`);
       fs.mkdirSync(dir, { recursive: true });
       const r = runOnce(c, { ...options, dir });
@@ -152,15 +221,24 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       const failed = r.checks.filter((ch) => !ch.pass).map((ch) => ch.name);
       console.error(`${c.id} run ${n}/${runs}: ${failed.length ? `FAIL (${failed.join('; ')})` : 'pass'}, ${r.subtype}, ${r.turns} turns, $${r.costUsd.toFixed(2)}, ${r.seconds} s`);
     }
-    const summary = summarize(c, results);
-    fs.writeFileSync(path.join(caseDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`);
-    pass.cases.push(summary);
-    pass.costUsd = Number((pass.costUsd + summary.costUsd).toFixed(4));
+    if (results.length) {
+      const summary = summarize(c, results);
+      fs.writeFileSync(path.join(caseDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`);
+      pass.cases.push(summary);
+      pass.costUsd = Number((pass.costUsd + summary.costUsd).toFixed(4));
+    }
+    if (pass.stopped) break;
   }
+  const order = ids.map((id) => loadCase(id).id);
+  pass.cases.sort((x, y) => order.indexOf(x.case) - order.indexOf(y.case));
   fs.writeFileSync(path.join(base, 'pass.json'), `${JSON.stringify(pass, null, 2)}\n`);
   for (const s of pass.cases) {
     console.log(`${s.case}: ${s.passedRuns}/${s.runs} runs passed, $${s.costUsd.toFixed(2)}`);
     for (const a of s.assertions) console.log(`  ${a.passed}/${s.runs}  ${a.name}`);
   }
   console.log(`pass '${labelName}': $${pass.costUsd.toFixed(2)} in total, results in ${base}`);
+  if (pass.stopped) {
+    console.log(`stopped before ${pass.stopped.before}: ${pass.stopped.reason}. Run the rest later with the same arguments plus --resume.`);
+    process.exitCode = 4;
+  }
 }

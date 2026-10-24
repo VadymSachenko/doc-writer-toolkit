@@ -21,12 +21,26 @@ node tools/harness/blind.mjs /tmp/harness main after
 
 | Command | Does |
 |---|---|
-| `run.mjs` | Runs each case `--runs` times (default 3) and prints pass counts per assertion and the cost. `--case` takes ids from `cases/` or paths, comma-separated. `--model` overrides the model, for cheap smoke runs. `--out` defaults to the OS temp folder |
+| `run.mjs` | Runs each case `--runs` times (default 3) and prints pass counts per assertion and the cost (the CLI's API-price estimate; on a plan, see `/usage` instead). `--resume` continues a pass the guard stopped. `--case` takes ids from `cases/` or paths, comma-separated. `--model` overrides the model, for cheap smoke runs. `--out` defaults to the OS temp folder |
 | `compare.mjs` | One row per case and assertion with both labels' pass counts, and a verdict: `regressed` (passed in every baseline run, fails in some after run), `fixed`, `same: pass`, `same: fail` or `mixed`. Exits 1 when anything regressed |
 | `blind.mjs` | For each case, run 1 of each label as `X` or `Y` by a seeded coin flip: `output.md` (the final answer) and `diff.patch`, with labels, sentinel names and run paths masked. The key goes to `<packet>.key.json`, beside the packet |
 | `fixture.mjs` | Writes a fixture host by hand, to look at it or try a prompt: `node tools/harness/fixture.mjs <dest> single\|multi [--locales de,pl] [--docusaurus]` |
 
 Keep `--out` outside the repo: run outputs never belong in it.
+
+## Plan limits, and turning the harness off
+
+Every run is a full session on your plan. Measured on one plan: one run of `tc-01` used under 1% of the 5-hour session and under 1% of the week. A smaller plan has smaller limits, so the same run takes a larger share.
+
+- **The guard:** before each run, the runner reads `claude -p /usage`. It stops once the 5-hour session is at 80% or the week at 50%, prints where it stopped, and exits 4. Run the rest later with the same arguments plus `--resume`: finished cases are kept. With an API key, `/usage` shows no plan bars, and the guard stays out of the way.
+- **Your own limits:** set them in `tools/harness/local.json`, which git ignores, or in the environment, which wins:
+
+  ```json
+  { "maxSessionPercent": 60, "maxWeekPercent": 30 }
+  ```
+
+  `HARNESS_MAX_SESSION_PERCENT=60 HARNESS_MAX_WEEK_PERCENT=30 node tools/harness/run.mjs …`
+- **Off:** `{ "mode": "off" }` in `local.json`, or `HARNESS_MODE=off`. The runner then makes no run and exits 3, so a script can tell "off" from "failed". The harness's own tests (`harness.test.mjs`) make no model calls and still run, and so does the rest of the regression set.
 
 ## What a run does
 
