@@ -1,0 +1,69 @@
+{
+  "id": "tc-13d-updater-rename-in-components",
+  "description": "A renamed control on a page whose mentions sit in component props too (img alt, figcaption, Accordion titles), with a marker on a line that changes: every mention of the control changes; a title where the word names the operation may stay, but only if the report lists it; markers stay; nothing else changes.",
+  "fixture": {
+    "shape": "single"
+  },
+  "setup": [
+    "mkdir -p portal/reports/.sources portal/reports/.assets && touch portal/reports/.assets/export-button.png portal/reports/.assets/export-format.png portal/reports/.assets/export-period.png portal/reports/.assets/export-busy.png && cat > portal/reports/reports.md <<'EOF'\n---\ntitle: Звіти\nsidebar_label: Звіти\n---\n\nimport Accordion from '@theme/Accordion';\n\n# Звіти\n\nНа сторінці **Звіти** ви завантажуєте звіти про платежі. {/* NEEDS CONFIRMATION: чи бачать цю сторінку всі ролі? */}\n\n## Завантаження звіту\n\n1. У меню виберіть **Звіти**.\n2. Натисніть <Icon icon=\"mdi:download\" height=\"24\" /> **Експорт** над таблицею. {/* NEEDS CONFIRMATION: чи видно кнопку на мобільному? */}\n\n   <img src={require('./.assets/export-button.png').default} alt=\"Кнопка Експорт над таблицею звітів\" width=\"600\" />\n\n3. Виберіть формат файлу.\n\n   <img src={require('./.assets/export-format.png').default} alt=\"Вікно, що відкривається після натискання кнопки Експорт\" width=\"600\" />\n\n**Результат:** файл звіту завантажується на ваш пристрій.\n\n<Accordion titleAs=\"h3\" title=\"Експорт за період\">\n\n1. Задайте період у полі **Дата**.\n2. Натисніть **Експорт**.\n\n   ![Кнопка Експорт поруч із полем дати](./.assets/export-period.png)\n\n</Accordion>\n\n<Accordion titleAs=\"h3\" title=\"Повторний експорт\">\n\nЩоб отримати звіт ще раз, знову натисніть **Експорт**. Кнопка **Експорт** неактивна, поки триває попередній експорт.\n\n<figure>\n  <img src={require('./.assets/export-busy.png').default} alt=\"Неактивна кнопка Експорт\" width=\"600\" />\n  <figcaption>Кнопка **Експорт** під час підготовки файлу.</figcaption>\n</figure>\n\n</Accordion>\n\n## Формати звітів\n\n| Формат | Опис |\n|---|---|\n| **CSV** | Таблиця для обробки в редакторах таблиць. |\n| **PDF** | Документ для друку. |\nEOF\ncat > portal/reports/.sources/change-brief.md <<'EOF'\n# Change brief — export button renamed\n\n## Page\nportal/reports/reports.md\n\n## What changed\n- The **Експорт** button is now labelled **Завантажити звіт**, with the same icon. — source: ticket #15\n\n## Where in the page\nlet the updater decide\n\n## Screenshots\n- export-button.png, export-format.png, export-period.png, export-busy.png — unchanged\n\n## Terms\n- **Завантажити звіт** (UA) / **Download report** (EN) — the button that downloads a report\n\n## Do not touch\n- The intro paragraph and its marker.\nEOF\ngit add -A && git commit -q -m 'Case setup'"
+  ],
+  "prompt": "use doc-page-updater with page `portal/reports/reports.md` and brief `portal/reports/.sources/change-brief.md`",
+  "options": {
+    "maxTurns": 60,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)",
+      "Bash(node:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "bold label renamed everywhere",
+      "type": "no-match",
+      "path": "portal/reports/reports.md",
+      "pattern": "\\*\\*Експорт\\*\\*"
+    },
+    {
+      "name": "alt texts renamed",
+      "type": "no-match",
+      "path": "portal/reports/reports.md",
+      "pattern": "alt=\"[^\"]*Експорт|!\\[[^\\]]*Експорт"
+    },
+    {
+      "name": "caption renamed",
+      "type": "no-match",
+      "path": "portal/reports/reports.md",
+      "pattern": "<figcaption>[^<]*Експорт"
+    },
+    {
+      "name": "a title left as is is reported",
+      "type": "command",
+      "run": "! grep -q 'title=\"Експорт за період\"' portal/reports/reports.md || grep -rq 'Експорт за період' portal/reports/.sources/"
+    },
+    {
+      "name": "marker on the changed line kept",
+      "type": "match",
+      "path": "portal/reports/reports.md",
+      "pattern": "\\{/\\* NEEDS CONFIRMATION: чи видно кнопку на мобільному\\? \\*/\\}"
+    },
+    {
+      "name": "intro marker kept",
+      "type": "match",
+      "path": "portal/reports/reports.md",
+      "pattern": "\\{/\\* NEEDS CONFIRMATION: чи бачать цю сторінку всі ролі\\? \\*/\\}"
+    },
+    {
+      "name": "nothing else changed",
+      "type": "diff-lines",
+      "path": "portal/reports/reports.md",
+      "allow": "[Ее]кспорт"
+    },
+    {
+      "type": "changed-only",
+      "paths": [
+        "portal/reports/",
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}
