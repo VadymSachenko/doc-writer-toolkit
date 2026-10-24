@@ -75,7 +75,7 @@ Write `<id>.unverified.json`: a JSON array of `{ "span": "<UA span>", "reason": 
 
 `LS check <id> --candidate <run folder>/<id>.candidate.md --unverified-file <run folder>/<id>.unverified.json`
 
-Exit `1` lists `failures`, each with its `check` name. Fix the cause as in step 3 and re-check, at most twice. The usual causes: a block split or merged (`structure`, `counts`), a label not verbatim or with something attached (`labels`), Ukrainian letters left (`ukrainian-letters`), a changed link, code span or attribute (`links`, `inline-code`, `tags`), a missing marker (`markers`). If it still fails, result `failed` with the check names and one line on why. Don't record it: the locale keeps its previous file and state.
+Exit `1` lists `failures`, each with its `check` name. Fix the cause as in step 3 and re-check, at most twice. The usual causes: a block split or merged (`structure`, `counts`), a label not verbatim or with something attached (`labels`), Ukrainian letters left (`ukrainian-letters`), a changed link, code span or attribute (`links`, `inline-code`, `tags`), a missing marker (`markers`), a frontmatter value that needs quotes (`frontmatter`: quote it in single quotes). A `link-form` failure is in the UA page, not the translation: result `failed`, naming the link. If it still fails, result `failed` with the check names and one line on why. Don't record it: the locale keeps its previous file and state.
 
 ### 6. Record
 

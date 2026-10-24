@@ -92,6 +92,28 @@ function canonMermaid(f) {
 
 const fenceKey = (f) => (/^mermaid\b/i.test(f.info) ? `mermaid\0${canonMermaid(f)}` : `${f.info}\0${f.lines.join('\n')}`);
 
+// Why a one-line frontmatter value would not parse as the string it shows, or null. The build stops on such a value,
+// and a translation adds them: an unquoted `: ` in a translated description is the usual one.
+export function yamlScalarProblem(value) {
+  if (!value) return null;
+  if (value.startsWith("'")) return /^'(?:[^']|'')*'$/.test(value) ? null : 'its single quotes are not closed';
+  if (value.startsWith('"')) return /^"(?:[^"\\]|\\.)*"$/.test(value) ? null : 'its double quotes are not closed';
+  if (/^[[\]{}&*!|>%@`]/.test(value) || /^[-?:](\s|$)/.test(value)) return `it starts with '${value[0]}', which YAML reads as syntax`;
+  if (/: |:$/.test(value)) return "it holds ': ' without quotes";
+  if (/\s#/.test(value)) return "it holds ' #' without quotes, which starts a comment";
+  return null;
+}
+
+// A page link must be site-root-relative with no .md/.mdx (context/doc-rules/project-rules/internal-links.md). Links to
+// assets, anchors and other sites are not page links.
+const ASSET_LINK = /\.(png|jpe?g|gif|svg|webp|pdf|zip|csv|json|ya?ml|txt|mp4|webm)(#.*)?$/i;
+export function linkFormProblem(target) {
+  if (/^([a-z][a-z0-9+.-]*:|#)/i.test(target) || ASSET_LINK.test(target) || target.includes('.assets/')) return null;
+  if (/\.mdx?(#|$)/i.test(target.split('?')[0])) return 'it has a file extension';
+  if (!target.startsWith('/')) return 'it is not site-root-relative';
+  return null;
+}
+
 const frontmatterKeys = (fm) => new Map((fm?.entries ?? []).filter((e) => e.key !== 'last_update').map((e) => [e.key, e]));
 
 // Requirement 8: every deterministic check on one translated page. Pure: reads nothing but its arguments and the disk
@@ -120,6 +142,10 @@ export async function checkPage({ locale, uaText, targetText, targetFile, state,
       const t = kt.get(key);
       if (!t) continue;
       if (!PROSE_FM_KEYS.has(key) && a.raw !== t.raw) fail('frontmatter', `The value of '${key}' must stay identical to the UA page.`, { ua: a.raw, target: t.raw });
+    }
+    for (const e of ft.entries) {
+      const problem = e.start === e.end ? yamlScalarProblem(e.first) : null;
+      if (problem) fail('frontmatter', `'${e.key}' would not parse as YAML: ${problem}. Quote the value.`, { key: e.key, value: e.first });
     }
     for (const key of ['title', 'description']) {
       const a = ka.get(key);
@@ -183,6 +209,9 @@ export async function checkPage({ locale, uaText, targetText, targetFile, state,
     const d = multisetDiff(a, b);
     if (d.missing.length || d.extra.length) fail(check, `${label} differ from the UA page.`, { missing: head(d.missing), extra: head(d.extra) });
   }
+  // Copied verbatim from UA, a page link in file form still breaks the locale build: the UA page has to be fixed.
+  const badForm = [...new Set(tr.links)].map((target) => [target, linkFormProblem(target)]).filter(([, p]) => p);
+  if (badForm.length) fail('link-form', 'Page links must be site-root-relative routes with no .md/.mdx. Fix them on the UA page too, then translate again.', { links: head(badForm.map(([target, problem]) => `${target}: ${problem}`)) });
 
   // ToDo / NEEDS CONFIRMATION markers and other comments.
   if (ua.markers !== tr.markers) fail('markers', `The UA page has ${ua.markers} ToDo / NEEDS CONFIRMATION markers but the translation has ${tr.markers}.`);
