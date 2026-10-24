@@ -67,7 +67,7 @@ and inline body links pointing at another `.md`/`.mdx` page in the docs tree).
 
 - **External URLs** (`https://…`, `mailto:`) — left exactly as written.
 - **Asset links** — `./.assets/image.png` and any other image/file reference stay document-relative.
-- **Same-page anchors** — a bare `#slug` (uk: `#довідкова-інформація-{slug}`) stays bare.
+- **Same-page anchors** — a bare `#id` stays bare. The id is the heading's, per `heading-anchors.md` (`#reference-information-{slug}` in both languages).
 - **MDX `import`/`export` paths.**
 - **Filesystem paths shown as code** (inside `` ` `` or a fenced block) — prose that looks like a path
   but is illustrative code, not a link.

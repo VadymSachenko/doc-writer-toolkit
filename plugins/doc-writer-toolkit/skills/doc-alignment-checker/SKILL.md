@@ -18,6 +18,7 @@ Load these files at the start of the task. Do not load others unless the user re
 
 - Follow `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` to resolve this project's **UA content root**, **EN i18n root**, and **UA URL prefix**. Do not assume `partner-cabinet/` or any other default.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` — the shared page-to-page link contract. Check 5 checks links against this file's algorithm; do not restate it here.
+- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/heading-anchors.md` — the shared heading-id contract. Check 2 checks UA heading ids against it; do not restate it here.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` — the shared slug/title/filename convention. Check 11 checks title form and slug/filename agreement against this file; do not restate it here.
 - The UA page being checked (at the path resolved above).
 - The EN counterpart page (at the path resolved above).
@@ -58,11 +59,11 @@ Extract every heading (`#`, `##`, `###`, `####`) from both files in order. Count
 
 When comparing UA headings, strip the anchor comment (`{/* #slug */}`) before comparing structure. Additionally:
 
-- Every UA heading must have an `{/* #anchor */}` comment derived from the EN heading text in lowercase kebab-case. Flag any UA heading that is missing its anchor.
+- Every UA heading from `##` down must end with a well-formed `{/* #id */}` comment, per `heading-anchors.md`; the page title (`#`) takes none. The expected id is the one generated from the EN heading at the same position, or that heading's explicit `{#id}`. Flag a UA heading whose comment is missing or malformed, and an id used twice on the page.
 - EN headings must **not** have `{/* … */}` anchor comments.
 
 **Flag:** `[HEADING COUNT/LEVEL MISMATCH]` — list the position and differing headings side by side.
-**Flag:** `[UA HEADING MISSING ANCHOR]` — show the heading and the expected anchor.
+**Flag:** `[UA HEADING MISSING ANCHOR]` — show the heading and the expected anchor, and say that adding it changes the heading's fragment, so links to the old fragment change with it (`heading-anchors.md`, rule 8).
 
 ### Check 3 — Table structure
 

@@ -33,6 +33,7 @@ Load these files at the start of the task.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-en.md` — canonical EN terminology. Use it to replace UA terms with their correct EN equivalents.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` — rank-0 project formatting conventions. Core section and English section apply. Outranks this skill's own body for any rule both cover.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` — the shared page-to-page link contract. Translation **preserves an already-correct route verbatim** (see "Never translate" and Step 4); do not re-derive or localize a path.
+- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/heading-anchors.md` — the shared heading-id contract (see Heading IDs below).
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` — the shared slug/title convention. The EN and UA pages share one path/filename; the EN `title:` is the semantic equivalent of the UA title. Never re-slug or move the page.
 - The Ukrainian source file, at the path resolved above.
 
@@ -67,11 +68,12 @@ Load these files at the start of the task.
 
 ### Heading IDs
 
-All UA headings in the UA content root carry an anchor comment: `## Передумови {/* #prerequisites */}`.
+UA headings from `##` down carry an id comment, per `heading-anchors.md`: `## Передумови {/* #prerequisites */}`.
 
 When translating to English:
 - The text inside `{/* #... */}` is the canonical EN anchor slug. Derive the EN heading from it (convert kebab-case to title/sentence words).
 - **Remove** the `{/* #... */}` comment from the EN output — EN headings do not carry anchor comments; Docusaurus generates their anchors automatically from the heading text.
+- When the EN heading can't read as the id's words (an id that names a parent, such as `reference-information-<slug>`, or a heading reworded after its id was set), write the EN heading naturally and give it the id explicitly, never as a comment: `## Reference information {#reference-information-create-payment}`. The EN heading's id always equals the UA comment's id.
 
 ```md
 UA:  ## Передумови {/* #prerequisites */}
@@ -214,8 +216,8 @@ Translate these recurring UA patterns consistently:
 | `У таблиці описано атрибути, з якими ви взаємодієте під час X:` | `The following table describes the attributes you interact with when X:` |
 | `ви можете виконувати такі операції` | `you can do the following` |
 | `ви можете виконувати такі операції з X` | `you can do the following with X` |
-| `## Передумови` + single reference section | `## Prerequisites` + `Before you start, review the [reference information](#reference-information), or look up the necessary information as you go through the process.` |
-| `## Передумови` + multiple reference sections | `## Prerequisites` + `Each section contains [reference information](#reference-information). Review it before you start, or look up the necessary information as you go through the process.` |
+| `## Передумови` + single reference section | `## Prerequisites` + `Before you start, review the [reference information](#reference-information-{slug}), or look up the necessary information as you go through the process.` |
+| `## Передумови` + multiple reference sections | `## Prerequisites` + `Each section contains [reference information](#reference-information-{slug}). Review it before you start, or look up the necessary information as you go through the process.` |
 | bare `За потреби перед виконанням кроків перегляньте довідкову інформацію.` (no `## Передумови` heading) | Still produce a full `## Prerequisites` section with the standard single-reference sentence. Never output a bare sentence without the heading. |
 | Paperclip icon for receipts | `receipts icon <Icon icon="uiw:paper-clip" color="#F79F14" />` — always "receipts icon"; never "receipt management icon", "receipt icon", or other variants |
 
@@ -286,6 +288,7 @@ Before saving, check:
 - Every page-to-page link path is byte-identical to the UA source (`internal-links.md`); no route was localized or "corrected"
 - All code blocks are byte-for-byte identical to the source
 - No `{/* #anchor */}` comments appear in EN headings
+- Every EN heading's id, generated from its text or explicit `{#id}`, equals its UA heading's comment id (`heading-anchors.md`)
 - No "UCPay" or "UniComPay" in prose — only "UCP"
 - `## Передумови` translated as `## Prerequisites` with the correct EN sentence (Variant A if a single reference section; Variant B if multiple)
 - After colons in prose: first word is capitalized if it is a regular word (not a UI element name, proper name, or code value)
