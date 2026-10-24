@@ -1,0 +1,41 @@
+{
+  "id": "tc-28a-align-reports-script-findings",
+  "description": "A UA page with one heading lacking its {/* #id */} and a NEEDS CONFIRMATION marker its EN page doesn't carry: the checker reports both, and edits nothing.",
+  "fixture": {
+    "shape": "single"
+  },
+  "setup": [
+    "perl -0pi -e 's/## Перегляд транзакцій/## Перегляд транзакцій {\\/* #view-transactions *\\/}/; s/## Фільтрування транзакцій/## Фільтрування транзакцій {\\/* #filter-transactions *\\/}/; s/(Список оновлюється автоматично\\.)/$1 {\\/* NEEDS CONFIRMATION: як часто оновлюється список *\\/}/' portal/transactions/transactions.md && grep -q 'NEEDS CONFIRMATION' portal/transactions/transactions.md && git add -A && git commit -q -m 'Case setup'"
+  ],
+  "prompt": "use doc-alignment-checker on `portal/transactions/transactions.md`, main: ua",
+  "options": {
+    "maxTurns": 40,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)",
+      "Bash(node:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "reports the heading without an id",
+      "type": "match",
+      "path": "output",
+      "pattern": "Повідомлення про платежі[\\s\\S]{0,300}(id|anchor|якір|коментар)|(id|anchor|якір)[\\s\\S]{0,300}Повідомлення про платежі",
+      "flags": "i"
+    },
+    {
+      "name": "reports the marker missing in EN",
+      "type": "match",
+      "path": "output",
+      "pattern": "NEEDS CONFIRMATION[\\s\\S]{0,300}(missing|absent|not (present|carried|found)|відсутн)|(missing|absent|відсутн)[\\s\\S]{0,300}NEEDS CONFIRMATION",
+      "flags": "i"
+    },
+    {
+      "type": "unchanged",
+      "ignore": [
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}
