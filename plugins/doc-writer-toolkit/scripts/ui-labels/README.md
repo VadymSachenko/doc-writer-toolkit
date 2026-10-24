@@ -31,7 +31,7 @@ Every option can be a flag. Missing flags are read from the `Documentation toolk
 |---|---|---|
 | `--source` | `UI label source:` | `github <owner/repo>@<branch> <dir>/*.json` or `command <shell command containing {locale}>` |
 | `--locale-files` | `Locale files:` | `uk=ua, es=ar`: docs locale = file name without `.json`. Only needed where file names don't match by language. |
-| `--locales` | (from `docusaurus.config.ts`) | Target locales. Default: `i18n.locales` minus `defaultLocale` and `en`. `uk` (the default locale) and `en` are always imported too. |
+| `--locales` | (from `docusaurus.config.ts`) | Target locales. Default: `i18n.locales` minus `defaultLocale` and `en`. `uk` (the default locale) and `en` are always imported too, so a site with no further locales keeps a snapshot of those two, and `sync` patches its UA and EN pages. |
 | `--docusaurus-config` | | Path to the Docusaurus config if it isn't `docusaurus.config.{ts,js,mjs,cjs}` in the root |
 | `--state-root` | `Toolkit state root:` | Default `.doc-toolkit` |
 | `--ua-root`, `--en-root` | `UA content root:`, `EN i18n root:` | Needed by `sync`: the primary root pair. Locale roots are derived by replacing the `en` path segment of the EN root. |

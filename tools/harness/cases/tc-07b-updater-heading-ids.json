@@ -1,0 +1,51 @@
+{
+  "id": "tc-07b-updater-heading-ids",
+  "description": "doc-page-updater adds a section to a uk page whose headings have no ids: the new heading gets a unique {/* #id */}, and the existing headings stay as they were.",
+  "fixture": {
+    "shape": "multi"
+  },
+  "setup": [
+    "cat > docs/.sources/change-brief-retry-schedule.md <<'EOF'\n# Change brief — retry schedule\n\n## Page\ndocs/webhooks/webhooks.md\n\n## What changed\n- A new section describes the retry schedule: the system retries after 1, 5 and 30 minutes. — source: release notes 2026-10-01\n\n## Where in the page\nA new section after «Повторні спроби».\n\n## Do not touch\n- The sections «Налаштування вебхука» and «Повторні спроби».\nEOF\ngit add -A && git commit -q -m 'Case setup'"
+  ],
+  "prompt": "use doc-page-updater with page `docs/webhooks/webhooks.md` and brief `docs/.sources/change-brief-retry-schedule.md`",
+  "options": {
+    "maxTurns": 60,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "new heading has its id, old ones untouched",
+      "type": "heading-ids",
+      "path": "docs/webhooks/webhooks.md",
+      "except": [
+        "Налаштування вебхука",
+        "Повторні спроби"
+      ]
+    },
+    {
+      "name": "a heading with an id was added",
+      "type": "match",
+      "path": "docs/webhooks/webhooks.md",
+      "pattern": "^#{2,3} .+ \\{/\\* #[a-z0-9]+(-[a-z0-9]+)* \\*/\\}$",
+      "flags": "m"
+    },
+    {
+      "name": "existing headings unchanged",
+      "type": "match",
+      "path": "docs/webhooks/webhooks.md",
+      "pattern": "^## Налаштування вебхука\\n[\\s\\S]*^## Повторні спроби\\n",
+      "flags": "m"
+    },
+    {
+      "type": "changed-only",
+      "paths": [
+        "docs/webhooks/",
+        "docs/.sources/",
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}

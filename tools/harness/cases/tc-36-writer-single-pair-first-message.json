@@ -1,0 +1,42 @@
+{
+  "id": "tc-36-writer-single-pair-first-message",
+  "description": "One pair, no inputs: user-guide-writer names root portal/, names no pair, writes nothing, and stops to say which inputs are missing (its 'When inputs are insufficient' rule).",
+  "fixture": {
+    "shape": "single"
+  },
+  "prompt": "use user-guide-writer for `portal/settings/currency-rules/`",
+  "options": {
+    "maxTurns": 40,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "names the portal root",
+      "type": "match",
+      "path": "output",
+      "pattern": "portal/"
+    },
+    {
+      "name": "no pair named",
+      "type": "no-match",
+      "path": "output",
+      "pattern": "api-reference"
+    },
+    {
+      "name": "stops for missing inputs",
+      "type": "match",
+      "path": "output",
+      "pattern": "no (inputs|source material)|nothing to write|stopped before drafting|couldn't start|where the inputs are",
+      "flags": "i"
+    },
+    {
+      "type": "unchanged",
+      "ignore": [
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}

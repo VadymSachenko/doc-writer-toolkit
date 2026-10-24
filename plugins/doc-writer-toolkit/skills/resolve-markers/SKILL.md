@@ -20,7 +20,7 @@ You are resolving documentation markers — `{/* NEEDS CONFIRMATION: ... */}` an
 
 ## Sources to load
 
-1. `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — resolve content root.
+1. `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — resolve the section folder's root pair (its content root).
 2. The section's `.sources/app-notes.md` — **optional**. Load if present; skip if absent. This file is written by `app-explorer` when it has run — do not require it.
 3. The section's `.sources/sme-interview.md` — **optional**. Load if present.
 4. The section's `.assets/` folder — list what screenshots already exist there.
@@ -53,7 +53,7 @@ Scan every `.md`/`.mdx` file in the section folder for:
 - `{/* ToDo: add a screenshot — ... */}` — a missing screenshot
 - `{/* ToDo: ... */}` — any other outstanding writer task that needs a *fact or observation* to resolve (a missing UI label, an unconfirmed step, a value to check in the app)
 
-This skill owns fact/observation markers. It does **not** handle pure cross-link TODOs — a `{/* ToDo: link to ... */}` whose only need is a link to another existing page belongs to `fix-doc-todos` (its Buckets A–C). If you encounter such a link-only ToDo, leave it and note it for `fix-doc-todos` rather than resolving it here.
+This skill owns fact/observation markers. It does **not** handle pure cross-link TODOs — a `{/* ToDo: link to ... */}` whose only need is a link to another existing page belongs to the `/fix-doc-todos` command (its Buckets A–C). If you encounter such a link-only ToDo, leave it and note it for `/fix-doc-todos` rather than resolving it here.
 
 For each marker, record: the file, the line, the full marker text, and the surrounding sentence or step.
 

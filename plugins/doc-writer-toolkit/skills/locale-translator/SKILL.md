@@ -181,7 +181,7 @@ Tell each worker in its prompt which correction it applies (for example, "the te
 ## Edge cases
 
 - **No target locales** in `docusaurus.config.*` (only the default locale and `en`): stop and say that none are configured yet.
-- **A docs locale that matches no locale file, or several** (`UL check` exit `2` with `unresolved`): ask once for the `Locale files:` mapping, show the `candidates`, offer to persist it. Never pick one.
+- **A docs locale that matches no locale file, or several** (`UL import` exit `2` with `unresolved`): ask once for the `Locale files:` mapping, show the `candidates`, offer to persist it. Never pick one.
 - **A UA page deleted or moved:** listed as `orphaned` / `moved` by `status`. Report it; don't delete or move locale files or state.
 - **Two root pairs with a page of the same id:** each has its own state, locale files and URL, and `status` lists both, qualified. A warning that a primary state "records the UA blob of" the other pair's page means an earlier run was pointed at the other pair's roots: report it. The state stays with the primary page.
 - **A declared root pair that the project doesn't translate into further locales:** its `<Name> Translation scope:` is `none`, so no run covers it. If `status` shows a pair the user didn't expect to translate, say so before Step 3 and wait: the declaration is the project's decision.

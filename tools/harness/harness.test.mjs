@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { makeFixture } from './fixture.mjs';
-import { changedPaths, check, frontmatterProblem, linkProblem, pageLinks } from './assertions.mjs';
+import { changedPaths, check, frontmatterProblem, headingIdProblems, linkProblem, pageLinks } from './assertions.mjs';
 import { builtInChecks, harnessSettings, loadCase, overLimit, parseUsage, readTranscript, summarize } from './run.mjs';
 import { compare, verdict } from './compare.mjs';
 import { coin, mask } from './blind.mjs';
@@ -62,6 +62,10 @@ test('assertions: files, patterns, frontmatter, links and the changed paths', ()
   assert.equal(check({ type: 'diff-lines', path: page, allow: 'Фільтри' }, after).pass, true);
   assert.equal(check({ type: 'diff-lines', path: page }, after).pass, false);
   fs.writeFileSync(path.join(host, page), before);
+  const calls = { ...ctx, skills: ['harness-x:extract-sme-screenshots'] };
+  assert.equal(check({ type: 'skill-called', skill: 'extract-sme-screenshots' }, calls).pass, true);
+  assert.equal(check({ type: 'skill-not-called', skill: 'extract-sme-screenshots' }, calls).pass, false);
+  assert.equal(check({ type: 'skill-not-called', skill: 'convert-sme-input' }, calls).pass, true);
 });
 
 test('assertions: helpers', () => {
@@ -75,6 +79,10 @@ test('assertions: helpers', () => {
   assert.match(frontmatterProblem('---\ntitle: T\n  date: 1\n---\n'), /no parent key/);
   assert.match(frontmatterProblem('---\nlast_update:\n  date: a: b\n---\n'), /date: value would not parse/);
   assert.deepEqual(changedPaths(' M a.md\n?? b/c.md\nR  old.md -> new.md\n'), ['a.md', 'b/c.md', 'new.md']);
+  const ok = '# Title\n\n## Статуси {/* #statuses */}\n\n### Нові {/* #new-statuses */}\n\nДив. [статуси](#statuses).\n\n```md\n## Code\n```\n';
+  assert.deepEqual(headingIdProblems(ok), []);
+  assert.deepEqual(headingIdProblems('## Old\n\n## A {/* #a */}\n\n## B {/* #a */}\n\n[x](#b)\n', ['Old']), ['repeated id: a', 'link to a missing id: #b']);
+  assert.deepEqual(headingIdProblems('## Bad {/* #Bad_Id */}\n## Plain\n'), ["no id: 'Bad {/* #Bad_Id */}'", "no id: 'Plain'"]);
 });
 
 const transcript = (sources, skills = []) => [
@@ -195,6 +203,14 @@ test('runner: off makes no run; the guard stops before a run; --resume skips fin
   assert.match(resumed.stderr, /second-case run 1\/1/);
   assert.doesNotMatch(resumed.stderr, /tc-01-translate-single-pair run 1\/1/);
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(out, 'x', 'pass.json'), 'utf8')).cases.map((s) => s.case), ['tc-01-translate-single-pair', 'second-case']);
+
+  // rescore: a corrected assertion re-checks the saved run, with no model call.
+  fs.writeFileSync(second, JSON.stringify({ id: 'second-case', fixture: { shape: 'single' }, prompt: 'p', assertions: [{ type: 'match', path: 'output', pattern: 'nope' }] }));
+  const rescore = (args) => spawnSync('node', [path.join(path.dirname(runner), 'rescore.mjs'), ...args], { encoding: 'utf8' });
+  assert.match(rescore(['--out', out, '--label', 'x', '--case', second]).stdout, /second-case: 0\/1 runs passed/);
+  fs.writeFileSync(second, JSON.stringify({ id: 'second-case', fixture: { shape: 'single' }, prompt: 'p', assertions: [{ type: 'match', path: 'output', pattern: '^ok$' }] }));
+  assert.match(rescore(['--out', out, '--label', 'x', '--case', second]).stdout, /second-case: 1\/1 runs passed/);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(out, 'x', 'pass.json'), 'utf8')).cases.find((s) => s.case === 'second-case').passedRuns, 1);
 });
 
 test('runner: a bad pattern fails before any run; a crash keeps the cases already finished', () => {

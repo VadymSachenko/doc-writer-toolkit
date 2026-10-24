@@ -147,12 +147,17 @@ export function runOnce(c, { copy, sentinel, ownSkills, dir, model, claude = 'cl
   const output = t.result?.result ?? '';
   const result = { exit: run.status, subtype: t.result?.subtype ?? null, turns: t.result?.num_turns ?? null, costUsd: t.result?.total_cost_usd ?? 0, seconds, output };
   fs.writeFileSync(path.join(dir, 'result.json'), `${JSON.stringify(result, null, 2)}\n`);
-  const checks = [
-    ...builtInChecks(t, sentinel, ownSkills),
-    ...c.assertions.map((a) => ({ name: nameOf(a), ...check(a, { host, output, status }) })),
-  ];
+  const checks = score(c, t, { host, output, status, sentinel, ownSkills });
   fs.writeFileSync(path.join(dir, 'assertions.json'), `${JSON.stringify(checks, null, 2)}\n`);
   return { ...result, checks };
+}
+
+// The built-in checks, then the case's own assertions. rescore.mjs reuses it on saved runs.
+export function score(c, t, { host, output, status, sentinel, ownSkills }) {
+  return [
+    ...builtInChecks(t, sentinel, ownSkills),
+    ...c.assertions.map((a) => ({ name: nameOf(a), ...check(a, { host, output, status, skills: t.skills }) })),
+  ];
 }
 
 export function summarize(c, runs) {

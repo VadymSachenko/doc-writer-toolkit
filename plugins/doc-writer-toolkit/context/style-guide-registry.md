@@ -114,7 +114,7 @@ While routing, carry the profile's `<lang>` with you: each corpus's `ROUTING.md`
 ### `gdsg`
 1. Read `${CLAUDE_PLUGIN_ROOT}/context/google-developer-style-guide/ROUTING.md`.
 2. Map the content signals above to the routing table rows.
-3. Load only the matched topic files. Quote ROUTING.md's own instruction: "Never load the full manifest, source map, all terminology indexes, or all rule files into model context."
+3. Load only the matched topic files. Follow the corpus README's own instruction: "Do not load the full manifest, source map, all terminology indexes, or all rule files into model context."
 4. Do not load all A–Z terminology chunks or the full terminology manifest — search `terminology/INDEX.md` only when a specific term arises.
 5. **If `<lang>` is `en`** (profile `gdsg@en`): load every matched row, both scopes. Nothing is filtered out.
 6. **If `<lang>` is not `en`** (profile `gdsg@uk`): skip the matched rows marked `language-specific (en-US)`, keep every `structural` row in full, and additionally follow layer 3 into `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/ua-grammar/INDEX.md` under the `ua-grammar` branch's rules below (its "Load triggers" table, topical files `01a`–`05g` only, no `00-cheatsheet.md`, no wholesale `99-word-index.md`).
@@ -184,7 +184,7 @@ This is the procedure every skill follows before consulting the tables above —
    - Declared as `uk,en` → whichever language the file is. Reviews detect it from the file; drafting takes it from the target location and template.
    - Field absent → use the file's language (detected, or the language being drafted), proceed, and tell the user the project has no `Content language:` declaration, offering to persist one.
 
-4. **Check for a real mismatch.** Stop and ask **only** when the file's language is not among the project's declared `Content language:` values — a Ukrainian file in a project declared `en`, say, which usually means the file is in the wrong place. Show the detected language and the declaration. One exception: a file under the project's EN i18n root (resolved per `project-paths.md`) is a translation, so English there is expected under any declaration and never triggers this prompt.
+4. **Check for a real mismatch.** Stop and ask **only** when the file's language is not among the project's declared `Content language:` values — a Ukrainian file in a project declared `en`, say, which usually means the file is in the wrong place. Show the detected language and the declaration. One exception: a file under any declared root pair's EN i18n root (resolved per `project-paths.md`) is a translation, so English there is expected under any declaration and never triggers this prompt.
 
    A file whose language merely differs from the *corpus* language is **not** a mismatch. That's the ordinary `gdsg@uk` case, and it resolves through the layer stack without a prompt.
 

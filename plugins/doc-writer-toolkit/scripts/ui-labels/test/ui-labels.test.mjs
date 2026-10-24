@@ -471,3 +471,43 @@ test('sync --pair patches only that pair and keeps the diff pending for the othe
   assert.ok((await read('docs/filters/filters.md')).includes('**Підтвердити**'));
   await assert.rejects(fs.stat(path.join(dir, '.doc-toolkit/ui-labels/.pending-diff.json')));
 });
+
+test('a host with only UA and EN keeps a snapshot: import, check, and sync patch UA and EN', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ui-labels-test-'));
+  const write = async (rel, content) => {
+    await fs.mkdir(path.dirname(path.join(dir, rel)), { recursive: true });
+    await fs.writeFile(path.join(dir, rel), typeof content === 'string' ? content : JSON.stringify(content, null, 2) + '\n');
+  };
+  const en = 'i18n/en/docusaurus-plugin-content-docs/current';
+  await write(
+    'CLAUDE.md',
+    `# Project\n\n## Documentation toolkit configuration\n\n- **UI label source:** \`command cat labels/{locale}.json\`\n- **UA content root:** \`docs/\`\n- **EN i18n root:** \`${en}/\`\n`,
+  );
+  await write('docusaurus.config.ts', `export default { i18n: { defaultLocale: 'uk', locales: ['uk', 'en'] } };\n`);
+  await write('labels/uk.json', { 'button.save': 'Зберегти' });
+  await write('labels/en.json', { 'button.save': 'Save' });
+  await write('docs/form/form.md', 'Натисніть **Зберегти**.\n');
+  await write(`${en}/form/form.md`, 'Click **Save**.\n');
+  await write('.doc-toolkit/pages/form/form.json', { spans: { Зберегти: 'label:button.save' }, locales: {} });
+  await git(dir, 'init', '-q');
+  await git(dir, 'config', 'user.email', 't@t');
+  await git(dir, 'config', 'user.name', 't');
+  await git(dir, 'add', '-A');
+  await git(dir, 'commit', '-qm', 'init');
+
+  const first = await cli(dir, 'import');
+  assert.equal(first.code, 0, first.stderr);
+  assert.deepEqual(first.out.locales, ['uk', 'en']);
+  assert.equal((await cli(dir, 'check')).code, 0);
+  await git(dir, 'add', '-A');
+  await git(dir, 'commit', '-qm', 'labels');
+
+  await write('labels/uk.json', { 'button.save': 'Підтвердити' });
+  await write('labels/en.json', { 'button.save': 'Confirm' });
+  assert.equal((await cli(dir, 'check')).code, 10);
+  assert.equal((await cli(dir, 'import')).code, 0);
+  const sync = await cli(dir, 'sync');
+  assert.equal(sync.code, 0, sync.stderr);
+  assert.equal(await fs.readFile(path.join(dir, 'docs/form/form.md'), 'utf8'), 'Натисніть **Підтвердити**.\n');
+  assert.equal(await fs.readFile(path.join(dir, `${en}/form/form.md`), 'utf8'), 'Click **Confirm**.\n');
+});

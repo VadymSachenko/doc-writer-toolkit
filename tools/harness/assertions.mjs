@@ -47,6 +47,24 @@ export function pageLinks(text) {
   return links;
 }
 
+// The heading-id contract (context/doc-rules/project-rules/heading-anchors.md): every heading from `##` down
+// ends with a unique `{/* #id */}`, and every `](#id)` link names one. `except` lists heading texts left as they were.
+export function headingIdProblems(text, except = []) {
+  const body = text.replace(/^```[\s\S]*?^```/gm, '');
+  const ids = [];
+  const problems = [];
+  for (const [, heading] of body.matchAll(/^#{2,6} (.+)$/gm)) {
+    const m = / \{\/\* #([a-z0-9]+(?:-[a-z0-9]+)*) \*\/\}$/.exec(heading);
+    if (m) ids.push(m[1]);
+    else if (!except.includes(heading.trim())) problems.push(`no id: '${heading}'`);
+  }
+  for (const id of new Set(ids.filter((id, i) => ids.indexOf(id) !== i))) problems.push(`repeated id: ${id}`);
+  for (const [, id] of body.matchAll(/\]\(#([^)\s]+)\)/g)) if (!ids.includes(id)) problems.push(`link to a missing id: #${id}`);
+  return problems;
+}
+
+const pages = (dir) => fs.readdirSync(dir, { recursive: true }).filter((f) => /\.mdx?$/.test(f)).map((f) => path.join(dir, f));
+
 export function linkProblem(target, form) {
   if (form !== 'root-relative') return `unknown link form '${form}'`;
   const bare = target.split('#')[0];
@@ -56,9 +74,9 @@ export function linkProblem(target, form) {
   return null;
 }
 
-// a: the assertion; ctx: { host, output, status }.
+// a: the assertion; ctx: { host, output, status, skills } (skills: the run's Skill calls).
 export function check(a, ctx) {
-  const { host, output, status } = ctx;
+  const { host, output, status, skills = [] } = ctx;
   const text = () => (a.path === 'output' ? output : read(host, a.path));
   switch (a.type) {
     case 'exists': return { pass: has(host, a.path), detail: a.path };
@@ -88,6 +106,20 @@ export function check(a, ctx) {
       const allow = a.allow ? new RegExp(a.allow, a.flags ?? '') : null;
       const bad = lines.filter((l) => l.startsWith('-')).map(strip).filter((l) => !added.has(l) && !allow?.test(l));
       return { pass: !bad.length, detail: bad.length ? `changed outside what the brief names: ${bad.slice(0, 5).join(' | ')}` : 'every changed line is one the brief names' };
+    }
+    case 'skill-called':
+    case 'skill-not-called': {
+      // Matched on the skill's own name, whatever plugin prefix the call carried.
+      const called = skills.some((s) => s.split(':').pop() === a.skill);
+      return { pass: a.type === 'skill-called' ? called : !called, detail: `skills called: ${skills.join(', ') || 'none'}` };
+    }
+    case 'heading-ids': {
+      if (!has(host, a.path)) return { pass: false, detail: `${a.path} does not exist` };
+      const full = path.join(host, a.path);
+      const files = fs.statSync(full).isDirectory() ? pages(full) : [full];
+      if (!files.length) return { pass: false, detail: `no page under ${a.path}` };
+      const bad = files.flatMap((f) => headingIdProblems(fs.readFileSync(f, 'utf8'), a.except).map((p) => `${path.relative(host, f)}: ${p}`));
+      return { pass: !bad.length, detail: bad.length ? bad.join('; ') : `${files.length} page(s), every heading has its id` };
     }
     case 'unchanged': {
       const changed = changedPaths(status).filter((p) => !(a.ignore ?? []).some((i) => p.startsWith(i)));

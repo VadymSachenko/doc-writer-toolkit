@@ -41,7 +41,7 @@ This single scan feeds whichever router(s) the resolved profile uses — for `ms
 
 The detected language **selects the profile's language layer; it does not block the run.** A Ukrainian file under a `gdsg` declaration is the ordinary `gdsg@uk` case: structural GDSG rules plus Ukrainian orthography. Do not stop for it.
 
-Stop and ask only in the one case the registry names: the file's language isn't among the project's declared `Content language:` values (and the file isn't a translation under the project's EN i18n root) — which usually means the file is in the wrong place. Show the detected ratio and the declaration, and let the user decide.
+Stop and ask only in the one case the registry names: the file's language isn't among the project's declared `Content language:` values (and the file isn't a translation under any declared root pair's EN i18n root) — which usually means the file is in the wrong place. Show the detected ratio and the declaration, and let the user decide.
 
 ## Step 2 — Load the profile's corpus layers
 

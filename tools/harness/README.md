@@ -22,6 +22,7 @@ node tools/harness/blind.mjs /tmp/harness main after
 | Command | Does |
 |---|---|
 | `run.mjs` | Runs each case `--runs` times (default 3) and prints pass counts per assertion and the cost (the CLI's API-price estimate; on a plan, see `/usage` instead). `--resume` continues a pass the guard stopped or a crash ended. `--case` takes ids from `cases/` or paths, comma-separated. `--model` overrides the model, for cheap smoke runs. `--out` defaults to the OS temp folder |
+| `rescore.mjs` | Re-checks a pass's saved runs against the cases' current assertions, with no model run, for a case whose assertion turned out to be wrong: `--out <dir> --label <name> --case <id>[,<id>…]`. Rewrites `assertions.json`, `summary.json` and `pass.json`; the cost stays as run |
 | `compare.mjs` | One row per case and assertion with both labels' pass counts, and a verdict: `regressed` (passed in every baseline run, fails in some after run), `fixed`, `same: pass`, `same: fail` or `mixed`. Exits 1 when anything regressed |
 | `blind.mjs` | For each case, run 1 of each label as `X` or `Y` by a seeded coin flip: `output.md` (the final answer) and `diff.patch`, with labels, sentinel names and run paths masked. The key goes to `<packet>.key.json`, beside the packet |
 | `fixture.mjs` | Writes a fixture host by hand, to look at it or try a prompt: `node tools/harness/fixture.mjs <dest> single\|multi [--locales de,pl] [--docusaurus]` |
@@ -94,13 +95,15 @@ One JSON file per case in `cases/`, named after its `id`:
 | `frontmatter` | `path` | the file starts with a closed `---` block of `key: value` lines (nested maps and lists allowed) whose values parse as the strings they show |
 | `links` | `path`, `form: "root-relative"` | every Markdown link to a page starts with `/`, with no `.md` and no `./` or `../` |
 | `diff-lines` | `path`, optional `allow` (a regex) and `flags` | every line the run removed from the file comes back among its added lines (list numbers aside), or matches `allow`: nothing outside what the brief names changed |
+| `skill-called`, `skill-not-called` | `skill` (its own name, without the plugin prefix) | the run called that skill through the `Skill` tool, or didn't |
+| `heading-ids` | `path` (a page, or a folder: every page under it), optional `except` (heading texts) | every heading from `##` down ends with a unique `{/* #id */}` and every `](#id)` link names one, per `heading-anchors.md`; headings listed in `except` may stay without |
 | `unchanged` | optional `ignore` (path prefixes) | `git status` shows no change outside `ignore` |
 | `changed-only` | `paths` (path prefixes) | every changed path starts with one of them |
 | `command` | `run`, optional `timeoutSeconds` | the shell command exits 0 in the host, such as a build |
 
 **A headless skill that has to ask** prints its question and ends. An "asks" case asserts that the output names every candidate (`match` on `output`), and that nothing was written (`unchanged`).
 
-**Before you rely on a case,** run it once with `--runs 1` and read what failed. The first runs of a new case mostly find mistakes in the case itself, such as a file the skill is supposed to touch.
+**Before you rely on a case,** run it once with `--runs 1` and read what failed. The first runs of a new case mostly find mistakes in the case itself, such as a file the skill is supposed to touch. When a pass shows a wrong assertion, fix the case and run `rescore.mjs` on that pass instead of running it again; say so wherever the results are reported.
 
 ## Tests
 

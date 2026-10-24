@@ -1,6 +1,6 @@
 ---
 name: doc-translator
-description: Translates an approved UA documentation page into English, at the corresponding path in the project's own declared EN i18n root. Preserves all MDX/code structure and enforces the project EN glossary. Use explicitly ("translate-doc", "use doc-translator to translate...").
+description: Translates an approved UA documentation page into English, at the corresponding path in the EN i18n root of the page's root pair. Preserves all MDX/code structure and enforces the project EN glossary. Use explicitly ("translate-doc", "use doc-translator to translate...").
 ---
 
 # doc-translator
@@ -9,37 +9,38 @@ You are translating an approved Ukrainian documentation page for UniComPay into 
 
 ## Scope
 
-- **In scope:** any Markdown/MDX page under the project's UA content root that has been approved in Ukrainian. Produces the English version at the corresponding path under the project's EN i18n root (see Path mapping).
-- **Out of scope:** writing new content, changing structure, fixing errors in the Ukrainian source, English-only reference sections with no UA counterpart (e.g. an API reference `docs/` tree in a project that splits UA and EN content into separate roots).
+- **In scope:** any Markdown/MDX page under a declared root pair's UA content root that has been approved in Ukrainian. Produces the English version at the corresponding path under that pair's EN i18n root (see Path mapping).
+- **Out of scope:** writing new content, changing structure, fixing errors in the Ukrainian source, a page outside every declared root pair.
 
 ## Path mapping
 
-Resolve the project's actual roots via `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` before doing anything else — do not assume `partner-cabinet/`.
+Resolve the page's root pair via `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` ("Resolving a page's root pair") before doing anything else — do not assume any folder.
 
 | Ukrainian source | English output |
 |---|---|
-| `<UA content root>/<relative-path>.md` | `<EN i18n root>/<relative-path>.md` |
+| `<pair's UA content root>/<relative-path>.md` | `<pair's EN i18n root>/<relative-path>.md` |
 
-Example, for a project whose declared UA content root is `partner-cabinet/` and EN i18n root is `i18n/en/docusaurus-plugin-content-docs-partner-cabinet/current/`:
-- `partner-cabinet/transactions/transactions.md` → `i18n/en/docusaurus-plugin-content-docs-partner-cabinet/current/transactions/transactions.md`
+Example, for a pair whose UA content root is `portal/` and EN i18n root is `i18n/en/docusaurus-plugin-content-docs-portal/current/`:
+- `portal/transactions/transactions.md` → `i18n/en/docusaurus-plugin-content-docs-portal/current/transactions/transactions.md`
 
 ## Sources to load
 
 Load these files at the start of the task.
 
 **Project paths (resolve first):**
-- Follow `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` to resolve this project's **UA content root** and **EN i18n root**. Do not assume `partner-cabinet/` or any other default. If either is undeclared, follow that file's fallback (ask once, offer to persist to the project's `CLAUDE.md`).
+- Follow `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` to resolve the page's **root pair**: its **UA content root** and **EN i18n root**. Do not assume any default. If either is undeclared, follow that file's fallback (ask once, offer to persist to the project's `CLAUDE.md`).
 
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-en.md` — canonical EN terminology. Use it to replace UA terms with their correct EN equivalents.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` — rank-0 project formatting conventions. Core section and English section apply. Outranks this skill's own body for any rule both cover.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` — the shared page-to-page link contract. Translation **preserves an already-correct route verbatim** (see "Never translate" and Step 4); do not re-derive or localize a path.
+- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/heading-anchors.md` — the shared heading-id contract (see Heading IDs below).
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` — the shared slug/title convention. The EN and UA pages share one path/filename; the EN `title:` is the semantic equivalent of the UA title. Never re-slug or move the page.
 - The Ukrainian source file, at the path resolved above.
 
 **Style guide (project-declared, resolved before translating):**
 - Follow `${CLAUDE_PLUGIN_ROOT}/context/style-guide-registry.md` — "Resolving which guide a project uses" section — to find this project's declared `Style guide:` token, then that file's "Loading procedure per guide" for the resolved token, mapping the content you're about to translate (terminology, tone, notation, procedures, punctuation) to the matched topical files.
 - If the project has no declared style guide, follow the registry's fallback: ask once, offer to persist the answer to that project's `CLAUDE.md`.
-- Do not hand-copy a guide name, corpus path, or individual rule into this skill file. `context/doc-rules/style-guide-rules/` is a retired, unmaintained digest — do not load it.
+- Do not hand-copy a guide name, corpus path, or individual rule into this skill file.
 
 ## What to translate
 
@@ -67,11 +68,12 @@ Load these files at the start of the task.
 
 ### Heading IDs
 
-All UA headings in the UA content root carry an anchor comment: `## Передумови {/* #prerequisites */}`.
+UA headings from `##` down carry an id comment, per `heading-anchors.md`: `## Передумови {/* #prerequisites */}`.
 
 When translating to English:
 - The text inside `{/* #... */}` is the canonical EN anchor slug. Derive the EN heading from it (convert kebab-case to title/sentence words).
 - **Remove** the `{/* #... */}` comment from the EN output — EN headings do not carry anchor comments; Docusaurus generates their anchors automatically from the heading text.
+- Use the id's words even when a closer translation of the UA text exists (`## Перегляд транзакцій {/* #transaction-list */}` → `## Transaction list`). Only when the id's words can't head the section (the id names a parent, such as `reference-information-<slug>`, or its words say something the UA heading no longer says), write the EN heading naturally and give it the id explicitly, never as a comment: `## Reference information {#reference-information-create-payment}`. The EN heading's id always equals the UA comment's id.
 
 ```md
 UA:  ## Передумови {/* #prerequisites */}
@@ -214,8 +216,8 @@ Translate these recurring UA patterns consistently:
 | `У таблиці описано атрибути, з якими ви взаємодієте під час X:` | `The following table describes the attributes you interact with when X:` |
 | `ви можете виконувати такі операції` | `you can do the following` |
 | `ви можете виконувати такі операції з X` | `you can do the following with X` |
-| `## Передумови` + single reference section | `## Prerequisites` + `Before you start, review the [reference information](#reference-information), or look up the necessary information as you go through the process.` |
-| `## Передумови` + multiple reference sections | `## Prerequisites` + `Each section contains [reference information](#reference-information). Review it before you start, or look up the necessary information as you go through the process.` |
+| `## Передумови` + single reference section | `## Prerequisites` + `Before you start, review the [reference information](#reference-information-{slug}), or look up the necessary information as you go through the process.` |
+| `## Передумови` + multiple reference sections | `## Prerequisites` + `Each section contains [reference information](#reference-information-{slug}). Review it before you start, or look up the necessary information as you go through the process.` |
 | bare `За потреби перед виконанням кроків перегляньте довідкову інформацію.` (no `## Передумови` heading) | Still produce a full `## Prerequisites` section with the standard single-reference sentence. Never output a bare sentence without the heading. |
 | Paperclip icon for receipts | `receipts icon <Icon icon="uiw:paper-clip" color="#F79F14" />` — always "receipts icon"; never "receipt management icon", "receipt icon", or other variants |
 
@@ -240,7 +242,7 @@ Do not capitalize after a colon that introduces a list, a code sample, or a UI e
 
 ### Step 1 — Locate the source file
 
-Read the Ukrainian source at `<UA content root>/<relative-path>.md`, using the root resolved from `project-paths.md`. If the file does not exist, stop and tell the user before doing anything else.
+Read the Ukrainian source at `<pair's UA content root>/<relative-path>.md`, using the pair resolved from `project-paths.md`. If the file does not exist, stop and tell the user before doing anything else.
 
 Check whether an English version already exists at the target path. If it does, read it and note any content that has diverged from the Ukrainian source (e.g., manual edits). Report this to the user and ask whether to overwrite or merge — **unless the caller asked for sync mode**, which answers that question by design (see "Sync mode" below).
 
@@ -282,10 +284,13 @@ Before saving, check:
 - No marketing adjectives
 - All `{/* NEEDS CONFIRMATION */}` and `{/* ToDo */}` markers from the source are present in the output (translated)
 - Frontmatter keys are untouched; only translatable values are changed
+- In a project with more than one root pair, the output path is under the source page's pair EN i18n root
 - The EN `title:` is the semantic equivalent of the UA title (`naming-conventions.md`); the output path, filename, and any `slug:` field are unchanged from the source's shared path — the page was not re-slugged or moved
 - Every page-to-page link path is byte-identical to the UA source (`internal-links.md`); no route was localized or "corrected"
 - All code blocks are byte-for-byte identical to the source
 - No `{/* #anchor */}` comments appear in EN headings
+- Every EN heading's id, generated from its text or explicit `{#id}`, equals its UA heading's comment id (`heading-anchors.md`)
+- No explicit `{#id}` contains a `{…}` placeholder (`heading-anchors.md` rule 9); a placeholder in the UA comment is reported, not carried into EN
 - No "UCPay" or "UniComPay" in prose — only "UCP"
 - `## Передумови` translated as `## Prerequisites` with the correct EN sentence (Variant A if a single reference section; Variant B if multiple)
 - After colons in prose: first word is capitalized if it is a regular word (not a UI element name, proper name, or code value)
@@ -304,7 +309,7 @@ Before saving, check:
 
 ### Step 5 — Save
 
-Write the English file to `<EN i18n root>/<relative-path>.md`, using the root resolved from `project-paths.md`. Create intermediate directories as needed.
+Write the English file to `<pair's EN i18n root>/<relative-path>.md`, using the pair resolved from `project-paths.md`. Create intermediate directories as needed.
 
 Set `last_update.date` in the English output to today's date (format: `M/D/YYYY`).
 
@@ -316,7 +321,7 @@ Do not modify any sidebar config file (`sidebars.ts`, or a project's custom-id e
 
 After saving, report:
 
-- Source path read
+- Source path read (as `<pair>:<path>` when the project declares more than one root pair)
 - Output path written
 - Any `{/* NEEDS CONFIRMATION */}` items (including unconfirmed glossary terms)
 - Any `{/* ToDo */}` items carried over from the source
