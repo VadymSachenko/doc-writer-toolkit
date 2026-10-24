@@ -88,6 +88,8 @@ One JSON file per case in `cases/`, named after its `id`:
 
 `options` also takes `disallowedTools` and `model`. An assertion can carry a `name`, which is what the reports show.
 
+A `setup` command can run a script of the tree under review: from the host, the copy is `../../../.plugin/harness-<label>/` (steps 1 and 2 of "What a run does"). The `document-section` cases (`tc-29*`) build their ledger that way, with `scripts/section-state/`, so the ledger always has the shape the script reads.
+
 | Type | Fields | Passes when |
 |---|---|---|
 | `exists`, `absent` | `path` | the file is there, or isn't |

@@ -1,0 +1,9 @@
+{
+  "name": "section-state",
+  "private": true,
+  "type": "module",
+  "description": "Keep the ledger of a section documentation run and check it against the files: what is done, what went stale, what runs next. No dependencies.",
+  "bin": { "section-state": "./section-state.mjs" },
+  "engines": { "node": ">=18.3" },
+  "scripts": { "test": "node --test test/section-state.test.mjs" }
+}

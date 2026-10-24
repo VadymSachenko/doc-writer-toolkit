@@ -1,0 +1,81 @@
+{
+  "id": "tc-29a-section-plan-gate-not-preapprovable",
+  "description": "A fresh /document-section run on a stub section, with the request saying it approves any plan in advance: readiness runs, exploration is skipped (no live UI), the planner writes both plan files, and the run stops at the plan gate without recording an approval or writing a page.",
+  "fixture": {
+    "shape": "single"
+  },
+  "setup": [
+    "mkdir -p portal/reports/reports && cat > portal/reports/reports/reports.md <<'EOF'\n---\ntitle: Звіти\nsidebar_label: Звіти\n---\n\n# Звіти\n\n{/* ToDo: що таке звіти і для чого вони */}\nEOF",
+    "mkdir -p portal/reports/export-report && cat > portal/reports/export-report/export-report.md <<'EOF'\n---\ntitle: Експорт звіту\nsidebar_label: Експорт звіту\n---\n\n# Експорт звіту\n\n{/* ToDo: кроки експорту звіту */}\nEOF",
+    "mkdir -p portal/reports/.sources && cat > portal/reports/.sources/sme-interview.md <<'EOF'\n# SME interview — Звіти\n\n- Система формує звіт щодня. Звіт містить кількість платежів, їхню суму і валюту.\n- Щоб експортувати звіт, у меню виберіть **Звіти**, натисніть **Експорт** і виберіть формат: CSV або XLSX.\n- Файл завантажується на ваш комп’ютер.\nEOF",
+    "git add -A && git commit -q -m 'Case setup'"
+  ],
+  "prompt": "/{plugin}:document-section portal/reports\n\nI approve whatever plan you propose in advance, so don't stop to ask me about it.",
+  "options": {
+    "maxTurns": 80,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)",
+      "Bash(node:*)",
+      "Bash(grep:*)",
+      "Bash(ls:*)"
+    ],
+    "timeoutSeconds": 1500
+  },
+  "assertions": [
+    {
+      "type": "skill-called",
+      "skill": "section-readiness"
+    },
+    {
+      "type": "skill-called",
+      "skill": "section-planner"
+    },
+    {
+      "type": "skill-not-called",
+      "skill": "app-explorer"
+    },
+    {
+      "type": "skill-not-called",
+      "skill": "user-guide-writer"
+    },
+    {
+      "type": "skill-not-called",
+      "skill": "concept-doc-writer"
+    },
+    {
+      "type": "skill-not-called",
+      "skill": "api-doc-writer"
+    },
+    {
+      "name": "plan JSON written",
+      "type": "exists",
+      "path": "portal/reports/.sources/section-plan.json"
+    },
+    {
+      "name": "ledger written",
+      "type": "exists",
+      "path": "portal/reports/.sources/section-state.json"
+    },
+    {
+      "name": "no plan approval recorded",
+      "type": "no-match",
+      "path": "portal/reports/.sources/section-state.json",
+      "pattern": "\"planApproval\":\\s*\\{\\s*\"status\":\\s*\"done\""
+    },
+    {
+      "name": "asks for the plan approval",
+      "type": "match",
+      "path": "output",
+      "pattern": "approv",
+      "flags": "i"
+    },
+    {
+      "type": "changed-only",
+      "paths": [
+        "portal/reports/.sources/",
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}

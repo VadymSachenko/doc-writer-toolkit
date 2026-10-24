@@ -5,7 +5,7 @@ description: Read-only diagnostic that scans one documentation section folder an
 
 # section-readiness
 
-You are producing a **readiness report** for one documentation section folder: a factual, machine-consumable inventory of what already exists and what later steps have to work with. This is the first step in documenting a section — run via `/check-section-readiness` — and its JSON output is the contract the later steps read: `app-explorer` (`/explore-and-resolve`) reads it to know which pages and markers exist, then `section-planner` (`/plan-section`) consumes it (plus the `app-notes.md` app-explorer produced) to propose structure. These steps are separate commands you run in sequence; there is no single orchestrator command today.
+You are producing a **readiness report** for one documentation section folder: a factual, machine-consumable inventory of what already exists and what later steps have to work with. This is the first step in documenting a section — run via `/check-section-readiness` — and its JSON output is the contract the later steps read: `app-explorer` (`/explore-and-resolve`) reads it to know which pages and markers exist, then `section-planner` (`/plan-section`) consumes it (plus the `app-notes.md` app-explorer produced) to propose structure. These steps are separate commands you can run in sequence, or `document-section` (`/document-section`) runs them, and the rest of the chain, for you.
 
 This skill **only reports facts**. It makes no edits, writes no doc pages, and asks the user nothing except the path-resolution fallback that `project-paths.md` already defines. It does not decide what pages *should* exist — that is `section-planner`'s job, which consumes this report.
 

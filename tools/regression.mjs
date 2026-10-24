@@ -17,6 +17,7 @@ const STEPS = [
   { id: 'ui-labels', cmd: 'npm', args: ['test'], cwd: `${scripts}/ui-labels` },
   { id: 'locale-sync', cmd: 'npm', args: ['test'], cwd: `${scripts}/locale-sync` },
   { id: 'doc-align', cmd: 'npm', args: ['test'], cwd: `${scripts}/doc-align` },
+  { id: 'section-state', cmd: 'npm', args: ['test'], cwd: `${scripts}/section-state` },
   { id: 'validate', cmd: claude, args: ['plugin', 'validate', 'plugins/doc-writer-toolkit'] },
   { id: 'visibility', cmd: 'node', args: ['tools/check-visibility.mjs'], notRunExit: 2 },
 ];
