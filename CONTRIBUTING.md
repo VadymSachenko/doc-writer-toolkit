@@ -97,6 +97,14 @@ The lint prints the gaps listed in `KNOWN_GAPS` (`tools/lint-plugin.mjs`) as `kn
 
 CI (`.github/workflows/check.yml`) runs the same steps on every pull request and every push to `main`. The two CLI steps run in their own job, with the CLI version pinned. Neither needs credentials.
 
+## Line endings
+
+Every text file is LF, set by `.gitattributes`, and the lint fails on CRLF. The commit that converted the repo is listed in `.git-blame-ignore-revs`. GitHub skips it in blame by itself; to skip it locally, run this once:
+
+```bash
+git config blame.ignoreRevsFile .git-blame-ignore-revs
+```
+
 ## Validating JSON manifests
 
 ```bash
