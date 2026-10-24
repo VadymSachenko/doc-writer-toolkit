@@ -20,6 +20,7 @@ You are changing an existing, approved page so that it is true again after a pro
 - The template matching the page's type, to know where a new block belongs: `${CLAUDE_PLUGIN_ROOT}/context/doc-templates/ua-user-guide-template.md`, `ua-concept-topic-template.md`, `api-reference-template.md` (or the EN equivalents on an `en` project). Detect the type from the page's structure and frontmatter.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-ua.md` (or `glossary-en.md`) and `formatting-conventions.md` — terms and formatting are rank 0.
 - `${CLAUDE_PLUGIN_ROOT}/context/changed-blocks.md` — the block vocabulary used in the report.
+- **`uk` page only:** `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/native-ukrainian.md` — natural-Ukrainian rules for the sentences you write (Step 2.2).
 
 Nothing else. Do not load style corpora; the reviewer does that afterwards.
 
@@ -43,7 +44,7 @@ Run the UI label check in `${CLAUDE_PLUGIN_ROOT}/context/ui-labels.md` before an
 ## Step 2 — Edit
 
 1. **Smallest edit.** Change only the blocks your plan names. Every other sentence stays byte-identical — no reflow, no re-punctuation, no "while I'm here". Keep heading structure, order, tone and sentence patterns of the surrounding text.
-2. **Terms.** Use the glossary term. A UI label the brief quotes goes in exactly as the app shows it, in the page's language, with the project's formatting convention for labels. Record every new or renamed term for the report.
+2. **Terms and natural Ukrainian.** On a `uk` page, every sentence you write or rewrite follows `native-ukrainian.md`: a brief written in English is a source of facts, not a sentence template («Відкривається вікно…», not «Діалог … відкривається»; no «цей посібник проведе вас через…»). It doesn't license touching any other sentence. Use the glossary term. A UI label the brief quotes goes in exactly as the app shows it, in the page's language, with the project's formatting convention for labels. Record every new or renamed term for the report.
 3. **Markers.** For an unknown or unsourced item write `{/* NEEDS CONFIRMATION: <plain writer's note> */}` at the end of the affected line — a note a colleague would write, no tool or model names. A screenshot the brief marks as showing the old state gets `{/* ToDo: re-capture <file> */}` next to its reference.
 4. **Screenshots.** Reference new or re-captured files exactly by the names the brief gives, in the page's `.assets/` folder, with the project's screenshot embedding conventions. Never create or modify image files.
 5. **Frontmatter.** Update `last_update.date` if the page has it. Touch nothing else in the frontmatter unless the brief names the field (e.g. `description` must change because the page's scope changed).
@@ -56,6 +57,7 @@ Run the UI label check in `${CLAUDE_PLUGIN_ROOT}/context/ui-labels.md` before an
 - No item from "Do not touch" changed.
 - Table columns and list numbering are still consistent after the edit.
 - New terms match the glossary; UI labels match the brief exactly.
+- On a `uk` page, each sentence you wrote passes `native-ukrainian.md`'s §5 checklist, and its negative controls (§4b) are left alone.
 - Markers read as plain writer's notes.
 - Code blocks and inline code are byte-identical unless the brief changed them.
 

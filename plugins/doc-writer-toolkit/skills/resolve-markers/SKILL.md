@@ -28,7 +28,9 @@ You are resolving documentation markers — `{/* NEEDS CONFIRMATION: ... */}` an
 6. If `Admin UI: playwright` is declared in the project's `CLAUDE.md` — also load `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/value-realism.md` and `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-capture.md`.
 7. `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` — **only for Ж1a** (UI-label terminal-punctuation normalization), applied when a confirmed UI label is written into a bold span in prose (Step 4). Do not use it to rewrite surrounding prose.
 
-Do not load style-guide corpora (formatting-conventions.md is a project rank-0 file, not a corpus). This skill edits markers only — it does not rewrite prose beyond filling in the confirmed fact.
+8. **`uk` pages only:** `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/native-ukrainian.md` — when a confirmed fact is written into the page as Ukrainian prose, that sentence follows it. It doesn't license rewriting the sentences around the marker.
+
+Do not load style-guide corpora (formatting-conventions.md and native-ukrainian.md are project rank-0 files, not corpora). This skill edits markers only — it does not rewrite prose beyond filling in the confirmed fact.
 
 ## Step 0 — Build the evidence index
 

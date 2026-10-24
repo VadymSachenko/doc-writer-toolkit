@@ -1,0 +1,48 @@
+{
+  "id": "tc-17b-updater-uk-no-walkthrough-calque",
+  "description": "A brief asks for an intro that 'walks you through' the page: the Ukrainian sentence states the page's purpose directly, with no «проведе вас через» and no «цей посібник», and nothing else changes.",
+  "fixture": {
+    "shape": "single"
+  },
+  "setup": [
+    "mkdir -p portal/transactions/.sources && cat > portal/transactions/.sources/change-brief.md <<'EOF'\n# Change brief — intro sentence\n\n## Page\nportal/transactions/transactions.md\n\n## What changed\n- The page needs a one-sentence intro at the top: this guide walks you through viewing and filtering transactions. — source: ticket #22\n\n## Where in the page\nThe intro paragraph under the title.\n\n## Screenshots\n- none\n\n## Terms\n- none\n\n## Do not touch\n- The sections «Фільтрування транзакцій» and «Повідомлення про платежі».\nEOF\ngit add -A && git commit -q -m 'Case setup'"
+  ],
+  "prompt": "use doc-page-updater with page `portal/transactions/transactions.md` and brief `portal/transactions/.sources/change-brief.md`",
+  "options": {
+    "maxTurns": 60,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)",
+      "Bash(node:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "no walk-through calque",
+      "type": "no-match",
+      "path": "portal/transactions/transactions.md",
+      "pattern": "прове(де|дуть|сти) вас|проводить вас",
+      "flags": "i"
+    },
+    {
+      "name": "no «цей посібник/гайд» for one page",
+      "type": "no-match",
+      "path": "portal/transactions/transactions.md",
+      "pattern": "(цей|цьому|цього) (посібник|гайд)",
+      "flags": "i"
+    },
+    {
+      "name": "nothing else changed",
+      "type": "diff-lines",
+      "path": "portal/transactions/transactions.md",
+      "allow": "На сторінці \\*\\*Транзакції\\*\\*"
+    },
+    {
+      "type": "changed-only",
+      "paths": [
+        "portal/transactions/",
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}
