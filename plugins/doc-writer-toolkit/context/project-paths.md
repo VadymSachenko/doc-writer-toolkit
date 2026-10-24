@@ -95,7 +95,7 @@ The folder is the host's own, committed with its pages. It sits outside every co
 | `templates/<name>` | A page template under the plugin's file name. It replaces `${CLAUDE_PLUGIN_ROOT}/context/doc-templates/<name>` for this host. | yes |
 | `glossary.md` | A bilingual list for people. No skill reads it. | yes |
 
-Each skill's "Sources to load" names the kit files it reads. Kit files are rank 0, like `formatting-conventions.md` (`${CLAUDE_PLUGIN_ROOT}/context/style-guide-registry.md`, "Project rank-0 layer"). The skeletons are in `${CLAUDE_PLUGIN_ROOT}/context/starter-kit/`. A skill names that folder and never copies it.
+Each skill's "Sources to load" names the kit files it reads. The glossaries and `product-rules.md` are rank 0, like `formatting-conventions.md` (`${CLAUDE_PLUGIN_ROOT}/context/style-guide-registry.md`, "Project rank-0 layer"). `product-facts.md` is background, not a rule. The skeletons are in `${CLAUDE_PLUGIN_ROOT}/context/starter-kit/`. A skill names that folder and never copies it.
 
 **Resolving the kit:**
 

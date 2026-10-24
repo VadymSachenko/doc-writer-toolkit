@@ -8,7 +8,7 @@
 // Usage: node tools/harness/fixture.mjs <dest> single|multi [--locales …] [--docusaurus] [--kit <name>]
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -207,10 +207,26 @@ function checkSource(source, rel) {
   if (typeof source?.git !== 'string' || !source.git.includes(':')) throw new Error(`kit file ${rel}: a source is a string, a list, or { git: '<rev>:<path>' }`);
 }
 
-export function kitSource(source, rel = 'kit file') {
+// The top of the git checkout that holds `dir`, or null when `dir` is in none.
+export function gitTop(dir) {
+  const s = spawnSync('git', ['-C', dir, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' });
+  return s.status === 0 ? s.stdout.trim() : null;
+}
+
+// Where `{ git }` sources are read from when the caller names no checkout: the one that holds the harness.
+// run.mjs passes the checkout of its --tree instead, since a copied harness may sit outside any repo.
+export const defaultRepo = () => gitTop(here) ?? REPO;
+
+export function kitSource(source, rel = 'kit file', repo = defaultRepo()) {
   if (typeof source === 'string') return source;
-  if (Array.isArray(source)) return source.map((part) => kitSource(part, rel)).join('');
-  let text = execFileSync('git', ['show', source.git], { cwd: REPO, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  if (Array.isArray(source)) return source.map((part) => kitSource(part, rel, repo)).join('');
+  const rev = source.git.slice(0, source.git.indexOf(':'));
+  if (!gitTop(repo)) throw new Error(`${rel}: the kit reads ${source.git} from git, and ${repo} is not a git checkout`);
+  const gitOut = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  try { gitOut('cat-file', '-e', `${rev}^{commit}`); } catch {
+    throw new Error(`${rel}: the kit needs commit ${rev}: fetch full history (git fetch --unshallow)`);
+  }
+  let text = gitOut('show', source.git);
   if (source.lines) {
     const all = text.split('\n');
     text = source.lines.split(',').map((range) => {
@@ -225,11 +241,17 @@ export function kitSource(source, rel = 'kit file') {
   return text;
 }
 
-export function makeFixture(dest, shape, { locales = [], docusaurus = false, kit = null } = {}) {
+// The kit's files as { '<folder><path>': text }, read from `repo` for git sources. Throws on a missing commit.
+export function kitFiles(kit, repo = defaultRepo()) {
+  const k = resolveKit(kit);
+  return Object.fromEntries(Object.entries(k?.files ?? {}).map(([rel, source]) => [`${k.folder}${rel}`, kitSource(source, rel, repo)]));
+}
+
+export function makeFixture(dest, shape, { locales = [], docusaurus = false, kit = null, repo = defaultRepo() } = {}) {
   if (!['single', 'multi'].includes(shape)) throw new Error(`unknown fixture shape '${shape}' (single or multi)`);
   if (fs.existsSync(dest) && fs.readdirSync(dest).length) throw new Error(`${dest} is not empty`);
   const k = resolveKit(kit);
-  const kitTree = Object.fromEntries(Object.entries(k?.files ?? {}).map(([rel, source]) => [`${k.folder}${rel}`, kitSource(source, rel)]));
+  const kitTree = kitFiles(kit, repo);
   const tree = { ...files.common(shape, locales, k), ...(shape === 'multi' ? files.multi() : {}), ...(docusaurus ? files.docusaurus() : {}), ...kitTree };
   for (const [rel, text] of Object.entries(tree)) {
     fs.mkdirSync(path.dirname(path.join(dest, rel)), { recursive: true });
@@ -251,6 +273,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     console.error('usage: node tools/harness/fixture.mjs <dest> single|multi [--locales de,pl] [--docusaurus] [--kit <name>]');
     process.exit(2);
   }
-  const written = makeFixture(path.resolve(dest), shape, { locales, docusaurus: process.argv.includes('--docusaurus'), kit: value('--kit') });
+  let written;
+  try { written = makeFixture(path.resolve(dest), shape, { locales, docusaurus: process.argv.includes('--docusaurus'), kit: value('--kit') }); } catch (e) {
+    console.error(`fixture: ${e.message}`);
+    process.exit(1);
+  }
   console.log(`${dest}: ${shape}, ${written.length} files, 1 commit`);
 }

@@ -86,7 +86,7 @@ The same shape holds for the other tokens:
 | `gdsg@uk` | GDSG | skipped | `ua-grammar/` | conventions + kit `glossary-ua.md` + kit `product-rules.md` + `native-ukrainian.md` |
 | `mssg-en@en` | MSSG `shared/` | MSSG `en-us/` — loaded | — | conventions + kit `glossary-en.md` + kit `product-rules.md` |
 | `mssg-ua@uk` | MSSG `shared/` | MSSG `uk-ua/` — loaded | `ua-grammar/` (reached through `uk-ua/grammar-authority.md`) | conventions + kit `glossary-ua.md` + kit `product-rules.md` + `native-ukrainian.md` |
-| `ua-grammar@uk` | — | — | `ua-grammar/` | conventions + `native-ukrainian.md` (no glossary, no product rules — see below) |
+| `ua-grammar@uk` | — | — | `ua-grammar/` | conventions + kit `product-rules.md` + `native-ukrainian.md` (no glossary — see below) |
 
 `mssg-en@uk` and `mssg-ua@en` are constructible but near-empty in practice: each drops its own language layer and gets nothing back for the file's actual language (`mssg-en@uk` keeps `shared/` structural plus `ua-grammar/`; `mssg-ua@en` keeps `shared/` structural and nothing else). If a caller lands on one of these, run it but say plainly in the report header that the better-matched token for this file's language is `mssg-ua` / `mssg-en` respectively.
 
@@ -151,13 +151,13 @@ Avoid double-applying it: if the resolved profile is `mssg-ua@uk`, don't separat
 
 ## Project rank-0 layer
 
-Layer 4 holds the project's own rules, loaded in drafting and in review alike. Two of its files ship with the plugin, under `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/`. The other two come from the host's product kit: how a skill finds the kit, and what it does when none is declared or a file is missing, is in `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`, "Product kit". `formatting-conventions.md` is loaded for every profile; the rest are conditioned on the profile's `<lang>`:
+Layer 4 holds the project's own rules, loaded in drafting and in review alike. Two of its files ship with the plugin, under `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/`. The other two come from the host's product kit: how a skill finds the kit, and what it does when none is declared or a file is missing, is in `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`, "Product kit". `formatting-conventions.md` and the kit's `product-rules.md` are loaded for every profile; the rest are conditioned on the profile's `<lang>`:
 
 | File | From | What it carries | Loaded for |
 |---|---|---|---|
 | `formatting-conventions.md` | plugin | the project's own formatting conventions (how placeholders are written, what bold/italic/code font mean in this project's pages, and the like) | every profile, always |
 | `glossary-ua.md` / `glossary-en.md` | kit | product-approved terminology, picked to match the profile's `<lang>`, read with `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/glossary-format.md` | every profile except `ua-grammar@uk` |
-| `product-rules.md` | kit | rules for this product only: its name and short name, key terms, the names of its UI sections | every profile except `ua-grammar@uk` |
+| `product-rules.md` | kit | rules for this product only: its name and short name, key terms, the names of its UI sections | every profile, always |
 | `native-ukrainian.md` | plugin | natural-Ukrainian prose rules — literal-English-syntax, ambiguous-reference, mechanical-repetition, self-reference, and discretionary-dash preferences (see the file's own scope note; it does not restate orthography or terminology) | every `@uk` profile — `gdsg@uk`, `mssg-ua@uk`, `ua-grammar@uk`; **never** on an `@en` profile |
 
 Rules for this layer:
@@ -165,7 +165,7 @@ Rules for this layer:
 - **Rank 0 means it outranks every corpus rule.** When a project rule and a corpus rule conflict, the project rule wins **silently** — no finding, no suggested "fix," no note. E.g. when the kit glossary mandates «ендпоінт», never suggest «кінцева точка» in its place even though the Microsoft Ukrainian glossary localizes it that way; likewise, a formatting convention that differs from the corpus's default is the correct form for this project, not a deviation from it.
 - **Silence runs one way.** A conflict with a corpus rule is silent, but a document that *breaks* a project rule is a normal finding — cite the project file as its source.
 - **A missing file is not an error.** A file that doesn't exist is skipped and noted as "not present" wherever the skill reports which sources it consulted. With no product kit declared, layer 4 is the plugin's two files alone, and the skill says so as `project-paths.md` describes.
-- **`ua-grammar` takes conventions but not the glossary or the product rules.** That mode is pure orthographic correctness with no terminology opinions, so the glossary and `product-rules.md` stay out; `formatting-conventions.md` still loads, because its job there is to keep project formatting choices from being reported as errors. `native-ukrainian.md` **does** load under `ua-grammar@uk` — it is a `uk`-prose preference, not a terminology opinion, so it rides with every `@uk` profile including this one.
+- **`ua-grammar` takes conventions and product rules but not the glossary.** That mode is pure orthographic correctness with no terminology opinions, so the glossary stays out; `formatting-conventions.md` and `product-rules.md` still load, because their job there is to keep project formatting and product writing choices, such as a UI section name with a capital letter, from being reported as errors. `native-ukrainian.md` **does** load under `ua-grammar@uk` — it is a `uk`-prose preference, not a terminology opinion, so it rides with every `@uk` profile including this one.
 - **`native-ukrainian.md` is `@uk`-only.** Load it for every profile whose `<lang>` is `uk`, and never for an `@en` profile — it encodes Ukrainian-prose preferences that have no meaning for English text. Like the other rank-0 files it outranks the corpus silently on conflict, and a document that breaks one of its rules is a normal finding citing the file. It never modifies or restates `ua-grammar/` orthography (layer 3) or the glossary — see the file's own scope note.
 - **`00-cheatsheet.md` is not part of this layer** and is never loaded by a review. Orthography comes from `ua-grammar/`'s topical files and project conventions come from `formatting-conventions.md`; the cheatsheet only duplicates them.
 

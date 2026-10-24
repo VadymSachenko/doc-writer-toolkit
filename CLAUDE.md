@@ -51,7 +51,7 @@ There's no build. What you'll actually run:
 
 ### Generic vs. product-specific seam
 
-Skill *logic* and the plugin's content are generic and reusable for any Docusaurus doc project. Product content lives in the host, not here. Each host keeps a *product kit*: a folder in its own repo, outside every content root (`doc-kit/`), declared as `Product kit:` in its `CLAUDE.md`. It has fixed file names: `glossary-ua.md`, `glossary-en.md`, `product-facts.md`, `product-rules.md` and, optionally, `templates/` and a human-facing bilingual `glossary.md` that no skill loads. Kit files are rank 0, like `formatting-conventions.md`.
+Skill *logic* and the plugin's content are generic and reusable for any Docusaurus doc project. Product content lives in the host, not here. Each host keeps a *product kit*: a folder in its own repo, outside every content root (`doc-kit/`), declared as `Product kit:` in its `CLAUDE.md`. It has fixed file names: `glossary-ua.md`, `glossary-en.md`, `product-facts.md`, `product-rules.md` and, optionally, `templates/` and a human-facing bilingual `glossary.md` that no skill loads. The glossaries and `product-rules.md` are rank 0, like `formatting-conventions.md`; `product-facts.md` is background.
 
 - `context/project-paths.md` ("Product kit") is the single source of truth for finding the kit. No kit declared: the run goes on with no glossary, product facts or product rules, and says so. A declared folder that doesn't exist: the run stops and names the path, writing nothing.
 - The plugin ships only neutral skeletons in `context/starter-kit/`, which skills name but never copy, and `context/doc-rules/glossary-format.md`, the generic contract for reading a glossary table that `formatting-conventions.md` Ж1, Ж3 and Ж4 rely on.

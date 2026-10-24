@@ -14,7 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { makeFixture, resolveKit } from './fixture.mjs';
+import { gitTop, kitFiles, makeFixture, resolveKit } from './fixture.mjs';
 import { check, label as nameOf } from './assertions.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -128,10 +128,10 @@ function claudeArgs(c, prompt, copy, model) {
   return args;
 }
 
-export function runOnce(c, { copy, sentinel, ownSkills, dir, model, claude = 'claude' }) {
+export function runOnce(c, { copy, sentinel, ownSkills, dir, model, claude = 'claude', repo }) {
   const host = path.join(dir, 'host');
   fs.mkdirSync(host, { recursive: true });
-  makeFixture(host, c.fixture.shape, c.fixture);
+  makeFixture(host, c.fixture.shape, { ...c.fixture, ...(repo ? { repo } : {}) });
   for (const cmd of c.setup ?? []) {
     const s = spawnSync('sh', ['-c', cmd], { cwd: host, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 'Fixture', GIT_AUTHOR_EMAIL: 'fixture@example.com', GIT_COMMITTER_NAME: 'Fixture', GIT_COMMITTER_EMAIL: 'fixture@example.com' } });
     if (s.status !== 0) throw new Error(`${c.id}: setup '${cmd}' exited ${s.status}: ${s.stderr}`);
@@ -208,14 +208,17 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   fs.mkdirSync(base, { recursive: true });
   const copy = sentinelCopy(path.resolve(tree), sentinel, path.join(base, '.plugin'));
   const ownSkills = new Set([...fs.readdirSync(path.join(copy, 'skills')), ...fs.readdirSync(path.join(copy, 'commands')).map((f) => f.replace(/\.md$/, ''))]);
-  const options = { copy, sentinel, ownSkills, model: option('--model'), claude: option('--claude', process.env.CLAUDE_BIN || 'claude') };
+  // A kit's git sources come from the checkout of the tree under test, which has the commits of main and the
+  // branch alike. A copy of the harness may sit outside any repo, so its own folder is only the fallback.
+  const repo = gitTop(path.resolve(tree)) ?? gitTop(here) ?? here;
+  const options = { copy, sentinel, ownSkills, model: option('--model'), claude: option('--claude', process.env.CLAUDE_BIN || 'claude'), repo };
   const pass = { label: labelName, tree: path.resolve(tree), sentinel, model: options.model ?? 'default', cases: [], costUsd: 0, stopped: null };
   let warned = false;
   // --resume keeps the cases a stopped pass already finished with the same number of runs.
   if (process.argv.includes('--resume') && fs.existsSync(path.join(base, 'pass.json'))) {
     const before = JSON.parse(fs.readFileSync(path.join(base, 'pass.json'), 'utf8'));
     const wanted = ids.map((id) => loadCase(id).id);
-    pass.cases = before.cases.filter((s) => s.runs === runs && wanted.includes(s.case));
+    pass.cases = before.cases.filter((s) => s.runs === runs && !s.error && wanted.includes(s.case));
     pass.costUsd = Number(pass.cases.reduce((sum, s) => sum + s.costUsd, 0).toFixed(4));
   }
   const save = () => {
@@ -228,6 +231,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     if (pass.cases.some((s) => s.case === c.id)) continue;
     const caseDir = path.join(base, c.id);
     fs.rmSync(caseDir, { recursive: true, force: true });
+    // A kit that can't be built, such as one that needs a commit this clone lacks, fails its case only.
+    try { kitFiles(c.fixture.kit, repo); } catch (e) {
+      console.error(`${c.id}: not run: ${e.message}`);
+      pass.cases.push({ case: c.id, runs, passedRuns: 0, assertions: [{ name: 'kit built', passed: 0 }], costUsd: 0, seconds: 0, error: e.message });
+      save();
+      continue;
+    }
     const results = [];
     for (let n = 1; n <= runs; n++) {
       const usage = readUsage(options.claude);
@@ -263,6 +273,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     for (const a of s.assertions) console.log(`  ${a.passed}/${s.runs}  ${a.name}`);
   }
   console.log(`pass '${labelName}': $${pass.costUsd.toFixed(2)} in total, results in ${base}`);
+  const broken = pass.cases.filter((s) => s.error);
+  if (broken.length) {
+    for (const s of broken) console.log(`${s.case}: not run: ${s.error}`);
+    process.exitCode = 1;
+  }
   if (pass.stopped) {
     console.log(`stopped before ${pass.stopped.before}: ${pass.stopped.reason}. Run the rest later with the same arguments plus --resume.`);
     process.exitCode = 4;

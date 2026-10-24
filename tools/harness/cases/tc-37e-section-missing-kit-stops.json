@@ -1,0 +1,48 @@
+{
+  "id": "tc-37e-section-missing-kit-stops",
+  "description": "A product kit declared as `doc-kit/` that doesn't exist: document-section stops in its Step 0, before readiness or any other stage, names the path, and changes nothing.",
+  "fixture": {
+    "shape": "single",
+    "kit": {
+      "files": {}
+    }
+  },
+  "prompt": "/{plugin}:document-section portal/transactions",
+  "options": {
+    "maxTurns": 30,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)",
+      "Bash(node:*)",
+      "Bash(ls:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "type": "skill-not-called",
+      "skill": "section-readiness"
+    },
+    {
+      "type": "skill-not-called",
+      "skill": "app-explorer"
+    },
+    {
+      "type": "skill-not-called",
+      "skill": "section-planner"
+    },
+    {
+      "name": "names the missing kit path",
+      "type": "match",
+      "path": "output",
+      "pattern": "doc-kit/?"
+    },
+    {
+      "name": "no ledger written",
+      "type": "absent",
+      "path": "portal/transactions/.sources/section-state.json"
+    },
+    {
+      "type": "unchanged"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 {
   "id": "tc-37c-writer-no-kit-says-so",
-  "description": "No product kit declared: user-guide-writer asks nothing about it, drafts and saves the page, and its report says that no kit, glossary or product rules were loaded.",
+  "description": "No product kit declared: user-guide-writer asks nothing about it, drafts and saves the page, and its report says that no product kit is declared.",
   "fixture": {
     "shape": "single"
   },
@@ -19,16 +19,21 @@
       "run": "test $(find portal/reports/monthly-digest -maxdepth 1 -name '*.md' | wc -l) -eq 1"
     },
     {
-      "name": "says no kit is declared",
+      "name": "says no product kit is declared",
       "type": "match",
       "path": "output",
-      "pattern": "\\b(no|not|without)\\b[^.\\n]{0,40}\\b(product )?kit\\b|\\bproduct kit\\b[^.\\n]{0,40}\\b(not declared|undeclared|none|absent)|\\b(no|without)\\b[^.\\n]{0,20}\\bglossary",
+      "pattern": "\\bno product kit\\b|\\bproduct kit\\b[^.\\n]{0,40}\\b(not declared|undeclared|isn't declared|wasn't declared|none)\\b|немає набору продукту|без набору продукту|набір продукту[^.\\n]{0,40}не (оголошено|задекларовано|вказано)",
       "flags": "i"
     },
     {
-      "name": "no plugin glossary read",
-      "type": "not-read",
-      "path": "project-rules/glossary-ua.md"
+      "name": "no kit folder made",
+      "type": "absent",
+      "path": "doc-kit"
+    },
+    {
+      "name": "no starter-kit file copied",
+      "type": "command",
+      "run": "test -z \"$(git status --porcelain --untracked-files=all | grep -E '(glossary-(ua|en)|product-(facts|rules))\\.md$')\""
     },
     {
       "type": "changed-only",
