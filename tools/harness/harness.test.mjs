@@ -7,6 +7,8 @@ import { execFileSync } from 'node:child_process';
 import { makeFixture } from './fixture.mjs';
 import { changedPaths, check, frontmatterProblem, linkProblem, pageLinks } from './assertions.mjs';
 import { builtInChecks, loadCase, readTranscript, summarize } from './run.mjs';
+import { compare, verdict } from './compare.mjs';
+import { coin, mask } from './blind.mjs';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'harness-test-'));
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' });
@@ -86,11 +88,26 @@ test('built-in checks: the sentinel must load, and no other copy of the plugin m
   assert.deepEqual(readTranscript(transcript([])).result.total_cost_usd, 0.5);
 });
 
-test('summaries: pass counts per assertion, and the cost', () => {
+test('summaries and compare: pass counts per assertion, and the verdicts', () => {
   const c = { id: 'case-a' };
   const r = (passes) => ({ costUsd: 0.25, seconds: 10, checks: passes.map((pass, i) => ({ name: `a${i}`, pass })) });
   const s = summarize(c, [r([true, true]), r([true, false]), r([true, false])]);
   assert.deepEqual(s.assertions, [{ name: 'a0', passed: 3 }, { name: 'a1', passed: 1 }]);
   assert.equal(s.passedRuns, 1);
   assert.equal(s.costUsd, 0.75);
+  assert.equal(verdict({ passed: 3, runs: 3 }, { passed: 2, runs: 3 }), 'regressed');
+  assert.equal(verdict({ passed: 0, runs: 3 }, { passed: 3, runs: 3 }), 'fixed');
+  assert.equal(verdict({ passed: 1, runs: 3 }, { passed: 3, runs: 3 }), 'mixed');
+  assert.equal(verdict({ passed: 3, runs: 3 }, { passed: 3, runs: 3 }), 'same: pass');
+  const after = summarize(c, [r([false, true]), r([true, true]), r([true, true])]);
+  assert.deepEqual(compare({ cases: [s] }, { cases: [after] }).map((x) => x.verdict), ['regressed', 'mixed']);
+});
+
+test('blind packet helpers: a seeded coin repeats, and masking hides labels and run paths', () => {
+  const a = coin(42);
+  const b = coin(42);
+  assert.deepEqual([a(), a(), a(), a()], [b(), b(), b(), b()]);
+  const text = mask('Used harness-main:doc-translator; wrote /tmp/out/main/case/run-1/host/i18n/x.md', ['main', 'branch']);
+  assert.doesNotMatch(text, /main|run-1/);
+  assert.match(text, /PLUGIN:doc-translator/);
 });
