@@ -39,8 +39,6 @@ const MSSG = `${PLUGIN}/context/microsoft-style-guide`;
 
 // Findings that exist on main today, with the reason each is open. Matched on file and message prefix.
 export const KNOWN_GAPS = [
-  { file: `${MSSG}/ROUTING.md`, message: "names 'genitive-it-forms.md', which does not exist", reason: 'the router names it without its folder' },
-  { file: `${MSSG}/uk-ua/terminology/genitive-it-forms.md`, message: UNREACHABLE, reason: 'the router names it without its folder' },
   ...[
     `${PLUGIN}/context/google-developer-style-guide/language/reference-verbs.md`,
     ...['acronyms', 'capitalization', 'numbers', 'word-choice/contractions', 'word-choice/plain-and-precise-language']

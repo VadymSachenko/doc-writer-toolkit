@@ -17,7 +17,7 @@ Load this file first. Then open only the matching topic files.
 | Ukrainian voice or natural translation | `uk-ua/voice-and-tone/`, `localization/` | language-specific (uk-UA) |
 | Ukrainian UI or documentation | `uk-ua/ui-localization/`, `uk-ua/documentation/` | language-specific (uk-UA) |
 | Ukrainian software strings or messages | `uk-ua/software-and-web/` | language-specific (uk-UA) |
-| Ukrainian exact localization choice | Search `uk-ua/terminology/frequent-choices.md`; load `genitive-it-forms.md` only for an IT genitive form | language-specific (uk-UA) |
+| Ukrainian exact localization choice | Search `uk-ua/terminology/frequent-choices.md`; load `uk-ua/terminology/genitive-it-forms.md` only for an IT genitive form | language-specific (uk-UA) |
 | Ukrainian Copilot predefined prompt | `uk-ua/conversational-content/copilot-prompts.md` | language-specific (uk-UA) |
 | Ukrainian voiceover or video | `uk-ua/voice-video/voice-and-video.md` | language-specific (uk-UA) |
 | Ukrainian spelling, grammar, or punctuation | `uk-ua/grammar-authority.md`, then the mapped external grammar file | language-specific (uk-UA) |

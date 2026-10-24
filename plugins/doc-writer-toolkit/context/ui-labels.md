@@ -23,7 +23,7 @@ Review, fix, alignment and UA → EN translation skills don't run it.
 | Situation | `locale-translator` | Writer and updater skills |
 |---|---|---|
 | No `UI label source:` declared | Ask once and offer to persist the answer (`${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`). | Skip this procedure without comment: the project keeps no label store. |
-| `check` or `import` fails (exit `1`: network, `gh` auth, a locale file that doesn't parse or covers under 80% of the EN keys) | Stop. A translation never runs on an unchecked snapshot. | Report the error in one line and continue with the existing snapshot. |
+| `check`, `import` or `sync` fails (exit `1`: network, `gh` auth, a locale file that doesn't parse or covers under 80% of the EN keys) | Stop. A translation never runs on an unchecked snapshot. | Report the error in one line and continue with the existing snapshot. |
 | `sync` leaves the diff pending (`pendingRemains`) | Stop until it is resolved (step 4). | Report it and continue. |
 | `sync` patched pages or categories (`suggestedCommit` lists paths outside the label store) | Stop: the user commits the sync first (step 6). | Continue. |
 
@@ -33,13 +33,18 @@ Run every command from the docs repo root. Pass `--ticket <n>` when the user sha
 
 1. **Check.** Run `ui-labels.mjs check`.
    - Exit `0`: the snapshot is current and nothing is pending. Continue the task. The rest of this file doesn't apply.
-   - Exit `10`: something changed or a diff is pending (`reasons`, `pendingSync`). Go to step 2.
-   - Exit `2`: a declaration is missing, or a docs locale matches no locale file or several. Ask once for the fields in `missing`, or for the mapping of the locales in `unresolved` (show their `candidates`). Offer to persist the answer in the `CLAUDE.md` configuration block, then run `check` again. Never pick a candidate yourself.
+   - Exit `10`: something changed, a diff is pending, or there is no snapshot yet (`reasons`, `pendingSync`). Go to step 2.
+   - Exit `2`: a declaration is missing. Ask once for the fields in `missing`, offer to persist the answer in the `CLAUDE.md` configuration block, then run `check` again.
    - Exit `1`: see the table above.
 2. **Drain an earlier diff.** If `pendingSync` is `false`, go to step 3. If it is `true`, run step 4 first, because `import` refuses to run (exit `3`) while a diff is unsynced, so a diff is never lost. Then run `check` again: exit `0` → step 5, exit `10` → step 3.
-3. **Import.** Run `ui-labels.mjs import`. It writes the new snapshot, the ticket overlay and the diff for `sync`. On exit `1` the previous snapshot is untouched: see the table above.
+3. **Import.** Run `ui-labels.mjs import`. It writes the new snapshot, the ticket overlay and the diff for `sync`.
+   - Exit `2`: a docs locale matches no locale file or several, or a declaration is missing. Ask once for the mapping of the locales in `unresolved` (show their `candidates`), or for the fields in `missing`. Offer to persist the answer (`Locale files:` for a mapping) in the `CLAUDE.md` configuration block, then run `import` again. Never pick a candidate yourself.
+   - Exit `3`: a diff from an earlier import is unsynced. Run step 4 first.
+   - Exit `1`: the previous snapshot is untouched: see the table above.
 4. **Sync.** Run `ui-labels.mjs sync`, without `--commit`: commits in the docs repo are the user's. For every page and sidebar category bound to a changed or rekeyed key, it patches the bold label in UA, EN and every locale on the current branch, and advances the state, so the patch doesn't trigger a re-translation once it is committed. A project with more than one root pair (`project-paths.md`) is synced in every pair, each page in its own pair's files; the report names those pages `<pair>:<id>`. Don't pass `--pair` here: a sync narrowed to one pair leaves the diff pending for the others. The changes stay in the working tree. `suggestedCommit` gives the commit for the user to make: the message (`Sync UI labels to <repo>@<sha7>`) and the changed paths. After an import with no diff to sync (`status: nothing-to-sync`, a first import for example), it lists the new snapshot alone.
    - A page with uncommitted changes isn't patched (`skipped`), and the diff stays pending (`pendingRemains`). Ask the user to commit or stash those files, then run `sync` again. Never commit or stash them yourself.
+   - Exit `2`: a root pair's declaration is missing or unusable: a missing root (`missing` names the fields), a name with no Latin letters or digits, or roots that overlap. `sync` reads the pairs only when a diff is pending, so this can appear although `check` passed. Ask once for the fields, offer to persist the answer, then run `sync` again.
+   - Exit `1`: see the table above.
 5. **Show the report** before the task continues:
    - **Patched:** the `uk` and `en` entries (page, old → new, line), which the PR reviewer checks, plus the number of locale entries. Read each patched `uk` line. If the label's grammar in the sentence depends on it (case, agreement), name that block for a fix, because `sync` patched it verbatim.
    - **For a writer to decide** (nothing was changed): `checkBinding` (a page bound to a sibling key still shows the old string), `markupParts` (a menu path or other markup span contains a renamed string), `broken` (a bound key was removed from the app), and `unpatched`. Give the page and key for each.
