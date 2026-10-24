@@ -106,7 +106,7 @@ function checkCoverage(labels) {
 
 export async function runImport(settings, { dryRun = false, noLibs = false, discardPending = false } = {}) {
   const src = requireSource(settings);
-  const locales = (await resolveLocales(settings)).all;
+  const locales = (await resolveLocales(settings, { requireTargets: false })).all;
   const dir = settings.labelsDir;
   const pendingPath = path.join(dir, PENDING_DIFF);
 
