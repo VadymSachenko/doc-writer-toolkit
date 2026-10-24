@@ -97,7 +97,7 @@ Counts from the report header, the list of changed sections, and every "Not appl
 - The brief targets a section that does not exist → add it per the template's placement; report "added".
 - The page is a multi-procedure guide and the brief adds a whole procedure → add it as a sibling of the existing ones with the same heading pattern; report "added".
 - The brief's fact contradicts an existing marker → apply the fact, remove that marker, report both.
-- A page in the EN root → refuse with the reason; suggest running on the UA page and then the translator's sync mode.
+- A page under any pair's EN i18n root → refuse with the reason; suggest running on the UA page and then the translator's sync mode.
 - The brief is empty or every item is "already present" → no edit, report only.
 
 ## Explicit invocation examples

@@ -5,7 +5,7 @@ argument-hint: "<path | pair:path> main:<ua|en>"
 
 Use the `doc-alignment-checker` skill to check alignment between the Ukrainian and English versions of a documentation page.
 
-- **Page:** $ARGUMENTS — relative to a content root, from the repo root, or `<pair>:<path>`; add `.md` if it is absent
+- **Page:** $ARGUMENTS without its `main:` argument — relative to a content root, from the repo root, or `<pair>:<path>`; add `.md` if it is absent
 
 The skill resolves the page's root pair itself (via `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`) — do not hardcode a path here.
 

@@ -1,6 +1,6 @@
 ---
 name: doc-translator
-description: Translates an approved UA documentation page into English, at the corresponding path in the project's own declared EN i18n root. Preserves all MDX/code structure and enforces the project EN glossary. Use explicitly ("translate-doc", "use doc-translator to translate...").
+description: Translates an approved UA documentation page into English, at the corresponding path in the EN i18n root of the page's root pair. Preserves all MDX/code structure and enforces the project EN glossary. Use explicitly ("translate-doc", "use doc-translator to translate...").
 ---
 
 # doc-translator

@@ -52,8 +52,10 @@ Host C has two root pairs:
 
 ```md
 - **UA content root:** `portal/`
+- **EN i18n root:** `i18n/en/docusaurus-plugin-content-docs-portal/current/`
 - **UA URL prefix:** `/portal/`
 - **API reference UA content root:** `docs/`
+- **API reference EN i18n root:** `i18n/en/docusaurus-plugin-content-docs/current/`
 - **API reference UA URL prefix:** `/`
 ```
 
@@ -98,12 +100,16 @@ and inline body links pointing at another `.md`/`.mdx` page in the docs tree).
 
 A checker sees only the route, not the target file. Check it like this:
 
-1. Match the route against every declared UA URL prefix. The longest match names the pair:
-   `/portal/settings/settings` belongs to `/portal/`, not to `/`. A route that matches no declared
-   prefix has a wrong prefix.
-2. Take the rest of the route after the matched prefix. If it starts with a declared UA content root
-   folder, the route is a file path written as a route (`/docs/webhooks/webhooks`, where `docs/` is a
-   content root): flag it.
+1. Match the route against every declared UA URL prefix, by whole path segments, with or without the
+   prefix's trailing slash: `/portal`, `/portal#x` and `/portal/a` match `/portal/`; `/portal-old/a`
+   doesn't. The longest match names the pair: `/portal/settings/settings` belongs to `/portal/`, not to
+   `/`. A route that matches no declared prefix has a wrong prefix: flag it. When the project keeps a tree
+   outside every pair (an `API reference root:` or an English-native tree, `project-paths.md`), add
+   that the route may point into that tree, whose prefix isn't declared.
+2. Take the rest of the route after the matched prefix. Flag it as a file path written as a route
+   when it starts, by whole segments, with a declared UA content root's full path
+   (`/docs/webhooks/webhooks`, where `docs/` is a content root), or with `docs/` when `/docs/` is no
+   declared prefix (the hardcoded prefix this file forbids).
 3. Flag `./`, `../` and a leftover `.md`/`.mdx` as before.
 
 This is a structural check only: it never looks for the target file.
