@@ -21,7 +21,7 @@ Both figures were measured on a near-idle 8-core machine and scale linearly with
 
 ## Inputs
 
-A `.sources/` folder (e.g. `partner-cabinet/archive/.sources/`) containing:
+A `.sources/` folder (e.g. `docs/archive/.sources/`) containing:
 
 - Exactly one video file.
 - Zero or more `.txt` transcript files (e.g. TurboScribe exports).
@@ -101,6 +101,12 @@ The destination is `.sources/frames/{video-basename}-frames/` (create it, includ
 - `frames-index.json` lands at `.sources/frames/{video-basename}-frames/frames-index.json`, alongside the screenshots — the script writes and maintains it; both `--merge-from` and `--extract-at` append entries to it rather than overwriting, so running either one again later only adds to it. **This is the index a doc-writing skill reads to pick a screenshot by its OCR text or the SME's transcript wording, without opening all of them** — selecting which ones actually get copied into `.assets/` for the published doc is the writer skills' job, not this skill's.
 - If there was no input transcript (Whisper ran), also move `<scratch-output-dir>/transcript.txt` to `.sources/{video-basename}-transcript.txt` (sibling of `frames/`, not inside it) — this is now the only record of what was said; don't let it get discarded with the rest of the scratch output.
 - Delete only what's genuinely disposable scratch: `contact-sheet.jpg`, `frame-decisions.csv`, `transcript.json`, `key/`, and the rest of `transcript-key/` once its `images/` are merged. **Do not delete `context.md` or `ocr/`** — the whole point of `frames-index.json` is to carry that description forward; treating it as safe-to-delete scratch output defeats it.
+
+### Self-review before reporting
+
+- The destination folder holds the merged screenshots and `frames-index.json` beside them; screenshots and index entries that were there before are all still there (appended to, not overwritten).
+- A transcript Whisper generated is at `.sources/{video-basename}-transcript.txt`.
+- Only the scratch files Step 5 lists were deleted; `context.md` and `ocr/` were kept, and nothing outside the scratch folder and the destination changed.
 
 ### Step 6 — Report
 

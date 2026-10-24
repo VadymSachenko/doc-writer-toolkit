@@ -86,7 +86,7 @@ test('locale files match by language; overrides and ambiguity are explicit', () 
 
 test('config helpers', () => {
   assert.deepEqual(ticketsFromBranch('1139-messenger-doc'), ['1139']);
-  assert.deepEqual(ticketsFromBranch('90-94-locales-and-translation-doc'), ['90', '94']);
+  assert.deepEqual(ticketsFromBranch('45-46-locales-doc'), ['45', '46']);
   assert.deepEqual(ticketsFromBranch('main'), []);
   assert.equal(deriveLocaleRoot('i18n/en/docusaurus-plugin-content-docs/current/', 'tr'), 'i18n/tr/docusaurus-plugin-content-docs/current/');
   assert.equal(parseSource('github Org/Repo@feat/x src/locales/*.json').branch, 'feat/x');
