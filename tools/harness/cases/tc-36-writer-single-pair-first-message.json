@@ -1,6 +1,6 @@
 {
   "id": "tc-36-writer-single-pair-first-message",
-  "description": "One pair: user-guide-writer names root portal/, names no pair and starts its interview without writing.",
+  "description": "One pair, no inputs: user-guide-writer names root portal/, names no pair, writes nothing, and stops to say which inputs are missing (its 'When inputs are insufficient' rule).",
   "fixture": {
     "shape": "single"
   },
@@ -26,10 +26,11 @@
       "pattern": "api-reference"
     },
     {
-      "name": "asks interview questions",
+      "name": "stops for missing inputs",
       "type": "match",
       "path": "output",
-      "pattern": "\\?"
+      "pattern": "no (inputs|source material)|nothing to write|stopped before drafting|couldn't start|where the inputs are",
+      "flags": "i"
     },
     {
       "type": "unchanged",

@@ -17,7 +17,7 @@
       "name": "refuses",
       "type": "match",
       "path": "output",
-      "pattern": "refus|EN (i18n )?root|authored language|not (the|a) UA",
+      "pattern": "refus|EN (i18n )?root|authored language|not (the|a) UA|English translation|didn't (make|apply|run)|only edits",
       "flags": "i"
     },
     {
