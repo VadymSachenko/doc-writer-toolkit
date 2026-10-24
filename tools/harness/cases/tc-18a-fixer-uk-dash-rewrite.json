@@ -1,0 +1,64 @@
+{
+  "id": "tc-18a-fixer-uk-dash-rewrite",
+  "description": "A doubled decorative dash is fixed by rewriting the sentence (a substantive fix), not by swapping the dash for another mark. The nominal-predicate dash and the range dash stay.",
+  "fixture": {
+    "shape": "single"
+  },
+  "setup": [
+    "perl -0pi -e 's/(Список оновлюється автоматично\\.)/$1 Статус online — це статус сесії — він не залежить від перемикачів. Транзакція — основний об’єкт роботи оператора. В архіві зберігаються дані у 2024—2026 роках./' portal/transactions/transactions.md && grep -q 'статус сесії —' portal/transactions/transactions.md && git add -A && git commit -q -m 'Case setup'"
+  ],
+  "prompt": "/{plugin}:fix-doc-style portal/transactions/transactions.md apply:mechanical,substantive\n\nThe doc-style-reviewer report for this page (guide: mssg-ua) is below.\n\n## Style Deviations\n\n**1. Decorative dashes** (section «Перегляд транзакцій»)\n- Text: «Статус online — це статус сесії — він не залежить від перемикачів.»\n- Rule: native-ukrainian.md §3, two decorative dashes in one sentence.\n- Suggested fix: replace the dashes.",
+  "options": {
+    "maxTurns": 40,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "doubled dash gone",
+      "type": "no-match",
+      "path": "portal/transactions/transactions.md",
+      "pattern": "статус сесії —"
+    },
+    {
+      "name": "no blind swap",
+      "type": "no-match",
+      "path": "portal/transactions/transactions.md",
+      "pattern": "сесії\\s*[,:;(—–-]\\s*(він|не залежить)",
+      "flags": "i"
+    },
+    {
+      "name": "nominal predicate kept",
+      "type": "match",
+      "path": "portal/transactions/transactions.md",
+      "pattern": "Транзакція — основний об’єкт роботи оператора"
+    },
+    {
+      "name": "range kept",
+      "type": "match",
+      "path": "portal/transactions/transactions.md",
+      "pattern": "2024—2026"
+    },
+    {
+      "name": "listed as a substantive rewrite",
+      "type": "match",
+      "pattern": "Substantive rewrites applied[\\s\\S]*Статус online",
+      "flags": "i",
+      "path": "output"
+    },
+    {
+      "name": "nothing else changed",
+      "type": "diff-lines",
+      "path": "portal/transactions/transactions.md",
+      "allow": "Список оновлюється"
+    },
+    {
+      "type": "changed-only",
+      "paths": [
+        "portal/transactions/"
+      ]
+    }
+  ]
+}
