@@ -1,11 +1,11 @@
 ---
 name: user-guide-writer
-description: 'Writes user guide pages (procedural docs) for the UniComPay partner cabinet, in the project''s declared content language, following the authoring rules in CLAUDE.md. Use explicitly ("use user-guide-writer to document...", "user-guide-writer: write the Filter transactions page"). Follows ${CLAUDE_PLUGIN_ROOT}/context/doc-templates/ua-user-guide-template.md (Ukrainian, Операції/Етапи structure) or user-guide-template.md (English, single/multi-task structure), with a mandatory interview phase before drafting. Not for concept topics or API reference pages.'
+description: 'Writes user guide pages (procedural docs) for the host product, in the project''s declared content language, following the authoring rules in CLAUDE.md. Use explicitly ("use user-guide-writer to document...", "user-guide-writer: write the Filter transactions page"). Follows ${CLAUDE_PLUGIN_ROOT}/context/doc-templates/ua-user-guide-template.md (Ukrainian, Операції/Етапи structure) or user-guide-template.md (English, single/multi-task structure), with a mandatory interview phase before drafting. Not for concept topics or API reference pages.'
 ---
 
 # user-guide-writer
 
-You are writing a procedural user guide page for the UniComPay partner cabinet, in the content language this project declares. The authoring contract in `CLAUDE.md` is already loaded; this skill adds the procedure for producing a procedural user guide end-to-end.
+You are writing a procedural user guide page for the host product, in the content language this project declares. The authoring contract in `CLAUDE.md` is already loaded; this skill adds the procedure for producing a procedural user guide end-to-end.
 
 ## Scope
 
@@ -316,6 +316,6 @@ This skill triggers only when the user names it explicitly. Examples of valid in
 
 - "Use user-guide-writer to write the Filter transactions page"
 - "user-guide-writer: write Manage receipts"
-- "Invoke user-guide-writer for partner-cabinet/transactions/manage-transactions/cancel-transaction/"
+- "Invoke user-guide-writer for portal/transactions/manage-transactions/cancel-transaction/"
 
 If the user asks for a user guide or procedural documentation without naming this skill, suggest invoking it but wait for explicit permission.

@@ -8,6 +8,8 @@ metadata:
 This glossary is the authoritative source of terms for English-language UCPay documents. Update it
 when a new document introduces a new term not yet listed here.
 
+**System name on translated pages (`doc-translator`):** always write the system name as **UCP**. Never write UCPay, UniComPay, or any other variant — in prose, comments, or UI labels.
+
 ## How to read the table
 
 - **Term** — the canonical form. Headwords are capitalized as dictionary entries; **in prose**,

@@ -19,9 +19,10 @@ This skill does **not** write documentation pages. It does not plan structure. I
 1. `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — resolve the section folder's root pair (its content root) and the content language.
 2. `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/value-realism.md` — mandatory rules for all values entered into the UI via Playwright. Load before any UI interaction step.
 3. `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-capture.md` — scope ladder, two-shot pattern, annotation patterns, blur patterns. Load before any screenshot step.
-4. The host project's `CLAUDE.md` — for `Admin UI:`, `API test collection:`, `API collection runner:`, and credentials (via `.env`).
-5. The section's `.sources/section-readiness.json` — to know which pages exist, their states, and marker counts.
-6. The section's existing `.sources/sme-interview.md` if present — to know what questions are already open.
+4. `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-locales.md` — **only when the host's `CLAUDE.md` declares `Screenshot locales:`**: which locales each screenshot needs, the manifest, staging and promotion. `SL` below is the script it names. Without the field, don't load it.
+5. The host project's `CLAUDE.md` — for `Admin UI:`, `API test collection:`, `API collection runner:`, and credentials (via `.env`).
+6. The section's `.sources/section-readiness.json` — to know which pages exist, their states, and marker counts.
+7. The section's existing `.sources/sme-interview.md` if present — to know what questions are already open.
 
 Do not load style-guide corpora or templates — this skill writes no documentation.
 
@@ -59,10 +60,11 @@ Defaults when a field is present but unspecified: **Playwright MCP** for navigat
 Run these checks before anything else. If any check fails, **stop and report exactly what is missing and how to fix it** — do not attempt to explore or seed without its driving tool.
 
 1. Read `.env` at the project root. Extract the variables needed for this section (at minimum: `OPERATOR_BASE_URL`, `OPERATOR_USERNAME`, `OPERATOR_PASSWORD`). If any are missing, stop and list them.
-2. **Navigation tool preflight.** Confirm `Admin UI: playwright` is declared in `CLAUDE.md` **and** that a Playwright MCP server is actually connected/available in the current session. If the field is missing, stop: "app-explorer needs a navigation tool. Declare `Admin UI: playwright` in the host project's CLAUDE.md 'Documentation toolkit configuration' block." If the field is declared but no Playwright MCP server is reachable, stop: "Playwright MCP server is not available in this session — connect it before running app-explorer; this skill cannot navigate or capture screenshots without it."
-3. **Seeding tool preflight.** Confirm the `API test collection:` field points at an existing file. If it's not declared but a `.sources/*.postman_collection.json` or equivalent exists, use it and note that it is not yet declared in `CLAUDE.md` — offer to add the declaration. Then confirm a collection runner is available (the `API collection runner:` field, defaulting to `newman`). If no collection file can be found, stop: "app-explorer needs an API test collection to seed scenarios — declare `API test collection:` in CLAUDE.md pointing at the collection file." If a collection exists but no runner is available, stop: "No API collection runner is available — install/enable the declared runner (e.g. `newman`) before running app-explorer; this skill cannot seed scenarios without it."
-4. Read `.sources/section-readiness.json`. Extract: the section verdict, list of pages, marker counts, and whether `sme-interview.md` is present.
-5. Read `.sources/sme-interview.md` if present. Extract every open question or `{/* NEEDS CONFIRMATION */}` item mentioned — these are the specific things to watch for during exploration.
+2. **Screenshot locales — only when `CLAUDE.md` declares `Screenshot locales:`.** Without the field, skip this check: screenshots are captured in one locale, as Step 3 describes, and nothing else changes. With it, run `SL config` (`screenshot-locales.md` Section 0). Exit `2`: stop before the tool checks below and ask one focused question that covers every problem it lists; never guess a locale folder. Exit `0` with `multilocale: true`: note the locales for the plan, and check that `.env` has the prefixed variables of every locale with a `Locale env prefix:` (their base URL must be a test environment too); if any is missing, stop and list them. Any other result: stop and report the command and its output.
+3. **Navigation tool preflight.** Confirm `Admin UI: playwright` is declared in `CLAUDE.md` **and** that a Playwright MCP server is actually connected/available in the current session. If the field is missing, stop: "app-explorer needs a navigation tool. Declare `Admin UI: playwright` in the host project's CLAUDE.md 'Documentation toolkit configuration' block." If the field is declared but no Playwright MCP server is reachable, stop: "Playwright MCP server is not available in this session — connect it before running app-explorer; this skill cannot navigate or capture screenshots without it."
+4. **Seeding tool preflight.** Confirm the `API test collection:` field points at an existing file. If it's not declared but a `.sources/*.postman_collection.json` or equivalent exists, use it and note that it is not yet declared in `CLAUDE.md` — offer to add the declaration. Then confirm a collection runner is available (the `API collection runner:` field, defaulting to `newman`). If no collection file can be found, stop: "app-explorer needs an API test collection to seed scenarios — declare `API test collection:` in CLAUDE.md pointing at the collection file." If a collection exists but no runner is available, stop: "No API collection runner is available — install/enable the declared runner (e.g. `newman`) before running app-explorer; this skill cannot seed scenarios without it."
+5. Read `.sources/section-readiness.json`. Extract: the section verdict, list of pages, marker counts, and whether `sme-interview.md` is present.
+6. Read `.sources/sme-interview.md` if present. Extract every open question or `{/* NEEDS CONFIRMATION */}` item mentioned — these are the specific things to watch for during exploration.
 
 Report what you found and your plan for the run, then continue.
 
@@ -84,7 +86,8 @@ For each scenario in the plan, call the API test collection to set up the test-e
 - Use only the test environment (`OPERATOR_BASE_URL` and matching keys from `.env`).
 - Call only the endpoints needed — do not make broad exploratory API calls.
 - Record each scenario's outcome: which API call, what it created, the relevant IDs or reference numbers.
-- **Payout timing note:** queued payouts auto-expire after ~2 minutes in this test environment. Seed payout scenarios immediately before capturing their UI state — do not seed them all upfront and capture later.
+- **Payout timing note:** queued payouts auto-expire after ~2 minutes in this test environment. Seed payout scenarios immediately before capturing their UI state — do not seed them all upfront and capture later. With screenshot locales, capture every locale of such a shot right after the seeding.
+- **One scenario for all locales.** With screenshot locales, seed each scenario once and capture every locale from it (`screenshot-locales.md` Sections 1 and 2).
 - If an API call fails, record the error and continue with other scenarios — do not stop the whole run for one failed seed.
 
 ## Step 3 — Explore and capture with Playwright
@@ -103,7 +106,8 @@ For each screen in the plan:
 4. Capture screenshots following `screenshot-capture.md`:
    - **Dialogs, modals, drawers, dropdowns:** use the two-shot pattern (Section 2). Shot 1 = trigger context (clipped to containing section via the scope ladder in Section 1, trigger annotated red). Shot 2 = the dialog/dropdown itself (clipped to bounding box + 24 px). Name Shot 1 `{subject}-trigger.png`, Shot 2 `{subject}-dialog.png` or `{subject}-dropdown.png`.
    - **Direct state captures (no overlay):** one screenshot per state. Annotate the primary interactive element (Section 3, red border). Apply the scope ladder from Section 1 to decide crop.
-   - Save all files to `.assets/` in the section folder.
+   - Save all files to `.assets/` in the section folder — when no `Screenshot locales:` is declared.
+   - **With `Screenshot locales:` declared**, every shot goes through `screenshot-locales.md` Section 4 instead: write it into the section's `.sources/screenshot-manifest.json` (its `file` is the name above, its `page` the page it illustrates), run `SL resolve <manifest> --shot <shotId>` (always naming the shots of this capture), capture each locale to its staged path, record a locale that can't be captured with `SL fail`, then run `SL promote <manifest> --shot <shotId>`. Never save into a locale's `.assets/` directly.
 5. Answer the specific questions from the exploration plan:
    - For each `{/* NEEDS CONFIRMATION */}` question, record the exact answer you observed: "The Accept button appears only on the Payins tab, not on Payouts."
    - If a question cannot be answered from what you can see (e.g. requires a specific permission level you don't have), record it as `unanswered` with the reason.
@@ -139,6 +143,7 @@ Write `.sources/app-notes.md` in the section folder. This is the evidence file e
 - Icon-only controls: {place} — {glyph} — name: {tooltip or aria-label, exact} | none — Iconify id: {id from the DOM} | none
 
 **Screenshots:** {filename.png}, {filename.png}
+**Screenshot locales:** {only when declared: per file, the locales promoted, and each failed locale with its reason}
 
 **Notes:** {anything notable — edge cases, unexpected behavior, things that differ from what sme-interview.md said}
 
@@ -185,13 +190,14 @@ Before finishing, verify:
 8. No credentials appear anywhere in `app-notes.md` or in any screenshot filename.
 9. No production URL was accessed — only the test environment.
 10. `app-notes.md` is complete (no empty sections).
+11. With `Screenshot locales:` declared: `SL status` on the manifest shows every shot of this run `complete`, or the shot is under "Unanswered questions" in `app-notes.md` and in the report, with each failed locale and its reason. No shot is `mixed`.
 
 ## Step 6 — Report
 
 Tell the user:
 - How many screens were explored, how many scenarios were seeded
 - How many `{/* NEEDS CONFIRMATION */}` questions were answered vs. unanswered
-- How many screenshots were saved and where
+- How many screenshots were saved and where — with screenshot locales, per locale: the shots promoted, the failed locales with their reasons, and the folders `SL promote` created (`screenshot-locales.md` Section 7)
 - Any API calls that failed
 - Any questions that could not be answered (so the user knows what still needs human input)
 

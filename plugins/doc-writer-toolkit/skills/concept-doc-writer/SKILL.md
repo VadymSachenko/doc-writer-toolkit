@@ -1,11 +1,11 @@
 ---
 name: concept-doc-writer
-description: 'Writes concept topic pages for the UniComPay partner cabinet, in the project''s declared content language, following the authoring rules in CLAUDE.md. Use explicitly ("use concept-doc-writer to document...", "concept-doc-writer: write the Transaction lifecycle page"). Follows ${CLAUDE_PLUGIN_ROOT}/context/doc-templates/ua-concept-topic-template.md (Ukrainian) or concept-topic-template.md (English), with a mandatory interview phase before drafting. Not for API reference pages or user guides.'
+description: 'Writes concept topic pages for the host product, in the project''s declared content language, following the authoring rules in CLAUDE.md. Use explicitly ("use concept-doc-writer to document...", "concept-doc-writer: write the Transaction lifecycle page"). Follows ${CLAUDE_PLUGIN_ROOT}/context/doc-templates/ua-concept-topic-template.md (Ukrainian) or concept-topic-template.md (English), with a mandatory interview phase before drafting. Not for API reference pages or user guides.'
 ---
 
 # concept-doc-writer
 
-You are writing a concept topic page for the UniComPay partner cabinet, in the content language this project declares. The authoring contract in `CLAUDE.md` is already loaded; this skill adds the procedure for producing a concept page end-to-end.
+You are writing a concept topic page for the host product, in the content language this project declares. The authoring contract in `CLAUDE.md` is already loaded; this skill adds the procedure for producing a concept page end-to-end.
 
 ## Scope
 
@@ -121,7 +121,7 @@ Apply the template resolved in "Sources to load". Concept topics do not have a f
 
 Rules:
 - **Overview is mandatory, and it must orient before it defines.** Every page must open with a lead paragraph that states: what this concept is, why it exists in the system, and why the partner needs to understand it. **The first reader-visible prose paragraph** (the first paragraph after frontmatter, imports, and template comments — not a heading, not a comment) must establish the page's scope, purpose, or reader benefit *before* the page drops into a standalone term definition or detailed explanation. Acceptable openings: «Ця сторінка пояснює…», «У цьому документі описано…», or a direct topic-first construction — do not force one stock phrase. A definition may be folded into that opening **only when the definition itself also establishes scope and relevance** (it performs the complete introductory function). Do **not** lead with a bare definition and defer the actual page introduction to paragraph two, and do **not** add an introduction that merely restates the title.
-- **Write in the resolved content language.** Follow the template's Design rules section, and the sentence-style, heading-language, and terminology rules for that language in `formatting-conventions.md` (imperative mood, present tense for current behavior, intro-sentence phrasing before numbered lists, UCP/UniComPay naming) — do not restate them here.
+- **Write in the resolved content language.** Follow the template's Design rules section, and the sentence-style, heading-language, and terminology rules for that language in `formatting-conventions.md` (imperative mood, present tense for current behavior, intro-sentence phrasing before numbered lists, the product's own name) — do not restate them here.
 - **Never invent facts.** If a fact is not in the sources or user answers, flag it with `{/* NEEDS CONFIRMATION: what's unclear */}` — don't guess.
 - **Apply the glossary** resolved in "Sources to load". Replace synonyms with the canonical term for the resolved language.
 - **No step-by-step procedures.** Instructions belong in user guides. Concept topics explain; they do not instruct.

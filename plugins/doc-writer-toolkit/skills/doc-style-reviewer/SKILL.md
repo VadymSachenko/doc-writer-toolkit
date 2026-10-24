@@ -225,5 +225,5 @@ The numbered-card format (not a wide table) is deliberate — prose fields like 
 - `/review-doc-style docs/payment-methods/quasi/quasi.md` — no `guide:`; the guide comes from the project's declaration and the language from the file, e.g. `gdsg@uk`
 - `/review-doc-style docs/transactions/filter-transactions.md guide:gdsg` — explicit token, overriding whatever the project declares
 - `/review-doc-style i18n/en/docusaurus-plugin-content-docs/current/overview.md guide:mssg-en`
-- `/review-doc-style partner-cabinet/receipts.md guide:mssg-ua`
+- `/review-doc-style portal/receipts.md guide:mssg-ua`
 - "Use doc-style-reviewer to check docs/orthography-test.md against ua-grammar"

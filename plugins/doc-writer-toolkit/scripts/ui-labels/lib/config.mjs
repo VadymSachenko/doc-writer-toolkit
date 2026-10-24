@@ -79,7 +79,7 @@ function currentBranch(root) {
   }
 }
 
-// Ticket numbers = the leading numeric segments of the docs branch name ('1139-x-doc' -> 1139, '90-94-x' -> 90, 94).
+// Ticket numbers = the leading numeric segments of the docs branch name ('123-x-doc' -> 123, '45-46-x' -> 45, 46).
 export function ticketsFromBranch(branch) {
   const name = branch.split('/').pop();
   const m = name.match(/^((?:\d+-)*\d+)(?:-|$)/);
@@ -227,7 +227,8 @@ function braceBlock(text, from) {
   return null;
 }
 
-async function readDocusaurusI18n(settings) {
+// The i18n block of docusaurus.config: { defaultLocale, locales } exactly as listed (no locale is added).
+export async function readDocusaurusI18n(settings) {
   const candidates = settings.docusaurusConfig
     ? [path.resolve(settings.root, settings.docusaurusConfig)]
     : ['docusaurus.config.ts', 'docusaurus.config.js', 'docusaurus.config.mjs', 'docusaurus.config.cjs'].map((f) => path.join(settings.root, f));

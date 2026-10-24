@@ -1,0 +1,9 @@
+{
+  "name": "screenshot-locales",
+  "private": true,
+  "type": "module",
+  "description": "Resolve the screenshot locales of a docs repo, stage one capture per locale and promote a set only when every locale is there. No dependencies.",
+  "bin": { "screenshot-locales": "./screenshot-locales.mjs" },
+  "engines": { "node": ">=18.3" },
+  "scripts": { "test": "node --test test/screenshot-locales.test.mjs" }
+}

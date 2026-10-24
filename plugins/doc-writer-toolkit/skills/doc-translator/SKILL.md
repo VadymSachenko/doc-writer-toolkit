@@ -5,7 +5,7 @@ description: Translates an approved UA documentation page into English, at the c
 
 # doc-translator
 
-You are translating an approved Ukrainian documentation page for UniComPay into English. The authoring contract in `CLAUDE.md` is already loaded; this skill adds the procedure for producing a correct English translation end-to-end.
+You are translating an approved Ukrainian documentation page of the host product into English. The authoring contract in `CLAUDE.md` is already loaded; this skill adds the procedure for producing a correct English translation end-to-end.
 
 ## Scope
 
@@ -93,7 +93,7 @@ If a UA heading has no anchor comment (legacy content), derive the EN heading di
 
 Use `glossary-en.md` as the single source of truth. Before translating prose, scan the Ukrainian text for every canonical UA term and replace it with the canonical EN term.
 
-**UCP naming:** always write the system name as **UCP**. Never write UCPay, UniComPay, or any other variant — in prose, comments, or UI labels.
+**System name:** write the product's own name exactly as `glossary-en.md`'s rule for translated pages says — in prose, comments, and UI labels.
 
 Key mappings:
 
@@ -223,10 +223,10 @@ Translate these recurring UA patterns consistently:
 
 **Cross-reference link text:** Do not repeat the subject when it matches the link text. "For more information about X, see [X]" is redundant — omit "about X":
 
-- ✓ Recommended: `For more information, see [Transactions](/partner-cabinet/transactions/).`
-- ⛔ Not recommended: `For more information about transactions, see [Transactions](/partner-cabinet/transactions/).`
+- ✓ Recommended: `For more information, see [Transactions](/portal/transactions/).`
+- ⛔ Not recommended: `For more information about transactions, see [Transactions](/portal/transactions/).`
 
-Use "about X" only when the subject differs from the link text: `For more information about filtering, see [Transactions](/partner-cabinet/transactions/).`
+Use "about X" only when the subject differs from the link text: `For more information about filtering, see [Transactions](/portal/transactions/).`
 
 ### Capitalize after a colon
 
@@ -291,7 +291,7 @@ Before saving, check:
 - No `{/* #anchor */}` comments appear in EN headings
 - Every EN heading's id, generated from its text or explicit `{#id}`, equals its UA heading's comment id (`heading-anchors.md`)
 - No explicit `{#id}` contains a `{…}` placeholder (`heading-anchors.md` rule 9); a placeholder in the UA comment is reported, not carried into EN
-- No "UCPay" or "UniComPay" in prose — only "UCP"
+- The product's own name follows `glossary-en.md`'s rule for translated pages
 - `## Передумови` translated as `## Prerequisites` with the correct EN sentence (Variant A if a single reference section; Variant B if multiple)
 - After colons in prose: first word is capitalized if it is a regular word (not a UI element name, proper name, or code value)
 - No spaces around em dashes: `word—word`, not `word — word`
@@ -318,7 +318,7 @@ Set `last_update.date` in the English output to today's date (format: `M/D/YYYY`
 
 Also update `last_update.date` in the Ukrainian source file to today's date. This is the only permitted change to the Ukrainian source.
 
-Do not modify any sidebar config file (`sidebars.ts`, or a project's custom-id equivalent like `sidebarsPartnerCabinet.ts`), `docusaurus.config.ts`, or any JSON files.
+Do not modify any sidebar config file (`sidebars.ts`, or a project's custom-id equivalent like `sidebarsPortal.ts`), `docusaurus.config.ts`, or any JSON files.
 
 ### Step 6 — Report
 
@@ -341,7 +341,7 @@ Carry all `{/* NEEDS CONFIRMATION */}` and `{/* ToDo */}` markers into the Engli
 This skill triggers only when the user names it explicitly or via the `/translate-doc` command. Examples of valid invocations:
 
 - `/translate-doc transactions/filter-transactions/filter-transactions`
-- "Use doc-translator to translate partner-cabinet/transactions/transactions.md"
+- "Use doc-translator to translate portal/transactions/transactions.md"
 - "doc-translator: translate the manage-receipts page"
 
 If the user asks for translation without naming this skill, suggest invoking it but wait for explicit permission.

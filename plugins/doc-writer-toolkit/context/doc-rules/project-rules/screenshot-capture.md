@@ -4,6 +4,8 @@ Apply these rules whenever taking screenshots via Playwright: inside `app-explor
 
 These rules govern *how* to capture. For *which* screenshots to select and embed in a doc page, see `screenshot-selection.md`.
 
+These rules cover one shot in one locale. When the host declares `Screenshot locales:`, every capture goes through `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-locales.md`: it runs this file once per locale and gives each shot its `path`, a staged path rather than the live `.assets/` file. Without that declaration, a capture goes into the `.assets/` folder the consuming skill names, as described here.
+
 ---
 
 ## Section 0 — Resolve capture configuration (do this first)
@@ -229,7 +231,7 @@ The frame's thickness and color are the resolved config values (Section 0); the 
 **When to annotate:**
 - `app-explorer`: annotate the primary interactive element for every state captured. For Shot 1 of a two-shot capture and for the union shot of an anchored overlay, always annotate the trigger.
 - `resolve-markers`: annotate the element the marker references before re-capturing.
-- Writer skills: if a screenshot in `.assets/` has no annotation and the step clearly points to one element, request a targeted re-capture (via `resolve-markers` or `app-explorer` targeted mode) rather than embedding an unannotated image.
+- Writer skills: if a screenshot in `.assets/` has no annotation and the step clearly points to one element, request a targeted re-capture (via `resolve-markers` or `app-explorer` targeted mode) rather than embedding an unannotated image. The re-capture covers every screenshot locale (`screenshot-locales.md`).
 
 ---
 
