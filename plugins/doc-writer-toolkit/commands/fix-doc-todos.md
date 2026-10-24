@@ -3,9 +3,9 @@ description: Scan all docs for ToDo and NEEDS CONFIRMATION comments, categorize 
 argument-hint: "[optional: path glob to limit scope, e.g. api-reference/create-payin-transactions]"
 ---
 
-You are resolving documentation TODOs for this Docusaurus project. Resolve the project's actual content roots via `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` before doing anything else — do not assume `docs/`. Both locales live in the same repo, at the project's declared **UA content root** and **EN i18n root**.
+You are resolving documentation TODOs for this Docusaurus project. Resolve the project's actual content roots via `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` before doing anything else — do not assume `docs/`. Both locales live in the same repo, under every declared root pair's **UA content root** and **EN i18n root**.
 
-**Link rule:** every page-to-page link you insert must follow the route-building algorithm in `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` — the project's declared **UA URL prefix** (from `project-paths.md`) joined to the target's path relative to the content root, no `.md`/`.mdx`, anchors preserved, never `./`/`../`, never a hardcoded `/docs/`. That file is authoritative; do not restate its steps here.
+**Link rule:** every page-to-page link you insert must follow the route-building algorithm in `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` — the **UA URL prefix of the target page's root pair** (from `project-paths.md`) joined to the target's path relative to that pair's content root, no `.md`/`.mdx`, anchors preserved, never `./`/`../`, never a hardcoded `/docs/`. That file is authoritative; do not restate its steps here.
 
 ---
 
@@ -14,7 +14,7 @@ You are resolving documentation TODOs for this Docusaurus project. Resolve the p
 Run the following command to collect every TODO and NEEDS CONFIRMATION comment across all docs (or within the optional scope from $ARGUMENTS if provided), substituting this project's resolved roots:
 
 ```bash
-grep -rn "ToDo\|NEEDS CONFIRMATION" <UA content root> <EN i18n root> --include="*.md"
+grep -rn "ToDo\|NEEDS CONFIRMATION" <every UA content root> <every EN i18n root> --include="*.md"
 ```
 
 Read each matched line **in full context** — open the file and read the surrounding paragraph or table row so you understand exactly what the TODO is asking for and where it sits structurally.
@@ -25,7 +25,7 @@ Read each matched line **in full context** — open the file and read the surrou
 
 Run, substituting this project's resolved roots:
 ```bash
-find <UA content root> <EN i18n root> -name "*.md" | sort
+find <every UA content root> <every EN i18n root> -name "*.md" | sort
 ```
 
 Use this list to determine which target pages already exist.
@@ -65,7 +65,7 @@ For each confirmed fix:
 
 - **Bucket A (inline):** Replace the TODO comment with the Markdown link. Preserve surrounding prose exactly.
 - **Bucket B (block comment):** Replace the entire `{/* ... */}` block with the user-approved prose. Polish punctuation and sentence flow to match the surrounding text, but do not rewrite beyond what is needed.
-- For both UA and EN files: build the inserted link with the `internal-links.md` algorithm (declared **UA URL prefix** + the target's path relative to the content root, no `.md`) — e.g. `/routing/pools` for a project whose prefix is `/`, or `/partner-cabinet/transactions/transactions` for a project whose prefix is `/partner-cabinet/`.
+- For both UA and EN files: build the inserted link with the `internal-links.md` algorithm (the target page's pair **UA URL prefix** + the target's path relative to that pair's content root, no `.md`) — e.g. `/routing/pools` for a target in a pair whose prefix is `/`, or `/portal/transactions/transactions` for one whose prefix is `/portal/`, even when the page holding the link is in the other pair.
 
 ---
 

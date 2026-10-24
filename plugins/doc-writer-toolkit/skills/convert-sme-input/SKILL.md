@@ -22,10 +22,10 @@ The user can provide one or more of the following:
 - Raw transcript or conversation text.
 - A raw source file (`.txt`, `.md`, etc.).
 - An existing processed Markdown file to compare against or update.
-- A target doc folder under this project's UA content root (resolve the root via `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — do not assume `partner-cabinet/`).
+- A target doc folder under a declared root pair's UA content root (resolve the pair via `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — do not assume any folder).
 - A topic or flow (e.g., inbound transactions, webhook configuration, dispute handling, partner cabinet receipts — see "Domain note" below).
 
-If the target path is missing, propose a concise file name under `.sources/` in the relevant doc folder, e.g. `<UA content root>/transactions/.sources/sme-interview.md`.
+If the target path is missing, propose a concise file name under `.sources/` in the relevant doc folder, e.g. `<pair's UA content root>/transactions/.sources/sme-interview.md`.
 
 ## Source priority
 
@@ -80,7 +80,7 @@ Always include `### Згадати у документації`. This section is
 ## Workflow
 
 1. Read the raw SME input and the existing processed Markdown if one exists.
-2. Identify the document topic and the target section under this project's UA content root (`${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`).
+2. Identify the document topic and the target section under its root pair's UA content root (`${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`).
 3. Extract only documentation-relevant facts:
    - Business rules and ownership
    - Process boundaries and entry conditions

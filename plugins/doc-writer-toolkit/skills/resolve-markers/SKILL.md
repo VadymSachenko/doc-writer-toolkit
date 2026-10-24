@@ -20,7 +20,7 @@ You are resolving documentation markers — `{/* NEEDS CONFIRMATION: ... */}` an
 
 ## Sources to load
 
-1. `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — resolve content root.
+1. `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — resolve the section folder's root pair (its content root).
 2. The section's `.sources/app-notes.md` — **optional**. Load if present; skip if absent. This file is written by `app-explorer` when it has run — do not require it.
 3. The section's `.sources/sme-interview.md` — **optional**. Load if present.
 4. The section's `.assets/` folder — list what screenshots already exist there.
