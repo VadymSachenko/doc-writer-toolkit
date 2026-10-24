@@ -1,6 +1,6 @@
 ---
 name: convert-sme-input
-description: Converts raw SME interview notes, meeting transcripts, or rough text into a structured Markdown source file for this project's documentation. Use when you need to turn unprocessed SME input into a clean `.sources/sme-interview.md`, compare raw SME files against processed source notes, or extract facts for guide writing.
+description: 'Converts raw SME interview notes, meeting transcripts, or rough text into a structured `.sources/sme-interview.md` for this project''s documentation, compares raw SME files against processed notes, or extracts facts for guide writing. Explicit invocation only: use explicitly ("convert-sme-input", "use convert-sme-input on .sources/"), or by name from /doc-from-interview; never on a loose request about notes or a transcript.'
 ---
 
 # convert-sme-input
@@ -22,10 +22,10 @@ The user can provide one or more of the following:
 - Raw transcript or conversation text.
 - A raw source file (`.txt`, `.md`, etc.).
 - An existing processed Markdown file to compare against or update.
-- A target doc folder under this project's UA content root (resolve the root via `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — do not assume `partner-cabinet/`).
+- A target doc folder under a declared root pair's UA content root (resolve the pair via `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — do not assume any folder).
 - A topic or flow (e.g., inbound transactions, webhook configuration, dispute handling, partner cabinet receipts — see "Domain note" below).
 
-If the target path is missing, propose a concise file name under `.sources/` in the relevant doc folder, e.g. `<UA content root>/transactions/.sources/sme-interview.md`.
+If the target path is missing, propose a concise file name under `.sources/` in the relevant doc folder, e.g. `<pair's UA content root>/transactions/.sources/sme-interview.md`.
 
 ## Source priority
 
@@ -80,7 +80,7 @@ Always include `### Згадати у документації`. This section is
 ## Workflow
 
 1. Read the raw SME input and the existing processed Markdown if one exists.
-2. Identify the document topic and the target section under this project's UA content root (`${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`).
+2. Identify the document topic and the target section under its root pair's UA content root (`${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`).
 3. Extract only documentation-relevant facts:
    - Business rules and ownership
    - Process boundaries and entry conditions
@@ -181,3 +181,11 @@ Before finishing:
   - **If the input was a video transcript:** for every section that describes a screen, button, form, or other UI element, count its timestamp citations. Zero citations in a UI-describing section means the self-check step was skipped — say so plainly. (Calibration: a 42 KB `sme-interview.md` with a single timestamp citation total is a failure.)
   - **If the input was `app-notes.md` or no `.sources/frames/` folder exists:** timestamps are not applicable. Instead confirm that every UI fact cites a screenshot filename or "observed directly" as its source. Zero sourced facts in a UI section is the failure condition here, not zero timestamps.
 - The final response explains what changed and whether anything needs SME follow-up.
+
+## Explicit invocation examples
+
+- "use convert-sme-input on `docs/payments/.sources/`"
+- "convert-sme-input: turn `.sources/meeting-transcript.txt` into `sme-interview.md`"
+- By name, from `/doc-from-interview` (its conversion step).
+
+A loose request ("here are my meeting notes") doesn't start this skill: ask whether to run it.

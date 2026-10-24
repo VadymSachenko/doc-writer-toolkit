@@ -1,0 +1,39 @@
+{
+  "id": "tc-03-translate-api-pair-command",
+  "description": "Two pairs: a docs/ page goes to the API reference EN tree, never the portal one, and the output names the pair.",
+  "fixture": {
+    "shape": "multi"
+  },
+  "prompt": "/{plugin}:translate-doc docs/webhooks/webhooks",
+  "options": {
+    "maxTurns": 40,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "type": "exists",
+      "path": "i18n/en/docusaurus-plugin-content-docs/current/webhooks/webhooks.md"
+    },
+    {
+      "type": "absent",
+      "path": "i18n/en/docusaurus-plugin-content-docs-portal/current/webhooks/webhooks.md"
+    },
+    {
+      "type": "changed-only",
+      "paths": [
+        "i18n/en/docusaurus-plugin-content-docs/current/webhooks/",
+        "docs/webhooks/webhooks.md",
+        ".doc-toolkit/"
+      ]
+    },
+    {
+      "name": "pair named in the output",
+      "type": "match",
+      "path": "output",
+      "pattern": "api-reference"
+    }
+  ]
+}
