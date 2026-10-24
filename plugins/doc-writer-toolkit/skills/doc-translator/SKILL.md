@@ -9,26 +9,26 @@ You are translating an approved Ukrainian documentation page for UniComPay into 
 
 ## Scope
 
-- **In scope:** any Markdown/MDX page under the project's UA content root that has been approved in Ukrainian. Produces the English version at the corresponding path under the project's EN i18n root (see Path mapping).
-- **Out of scope:** writing new content, changing structure, fixing errors in the Ukrainian source, English-only reference sections with no UA counterpart (e.g. an API reference `docs/` tree in a project that splits UA and EN content into separate roots).
+- **In scope:** any Markdown/MDX page under a declared root pair's UA content root that has been approved in Ukrainian. Produces the English version at the corresponding path under that pair's EN i18n root (see Path mapping).
+- **Out of scope:** writing new content, changing structure, fixing errors in the Ukrainian source, a page outside every declared root pair.
 
 ## Path mapping
 
-Resolve the project's actual roots via `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` before doing anything else — do not assume `partner-cabinet/`.
+Resolve the page's root pair via `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` ("Resolving a page's root pair") before doing anything else — do not assume any folder.
 
 | Ukrainian source | English output |
 |---|---|
-| `<UA content root>/<relative-path>.md` | `<EN i18n root>/<relative-path>.md` |
+| `<pair's UA content root>/<relative-path>.md` | `<pair's EN i18n root>/<relative-path>.md` |
 
-Example, for a project whose declared UA content root is `partner-cabinet/` and EN i18n root is `i18n/en/docusaurus-plugin-content-docs-partner-cabinet/current/`:
-- `partner-cabinet/transactions/transactions.md` → `i18n/en/docusaurus-plugin-content-docs-partner-cabinet/current/transactions/transactions.md`
+Example, for a pair whose UA content root is `portal/` and EN i18n root is `i18n/en/docusaurus-plugin-content-docs-portal/current/`:
+- `portal/transactions/transactions.md` → `i18n/en/docusaurus-plugin-content-docs-portal/current/transactions/transactions.md`
 
 ## Sources to load
 
 Load these files at the start of the task.
 
 **Project paths (resolve first):**
-- Follow `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` to resolve this project's **UA content root** and **EN i18n root**. Do not assume `partner-cabinet/` or any other default. If either is undeclared, follow that file's fallback (ask once, offer to persist to the project's `CLAUDE.md`).
+- Follow `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` to resolve the page's **root pair**: its **UA content root** and **EN i18n root**. Do not assume any default. If either is undeclared, follow that file's fallback (ask once, offer to persist to the project's `CLAUDE.md`).
 
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-en.md` — canonical EN terminology. Use it to replace UA terms with their correct EN equivalents.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` — rank-0 project formatting conventions. Core section and English section apply. Outranks this skill's own body for any rule both cover.
@@ -240,7 +240,7 @@ Do not capitalize after a colon that introduces a list, a code sample, or a UI e
 
 ### Step 1 — Locate the source file
 
-Read the Ukrainian source at `<UA content root>/<relative-path>.md`, using the root resolved from `project-paths.md`. If the file does not exist, stop and tell the user before doing anything else.
+Read the Ukrainian source at `<pair's UA content root>/<relative-path>.md`, using the pair resolved from `project-paths.md`. If the file does not exist, stop and tell the user before doing anything else.
 
 Check whether an English version already exists at the target path. If it does, read it and note any content that has diverged from the Ukrainian source (e.g., manual edits). Report this to the user and ask whether to overwrite or merge — **unless the caller asked for sync mode**, which answers that question by design (see "Sync mode" below).
 
@@ -282,6 +282,7 @@ Before saving, check:
 - No marketing adjectives
 - All `{/* NEEDS CONFIRMATION */}` and `{/* ToDo */}` markers from the source are present in the output (translated)
 - Frontmatter keys are untouched; only translatable values are changed
+- In a project with more than one root pair, the output path is under the source page's pair EN i18n root
 - The EN `title:` is the semantic equivalent of the UA title (`naming-conventions.md`); the output path, filename, and any `slug:` field are unchanged from the source's shared path — the page was not re-slugged or moved
 - Every page-to-page link path is byte-identical to the UA source (`internal-links.md`); no route was localized or "corrected"
 - All code blocks are byte-for-byte identical to the source
@@ -304,7 +305,7 @@ Before saving, check:
 
 ### Step 5 — Save
 
-Write the English file to `<EN i18n root>/<relative-path>.md`, using the root resolved from `project-paths.md`. Create intermediate directories as needed.
+Write the English file to `<pair's EN i18n root>/<relative-path>.md`, using the pair resolved from `project-paths.md`. Create intermediate directories as needed.
 
 Set `last_update.date` in the English output to today's date (format: `M/D/YYYY`).
 
@@ -316,7 +317,7 @@ Do not modify any sidebar config file (`sidebars.ts`, or a project's custom-id e
 
 After saving, report:
 
-- Source path read
+- Source path read (as `<pair>:<path>` when the project declares more than one root pair)
 - Output path written
 - Any `{/* NEEDS CONFIRMATION */}` items (including unconfirmed glossary terms)
 - Any `{/* ToDo */}` items carried over from the source
