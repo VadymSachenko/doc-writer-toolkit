@@ -17,7 +17,7 @@ You are writing an English API reference page for UniComPay. The authoring contr
 Load these files at the start of the task. Do not load others unless the user references them explicitly.
 
 **Project paths (resolve first):**
-- Follow `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` to resolve this project's **API reference root** (where API pages are written) and its **UA URL prefix** (needed to build absolute links to other doc pages — see the internal-link rule in Step 5). Do not hardcode `docs/api-reference/`; if the project doesn't declare it, use that file's fallback (default `docs/api-reference/`, offer to persist).
+- Follow `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` to resolve this project's **API reference root** (where API pages are written) and the root pair that holds it, whose **UA URL prefix** builds links to API pages; each link to another page takes that page's own pair prefix (see the internal-link rule in Step 5). Do not hardcode `docs/api-reference/`; if the project doesn't declare it, use that file's fallback (default `docs/api-reference/`, offer to persist).
 
 **Templates:**
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-templates/api-reference-template.md` — the authoritative structure. When the template and examples disagree, the template wins.
@@ -28,6 +28,7 @@ Load these files at the start of the task. Do not load others unless the user re
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` — rank-0 project formatting conventions (what bold/italic/code font mean here, placeholder form, one-entity-one-render, code-entity vs. human concept). Outranks everything else loaded for this task, including this skill's own body. API reference pages are always English, so only its Core section and English section apply.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-selection.md` — shared screenshot selection procedure: three-folder model, four selection cases, sensitive-content screening, rename pattern, full-page vs. compact classification.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` — the shared page-to-page link contract (see the link rule in Step 5).
+- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/heading-anchors.md` — the shared heading-id contract: on a `uk` page every heading from `##` down ends with `{/* #id */}` (see the heading rule in Step 5).
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` — the shared slug/title/filename convention (used to name the output file in Step 8; API titles are noun phrases matching the endpoint's resource).
 
 **Style guide (project-declared, resolved before drafting):**
@@ -110,7 +111,8 @@ Rules:
 - **Apply the glossary.** Replace synonyms with canonical EN terms (Partner, Transaction, Webhook, etc.).
 - **Sentence style, UI labels, status values, placeholders, code-vs-concept rendering:** follow `formatting-conventions.md`'s Core section (Ж1–Ж7) and its English section — do not restate them here.
 - **Match the template's section structure.** Prerequisites (if applicable), Authentication, endpoint action, Request, Response, Possible errors, Next steps.
-- **Internal links to other doc pages follow the shared contract.** Build every page-to-page link (Authentication page, Next steps, Other management options, error-codes page, etc.) exactly as `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` prescribes — site-root-relative, the declared UA URL prefix joined to the target's path relative to the content root, no `.md`/`.mdx`, anchors preserved. That file is authoritative for what is and isn't a page link (asset links `./.assets/…` are exempt); do not restate its algorithm here.
+- **Heading ids (`uk` pages) follow the shared contract.** End every heading from `##` down with its `{/* #id */}` comment, and build every link to a heading from that id, exactly as `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/heading-anchors.md` prescribes. Do not restate its rules here.
+- **Internal links to other doc pages follow the shared contract.** Build every page-to-page link (Authentication page, Next steps, Other management options, error-codes page, etc.) exactly as `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` prescribes — site-root-relative, the UA URL prefix of the target page's pair joined to the target's path relative to that pair's content root, no `.md`/`.mdx`, anchors preserved. That file is authoritative for what is and isn't a page link (asset links `./.assets/…` are exempt); do not restate its algorithm here.
 - **For code fences:** use `json` for JSON bodies, `bash` for cURL examples, `text` for plain strings.
 - **For long request or response samples:** wrap in `<details>` blocks.
 - **For reader-replaced placeholders:** `*`\``UPPER_CASE`\``*`.
@@ -124,7 +126,8 @@ Before writing to disk, check:
 - No future tense (`will`, `would`) in descriptions of current behavior
 - No marketing adjectives (`powerful`, `seamless`, `robust`)
 - No stale links from example files (e.g., `/docs/wellfunnel-*`)
-- Every link to another doc page follows `internal-links.md` (declared UA URL prefix + path, no `.md`); no `./`/`../` page links, no hardcoded `/docs/` (asset links `./.assets/…` are exempt)
+- On a `uk` page, every heading from `##` down ends with a well-formed, unique `{/* #id */}` per `heading-anchors.md`, and every `#…` link to a heading uses an id that exists
+- Every link to another doc page follows `internal-links.md` (its pair's UA URL prefix + path, no `.md`); no `./`/`../` page links, no hardcoded `/docs/` (asset links `./.assets/…` are exempt)
 - Every fact is traceable to an input source or a user answer from Step 4
 - All required template sections are present; optional ones are either filled or omitted (not left as empty placeholders)
 - UI labels, status values, placeholders, and code-vs-concept rendering follow `formatting-conventions.md` Ж1–Ж4
