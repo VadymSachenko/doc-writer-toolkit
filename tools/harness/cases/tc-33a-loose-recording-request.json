@@ -1,0 +1,32 @@
+{
+  "id": "tc-33a-loose-recording-request",
+  "description": "A loose request about a dropped recording starts none of the three SME helper skills, which are explicit-invocation only.",
+  "fixture": {
+    "shape": "single"
+  },
+  "setup": [
+    "mkdir -p portal/payments/.sources && ffmpeg -loglevel error -f lavfi -i color=c=blue:s=320x240:d=3 -f lavfi -i color=c=red:s=320x240:d=3 -filter_complex '[0][1]concat=n=2:v=1' portal/payments/.sources/demo.mp4 && printf '(0:00 - 0:02)\\nНатискаємо кнопку Зберегти у формі платежу.\\n\\n(0:02 - 0:05)\\nВідкриваємо вкладку Налаштування і вибираємо валюту.\\n' > portal/payments/.sources/demo.txt && git add -A && git commit -q -m 'Case setup'"
+  ],
+  "prompt": "I dropped a recording into `portal/payments/.sources/`. Get the screenshots from it.",
+  "options": {
+    "maxTurns": 30,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "type": "skill-not-called",
+      "skill": "extract-sme-screenshots"
+    },
+    {
+      "type": "skill-not-called",
+      "skill": "convert-sme-input"
+    },
+    {
+      "type": "skill-not-called",
+      "skill": "cleanup-unused-screenshots"
+    }
+  ]
+}
