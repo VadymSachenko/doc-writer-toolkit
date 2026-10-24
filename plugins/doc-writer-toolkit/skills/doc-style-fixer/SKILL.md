@@ -13,7 +13,7 @@ You are applying fixes for a `doc-style-reviewer` findings report against exactl
 - **Out of scope:**
   - The style review itself — that's `doc-style-reviewer`'s job. This skill never invents a finding; it only acts on findings that skill already produced. If no report exists yet, this skill calls `doc-style-reviewer` and waits for its output rather than reviewing the file itself.
   - Resolving `{/* ToDo: ... */}` or `{/* NEEDS CONFIRMATION: ... */}` markers — this skill leaves every such marker untouched, even ones a finding happens to sit near. For marker resolution, use the correct handler:
-    - Link and prose-block TODOs (Buckets A–C in its categorization) → `fix-doc-todos`.
+    - Link and prose-block TODOs (Buckets A–C in its categorization) → the `/fix-doc-todos` command.
     - Content-gap TODOs and all `{/* NEEDS CONFIRMATION: ... */}` markers → `resolve-markers` (it uses app-notes.md, sme-interview.md, and Playwright to answer these directly). Note the granularity difference: `resolve-markers` operates on a whole **section folder**, not a single page — running it to clear markers on this one page will also process every sibling page in the section. That's expected; just don't invoke it expecting a single-file edit.
   - UA/EN structural alignment — `doc-alignment-checker`'s job.
   - Any file other than the one the report was written against. No neighboring file, no "while I'm here" cleanup.
