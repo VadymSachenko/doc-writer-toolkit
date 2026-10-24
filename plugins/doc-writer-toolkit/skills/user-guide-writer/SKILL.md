@@ -48,7 +48,7 @@ Load these files at the start of the task. Do not load others unless the user re
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/doc-examples/user-guide-examples/user-guide-example-create-branches.md`
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/doc-examples/user-guide-examples/user-guide-example-edit-links.md`
 
-These examples illustrate prose density, step phrasing, screenshot placement, admonition use, and result block formatting. They do **not** define the target structure, and their own language does not dictate yours. For sections, headings, and required content, follow the template. When an example and the template disagree, the template wins.
+These examples illustrate prose density, step phrasing, screenshot placement, admonition use, and result block formatting. They do **not** define the target structure, and their own language does not dictate yours. For sections, headings, and required content, follow the template. When an example and the template disagree, the template wins. Their page links (`/docs/…`) belong to the example's own site: never copy one, and build every link from `internal-links.md`.
 
 ## Workflow
 
@@ -293,7 +293,7 @@ Fix every issue found before saving.
 
 ### Step 9 — Save
 
-Save to `<pair's content root>/<target-folder>/<slug>.md`, where the target folder was confirmed in Step 1 and the `<slug>` and page title follow `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` (canonical English title → kebab-case slug; folder and basename share the slug; UA/EN titles are semantic equivalents; imperative-verb-phrase title for a user guide). If this page already exists with a mismatched filename/title, do not silently rename it — report the mismatch per that file's "Existing pages" rule.
+Save to `<pair's content root>/<target-folder>/<slug>.md`, where the target folder was confirmed in Step 1 and the `<slug>` and page title follow `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` (canonical English title → kebab-case slug; folder and basename share the slug; UA/EN titles are semantic equivalents; a title too long for the sidebar stays whole and gets a shorter `sidebar_label:` naming the same subject; imperative-verb-phrase title for a user guide). If this page already exists with a mismatched filename/title, do not silently rename it — report the mismatch per that file's "Existing pages" rule.
 
 Do not update the sidebar config file (`sidebars.ts`, or a project's custom-id equivalent) — it's auto-generated.
 

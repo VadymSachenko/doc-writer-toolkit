@@ -31,6 +31,7 @@ You are applying fixes for a `doc-style-reviewer` findings report against exactl
 - The `doc-style-reviewer` report (from conversation context, or produced by invoking that skill — see Step 1).
 - The target file itself.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/procedure-steps.md`, only when a finding cites it: merge exactly the steps the finding names, never where a keep-separate condition holds.
+- **Only when a finding in the report cites it:** `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/native-ukrainian.md`. Use it to apply that finding: take the file's preferred form when the finding's suggestion differs from it, and leave its negative controls (§4b) alone. It adds no finding of its own.
 - Nothing else. This skill does not re-load style-guide corpora or other project rules — the report already did that classification work; this skill only reads the report's own citations back to the user when showing why a fix applies.
 
 ## Step 1 — Get the report
@@ -58,7 +59,7 @@ These can be applied as a batch on a single confirmation.
 
 The fix requires rewriting a phrase, and more than one phrasing could satisfy the rule. Meaning must be preserved, but the exact words are a judgment call worth showing, not assuming.
 
-Examples: splitting nested parentheses into two sentences, removing an idiom ("під капотом", "по суті") and rephrasing around it, moving a paragraph about future plans into a `{/* ToDo: ... */}` comment, restructuring a sentence to drop a filler phrase, merging a needlessly split input step and its commit step (`procedure-steps.md`; only the two steps the finding names, renumbering the steps after them).
+Examples: splitting nested parentheses into two sentences, removing an idiom ("під капотом", "по суті") and rephrasing around it, moving a paragraph about future plans into a `{/* ToDo: ... */}` comment, restructuring a sentence to drop a filler phrase, merging a needlessly split input step and its commit step (`procedure-steps.md`; only the two steps the finding names, renumbering the steps after them). A decorative or doubled dash on a `uk` page (`native-ukrainian.md` §3) is always this bucket: rewrite or split the sentence first, and use a comma, parentheses or a colon only where that file says they fit. Swapping the dash for another mark is never a bucket 1 fix, and a dash that file says to keep (a nominal predicate, a range, Markdown) is left alone. The rewrite is reported under **Substantive rewrites applied**, like every bucket 2 fix (Step 5).
 
 Every bucket 2 finding gets its own explicit decision — the point is that the user is choosing among viable rewrites, not rubber-stamping a mechanical substitution. Whether those decisions are collected one exchange at a time or together is decided in Step 3's "Bucket 2 — approval form".
 

@@ -45,7 +45,7 @@ Load these files at the start of the task.
 ## What to translate
 
 **Always translate:**
-- Frontmatter `title:` and `description:` values
+- Frontmatter `title:`, `description:` and `sidebar_label:` values
 - All prose paragraphs
 - Heading text (strip the `{/* #anchor */}` comment — see Heading IDs below)
 - List item text that is prose (not a code value, not a placeholder)
@@ -253,7 +253,7 @@ Use when an EN page already exists and only part of the UA page changed. Nothing
 1. **No EN page at the target path** → say so and fall back to the normal full translation.
 2. **Find the changed UA blocks** through `${CLAUDE_PLUGIN_ROOT}/context/changed-blocks.md` (an `update-report.md` from `doc-page-updater`, else `git diff <base>...HEAD -- <page>` with `origin/main` as the default base, else the explicit `sections:` list). A base ref that does not exist → stop and name it. Nothing changed in the UA root → report and stop without touching files.
 3. **Map each block to its EN counterpart** by heading path (headings are matched by position within the parent section when the UA heading itself was renamed) and, inside a section, by block order — paragraph to paragraph, list item to list item, table row to table row. A block that cannot be mapped is reported with the UA text quoted — never translated into a guessed place.
-4. **Re-translate only the mapped blocks**, with every rule of this skill; leave every other EN byte identical. A UA section added / removed / moved → add / remove / move the EN section accordingly (translating an added one). A changed block inside an admonition or MDX component → the block boundary is that body. Frontmatter `title`/`description` changed → update only the mirrored EN values.
+4. **Re-translate only the mapped blocks**, with every rule of this skill; leave every other EN byte identical. A UA section added / removed / moved → add / remove / move the EN section accordingly (translating an added one). A changed block inside an admonition or MDX component → the block boundary is that body. Frontmatter `title`/`description`/`sidebar_label` changed → update only the mirrored EN values.
 5. **Manual EN edits inside a re-translated block are overwritten** — list them in the report under "EN edits overwritten" with the old EN text.
 6. Steps 4 (self-review, applied to the re-translated blocks) and 5 (save, `last_update.date` in both files) run as usual; then run `doc-alignment-checker` on the pair and include its result in the report.
 7. Report: blocks replaced, added, removed; unmapped blocks; EN edits overwritten; the alignment result. State the source of "what changed" (report / diff base / list) as `changed-blocks.md` requires.
@@ -285,7 +285,7 @@ Before saving, check:
 - All `{/* NEEDS CONFIRMATION */}` and `{/* ToDo */}` markers from the source are present in the output (translated)
 - Frontmatter keys are untouched; only translatable values are changed
 - In a project with more than one root pair, the output path is under the source page's pair EN i18n root
-- The EN `title:` is the semantic equivalent of the UA title (`naming-conventions.md`); the output path, filename, and any `slug:` field are unchanged from the source's shared path — the page was not re-slugged or moved
+- The EN `title:` is the semantic equivalent of the UA title, and an EN `sidebar_label:` of the UA one (`naming-conventions.md`); the output path, filename, and any `slug:` field are unchanged from the source's shared path — the page was not re-slugged or moved
 - Every page-to-page link path is byte-identical to the UA source (`internal-links.md`); no route was localized or "corrected"
 - All code blocks are byte-for-byte identical to the source
 - No `{/* #anchor */}` comments appear in EN headings

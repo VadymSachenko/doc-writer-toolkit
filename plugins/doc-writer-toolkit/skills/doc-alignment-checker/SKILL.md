@@ -128,10 +128,11 @@ A structural check only, against `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/projec
 - Both files share one relative path and filename basename (the two locales are the same page in two roots). Flag a divergent basename.
 - The filename basename is the kebab-case slug of the **canonical English title** (drop articles); an explicit `slug:` frontmatter field, if present, still names the same topic. Flag a basename that names a different topic than the EN title, or an EN/UA title that name different topics from each other.
 - The title form matches the doc type per that file (user guide = imperative phrase; concept = noun phrase; API reference = resource noun phrase). Flag a form mismatch.
+- A `sidebar_label:`, in either file, names the same subject as that file's title, and the EN and UA labels name the same subject. Flag a label that names a different or a broader subject, or one present in only one of the two files.
 
 Per that file, **report the mismatch — never rename**. `index.md` and other generated files are exempt.
 
-**Flag:** `[NAMING — TITLE/SLUG MISMATCH]` — show the filename, both titles, and what disagrees.
+**Flag:** `[NAMING — TITLE/SLUG MISMATCH]` — show the filename, both titles (and labels), and what disagrees.
 
 ## Step 3 — Report
 

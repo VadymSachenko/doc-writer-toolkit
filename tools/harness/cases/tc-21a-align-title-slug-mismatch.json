@@ -1,0 +1,35 @@
+{
+  "id": "tc-21a-align-title-slug-mismatch",
+  "description": "The path says platform-rules but both titles name operator rules: the checker reports the naming mismatch and renames nothing.",
+  "fixture": {
+    "shape": "single"
+  },
+  "setup": [
+    "mkdir -p portal/platform-rules i18n/en/docusaurus-plugin-content-docs-portal/current/platform-rules",
+    "cat > portal/platform-rules/platform-rules.md <<'EOF'\n---\ntitle: Правила роботи оператора\nsidebar_label: Правила роботи оператора\n---\n\n# Правила роботи оператора\n\nЦі правила діють для всіх користувачів платформи.\n\n## Доступ {/* #access */}\n\nДоступ надає адміністратор.\nEOF",
+    "cat > i18n/en/docusaurus-plugin-content-docs-portal/current/platform-rules/platform-rules.md <<'EOF'\n---\ntitle: Operator rules\nsidebar_label: Operator rules\n---\n\n# Operator rules\n\nThese rules apply to every platform user.\n\n## Access\n\nAn administrator grants access.\nEOF",
+    "git add -A && git commit -q -m 'Case setup'"
+  ],
+  "prompt": "use doc-alignment-checker on `portal/platform-rules/platform-rules.md`, main: ua",
+  "options": {
+    "maxTurns": 40,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "reports the naming mismatch",
+      "type": "match",
+      "path": "output",
+      "pattern": "NAMING|TITLE/SLUG"
+    },
+    {
+      "type": "unchanged",
+      "ignore": [
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}
