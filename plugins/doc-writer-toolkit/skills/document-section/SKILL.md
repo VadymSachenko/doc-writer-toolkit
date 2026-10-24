@@ -57,7 +57,7 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/section-state/section-state.mjs record <secti
 
 1. No folder given → ask which, and stop. Resolve its root pair via `project-paths.md`. The folder doesn't exist → stop and say so.
 2. Run `status <section> --md` and show the block. No ledger → a fresh run, and Step 1 creates it.
-3. Continue without asking, unless `gate` is set (Steps 4, 5, 9, 10), a page due for `translate` has its EN page edited by hand (Step 10.2), or an approval went stale: a plan or a page changed after the user approved it. Say which before going on.
+3. Continue without asking, unless `gate` is set (Steps 4, 5, 9, 10), a page due for `translate` has its EN page edited by hand (Step 10.2), or an approval went stale: a plan or a page changed after the user approved it. Say which before going on. When a page changed outside the run after one of its stages was done, say so too, before that page's next stage: which page, and which stages run again.
 4. `blocked` is not empty → retry those pages first, at their blocked stage. Recording that stage `running` clears the block; a page that fails again is blocked again, and the run goes on.
 5. Run the stage `next` names, for the pages it lists (only `page:` if passed), then `status` again. Repeat until a gate stops the run or `next.stage` is `null`.
 

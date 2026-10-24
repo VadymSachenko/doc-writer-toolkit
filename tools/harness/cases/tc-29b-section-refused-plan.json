@@ -50,10 +50,10 @@
       "skill": "api-doc-writer"
     },
     {
-      "name": "the plan has the split",
+      "name": "the plan takes the split: a split entry, or the existing page kept plus an added page",
       "type": "match",
       "path": "portal/reports/.sources/section-plan.json",
-      "pattern": "\"split\""
+      "pattern": "\"split\"|\"add\""
     },
     {
       "name": "revised plan recorded done",
