@@ -1,0 +1,64 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+# Every step after the first runs even when an earlier one failed, so each check shows its own result.
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # 18.x is the floor the scripts declare (engines >= 18.3).
+        node: ['18.x', 'lts/*']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Lint the plugin (frontmatter, plugin-root paths, routing coverage)
+        run: node tools/lint-plugin.mjs
+      - name: Test the tools
+        if: ${{ !cancelled() }}
+        run: node --test tools/lint-plugin.test.mjs tools/check-visibility.test.mjs
+      - name: Test ui-labels
+        if: ${{ !cancelled() }}
+        run: npm test
+        working-directory: plugins/doc-writer-toolkit/scripts/ui-labels
+      - name: Test locale-sync
+        if: ${{ !cancelled() }}
+        run: npm test
+        working-directory: plugins/doc-writer-toolkit/scripts/locale-sync
+
+  # The two checks that need the Claude Code CLI. Neither needs credentials. The CLI needs Node 22 or later,
+  # and is pinned so its token estimates don't move under the visibility check.
+  cli:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DISABLE_AUTOUPDATER: '1'
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 'lts/*'
+      - name: Install the Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code@2.1.307
+      - name: Validate the plugin
+        run: claude plugin validate plugins/doc-writer-toolkit
+      - name: Check that every skill and command loads with its description
+        if: ${{ !cancelled() }}
+        run: node tools/check-visibility.mjs
