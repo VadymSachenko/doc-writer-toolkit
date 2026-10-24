@@ -82,9 +82,10 @@ No skill hardcodes a UA content root, an EN i18n root, a URL prefix, or a style-
 ```
 
 - `context/project-paths.md` is the single source of truth for the path-resolution procedure (and the ask-once, offer-to-persist fallback when a project hasn't declared these fields yet).
+- `project-paths.md` also resolves which root pair a page belongs to, for hosts that declare more than one; skills point at it.
 - `context/style-guide-registry.md` is the equivalent for the style-guide token, plus the corpus/router each token maps to.
 
-Host projects are free to differ in shape here, and none of that difference lives in a skill file: some split UA-first content and EN-native reference docs into two separate Docusaurus plugin instances with two i18n output paths (e.g. `partner-cabinet/` alongside a default-id `docs/`); others use a single tree. A skill never assumes which — it reads the declaration.
+Host projects are free to differ in shape here, and none of that difference lives in a skill file: some split content into two separate Docusaurus plugin instances with two i18n output paths (e.g. `portal/` alongside a default-id `docs/`), each a root pair; others use a single tree. A skill never assumes which — it reads the declaration.
 
 Across any project's tree(s), unresolved content is marked with `{/* ToDo: ... */}` and `{/* NEEDS CONFIRMATION: ... */}` HTML comments — every writing/translation/alignment skill knows to preserve, carry over, or check for these markers rather than resolving them silently.
 

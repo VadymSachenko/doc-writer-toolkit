@@ -56,7 +56,7 @@ Flags override the `Documentation toolkit configuration` block of `<root>/CLAUDE
 
 ## Root pairs
 
-A docs repo with two Docusaurus docs plugin instances has two UA content roots, each with its own EN i18n root, URL prefix and locale files. Each such UA/EN pair is a **root pair**. The unprefixed fields are the **primary** pair, so a host that declares one pair needs no change. Each further pair is the same fields with a name in front:
+A docs repo with two Docusaurus docs plugin instances has two UA content roots, each with its own EN i18n root, URL prefix and locale files. Each such UA/EN pair is a **root pair**. The unprefixed fields are the **primary** pair, so a host that declares one pair needs no change. Skills outside the pipeline resolve a page's pair the same way (`context/project-paths.md`). Each further pair is the same fields with a name in front:
 
 ```md
 - **UA content root:** `portal/`
