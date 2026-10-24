@@ -18,7 +18,8 @@
       "Bash(git:*)",
       "Bash(mkdir:*)",
       "Bash(mv:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(cd:*)"
     ]
   },
   "assertions": [
