@@ -1,15 +1,15 @@
 ---
 name: section-planner
-description: 'Reads a section''s readiness report and app-notes.md (required when a live Admin UI is declared, produced by app-explorer), cross-checks existing pages against the app''s actual flows as recorded in app-notes.md, and proposes a page inventory — what to keep, merge, split, add, or delete — with a doc type and one-line rationale per page. Writes a section-plan.md for human approval. Nothing is written or deleted until you confirm. Use explicitly ("section-planner: docs/balance", "use section-planner on the archive section").'
+description: 'Reads a section''s readiness report and app-notes.md (required when a live Admin UI is declared, produced by app-explorer), cross-checks existing pages against the app''s actual flows as recorded in app-notes.md, and proposes a page inventory — what to keep, merge, split, add, or delete — with a doc type and one-line rationale per page. Writes section-plan.md for human approval, and section-plan.json with the same inventory for document-section. Nothing is written or deleted until you confirm. Use explicitly ("section-planner: docs/balance", "use section-planner on the archive section").'
 ---
 
 # section-planner
 
-You are proposing the documentation structure for one section. You read what already exists, cross-check it against what the app actually does — using the app-notes.md that app-explorer recorded — and produce a plan: a proposed page inventory with a type and rationale per page. You write that plan to `.sources/section-plan.md` and stop — nothing is created, merged, or deleted until the user approves.
+You are proposing the documentation structure for one section. You read what already exists, cross-check it against what the app actually does — using the app-notes.md that app-explorer recorded — and produce a plan: a proposed page inventory with a type and rationale per page. You write that plan to `.sources/section-plan.md`, with the same inventory in `.sources/section-plan.json` for `document-section`, and stop — nothing is created, merged, or deleted until the user approves.
 
 ## Scope
 
-- **In scope:** proposing the page inventory (what pages should exist, their types, their slugs, keep/merge/split/add/delete decisions). Writing `.sources/section-plan.md`. Nothing else.
+- **In scope:** proposing the page inventory (what pages should exist, their types, their slugs, keep/merge/split/add/delete decisions). Writing `.sources/section-plan.md` and `.sources/section-plan.json`. Nothing else.
 - **Out of scope:** writing doc pages (`user-guide-writer`, `concept-doc-writer`, `api-doc-writer`). Resolving markers (`resolve-markers`). Style review. Editing existing pages. **Any interaction with the live app.** This skill never launches Playwright, reads credentials, or navigates the UI. App flows come from `app-notes.md`, which `app-explorer` produces — see "Full vs. targeted app access" below. If `app-notes.md` is missing and a live UI is available, this skill defers to `app-explorer` rather than exploring itself.
 
 ### Full vs. targeted app access
@@ -143,7 +143,31 @@ Once you approve this plan (or make changes), run the writers:
 - For each `api` page: `api-doc-writer`
 ```
 
-Do not create, rename, or delete any page files — write only `.sources/section-plan.md`.
+Then write the same inventory to `.sources/section-plan.json`, for `document-section` and its `section-state` script:
+
+```json
+{
+  "schemaVersion": 1,
+  "section": "docs/balance",
+  "status": "awaiting-approval",
+  "basedOn": ["section-readiness", "app-notes"],
+  "verdict": "skeleton",
+  "sidebarOrderDeviates": false,
+  "pages": [
+    { "order": 1, "action": "keep", "path": "docs/balance/balance/balance.md", "docType": "concept", "title": "Balance", "sidebarLabel": null, "rationale": "Concept page first — users need context before acting", "mergesFrom": [], "splitsFrom": null, "sourceEvidence": "app-notes" },
+    { "order": 3, "action": "merge", "path": "docs/balance/manage-cards/manage-cards.md", "docType": "user-guide", "title": "Manage cards", "sidebarLabel": null, "rationale": "Same screen, same flow", "mergesFrom": ["docs/balance/add-cards/add-cards.md", "docs/balance/manage-cards/manage-cards.md"], "splitsFrom": null, "sourceEvidence": "app-notes" }
+  ],
+  "openQuestions": [{ "question": "Is the card overview its own concept page?", "proposedDefault": "yes" }]
+}
+```
+
+- One entry per row of the inventory table, with the same values. `order` is the `#` column.
+- `path`, `mergesFrom` and `splitsFrom` are page paths from the repo root (the section folder plus the slug), not slugs.
+- An `api` entry's `path` is where `api-doc-writer` saves it, under the API reference root (`project-paths.md`), which may be outside the section. `document-section` lists `api` pages for a separate `api-doc-writer` run and doesn't write them.
+- A `delete` entry has the existing page's `path` and no `docType`. A `split` has one entry per new page, each with the same `splitsFrom`.
+- `sourceEvidence` is `inferred` for a proposal neither `app-notes.md` nor `sme-interview.md` backs.
+
+Do not create, rename, or delete any page files — write only `.sources/section-plan.md` and `.sources/section-plan.json`.
 
 ## Step 5 — Self-review before finishing
 
@@ -155,7 +179,7 @@ Do not create, rename, or delete any page files — write only `.sources/section
 6. Every `merge` has a `mergesFrom` list.
 7. Every `inferred` proposal is clearly flagged as such.
 8. Open questions have a proposed default so the user can just say yes/no.
-9. Only `.sources/section-plan.md` was written — no other files touched.
+9. Only `.sources/section-plan.md` and `.sources/section-plan.json` were written — no other files touched. The JSON parses, and it has one entry per table row with the same action, path, type and order.
 
 ## Step 6 — Show the plan
 

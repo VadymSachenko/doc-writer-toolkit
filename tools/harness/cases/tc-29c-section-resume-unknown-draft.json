@@ -1,0 +1,86 @@
+{
+  "id": "tc-29c-section-resume-unknown-draft",
+  "description": "Resume after an interruption: the ledger has the plan approved, one page written, and the other page's write still running, with a draft on disk the ledger doesn't know. The run neither starts over nor drafts again: it names the draft and asks whether to keep it.",
+  "fixture": {
+    "shape": "single"
+  },
+  "setup": [
+    "mkdir -p portal/reports/reports && cat > portal/reports/reports/reports.md <<'EOF'\n---\ntitle: Звіти\nsidebar_label: Звіти\n---\n\n# Звіти\n\n{/* ToDo: що таке звіти і для чого вони */}\nEOF",
+    "mkdir -p portal/reports/export-report && cat > portal/reports/export-report/export-report.md <<'EOF'\n---\ntitle: Експорт звіту\nsidebar_label: Експорт звіту\n---\n\n# Експорт звіту\n\n{/* ToDo: кроки експорту звіту */}\nEOF",
+    "mkdir -p portal/reports/.sources && cat > portal/reports/.sources/sme-interview.md <<'EOF'\n# SME interview — Звіти\n\n- Система формує звіт щодня. Звіт містить кількість платежів, їхню суму і валюту.\n- Щоб експортувати звіт, у меню виберіть **Звіти**, натисніть **Експорт** і виберіть формат: CSV або XLSX.\n- Файл завантажується на ваш комп’ютер.\nEOF",
+    "mkdir -p portal/reports/.sources && cat > portal/reports/.sources/section-readiness.json <<'EOF'\n{\n  \"section\": \"portal/reports\",\n  \"generatedFrom\": \"section-readiness\",\n  \"verdict\": \"skeleton\",\n  \"verdictReason\": \"both pages are unfilled stubs\",\n  \"project\": {\n    \"contentLanguage\": \"uk\",\n    \"contentRoot\": \"portal/\",\n    \"uaUrlPrefix\": \"/portal/\"\n  },\n  \"appAccess\": {\n    \"liveUI\": \"none\",\n    \"apiSeed\": \"not-declared\",\n    \"existingAppNotes\": \"absent\"\n  },\n  \"pages\": [\n    {\n      \"path\": \"portal/reports/export-report/export-report.md\",\n      \"state\": \"stub\",\n      \"docType\": \"user-guide\",\n      \"markerCount\": 1,\n      \"reason\": \"one ToDo marker, no body\"\n    },\n    {\n      \"path\": \"portal/reports/reports/reports.md\",\n      \"state\": \"stub\",\n      \"docType\": \"concept\",\n      \"markerCount\": 1,\n      \"reason\": \"one ToDo marker, no body\"\n    }\n  ],\n  \"sources\": {\n    \"videos\": [],\n    \"transcripts\": [],\n    \"smeInterview\": \"present\",\n    \"appNotes\": \"absent\",\n    \"framesFolders\": [],\n    \"screenshotCount\": 0,\n    \"sectionPlan\": \"absent\",\n    \"sectionState\": \"absent\"\n  },\n  \"summary\": {\n    \"pageCount\": 2,\n    \"stubCount\": 2,\n    \"completeCount\": 0,\n    \"totalMarkers\": 2\n  }\n}\nEOF",
+    "S=\"../../../.plugin/harness-$(basename \"$(cd ../../.. && pwd)\")/scripts/section-state/section-state.mjs\" && test -f \"$S\" && R() { node \"$S\" record portal/reports \"$@\" > /dev/null; } && R --stage readiness --status running --ua-root portal/ --en-root i18n/en/docusaurus-plugin-content-docs-portal/current/ --options '{\"interview\":\"ask\",\"apply\":\"mechanical\"}' && R --stage readiness --status done && R --stage explore --status skipped --note 'liveUI: none'",
+    "mkdir -p portal/reports/.sources && cat > portal/reports/.sources/section-plan.json <<'EOF'\n{\n  \"schemaVersion\": 1,\n  \"section\": \"portal/reports\",\n  \"status\": \"awaiting-approval\",\n  \"basedOn\": [\n    \"section-readiness\",\n    \"sme-interview\"\n  ],\n  \"verdict\": \"skeleton\",\n  \"sidebarOrderDeviates\": false,\n  \"pages\": [\n    {\n      \"order\": 1,\n      \"action\": \"keep\",\n      \"path\": \"portal/reports/reports/reports.md\",\n      \"docType\": \"concept\",\n      \"title\": \"Reports\",\n      \"sidebarLabel\": null,\n      \"rationale\": \"Background first: what a report holds\",\n      \"mergesFrom\": [],\n      \"splitsFrom\": null,\n      \"sourceEvidence\": \"sme-interview\"\n    },\n    {\n      \"order\": 2,\n      \"action\": \"keep\",\n      \"path\": \"portal/reports/export-report/export-report.md\",\n      \"docType\": \"user-guide\",\n      \"title\": \"Export a report\",\n      \"sidebarLabel\": null,\n      \"rationale\": \"The one task in the section\",\n      \"mergesFrom\": [],\n      \"splitsFrom\": null,\n      \"sourceEvidence\": \"sme-interview\"\n    }\n  ],\n  \"openQuestions\": []\n}\nEOF",
+    "mkdir -p portal/reports/.sources && cat > portal/reports/.sources/section-plan.md <<'EOF'\n# Section plan — Звіти\n\n**Status:** awaiting approval\n**Based on:** section-readiness.json, sme-interview.md\n**Verdict from readiness check:** skeleton\n**Sidebar order:** follows existing folder structure\n\n---\n\n## Proposed page inventory\n\n| # | Action | Slug | Type | Title | Rationale |\n|---|---|---|---|---|---|\n| 1 | keep | reports/reports.md | concept | Reports | Background first: what a report holds |\n| 2 | keep | export-report/export-report.md | user-guide | Export a report | The one task in the section |\n\n## Open questions (need your input before writing)\n\nNone.\nEOF",
+    "S=\"../../../.plugin/harness-$(basename \"$(cd ../../.. && pwd)\")/scripts/section-state/section-state.mjs\" && test -f \"$S\" && R() { node \"$S\" record portal/reports \"$@\" > /dev/null; } && R --stage plan --status done",
+    "S=\"../../../.plugin/harness-$(basename \"$(cd ../../.. && pwd)\")/scripts/section-state/section-state.mjs\" && test -f \"$S\" && R() { node \"$S\" record portal/reports \"$@\" > /dev/null; } && R --stage planApproval --status done",
+    "mkdir -p portal/reports/reports && cat > portal/reports/reports/reports.md <<'EOF'\n---\ntitle: Звіти\nsidebar_label: Звіти\n---\n\n# Звіти\n\nЗвіт показує підсумки платежів вашого акаунта за день. Система формує звіти щодня.\n\n## Що містить звіт {/* #report-contents */}\n\nЗвіт містить кількість платежів, їхню суму і валюту.\nEOF",
+    "S=\"../../../.plugin/harness-$(basename \"$(cd ../../.. && pwd)\")/scripts/section-state/section-state.mjs\" && test -f \"$S\" && R() { node \"$S\" record portal/reports \"$@\" > /dev/null; } && R --stage write --status done --page reports/reports/reports && R --stage write --status running --page reports/export-report/export-report",
+    "mkdir -p portal/reports/export-report && cat > portal/reports/export-report/export-report.md <<'EOF'\n---\ntitle: Експорт звіту\nsidebar_label: Експорт звіту\n---\n\n# Експорт звіту\n\n## Експорт у файл {/* #export-to-a-file */}\n\n1. У меню виберіть **Звіти**.\n2. Натисніть **Експорт** і виберіть формат: CSV або XLSX.\n\nФайл завантажується на ваш комп’ютер.\nEOF",
+    "git add -A && git commit -q -m 'Case setup'",
+    "git rev-parse HEAD > .git/harness-setup-head"
+  ],
+  "prompt": "/{plugin}:document-section portal/reports",
+  "options": {
+    "maxTurns": 80,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)",
+      "Bash(node:*)",
+      "Bash(grep:*)",
+      "Bash(ls:*)"
+    ],
+    "timeoutSeconds": 1500
+  },
+  "assertions": [
+    {
+      "type": "skill-not-called",
+      "skill": "section-readiness"
+    },
+    {
+      "type": "skill-not-called",
+      "skill": "section-planner"
+    },
+    {
+      "type": "skill-not-called",
+      "skill": "resolve-markers"
+    },
+    {
+      "type": "skill-not-called",
+      "skill": "user-guide-writer"
+    },
+    {
+      "type": "skill-not-called",
+      "skill": "concept-doc-writer"
+    },
+    {
+      "type": "skill-not-called",
+      "skill": "api-doc-writer"
+    },
+    {
+      "name": "names the unknown draft",
+      "type": "match",
+      "path": "output",
+      "pattern": "export-report"
+    },
+    {
+      "name": "asks keep or draft again",
+      "type": "match",
+      "path": "output",
+      "pattern": "(keep|use) (this|the|that|it|existing)\\b[^\\n]{0,60}(draft|version|page)|(draft|write)( it| this page| the page)? again|redraft|overwrit",
+      "flags": "i"
+    },
+    {
+      "type": "unchanged",
+      "ignore": [
+        "portal/reports/.sources/section-state.json",
+        ".doc-toolkit/"
+      ]
+    },
+    {
+      "name": "no commit made",
+      "type": "command",
+      "run": "test \"$(git rev-parse HEAD)\" = \"$(cat .git/harness-setup-head)\""
+    }
+  ]
+}

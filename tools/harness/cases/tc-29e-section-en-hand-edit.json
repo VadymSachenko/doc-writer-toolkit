@@ -1,0 +1,73 @@
+{
+  "id": "tc-29e-section-en-hand-edit",
+  "description": "Every stage is done for both pages; then an EN page was edited by hand. Only its alignment runs again: nothing is translated or fixed, and no page changes.",
+  "fixture": {
+    "shape": "single"
+  },
+  "setup": [
+    "mkdir -p portal/reports/reports && cat > portal/reports/reports/reports.md <<'EOF'\n---\ntitle: Звіти\nsidebar_label: Звіти\n---\n\n# Звіти\n\n{/* ToDo: що таке звіти і для чого вони */}\nEOF",
+    "mkdir -p portal/reports/export-report && cat > portal/reports/export-report/export-report.md <<'EOF'\n---\ntitle: Експорт звіту\nsidebar_label: Експорт звіту\n---\n\n# Експорт звіту\n\n{/* ToDo: кроки експорту звіту */}\nEOF",
+    "mkdir -p portal/reports/.sources && cat > portal/reports/.sources/sme-interview.md <<'EOF'\n# SME interview — Звіти\n\n- Система формує звіт щодня. Звіт містить кількість платежів, їхню суму і валюту.\n- Щоб експортувати звіт, у меню виберіть **Звіти**, натисніть **Експорт** і виберіть формат: CSV або XLSX.\n- Файл завантажується на ваш комп’ютер.\nEOF",
+    "mkdir -p portal/reports/.sources && cat > portal/reports/.sources/section-readiness.json <<'EOF'\n{\n  \"section\": \"portal/reports\",\n  \"generatedFrom\": \"section-readiness\",\n  \"verdict\": \"skeleton\",\n  \"verdictReason\": \"both pages are unfilled stubs\",\n  \"project\": {\n    \"contentLanguage\": \"uk\",\n    \"contentRoot\": \"portal/\",\n    \"uaUrlPrefix\": \"/portal/\"\n  },\n  \"appAccess\": {\n    \"liveUI\": \"none\",\n    \"apiSeed\": \"not-declared\",\n    \"existingAppNotes\": \"absent\"\n  },\n  \"pages\": [\n    {\n      \"path\": \"portal/reports/export-report/export-report.md\",\n      \"state\": \"stub\",\n      \"docType\": \"user-guide\",\n      \"markerCount\": 1,\n      \"reason\": \"one ToDo marker, no body\"\n    },\n    {\n      \"path\": \"portal/reports/reports/reports.md\",\n      \"state\": \"stub\",\n      \"docType\": \"concept\",\n      \"markerCount\": 1,\n      \"reason\": \"one ToDo marker, no body\"\n    }\n  ],\n  \"sources\": {\n    \"videos\": [],\n    \"transcripts\": [],\n    \"smeInterview\": \"present\",\n    \"appNotes\": \"absent\",\n    \"framesFolders\": [],\n    \"screenshotCount\": 0,\n    \"sectionPlan\": \"absent\",\n    \"sectionState\": \"absent\"\n  },\n  \"summary\": {\n    \"pageCount\": 2,\n    \"stubCount\": 2,\n    \"completeCount\": 0,\n    \"totalMarkers\": 2\n  }\n}\nEOF",
+    "S=\"../../../.plugin/harness-$(basename \"$(cd ../../.. && pwd)\")/scripts/section-state/section-state.mjs\" && test -f \"$S\" && R() { node \"$S\" record portal/reports \"$@\" > /dev/null; } && R --stage readiness --status running --ua-root portal/ --en-root i18n/en/docusaurus-plugin-content-docs-portal/current/ --options '{\"interview\":\"ask\",\"apply\":\"mechanical\"}' && R --stage readiness --status done && R --stage explore --status skipped --note 'liveUI: none'",
+    "mkdir -p portal/reports/.sources && cat > portal/reports/.sources/section-plan.json <<'EOF'\n{\n  \"schemaVersion\": 1,\n  \"section\": \"portal/reports\",\n  \"status\": \"awaiting-approval\",\n  \"basedOn\": [\n    \"section-readiness\",\n    \"sme-interview\"\n  ],\n  \"verdict\": \"skeleton\",\n  \"sidebarOrderDeviates\": false,\n  \"pages\": [\n    {\n      \"order\": 1,\n      \"action\": \"keep\",\n      \"path\": \"portal/reports/reports/reports.md\",\n      \"docType\": \"concept\",\n      \"title\": \"Reports\",\n      \"sidebarLabel\": null,\n      \"rationale\": \"Background first: what a report holds\",\n      \"mergesFrom\": [],\n      \"splitsFrom\": null,\n      \"sourceEvidence\": \"sme-interview\"\n    },\n    {\n      \"order\": 2,\n      \"action\": \"keep\",\n      \"path\": \"portal/reports/export-report/export-report.md\",\n      \"docType\": \"user-guide\",\n      \"title\": \"Export a report\",\n      \"sidebarLabel\": null,\n      \"rationale\": \"The one task in the section\",\n      \"mergesFrom\": [],\n      \"splitsFrom\": null,\n      \"sourceEvidence\": \"sme-interview\"\n    }\n  ],\n  \"openQuestions\": []\n}\nEOF",
+    "mkdir -p portal/reports/.sources && cat > portal/reports/.sources/section-plan.md <<'EOF'\n# Section plan — Звіти\n\n**Status:** awaiting approval\n**Based on:** section-readiness.json, sme-interview.md\n**Verdict from readiness check:** skeleton\n**Sidebar order:** follows existing folder structure\n\n---\n\n## Proposed page inventory\n\n| # | Action | Slug | Type | Title | Rationale |\n|---|---|---|---|---|---|\n| 1 | keep | reports/reports.md | concept | Reports | Background first: what a report holds |\n| 2 | keep | export-report/export-report.md | user-guide | Export a report | The one task in the section |\n\n## Open questions (need your input before writing)\n\nNone.\nEOF",
+    "S=\"../../../.plugin/harness-$(basename \"$(cd ../../.. && pwd)\")/scripts/section-state/section-state.mjs\" && test -f \"$S\" && R() { node \"$S\" record portal/reports \"$@\" > /dev/null; } && R --stage plan --status done",
+    "S=\"../../../.plugin/harness-$(basename \"$(cd ../../.. && pwd)\")/scripts/section-state/section-state.mjs\" && test -f \"$S\" && R() { node \"$S\" record portal/reports \"$@\" > /dev/null; } && R --stage planApproval --status done",
+    "mkdir -p portal/reports/reports && cat > portal/reports/reports/reports.md <<'EOF'\n---\ntitle: Звіти\nsidebar_label: Звіти\n---\n\n# Звіти\n\nЗвіт показує підсумки платежів вашого акаунта за день. Система формує звіти щодня.\n\n## Що містить звіт {/* #report-contents */}\n\nЗвіт містить кількість платежів, їхню суму і валюту.\nEOF",
+    "mkdir -p portal/reports/export-report && cat > portal/reports/export-report/export-report.md <<'EOF'\n---\ntitle: Експорт звіту\nsidebar_label: Експорт звіту\n---\n\n# Експорт звіту\n\n## Експорт у файл {/* #export-to-a-file */}\n\n1. У меню виберіть **Звіти**.\n2. Натисніть **Експорт** і виберіть формат: CSV або XLSX.\n\nФайл завантажується на ваш комп’ютер.\nEOF",
+    "S=\"../../../.plugin/harness-$(basename \"$(cd ../../.. && pwd)\")/scripts/section-state/section-state.mjs\" && test -f \"$S\" && R() { node \"$S\" record portal/reports \"$@\" > /dev/null; } && R --stage write --status done --page reports/reports/reports --page reports/export-report/export-report --result '{\"skill\":\"writer\",\"interview\":\"asked 2\"}' && R --stage resolve --status done && R --stage fix --status done --page reports/reports/reports --page reports/export-report/export-report --result '{\"applied\":0,\"left\":0}' && R --stage review --status done --page reports/reports/reports --page reports/export-report/export-report --result '{\"errors\":0,\"deviations\":0,\"suggestions\":0,\"round\":1}'",
+    "S=\"../../../.plugin/harness-$(basename \"$(cd ../../.. && pwd)\")/scripts/section-state/section-state.mjs\" && test -f \"$S\" && R() { node \"$S\" record portal/reports \"$@\" > /dev/null; } && R --stage uaApproval --status done --page reports/reports/reports --page reports/export-report/export-report",
+    "git add -A && git commit -q -m 'Case setup'",
+    "mkdir -p i18n/en/docusaurus-plugin-content-docs-portal/current/reports/reports && cat > i18n/en/docusaurus-plugin-content-docs-portal/current/reports/reports/reports.md <<'EOF'\n---\ntitle: Reports\nsidebar_label: Reports\n---\n\n# Reports\n\nA report shows the totals of the payments in your account for one day. The system builds reports daily.\n\n## Report contents\n\nA report contains the number of payments, their amount and their currency.\nEOF",
+    "mkdir -p i18n/en/docusaurus-plugin-content-docs-portal/current/reports/export-report && cat > i18n/en/docusaurus-plugin-content-docs-portal/current/reports/export-report/export-report.md <<'EOF'\n---\ntitle: Export a report\nsidebar_label: Export a report\n---\n\n# Export a report\n\n## Export to a file\n\n1. In the menu, select **Звіти**.\n2. Select **Експорт** and choose a format: CSV or XLSX.\n\nThe file downloads to your computer.\nEOF",
+    "S=\"../../../.plugin/harness-$(basename \"$(cd ../../.. && pwd)\")/scripts/section-state/section-state.mjs\" && test -f \"$S\" && R() { node \"$S\" record portal/reports \"$@\" > /dev/null; } && R --stage translate --status done --page reports/reports/reports --page reports/export-report/export-report && R --stage align --status done --page reports/reports/reports --page reports/export-report/export-report --result '{\"bugs\":0,\"warnings\":0}'",
+    "sed -i.bak 's/The file downloads to your computer./The file is saved to your computer./' i18n/en/docusaurus-plugin-content-docs-portal/current/reports/export-report/export-report.md && rm i18n/en/docusaurus-plugin-content-docs-portal/current/reports/export-report/export-report.md.bak",
+    "git add -A && git commit -q -m 'Case setup'",
+    "git rev-parse HEAD > .git/harness-setup-head"
+  ],
+  "prompt": "/{plugin}:document-section portal/reports",
+  "options": {
+    "maxTurns": 80,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)",
+      "Bash(node:*)",
+      "Bash(grep:*)",
+      "Bash(ls:*)"
+    ],
+    "timeoutSeconds": 1500
+  },
+  "assertions": [
+    {
+      "type": "skill-called",
+      "skill": "doc-alignment-checker"
+    },
+    {
+      "type": "skill-not-called",
+      "skill": "doc-translator"
+    },
+    {
+      "type": "skill-not-called",
+      "skill": "doc-style-fixer"
+    },
+    {
+      "name": "the hand edit stays",
+      "type": "match",
+      "path": "i18n/en/docusaurus-plugin-content-docs-portal/current/reports/export-report/export-report.md",
+      "pattern": "The file is saved to your computer\\."
+    },
+    {
+      "type": "unchanged",
+      "ignore": [
+        "portal/reports/.sources/section-state.json",
+        ".doc-toolkit/"
+      ]
+    },
+    {
+      "name": "no commit made",
+      "type": "command",
+      "run": "test \"$(git rev-parse HEAD)\" = \"$(cat .git/harness-setup-head)\""
+    }
+  ]
+}

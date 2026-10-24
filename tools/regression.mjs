@@ -18,6 +18,7 @@ const STEPS = [
   { id: 'locale-sync', cmd: 'npm', args: ['test'], cwd: `${scripts}/locale-sync` },
   { id: 'doc-align', cmd: 'npm', args: ['test'], cwd: `${scripts}/doc-align` },
   { id: 'screenshot-locales', cmd: 'npm', args: ['test'], cwd: `${scripts}/screenshot-locales` },
+  { id: 'section-state', cmd: 'npm', args: ['test'], cwd: `${scripts}/section-state` },
   { id: 'validate', cmd: claude, args: ['plugin', 'validate', 'plugins/doc-writer-toolkit'] },
   { id: 'visibility', cmd: 'node', args: ['tools/check-visibility.mjs'], notRunExit: 2 },
 ];

@@ -1,6 +1,6 @@
 # Contributing to doc-writer-toolkit
 
-This repo is a Claude Code plugin marketplace. The deliverable is the Markdown/JSON content under `plugins/doc-writer-toolkit/` — there is no app to build. A lint, a skill visibility check and the test suites of the four Node scripts run before every merge: see [Checks before a merge](#checks-before-a-merge). See [CLAUDE.md](CLAUDE.md) for a full architectural overview.
+This repo is a Claude Code plugin marketplace. The deliverable is the Markdown/JSON content under `plugins/doc-writer-toolkit/` — there is no app to build. A lint, a skill visibility check and the test suites of the five Node scripts run before every merge: see [Checks before a merge](#checks-before-a-merge). See [CLAUDE.md](CLAUDE.md) for a full architectural overview.
 
 ## How to add a skill
 
@@ -99,7 +99,7 @@ It prints one row per step, with the exit code and the result line. A step whose
 |---|---|---|
 | `lint` | `node tools/lint-plugin.mjs` | Skill and command frontmatter that strict YAML accepts; every `${CLAUDE_PLUGIN_ROOT}/…` path exists; every style-guide rule file is reachable from its `ROUTING.md`; no file has CRLF line endings; every skill carries the contract's five parts; every screenshot-annotation frame in a snippet is square and unfilled |
 | `tools-tests` | `node --test tools/lint-plugin.test.mjs tools/check-visibility.test.mjs tools/harness/harness.test.mjs` | The tools' own tests, including the skill harness (no model calls) |
-| `ui-labels`, `locale-sync`, `doc-align`, `screenshot-locales` | `npm test` in each folder under `plugins/doc-writer-toolkit/scripts/` | The scripts' suites. `locale-sync` takes about two minutes |
+| `ui-labels`, `locale-sync`, `doc-align`, `screenshot-locales`, `section-state` | `npm test` in each folder under `plugins/doc-writer-toolkit/scripts/` | The scripts' suites. `locale-sync` takes about two minutes |
 | `validate` | `claude plugin validate plugins/doc-writer-toolkit` | The CLI's own plugin checks |
 | `visibility` | `node tools/check-visibility.mjs` | Every skill and command loads with its description. It reads a copy under a sentinel name, so an installed copy can't stand in for the tree under review |
 

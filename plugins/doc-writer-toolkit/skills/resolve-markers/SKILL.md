@@ -9,7 +9,7 @@ You are resolving documentation markers — `{/* NEEDS CONFIRMATION: ... */}` an
 
 ## Scope
 
-- **In scope:** resolving `{/* NEEDS CONFIRMATION */}` and `{/* ToDo */}` markers in all doc pages of one section, using all available evidence sources. **Targeted, read-only observation of a single screen via Playwright to confirm one specific marker** (see "Full vs. targeted app access" below). Editing the pages in place. Reporting what was resolved and what remains.
+- **In scope:** resolving `{/* NEEDS CONFIRMATION */}` and `{/* ToDo */}` markers in all doc pages of one section (or only the pages a caller lists, see Arguments), using all available evidence sources. **Targeted, read-only observation of a single screen via Playwright to confirm one specific marker** (see "Full vs. targeted app access" below). Editing the pages in place. Reporting what was resolved and what remains.
 - **Out of scope:** running full app exploration — systematic multi-screen navigation, scenario seeding, or screenshot sweeps (`app-explorer`'s job; see "Full vs. targeted app access" below). Writing new pages. Style review. Translation.
 
 ### Full vs. targeted app access
@@ -18,13 +18,18 @@ You are resolving documentation markers — `{/* NEEDS CONFIRMATION: ... */}` an
 - **Targeted observation** — navigating to one already-identified screen to confirm a single fact for a specific marker; no scenario seeding, no systematic sweep, no new screenshots unless a specific `{/* ToDo: add a screenshot */}` marker needs one. **This skill may do this** (Step 0, source 4) when no other evidence answers a marker.
 - It reads `app-notes.md` when present but **does not require it** — a live targeted check is its fallback.
 
+## Arguments
+
+- `<section folder>` — required.
+- `pages:<path,…>` — optional: only these pages of the section, as paths from the repo root. Steps 1–3 work on them alone, and no other page is read for markers or edited. The evidence sources stay section-wide. Without it, every page in the section.
+
 ## Sources to load
 
 1. `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — resolve the section folder's root pair (its content root).
 2. The section's `.sources/app-notes.md` — **optional**. Load if present; skip if absent. This file is written by `app-explorer` when it has run — do not require it.
 3. The section's `.sources/sme-interview.md` — **optional**. Load if present.
 4. The section's `.assets/` folder — list what screenshots already exist there.
-5. The doc pages in the section — read each one to find markers.
+5. The doc pages in the section (only the `pages:` list, when passed) — read each one to find markers.
 6. If `Admin UI: playwright` is declared in the project's `CLAUDE.md` — also load `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/value-realism.md` and `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-capture.md`. If `CLAUDE.md` also declares `Screenshot locales:`, load `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-locales.md` too (which locales a capture covers, and when new images replace the old ones; `SL` below is the script it names). Without that field, don't load it and don't run `SL`: everything below that starts "With `Screenshot locales:` declared" doesn't apply.
 7. `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` — **only for Ж1a** (UI-label terminal-punctuation normalization), applied when a confirmed UI label is written into a bold span in prose (Step 3). Do not use it to rewrite surrounding prose.
 8. **`uk` pages only:** `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/native-ukrainian.md` — when a confirmed fact is written into the page as Ukrainian prose (Step 3), the words you write follow it. It doesn't license rewriting the rest of that sentence or the sentences around the marker.
@@ -49,7 +54,7 @@ If none of these sources exist and `Admin UI:` is `none`, continue — the skill
 
 ## Step 1 — Find all markers
 
-Scan every `.md`/`.mdx` file in the section folder for:
+Scan every `.md`/`.mdx` file in the section folder (only the `pages:` list, when passed) for:
 - `{/* NEEDS CONFIRMATION: ... */}` — a fact that was uncertain when the page was written
 - `{/* ToDo: add a screenshot — ... */}` — a missing screenshot
 - `{/* ToDo: ... */}` — any other outstanding writer task that needs a *fact or observation* to resolve (a missing UI label, an unconfirmed step, a value to check in the app)
@@ -134,3 +139,4 @@ Tell the user:
 - "resolve-markers: docs/transactions"
 - "use resolve-markers on the archive section"
 - "run resolve-markers after app-explorer finishes"
+- "resolve-markers: docs/reports pages:docs/reports/export-report/export-report.md,docs/reports/reports/reports.md"
