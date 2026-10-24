@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { checkFrontmatter, isRouted, MAX_DESCRIPTION, rootRefs, routedPaths, scalarProblem } from './lint-plugin.mjs';
+import { applyKnownGaps, checkFrontmatter, isRouted, MAX_DESCRIPTION, rootRefs, routedPaths, scalarProblem } from './lint-plugin.mjs';
 
 const skill = (description, name = 'my-skill') => `---\nname: ${name}\ndescription: ${description}\n---\n\n# ${name}\n`;
 const messages = (findings) => findings.map((f) => `${f.line}: ${f.message}`);
@@ -91,4 +91,32 @@ test('isRouted: a file is reached through a named file, a named folder or the al
   assert.equal(isRouted('maintenance/qa-report.md', named, ['maintenance/']), true);
   assert.equal(isRouted('en-us/b.md', named, ['README.md']), false);
   assert.equal(isRouted('shared/voices.md', named, []), false);
+});
+
+test('frontmatter: a CRLF file parses like an LF one', () => {
+  const crlf = (text) => text.replace(/\n/g, '\r\n');
+  assert.deepEqual(checkFrontmatter(crlf(skill(`'Writes pages. Use explicitly ("my-skill: write the X page").'`)), { kind: 'skill', folder: 'my-skill' }), []);
+  const findings = checkFrontmatter(crlf(skill('Writes pages. Use explicitly ("my-skill: write the X page").')), { kind: 'skill', folder: 'my-skill' });
+  assert.deepEqual(messages(findings), ["3: description: an unquoted value can't contain ': ' or ' #'; wrap it in single quotes and write an apostrophe as ''"]);
+  assert.deepEqual(messages(checkFrontmatter(crlf('---\nname: other\ndescription: Fine.\n---\n'), { kind: 'skill', folder: 'my-skill' })), [
+    "2: name 'other' differs from its folder 'my-skill'",
+  ]);
+});
+
+test('known gaps: a listed finding does not fail, an unlisted one does', () => {
+  const known = [{ file: 'a.md', message: 'no ROUTING.md row reaches this rule file', reason: 'no row yet' }];
+  const { failing, known: listed } = applyKnownGaps([
+    { file: 'a.md', line: 1, message: 'no ROUTING.md row reaches this rule file; add a row' },
+    { file: 'b.md', line: 1, message: 'no ROUTING.md row reaches this rule file; add a row' },
+  ], known);
+  assert.deepEqual(failing.map((f) => f.file), ['b.md']);
+  assert.deepEqual(listed.map((f) => [f.file, f.reason]), [['a.md', 'no row yet']]);
+});
+
+test('known gaps: a listed gap that no longer occurs fails, so the list can only shrink', () => {
+  const known = [{ file: 'a.md', message: 'no ROUTING.md row reaches this rule file', reason: 'no row yet' }];
+  const { failing, known: listed } = applyKnownGaps([], known);
+  assert.equal(listed.length, 0);
+  assert.equal(failing.length, 1);
+  assert.match(failing[0].message, /known gap no longer occurs.*remove it/);
 });
