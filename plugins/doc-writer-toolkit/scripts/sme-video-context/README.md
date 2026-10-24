@@ -117,7 +117,7 @@ python3 sme_video_context.py \
 
 ## `frames-index.json` (K8)
 
-Lives alongside a folder of `screen-HH-MM-SS.jpg` screenshots — `images/`, `transcript-key/images/`, or a merged destination folder like `.sources/frames/{video}-frames/`. One entry per screenshot in that folder:
+Lives alongside a folder of `screen-HH-MM-SS.jpg` screenshots — `images/`, `transcript-key/images/`, or a merged destination folder like `.sources/frames/{video}-frames/`. A frame taken between whole seconds gets the tenths too, `screen-HH-MM-SS_T.jpg` (`screen-00-00-58_5.jpg`), so two frames in the same second don't overwrite each other; its `timestamp` then reads `00:00:58.5`. Names sort in time order, and every mode reads both forms. One entry per screenshot in that folder:
 
 ```json
 [
