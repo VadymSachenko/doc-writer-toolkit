@@ -1,0 +1,37 @@
+{
+  "id": "tc-19a-concept-orients-before-defining",
+  "description": "concept-doc-writer drafts a uk concept page from facts that start with a definition: the first reader-visible paragraph orients the reader (scope, purpose or benefit) instead of opening with the bare definition «Транзакція — …».",
+  "fixture": {
+    "shape": "single"
+  },
+  "setup": [
+    "cat > .git/first-para.mjs <<'EOF'\nimport fs from 'node:fs'; import path from 'node:path';\nconst dir = process.argv[2];\nconst files = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => /\\.mdx?$/.test(f)) : [];\nif (files.length !== 1) { console.log(`expected one page in ${dir}, found ${files.length}`); process.exit(1); }\nlet t = fs.readFileSync(path.join(dir, files[0]), 'utf8').replace(/\\r\\n/g, '\\n');\nt = t.replace(/^---\\n[\\s\\S]*?\\n---\\n/, '').replace(/\\{\\/\\*[\\s\\S]*?\\*\\/\\}/g, '');\nconst para = t.split(/\\n\\s*\\n/).map((p) => p.trim()).find((p) => p && !/^(#|import |export |<|!\\[|:::|```|\\||[-*] |\\d+\\. )/.test(p));\nconsole.log(`first paragraph: ${para}`);\nif (!para) process.exit(1);\nif (/^[«\"]?Транзакці[яї]\\s*[—–-]\\s/.test(para)) { console.log('opens with a bare definition'); process.exit(1); }\nEOF"
+  ],
+  "prompt": "use concept-doc-writer for `portal/transactions/transaction-lifecycle/`. Skip questions and draft with your best guess, then save the page. Facts: a transaction is the main object an operator works with. Each transaction moves through the statuses **Нова**, **В обробці** and **Завершена**. The operator takes a transaction from the queue, which sets **В обробці**; confirming it sets **Завершена**. Incoming and outgoing transactions are on separate tabs, **Вхідні** and **Вихідні**. Operators need this to know which transactions they can still act on.",
+  "options": {
+    "maxTurns": 60,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "first paragraph orients, not a bare definition",
+      "type": "command",
+      "run": "node .git/first-para.mjs portal/transactions/transaction-lifecycle"
+    },
+    {
+      "name": "the term is still defined",
+      "type": "command",
+      "run": "grep -rqE 'Транзакці[яї]' portal/transactions/transaction-lifecycle"
+    },
+    {
+      "type": "changed-only",
+      "paths": [
+        "portal/transactions/transaction-lifecycle/",
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}
