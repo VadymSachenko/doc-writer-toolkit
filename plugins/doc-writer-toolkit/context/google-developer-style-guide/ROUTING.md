@@ -18,6 +18,7 @@ Load this file first. Then open only the smallest matching set.
 | Diagram, screenshot, figure, or alt text | `visuals/images-and-media.md` | structural |
 | Link, cross-reference, or anchor | `linking/` | structural |
 | API reference | `technical-content/api-reference-comments.md` | structural |
+| Several method, function or endpoint descriptions on one page (consistent verbs, no "This method is used to") | `language/reference-verbs.md` | structural |
 | Inline code or code sample | `technical-content/code-in-text-and-samples.md` | structural |
 | Command line or command output | `technical-content/command-line-syntax.md` | structural |
 | Placeholder | `technical-content/placeholders.md` | structural |

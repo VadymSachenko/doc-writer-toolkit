@@ -61,7 +61,7 @@ A writer takes a UI label from the store, not from a screenshot:
 - `ui-labels.mjs lookup "<UA text>"` shows whether the string is a label, with its key and its string in each locale (`--locales tr,kk` to choose).
 - `ui-labels.mjs lookup --search "<text>"` searches keys and UA and EN strings, to find the exact wording of a control.
 
-A match is written verbatim in bold. No match means the text is not in the app's dictionaries: it may be server text, a hardcoded string, or a paraphrase. Writers don't edit the page state's `spans`. Binding a span to a key is the job of `locale-translator`'s binding pass.
+A match is written verbatim in bold, except for decorative terminal punctuation, which leaves the bold span (`formatting-conventions.md` Ж1a: `Create!` → **Create**). The store keeps the exact string. No match means the text is not in the app's dictionaries: it may be server text, a hardcoded string, or a paraphrase. Writers don't edit the page state's `spans`. Binding a span to a key is the job of `locale-translator`'s binding pass.
 
 ## What this procedure never does
 

@@ -1,6 +1,6 @@
 ---
 name: internal-links
-description: The single shared contract for building, repairing, and validating page-to-page documentation links as site-root-relative URLs. Referenced by every skill that creates, repairs, or validates internal links (concept-doc-writer, user-guide-writer, api-doc-writer, doc-alignment-checker, doc-translator, and the fix-doc-todos command) — never copy this algorithm into a skill file.
+description: The single shared contract for building, repairing, and validating page-to-page documentation links as site-root-relative URLs. Referenced by every skill that creates, repairs, or validates internal links (concept-doc-writer, user-guide-writer, api-doc-writer, doc-page-updater, doc-alignment-checker, doc-translator, and the fix-doc-todos command) — never copy this algorithm into a skill file.
 metadata:
   type: reference
 ---
@@ -118,6 +118,8 @@ This is a structural check only: it never looks for the target file.
 
 - **Authoring** skills (`concept-doc-writer`, `user-guide-writer`, `api-doc-writer`) build every new
   page-to-page link with this algorithm from the start, from the target page's pair.
+- **Updating** (`doc-page-updater`) builds a link it adds the same way, and leaves existing links outside its
+  blocks as they are.
 - **Repair** (the `/fix-doc-todos` command) rewrites a relative or extensioned page link to the algorithm's output.
 - **Translation** (`doc-translator`) **preserves an already-correct route verbatim** — an EN page links
   to the same site-root-relative path as its UA source (the locales share one path; see

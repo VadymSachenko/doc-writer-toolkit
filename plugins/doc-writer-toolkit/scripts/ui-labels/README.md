@@ -99,10 +99,12 @@ span           class  key                 ru            tr            kk
 Нема такого    ?      no match
 ```
 
-- Matching is exact, then normalized (case, whitespace, trailing `:` `.` `…`), then placeholder patterns.
+- Matching is exact, then normalized (case, whitespace, trailing `:` `.` `…` `!` `?`), then placeholder patterns.
 - Application keys beat `lib.*` keys with the same strings. A `lib.*` key whose strings differ from every application key stays a candidate (`ambiguous`): the same UA text can be a library control, such as a date picker's OK, that the app's own button translates differently.
 - Several keys with identical strings in the requested locales are `label` (`status: identical-targets`; `key` is just the first of the candidates, the others are in `alsoKeys`). **`key` must not be used as the binding in that case.** Choosing among the candidates by the page's namespace is the binding pass's job (Requirement 3, criterion 2). Binding to whichever key sorts first would make a later rename of a sibling key skip the page, or patch it wrongly.
 - Several keys with different strings are `?` with `status: ambiguous` and the candidates. The binding pass chooses.
+- An exact hit also lists, in `looseKeys`, the keys that only the normalized form reaches: `**Видалити**` matches a button `Видалити` exactly, and a dialog title `Видалити?` loosely. A page that drops the decoration may mean either, so the binding pass checks them.
+- A label that is only punctuation (`?`, `…`) matches exactly or not at all.
 - `--json` gives the full structure, including `overlay` (the branch a value came from) and `missingIn`.
 
 `lookup` only matches spans against the dictionary. It does not decide label vs term vs emphasis. That needs the page context and belongs to the binding pass.
@@ -114,6 +116,8 @@ span           class  key                 ru            tr            kk
 1. Replaces `**old**` with `**new**` outside fenced code blocks, in the language each string belongs to: the UA page, the EN page and every locale page that exists, all in the page's own pair (its UA root, EN root and locale roots). When a span bound to the changed key has decisions scoped to headings, only the sections where that key applies are patched; the sections of each file pair with UA by position, and a file whose headings don't line up is reported in `unpatched`.
 2. Renames the span in the state file (a scoped key keeps its heading) and rebinds rekeyed keys.
 3. Advances each locale's `sourceBlob` to the patched UA blob **only if** it equalled the UA blob before the patch, so a translation that was already stale stays stale. Sets `labelSnapshot` when every patch for that locale succeeded.
+
+A span that dropped the label's decorative punctuation (`**Створити**` bound to `Створити!`) is not found yet: `sync` looks for `**old**` only, reports the page in `notFound`, and the locale `labels` check then blocks `record` until it is patched by hand.
 
 It never patches a page when any of its files has uncommitted changes (reported in `skipped`; the diff stays pending). Run it again after committing. It is idempotent: a string already at its new value is reported as `alreadyCurrent`.
 
