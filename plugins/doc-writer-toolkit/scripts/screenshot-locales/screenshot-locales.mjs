@@ -7,17 +7,21 @@ import { resolveManifest, failShot, promoteManifest, manifestStatus } from './li
 
 const USAGE = `screenshot-locales <command> [<manifest>] [options]
 
+Exit codes: 0 ok · 1 a set was not promoted, or a shot is not complete · 2 configuration or input problem (ask the
+user) · 3 unexpected error (stop and report it)
+
 Commands
   config                 The screenshot locales, how the app switches between them, and each locale's folder per
                          root pair. multilocale: false when no 'Screenshot locales:' is declared. Exit 2 lists every
                          problem (a locale docusaurus.config doesn't have, a missing switch token).
   resolve <manifest>     Fills each shot's required locales, staged paths and output paths; sets the shots to capture
-                         to pending and deletes their leftover staged files. Writes nothing if anything is unresolved.
+                         to pending and deletes their leftover staged files. Without --shot, only shots never resolved.
+                         Writes nothing if anything is unresolved or unsafe (an output folder through a symlink).
   fail <manifest>        Records that one locale of a shot could not be captured: --shot <id> --locale <l> --reason <t>.
-  promote <manifest>     Moves each complete staged set into place, all locales or none. A shot with a failed or
-                         missing locale keeps its previous images; its staged files are discarded. Exit 1 if any.
-  status <manifest>      Per shot: complete, pending, failed or mixed (some locales have their image, some don't).
-                         Exit 1 unless every shot is complete.
+  promote <manifest>     Moves each complete staged set into place, all locales of the round or none. A shot with a
+                         failed or missing locale keeps its previous images; its staged files are discarded. Exit 1 if any.
+  status <manifest>      Per shot: complete, pending, failed, mixed (some locales have their image, some don't) or
+                         interrupted (an earlier image left in staging). Exit 1 unless every shot is complete.
 
 Options (default: the 'Documentation toolkit configuration' block of <root>/CLAUDE.md)
   --root <dir>             docs repo root (default: cwd)
@@ -25,7 +29,8 @@ Options (default: the 'Documentation toolkit configuration' block of <root>/CLAU
   --docusaurus-config <f>  path to the Docusaurus config
   --ua-root <dir> --en-root <dir>   the primary root pair's content roots
 config:   --locales <list>   an explicitly locale-scoped request: each must be a declared screenshot locale
-resolve:  --shot <ids>       the shots to (re)capture (default: every shot not committed in all its locales)  --dry-run
+resolve:  --shot <ids>       the shots to (re)capture (default: only the shots never resolved)  --dry-run
+          --locales <list>   with --shot: a one-off locale-scoped request (the other locales must be committed)
 promote:  --shot <ids>  --dry-run
 `;
 
@@ -97,7 +102,7 @@ main().then(
       process.exitCode = 2;
     } else {
       log(e);
-      process.exitCode = 1;
+      process.exitCode = 3;
     }
   },
 );

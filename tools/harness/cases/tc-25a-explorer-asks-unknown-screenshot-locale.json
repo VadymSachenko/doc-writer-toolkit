@@ -1,6 +1,6 @@
 {
   "id": "tc-25a-explorer-asks-unknown-screenshot-locale",
-  "description": "The host declares Screenshot locales uk, en, de, but docusaurus.config has only uk and en: app-explorer stops at Step 0, names de as a locale it can't place, asks instead of guessing a folder, and writes nothing.",
+  "description": "The host declares Screenshot locales uk, en, de, but docusaurus.config has only uk and en: app-explorer stops at Step 0, names de as a locale it can't place, asks instead of guessing a folder, and writes nothing. It asks before the tool checks, so it doesn't stop for the missing Playwright server (which main does).",
   "fixture": {
     "shape": "single"
   },
@@ -24,6 +24,13 @@
       "type": "match",
       "path": "output",
       "pattern": "\\bde\\b[^\\n]{0,160}(docusaurus|not (a )?(configured|declared|listed)|isn.t (configured|listed|declared)|unknown|can.t be (derived|placed|resolved))|docusaurus[^\\n]{0,160}\\bde\\b",
+      "flags": "i"
+    },
+    {
+      "name": "does not stop for the missing Playwright server",
+      "type": "no-match",
+      "path": "output",
+      "pattern": "Playwright[^\\n]{0,120}(not (available|connected|reachable)|unavailable|isn.t (available|connected)|missing|no [^\\n]{0,20}server)|(no|missing)[^\\n]{0,40}Playwright",
       "flags": "i"
     },
     {

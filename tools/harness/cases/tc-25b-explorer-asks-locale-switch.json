@@ -1,6 +1,6 @@
 {
   "id": "tc-25b-explorer-asks-locale-switch",
-  "description": "The host declares Screenshot locales uk, en with no Locale switch: app-explorer stops at Step 0 and asks how the app changes its UI language, before any capture, and writes nothing.",
+  "description": "The host declares Screenshot locales uk, en with no Locale switch: app-explorer stops at Step 0 and asks how the app changes its UI language, before any capture, and writes nothing. It asks before the tool checks, so it doesn't stop for the missing Playwright server (which main does).",
   "fixture": {
     "shape": "single"
   },
@@ -23,7 +23,14 @@
       "name": "asks for the locale switch",
       "type": "match",
       "path": "output",
-      "pattern": "Locale switch|(switch|change)[^\\n]{0,60}(UI )?(language|locale)",
+      "pattern": "Locale switch|how (does )?the app (switch|change)(es|s)? (its )?(UI )?language",
+      "flags": "i"
+    },
+    {
+      "name": "does not stop for the missing Playwright server",
+      "type": "no-match",
+      "path": "output",
+      "pattern": "Playwright[^\\n]{0,120}(not (available|connected|reachable)|unavailable|isn.t (available|connected)|missing|no [^\\n]{0,20}server)|(no|missing)[^\\n]{0,40}Playwright",
       "flags": "i"
     },
     {

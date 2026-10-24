@@ -1,6 +1,6 @@
 {
   "id": "tc-25d-markers-recapture-keeps-set",
-  "description": "Two screenshot locales, a recapture marker, and no Playwright MCP server to capture with: resolve-markers keeps the marker and leaves both the UA and the EN image as they were, so no locale is half-updated.",
+  "description": "Negative control (passes on main too, since there is no capture tool): with two screenshot locales and a recapture marker, resolve-markers keeps the marker and leaves both the UA and the EN image as they were. It guards against a change that writes or promotes something without a capture.",
   "fixture": {
     "shape": "single"
   },

@@ -4,7 +4,7 @@ Apply these rules whenever taking screenshots via Playwright: inside `app-explor
 
 These rules govern *how* to capture. For *which* screenshots to select and embed in a doc page, see `screenshot-selection.md`.
 
-These rules cover one shot in one locale. When the host declares `Screenshot locales:`, every capture goes through `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-locales.md`: it runs this file once per locale and gives each shot its `path`, a staged path rather than the live `.assets/` file. Without that declaration, a capture goes into the page's `.assets/`, as described here.
+These rules cover one shot in one locale. When the host declares `Screenshot locales:`, every capture goes through `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-locales.md`: it runs this file once per locale and gives each shot its `path`, a staged path rather than the live `.assets/` file. Without that declaration, a capture goes into the `.assets/` folder the consuming skill names, as described here.
 
 ---
 

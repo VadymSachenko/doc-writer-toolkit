@@ -148,7 +148,7 @@ export function configView(cfg) {
   if (!cfg.multilocale) {
     return {
       multilocale: false,
-      message: "No 'Screenshot locales:' declared: capture once, into the page's own .assets/ (screenshot-capture.md). No manifest, no staging.",
+      message: "No 'Screenshot locales:' declared: capture once, into the .assets/ folder the consuming skill names (screenshot-capture.md). No manifest, no staging.",
     };
   }
   return {

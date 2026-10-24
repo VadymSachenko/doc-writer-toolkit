@@ -176,7 +176,7 @@ test('resolve writes nothing when a shot cannot be placed', async () => {
   const messages = r.out.problems.map((p) => p.message).join('\n');
   assert.match(messages, /under no declared UA content root/);
   assert.match(messages, /image file name with no folder/);
-  assert.match(messages, /not a declared screenshot locale/);
+  assert.match(messages, /locale-scoped request is one-off/);
   assert.match(messages, /both write/);
   assert.match(messages, /Two shots have the shotId 'e'/);
   assert.equal(await h.read(MANIFEST), before);
@@ -253,19 +253,144 @@ test('a missing capture blocks the set like a recorded failure', async () => {
   assert.equal(await lexists(path.join(h.root, UK_LIVE)), false, 'no uk image without its en twin');
 });
 
-test('a locale-scoped shot replaces that locale only', async () => {
+async function committedSet(h) {
+  await h.write(MANIFEST, manifest());
+  await cli(h.root, 'resolve', MANIFEST);
+  await h.write(`${STAGE}/uk.png`, 'first uk');
+  await h.write(`${STAGE}/en.png`, 'first en');
+  assert.equal((await cli(h.root, 'promote', MANIFEST)).code, 0);
+}
+
+test('a locale-scoped request is one-off: it replaces that locale only, and the next default round needs every locale', async () => {
   const h = await host();
-  await h.write(UK_LIVE, 'previous uk');
-  await h.write(EN_LIVE, 'previous en');
-  await h.write(MANIFEST, manifest([shot({ locales: ['en'] })]));
-  const r = await cli(h.root, 'resolve', MANIFEST);
-  assert.deepEqual(r.out.shots[0].requiredLocales, ['en']);
+  await committedSet(h);
+  const r = await cli(h.root, 'resolve', MANIFEST, '--shot', 'filters-pane', '--locales', 'en');
+  assert.equal(r.code, 0, JSON.stringify(r.out));
+  assert.deepEqual(r.out.shots[0].toCapture, ['en']);
+  assert.deepEqual(r.out.shots[0].requiredLocales, ['uk', 'en']);
+  assert.deepEqual(r.out.shots[0].status, { uk: 'committed', en: 'pending' });
   await h.write(`${STAGE}/en.png`, 'new en');
   assert.equal((await cli(h.root, 'promote', MANIFEST)).code, 0);
-  assert.equal(await h.read(UK_LIVE), 'previous uk');
+  assert.equal(await h.read(UK_LIVE), 'first uk');
   assert.equal(await h.read(EN_LIVE), 'new en');
+  const s = JSON.parse(await h.read(MANIFEST)).scenarios[0].shots[0];
+  assert.equal(s.locales, undefined);
+  assert.equal(s.captureLocales, undefined, 'the scope is gone after the promotion');
   const st = await cli(h.root, 'status', MANIFEST);
-  assert.deepEqual(st.out.shots[0].missingLocales, [], 'a scoped shot is not short of locales');
+  assert.equal(st.out.shots[0].state, 'complete');
+  const next = await cli(h.root, 'resolve', MANIFEST, '--shot', 'filters-pane');
+  assert.deepEqual(next.out.shots[0].toCapture, ['uk', 'en']);
+});
+
+test('a locale-scoped request never starts a partial set', async () => {
+  const h = await host();
+  await h.write(MANIFEST, manifest());
+  let r = await cli(h.root, 'resolve', MANIFEST, '--shot', 'filters-pane', '--locales', 'en');
+  assert.equal(r.code, 2);
+  assert.match(r.out.problems.map((p) => p.message).join('\n'), /not committed in uk: a locale-scoped request would leave a partial set/);
+  r = await cli(h.root, 'resolve', MANIFEST, '--locales', 'en');
+  assert.equal(r.code, 2);
+  assert.match(r.out.problems[0].message, /name them with --shot/);
+});
+
+test('resolve without --shot keeps other shots: their captures, their failures and reasons', async () => {
+  const h = await host();
+  const second = shot({ shotId: 'export-dialog', file: 'export-dialog.png' });
+  await h.write(MANIFEST, manifest([shot(), second]));
+  await cli(h.root, 'resolve', MANIFEST);
+  await h.write(`${STAGE}/uk.png`, 'staged uk');
+  await cli(h.root, 'fail', MANIFEST, '--shot', 'export-dialog', '--locale', 'en', '--reason', 'the dialog does not open in en');
+  const m = JSON.parse(await h.read(MANIFEST));
+  m.scenarios[0].shots.push(shot({ shotId: 'columns', file: 'columns.png' }));
+  await h.write(MANIFEST, `${JSON.stringify(m, null, 2)}\n`);
+  const r = await cli(h.root, 'resolve', MANIFEST);
+  assert.equal(r.code, 0, JSON.stringify(r.out));
+  assert.deepEqual(r.out.shots.map((x) => x.toCapture), [[], [], ['uk', 'en']]);
+  assert.equal(await h.read(`${STAGE}/uk.png`), 'staged uk');
+  const after = JSON.parse(await h.read(MANIFEST)).scenarios[0].shots;
+  assert.equal(after[1].status.en, 'failed');
+  assert.equal(after[1].failureReason.en, 'the dialog does not open in en');
+});
+
+test('an output folder through a symlink is refused: resolve and promote exit 2, nothing moves', async () => {
+  const h = await host();
+  await h.write(UK_LIVE, 'previous uk');
+  await h.write(MANIFEST, manifest());
+  await fs.mkdir(path.join(h.root, PORTAL_EN, 'transactions'), { recursive: true });
+  await fs.symlink(path.join(h.root, 'portal/transactions/.assets'), path.join(h.root, PORTAL_EN, 'transactions/.assets'));
+  const r = await cli(h.root, 'resolve', MANIFEST);
+  assert.equal(r.code, 2);
+  const messages = r.out.problems.map((p) => p.message).join('\n');
+  assert.match(messages, /The en folder .* leads through a symlink to portal\/transactions\/\.assets/);
+  assert.match(messages, /\(en\) and shot 'filters-pane' \(uk\) would write the same file/);
+
+  // The link appears after resolve: promote refuses before it moves anything.
+  await fs.rm(path.join(h.root, PORTAL_EN, 'transactions/.assets'));
+  assert.equal((await cli(h.root, 'resolve', MANIFEST)).code, 0);
+  await h.write(`${STAGE}/uk.png`, 'new uk');
+  await h.write(`${STAGE}/en.png`, 'new en');
+  await fs.symlink(path.join(h.root, 'portal/transactions/.assets'), path.join(h.root, PORTAL_EN, 'transactions/.assets'));
+  const p = await cli(h.root, 'promote', MANIFEST);
+  assert.equal(p.code, 2);
+  assert.equal((await cli(h.root, 'status', MANIFEST)).out.shots[0].state, 'unsafe');
+  assert.match(p.out.error, /Nothing promoted: .*symlink/);
+  assert.equal(await h.read(UK_LIVE), 'previous uk');
+  assert.equal(await h.read(`${STAGE}/uk.png`), 'new uk');
+  assert.equal(await h.read(`${STAGE}/en.png`), 'new en');
+});
+
+test('a further locale whose .assets folder links to the EN folder is refused', async () => {
+  const h = await host({ extra: ['- **Screenshot locales:** `uk, en, de`', '- **Locale switch:** `url-prefix uk=/, en=/en/, de=/de/`'], locales: ['uk', 'en', 'de'] });
+  const deDir = 'i18n/de/docusaurus-plugin-content-docs-portal/current/transactions';
+  await h.write(EN_LIVE, 'previous en');
+  await fs.mkdir(path.join(h.root, deDir), { recursive: true });
+  await fs.symlink(path.join(h.root, PORTAL_EN, 'transactions/.assets'), path.join(h.root, deDir, '.assets'));
+  await h.write(MANIFEST, manifest());
+  const r = await cli(h.root, 'resolve', MANIFEST);
+  assert.equal(r.code, 2);
+  assert.match(r.out.problems.map((p) => p.message).join('\n'), /The de folder .* leads through a symlink/);
+  assert.equal(await h.read(EN_LIVE), 'previous en');
+});
+
+test('an interrupted promotion: the earlier image in staging is never deleted, and status says interrupted', async () => {
+  const h = await host();
+  await h.write(MANIFEST, manifest());
+  await cli(h.root, 'resolve', MANIFEST);
+  await h.write(`${STAGE}/en.png.previous`, 'earlier en');
+  const r = await cli(h.root, 'resolve', MANIFEST, '--shot', 'filters-pane');
+  assert.equal(r.code, 2);
+  assert.match(r.out.problems[0].message, /interrupted promotion/);
+  assert.equal(await h.read(`${STAGE}/en.png.previous`), 'earlier en');
+  const st = await cli(h.root, 'status', MANIFEST);
+  assert.equal(st.out.shots[0].state, 'interrupted');
+  assert.equal((await cli(h.root, 'promote', MANIFEST)).code, 2);
+  assert.equal(await h.read(`${STAGE}/en.png.previous`), 'earlier en');
+});
+
+test('promote --dry-run moves and writes nothing', async () => {
+  const h = await host();
+  await h.write(MANIFEST, manifest());
+  await cli(h.root, 'resolve', MANIFEST);
+  await h.write(`${STAGE}/uk.png`, 'new uk');
+  await h.write(`${STAGE}/en.png`, 'new en');
+  const before = await h.read(MANIFEST);
+  const r = await cli(h.root, 'promote', MANIFEST, '--dry-run');
+  assert.equal(r.code, 0);
+  assert.deepEqual(r.out.results[0].wouldPromote, ['uk', 'en']);
+  assert.equal(await h.read(MANIFEST), before);
+  assert.equal(await lexists(path.join(h.root, UK_LIVE)), false);
+  assert.equal(await h.read(`${STAGE}/en.png`), 'new en');
+});
+
+test('fail refuses a locale the round does not capture; an unexpected error exits 3', async () => {
+  const h = await host();
+  await committedSet(h);
+  await cli(h.root, 'resolve', MANIFEST, '--shot', 'filters-pane', '--locales', 'en');
+  const f = await cli(h.root, 'fail', MANIFEST, '--shot', 'filters-pane', '--locale', 'uk', '--reason', 'x');
+  assert.equal(f.code, 2);
+  assert.match(f.out.error, /not being captured in 'uk'/);
+  assert.equal((await cli(h.root, 'fail', MANIFEST, '--shot', 'filters-pane', '--locale', 'de', '--reason', 'x')).code, 2);
+  assert.equal((await cli(h.root, 'status', 'portal')).code, 3, 'a folder is not a manifest');
 });
 
 test('a symlink to the EN image is replaced, never written through', async () => {
@@ -328,10 +453,10 @@ test('resolve leaves a committed shot alone unless --shot names it', async () =>
   await h.write(`${STAGE}/en.png`, 'new en');
   await cli(h.root, 'promote', MANIFEST);
   let r = await cli(h.root, 'resolve', MANIFEST);
-  assert.equal(r.out.shots[0].toCapture, false);
+  assert.deepEqual(r.out.shots[0].toCapture, []);
   assert.equal(r.out.shots[0].status.uk, 'committed');
   r = await cli(h.root, 'resolve', MANIFEST, '--shot', 'filters-pane');
-  assert.equal(r.out.shots[0].toCapture, true);
+  assert.deepEqual(r.out.shots[0].toCapture, ['uk', 'en']);
   assert.deepEqual(r.out.shots[0].status, { uk: 'pending', en: 'pending' });
   assert.equal(await h.read(UK_LIVE), 'new uk', 'the live set stays until a new one is promoted');
   assert.equal((await cli(h.root, 'resolve', MANIFEST, '--shot', 'nope')).code, 2);
