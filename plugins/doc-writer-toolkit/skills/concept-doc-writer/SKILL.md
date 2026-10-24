@@ -31,6 +31,7 @@ Load these files at the start of the task. Do not load others unless the user re
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` — rank-0 project formatting conventions (what bold/italic/code font mean here, placeholder form, one-entity-one-render, code-entity vs. human concept). Outranks everything else loaded for this task, including this skill's own body. Loaded regardless of resolved language — it carries both a language-neutral core and a per-language section.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-selection.md` — shared screenshot selection procedure: three-folder model, four selection cases, sensitive-content screening, rename pattern, full-page vs. compact classification.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` — the shared page-to-page link contract (see the link rule in Step 5).
+- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/heading-anchors.md` — the shared heading-id contract: on a `uk` page every heading from `##` down ends with `{/* #id */}` (see the heading rule in Step 5).
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` — the shared slug/title/filename convention (used to name the output file and title in Step 8).
 
 **UA grammar — only when the resolved language is `uk`:**
@@ -124,6 +125,7 @@ Rules:
 - **Never invent facts.** If a fact is not in the sources or user answers, flag it with `{/* NEEDS CONFIRMATION: what's unclear */}` — don't guess.
 - **Apply the glossary** resolved in "Sources to load". Replace synonyms with the canonical term for the resolved language.
 - **No step-by-step procedures.** Instructions belong in user guides. Concept topics explain; they do not instruct.
+- **Heading ids (`uk` pages) follow the shared contract.** End every heading from `##` down with its `{/* #id */}` comment, and build every link to a heading from that id, exactly as `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/heading-anchors.md` prescribes. Do not restate its rules here.
 - **Internal links to other doc pages follow the shared contract.** Build every page-to-page link (in Prerequisites, Next steps, Related documents, or inline) exactly as `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` prescribes — site-root-relative, the UA URL prefix of the target page's pair joined to the target's path relative to that pair's content root, no `.md`/`.mdx`, anchors preserved. That file is authoritative for what is and isn't a page link (asset links `./.assets/…` and same-page anchors are exempt); do not restate its algorithm here.
 - **For flows and lifecycles:** prefer a Mermaid `sequenceDiagram` for multi-actor flows and a Mermaid `flowchart` for decision trees or status transitions.
 - **For screenshots:** only embed from `.assets/` (root) — never from `.assets/ref/`. Choose syntax based on the classification from Step 2:
@@ -157,6 +159,7 @@ Before writing to disk, check:
 - **Orient-before-define.** The first reader-visible prose paragraph (skip frontmatter, imports, and `{/* … */}` comments to find it) establishes scope/purpose/benefit before any standalone definition. A definition-first opening is allowed only when that definition also establishes scope and relevance. The opening does not merely repeat the title.
 - All chosen sections are complete; bare placeholders are either filled or removed
 - Next steps links only to user guides; Related documents links to other concepts or references
+- On a `uk` page, every heading from `##` down ends with a well-formed, unique `{/* #id */}` per `heading-anchors.md`, and every `#…` link to a heading uses an id that exists
 - Every link to another doc page follows `internal-links.md` (its pair's UA URL prefix + path, no `.md`); no `./`/`../` page links, no hardcoded `/docs/` (asset links `./.assets/…` are exempt)
 - The draft conforms to every rule in the style-guide topical files loaded per "Sources to load" (resolved via `style-guide-registry.md`) — check against those files directly, don't rely on memory of past drafts
 - **P1 — Inherited wording normalized.** For every heading and every bolded fragment, confirm it is not lifted from `.sources/` (a heading, a bold label, an entire phrase) without normalization. The interview/notes are a source of *facts*, not of *wording* — a heading or emphasis pattern copied verbatim from `sme-interview.md` is a defect even if the fact itself is correct.
