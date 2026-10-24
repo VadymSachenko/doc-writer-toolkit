@@ -37,6 +37,13 @@ After `extract-sme-screenshots` produces a pool of candidate screenshots and som
 
    Show the `→ published_as` mapping on the Kept line only where a link exists. Omit the `Warning:` block entirely when every renamed embed traced back through `published_as`.
 
+### Self-review before reporting
+
+- No file was deleted: every frame classified unused is now in `_unused/`, and the files an earlier run left there are still there.
+- No frame that the doc uses, by its own basename or through `published_as`, was moved.
+- `frames-index.json` has as many entries as before; each moved entry points into `_unused/`, with `published_as` and its other fields unchanged.
+- The report carries the warning exactly when frames were moved and an untraceable renamed embed exists (step 5).
+
 ## Non-negotiables
 
 - **Never delete.** Always move into `_unused/` — the user reviews and deletes that folder themselves when ready. This mirrors this project's own repos, where `Bash(rm:*)` is denied by policy in `.claude/settings.json`; this skill should behave the same way even in a project that doesn't have that rule.

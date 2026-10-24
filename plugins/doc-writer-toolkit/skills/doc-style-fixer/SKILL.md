@@ -103,6 +103,13 @@ Use judgment at the boundary; the four-or-more default is a starting point, not 
 - Never resolve a `{/* ToDo: ... */}` or `{/* NEEDS CONFIRMATION: ... */}` marker, even one adjacent to an applied fix. See the Scope section for the correct handler for each type.
 - Apply exactly what the confirmed finding specifies. Do not extend a fix to cover similar-looking text the report didn't flag, even in the same sentence.
 
+### Self-review before saving
+
+- The diff touches only the report's file, and only where an applied finding points (inside the Scope block's blocks when the report has one).
+- Every applied fix was confirmed, or its bucket was pre-approved by `apply:`; no bucket 3 finding was applied.
+- No `{/* ToDo */}` or `{/* NEEDS CONFIRMATION */}` marker was resolved or removed; fenced code, inline code and frontmatter are unchanged unless a finding names them.
+- Every applied bucket 2 fix is listed for the final report (Step 5).
+
 ## Step 5 — Final report
 
 - Counts: how many findings applied, how many skipped, how many still pending a human decision.
