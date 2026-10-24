@@ -1,0 +1,46 @@
+{
+  "id": "tc-30b-readiness-single-pair",
+  "description": "One pair: the readiness report has the primary roots and no pair key.",
+  "fixture": {
+    "shape": "single"
+  },
+  "prompt": "/{plugin}:check-section-readiness portal/transactions",
+  "options": {
+    "maxTurns": 40,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "type": "exists",
+      "path": "portal/transactions/.sources/section-readiness.json"
+    },
+    {
+      "type": "changed-only",
+      "paths": [
+        "portal/transactions/.sources/",
+        ".doc-toolkit/"
+      ]
+    },
+    {
+      "name": "contentRoot portal/",
+      "type": "match",
+      "path": "portal/transactions/.sources/section-readiness.json",
+      "pattern": "\\\"contentRoot\\\"\\s*:\\s*\\\"portal/\\\""
+    },
+    {
+      "name": "uaUrlPrefix /portal/",
+      "type": "match",
+      "path": "portal/transactions/.sources/section-readiness.json",
+      "pattern": "\\\"uaUrlPrefix\\\"\\s*:\\s*\\\"/portal/\\\""
+    },
+    {
+      "name": "no pair key",
+      "type": "no-match",
+      "path": "portal/transactions/.sources/section-readiness.json",
+      "pattern": "\\\"pair\\\"\\s*:"
+    }
+  ]
+}
