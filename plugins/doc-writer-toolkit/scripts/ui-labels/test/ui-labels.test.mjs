@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { diffSnapshots } from '../lib/diff.mjs';
 import { resolveLocaleFiles, ticketsFromBranch, parseSource, deriveLocaleRoot } from '../lib/config.mjs';
 import { replaceBold } from '../lib/sync.mjs';
+import { normalize } from '../lib/lookup.mjs';
 import { gitBlobHash } from '../lib/util.mjs';
 
 const run = promisify(execFile);
@@ -23,6 +24,15 @@ async function cli(cwd, ...args) {
   }
 }
 const git = (cwd, ...args) => run('git', ['-C', cwd, ...args]).then((r) => r.stdout.trim());
+
+test('normalize: decorative trailing punctuation goes, internal punctuation stays', () => {
+  assert.equal(normalize('Create!'), normalize('Create'));
+  assert.equal(normalize('What’s new?'), 'what’s new');
+  assert.equal(normalize('Статус:'), 'статус');
+  assert.equal(normalize('Save & close'), 'save & close');
+  assert.equal(normalize('Import/Export'), 'import/export');
+  assert.equal(normalize('v2.1'), 'v2.1');
+});
 
 test('diff: added / removed / changed / rekeyed', () => {
   const before = {
@@ -278,6 +288,21 @@ test('lookup: a library key with other strings than the app keys stays a candida
   const { results } = await runLookup({ labelsDir: dir }, { spans: ['OK', 'Зберегти'], locales: ['kk'] });
   assert.deepEqual([results[0].status, results[0].candidates.map((c) => c.key)], ['ambiguous', ['field.ok', 'lib.antd.DatePicker.lang.ok']]);
   assert.deepEqual([results[1].status, results[1].key, results[1].alsoKeys], ['unique', 'save', []]);
+});
+
+test('lookup: a stripped span matches the decorated label; an exact hit names the keys only the stripped form reaches', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ul-lookup-'));
+  const labels = {
+    uk: { 'btn.create': 'Створити!', 'btn.delete': 'Видалити', 'dialog.delete': 'Видалити?', 'hint.q': '?', 'hint.more': '…' },
+    kk: { 'btn.create': 'Құру!', 'btn.delete': 'Жою', 'dialog.delete': 'Жою керек пе?', 'hint.q': '?', 'hint.more': '…' },
+  };
+  await fs.writeFile(path.join(dir, 'meta.json'), JSON.stringify({ locales: ['uk', 'kk'], commit: 'x' }));
+  for (const [l, m] of Object.entries(labels)) await fs.writeFile(path.join(dir, `${l}.json`), JSON.stringify(m));
+  const { runLookup } = await import('../lib/lookup.mjs');
+  const { results } = await runLookup({ labelsDir: dir }, { spans: ['Створити', 'Видалити', '!'], locales: ['kk'] });
+  assert.deepEqual([results[0].status, results[0].match, results[0].key], ['unique', 'normalized', 'btn.create']);
+  assert.deepEqual([results[1].status, results[1].match, results[1].key, results[1].looseKeys], ['unique', 'exact', 'btn.delete', ['dialog.delete']]);
+  assert.equal(results[2].status, 'no-match');
 });
 
 test('diff command compares two snapshot directories', async () => {

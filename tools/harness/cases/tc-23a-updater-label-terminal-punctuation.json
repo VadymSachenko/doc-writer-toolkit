@@ -1,0 +1,73 @@
+{
+  "id": "tc-23a-updater-label-terminal-punctuation",
+  "description": "Labels quoted from the app: the decorative ! and : leave the bold span (**Експортувати**, - **Отримання**: …), and the internal slash of **Імпорт/експорт** stays.",
+  "fixture": {
+    "shape": "single"
+  },
+  "setup": [
+    "mkdir -p portal/transactions/.sources",
+    "cat > portal/transactions/.sources/change-brief.md <<'EOF'\n# Change brief — export and import\n\n## Page\nportal/transactions/transactions.md\n\n## What changed\n- Under the list there is now a button the app shows as `Експортувати!`. Clicking it downloads the list as CSV. Add it as a sentence after «Список оновлюється автоматично.» — source: ticket #41\n- The same row has a menu the app shows as `Імпорт/експорт`. Mention it in the same paragraph: it opens the import settings. — source: ticket #41\n- The list has a section the app titles `Отримання:`. Add a one-item bullet list after that paragraph that defines it: incoming payments that haven't been confirmed yet. — source: ticket #41\n\n## Where in the page\nThe section «Перегляд транзакцій».\n\n## Screenshots\n- none\n\n## Terms\n- none\n\n## Do not touch\n- The sections «Фільтрування транзакцій» and «Повідомлення про платежі».\nEOF",
+    "git add -A && git commit -q -m 'Case setup'"
+  ],
+  "prompt": "use doc-page-updater with page `portal/transactions/transactions.md` and brief `portal/transactions/.sources/change-brief.md`",
+  "options": {
+    "maxTurns": 60,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)",
+      "Bash(node:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "button without its !",
+      "type": "match",
+      "path": "portal/transactions/transactions.md",
+      "pattern": "\\*\\*Експортувати\\*\\*"
+    },
+    {
+      "name": "no ! inside the bold",
+      "type": "no-match",
+      "path": "portal/transactions/transactions.md",
+      "pattern": "\\*\\*Експортувати!\\*\\*"
+    },
+    {
+      "name": "the ! is dropped, not moved outside",
+      "type": "no-match",
+      "path": "portal/transactions/transactions.md",
+      "pattern": "\\*\\*Експортувати\\*\\*!"
+    },
+    {
+      "name": "internal slash kept",
+      "type": "match",
+      "path": "portal/transactions/transactions.md",
+      "pattern": "\\*\\*Імпорт/експорт\\*\\*"
+    },
+    {
+      "name": "list definition: colon outside the bold",
+      "type": "match",
+      "path": "portal/transactions/transactions.md",
+      "pattern": "^\\s*[-*] \\*\\*Отримання\\*\\*:",
+      "flags": "m"
+    },
+    {
+      "name": "no colon inside the bold",
+      "type": "no-match",
+      "path": "portal/transactions/transactions.md",
+      "pattern": "\\*\\*Отримання:\\*\\*"
+    },
+    {
+      "name": "nothing else changed",
+      "type": "diff-lines",
+      "path": "portal/transactions/transactions.md",
+      "allow": "Експортувати|Імпорт/експорт|Отримання|CSV"
+    },
+    {
+      "type": "changed-only",
+      "paths": [
+        "portal/transactions/",
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}
