@@ -20,6 +20,7 @@ You are changing an existing, approved page so that it is true again after a pro
 - The template matching the page's type, to know where a new block belongs: `${CLAUDE_PLUGIN_ROOT}/context/doc-templates/ua-user-guide-template.md`, `ua-concept-topic-template.md`, `api-reference-template.md` (or the EN equivalents on an `en` project). Detect the type from the page's structure and frontmatter.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-ua.md` (or `glossary-en.md`) and `formatting-conventions.md` — terms and formatting are rank 0.
 - `${CLAUDE_PLUGIN_ROOT}/context/changed-blocks.md` — the block vocabulary used in the report.
+- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` — only when a block you write links to another page (Step 2.8).
 - **`uk` page only:** `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/native-ukrainian.md` — natural-Ukrainian rules for the sentences you write (Step 2.2).
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/heading-anchors.md` — heading ids on a `uk` page (Step 2.7).
 
@@ -52,6 +53,7 @@ Run the UI label check in `${CLAUDE_PLUGIN_ROOT}/context/ui-labels.md` before an
 5. **Frontmatter.** Update `last_update.date` if the page has it. Touch nothing else in the frontmatter unless the brief names the field (e.g. `description` must change because the page's scope changed).
 6. **MDX.** Never touch import lines or component props unless the brief names them. A renamed label names every prop that quotes it (Step 1.5).
 7. **Heading ids (`uk` pages).** A heading you add ends with its `{/* #id */}` comment, per `heading-anchors.md`. A heading you reword keeps its comment unchanged. Never add a comment to an existing heading unless the brief asks; when it does, rewrite the links to the old fragment in the same change (that file's rule 8) and list them in the report.
+8. **Links.** A link you add to another page is built as `internal-links.md` prescribes, from the target page's root pair: site-root-relative, no `.md`/`.mdx`, never `./` or `../`. A link the brief gives as a file path is converted the same way. An existing link outside your blocks stays as it is.
 
 ## Step 3 — Self-review before saving
 
@@ -63,6 +65,7 @@ Run the UI label check in `${CLAUDE_PLUGIN_ROOT}/context/ui-labels.md` before an
 - On a `uk` page, each sentence you wrote passes `native-ukrainian.md`'s §5 checklist, and its negative controls (§4b) are left alone.
 - Markers read as plain writer's notes.
 - Code blocks and inline code are byte-identical unless the brief changed them.
+- Every page link you added follows `internal-links.md`.
 - For every renamed label, search the saved page for the old string: each hit left is listed under "Not applied" with its reason.
 - Every marker that was on a line you changed is still on it, unless the brief resolved it (then it is reported).
 - On a `uk` page, every heading you added ends with a well-formed `{/* #id */}` that is unique on the page; no existing heading's comment changed.
