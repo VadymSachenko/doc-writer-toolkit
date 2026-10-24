@@ -1,0 +1,23 @@
+{
+  "id": "tc-01-translate-single-pair",
+  "description": "A host with one root pair: doc-translator writes the EN page at the pair's EN path, keeps link paths byte-identical, and names no pair. The skill may also stamp `last_update` on the UA page.",
+  "fixture": { "shape": "single" },
+  "setup": [
+    "git rm -q i18n/en/docusaurus-plugin-content-docs-portal/current/transactions/transactions.md && git commit -q -m 'Remove the EN page'"
+  ],
+  "prompt": "use doc-translator to translate `transactions/transactions`",
+  "options": {
+    "maxTurns": 40,
+    "permissionMode": "acceptEdits",
+    "allowedTools": ["Bash(git:*)"]
+  },
+  "assertions": [
+    { "type": "exists", "path": "i18n/en/docusaurus-plugin-content-docs-portal/current/transactions/transactions.md" },
+    { "type": "changed-only", "paths": ["i18n/en/docusaurus-plugin-content-docs-portal/current/transactions/", "portal/transactions/transactions.md", ".doc-toolkit/"] },
+    { "type": "frontmatter", "path": "i18n/en/docusaurus-plugin-content-docs-portal/current/transactions/transactions.md" },
+    { "name": "three H2 sections", "type": "match", "path": "i18n/en/docusaurus-plugin-content-docs-portal/current/transactions/transactions.md", "pattern": "^## [^\\n]+\\n[\\s\\S]*^## [^\\n]+\\n[\\s\\S]*^## [^\\n]+\\n", "flags": "m" },
+    { "name": "link to settings kept byte-identical", "type": "match", "path": "i18n/en/docusaurus-plugin-content-docs-portal/current/transactions/transactions.md", "pattern": "\\]\\(/portal/settings/settings\\)" },
+    { "name": "link to webhooks kept byte-identical", "type": "match", "path": "i18n/en/docusaurus-plugin-content-docs-portal/current/transactions/transactions.md", "pattern": "\\]\\(/webhooks/webhooks\\)" },
+    { "name": "no pair named in the output", "type": "no-match", "path": "output", "pattern": "api-reference" }
+  ]
+}
