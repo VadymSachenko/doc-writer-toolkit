@@ -251,6 +251,7 @@ Before writing to disk, check:
 - No UI element is the subject of an action in steps or Result blocks
 - References to the reference-information section in steps are inline links, not separate sentences — and each link's anchor matches the target heading's explicit `reference-information-<slug>` id (never a bare `#reference-information`)
 - On a `uk` page, every heading from `##` down ends with a well-formed, unique `{/* #id */}` per `heading-anchors.md`, and every `#…` link to a heading uses an id that exists
+- No template placeholder (`{slug}`, `{task-1-slug}`, any `{…}`) is left inside a heading id or a `#…` link, on a `uk` or an `en` page (`heading-anchors.md` rule 9)
 - Every link to another doc page follows `internal-links.md` (its pair's UA URL prefix + path, no `.md`); no `./`/`../` page links, no hardcoded `/docs/` (asset links `./.assets/…` and intra-page anchors `#…` are exempt)
 - No Атрибут/Опис reference table appears inside a numbered step or Accordion stage body
 - The Довідкова інформація table covers every visible field on each screen/form/table the user encounters, not only directly-interacted elements; read-only and display-only fields are included
