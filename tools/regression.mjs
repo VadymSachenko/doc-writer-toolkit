@@ -16,6 +16,7 @@ const STEPS = [
   { id: 'tools-tests', cmd: 'node', args: ['--test', 'tools/lint-plugin.test.mjs', 'tools/check-visibility.test.mjs', 'tools/harness/harness.test.mjs'] },
   { id: 'ui-labels', cmd: 'npm', args: ['test'], cwd: `${scripts}/ui-labels` },
   { id: 'locale-sync', cmd: 'npm', args: ['test'], cwd: `${scripts}/locale-sync` },
+  { id: 'doc-align', cmd: 'npm', args: ['test'], cwd: `${scripts}/doc-align` },
   { id: 'validate', cmd: claude, args: ['plugin', 'validate', 'plugins/doc-writer-toolkit'] },
   { id: 'visibility', cmd: 'node', args: ['tools/check-visibility.mjs'], notRunExit: 2 },
 ];
