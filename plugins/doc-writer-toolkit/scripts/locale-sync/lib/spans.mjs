@@ -56,7 +56,7 @@ export function uiIndex(labels) {
   for (const [key, text] of Object.entries(labels?.uk ?? {})) {
     if (isLib(key)) continue;
     const n = normalize(text);
-    index.set(n, [...(index.get(n) ?? []), key]);
+    if (n) index.set(n, [...(index.get(n) ?? []), key]);
   }
   return index;
 }

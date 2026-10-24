@@ -32,6 +32,12 @@
       "pattern": "\\*\\*Експортувати!\\*\\*"
     },
     {
+      "name": "the ! is dropped, not moved outside",
+      "type": "no-match",
+      "path": "portal/transactions/transactions.md",
+      "pattern": "\\*\\*Експортувати\\*\\*!"
+    },
+    {
       "name": "internal slash kept",
       "type": "match",
       "path": "portal/transactions/transactions.md",
