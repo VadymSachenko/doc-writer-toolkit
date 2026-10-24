@@ -1,6 +1,6 @@
 # Contributing to doc-writer-toolkit
 
-This repo is a Claude Code plugin marketplace. The deliverable is the Markdown/JSON content under `plugins/doc-writer-toolkit/` — there is no app to build and no lint config. Only the two Node scripts of the locale translation pipeline have tests (`npm test` in `scripts/ui-labels/` and `scripts/locale-sync/`). See [CLAUDE.md](CLAUDE.md) for a full architectural overview.
+This repo is a Claude Code plugin marketplace. The deliverable is the Markdown/JSON content under `plugins/doc-writer-toolkit/` — there is no app to build. A lint, a skill visibility check and the test suites of the two Node scripts run before every merge: see [Checks before a merge](#checks-before-a-merge). See [CLAUDE.md](CLAUDE.md) for a full architectural overview.
 
 ## How to add a skill
 
@@ -74,6 +74,28 @@ This repo is a Claude Code plugin marketplace. The deliverable is the Markdown/J
 - [ ] Sibling SKILL.md files — Scope cross-references updated if the name changed
 - [ ] CLAUDE.md — architecture section updated if the change affects the documented seam
 ```
+
+## Checks before a merge
+
+A merge to `main` is a release: hosts with auto-update follow `main`. Run the regression set from the repo root before you open a PR, and again on its last commit:
+
+```bash
+node tools/regression.mjs
+```
+
+It prints one row per step, with the exit code and the result line. A step whose tool is missing shows `not run` and fails the run; `--allow-not-run` accepts that. `--out <dir>` keeps each step's full output, and `--skip <step,...>` leaves steps out.
+
+| Step | Command | Checks |
+|---|---|---|
+| `lint` | `node tools/lint-plugin.mjs` | Skill and command frontmatter that strict YAML accepts; every `${CLAUDE_PLUGIN_ROOT}/…` path exists; every style-guide rule file is reachable from its `ROUTING.md` |
+| `tools-tests` | `node --test tools/lint-plugin.test.mjs tools/check-visibility.test.mjs` | The two tools' own tests |
+| `ui-labels`, `locale-sync` | `npm test` in each folder under `plugins/doc-writer-toolkit/scripts/` | The scripts' suites. `locale-sync` takes about two minutes |
+| `validate` | `claude plugin validate plugins/doc-writer-toolkit` | The CLI's own plugin checks |
+| `visibility` | `node tools/check-visibility.mjs` | Every skill and command loads with its description. It reads a copy under a sentinel name, so an installed copy can't stand in for the tree under review |
+
+The lint prints the gaps listed in `KNOWN_GAPS` (`tools/lint-plugin.mjs`) as `known`, and they don't fail it. When you close one, remove its entry: an entry that no longer occurs fails the lint.
+
+CI (`.github/workflows/check.yml`) runs the same steps on every pull request and every push to `main`. The two CLI steps run in their own job, with the CLI version pinned. Neither needs credentials.
 
 ## Validating JSON manifests
 

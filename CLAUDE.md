@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repository is
 
-This is the **source repository for a Claude Code plugin marketplace** (`doc-writer-toolkit`), not a documentation site itself. It contains skills, slash commands, and content-rule corpora that get installed into *other* Docusaurus documentation projects (currently only UniComPay's). There is no app to build and no lint config — the deliverable is the Markdown/JSON content under `plugins/doc-writer-toolkit/`, consumed by Claude Code at runtime in a different repo. The only tests are those of the two Node scripts behind the locale translation pipeline (see Commands).
+This is the **source repository for a Claude Code plugin marketplace** (`doc-writer-toolkit`), not a documentation site itself. It contains skills, slash commands, and content-rule corpora that get installed into *other* Docusaurus documentation projects (currently only UniComPay's). There is no app to build — the deliverable is the Markdown/JSON content under `plugins/doc-writer-toolkit/`, consumed by Claude Code at runtime in a different repo. The checks (a lint, a skill visibility check and the tests of the two Node scripts behind the locale translation pipeline) run with one command (see Commands).
 
 Because of this, most SKILL.md files reference paths like `docs/`, `partner-cabinet/`, `i18n/en/...`, and `CLAUDE.md` that **do not exist in this repo** — they refer to the target project where the plugin is installed. Do not go looking for those paths here; they're part of the runtime contract the skills expect the host project to satisfy.
 
@@ -12,6 +12,8 @@ Because of this, most SKILL.md files reference paths like `docs/`, `partner-cabi
 
 ```
 .claude-plugin/marketplace.json          # marketplace manifest (lists the plugin(s) below)
+tools/                                   # repo checks, not shipped: lint, skill visibility check, regression runner
+.github/workflows/check.yml              # CI: runs the checks on pull requests and pushes to main
 plugins/doc-writer-toolkit/
   .claude-plugin/plugin.json             # plugin manifest (name/description/author)
   skills/<name>/SKILL.md                 # one skill per directory
@@ -32,8 +34,9 @@ Two manifests gate everything: `marketplace.json` points at `./plugins/doc-write
 
 ## Commands used when developing this repo
 
-There's no build/lint/test tooling. What you'll actually run:
+There's no build. What you'll actually run:
 
+- **Run the regression set before a merge:** `node tools/regression.mjs` from the repo root runs the lint, the tools' tests, both script suites, `claude plugin validate` and the skill visibility check, and prints one row per step. CI runs the same on every pull request. See CONTRIBUTING.md, "Checks before a merge".
 - **Validate a manifest edit:** `python3 -m json.tool plugins/doc-writer-toolkit/.claude-plugin/plugin.json` (or `.claude-plugin/marketplace.json`) — just a JSON syntax check.
 - **Try a skill/command end-to-end:** it must be exercised from a *different* repo that has this plugin installed (see README's "Install into a project" section) or from a local checkout added via `extraKnownMarketplaces` pointing at a local path. There is no in-repo harness for running a skill.
 - **Test the locale pipeline scripts:** `npm test` in `plugins/doc-writer-toolkit/scripts/ui-labels/` and in `.../scripts/locale-sync/`. Offline (throwaway git repos and the `command` label adapter); the `locale-sync` suite takes about two minutes. Keep each script's `README.md` in step with its flags and output fields, and add a test with every behaviour change.
