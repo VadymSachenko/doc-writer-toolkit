@@ -20,6 +20,8 @@ You are changing an existing, approved page so that it is true again after a pro
 - The template matching the page's type, to know where a new block belongs: `${CLAUDE_PLUGIN_ROOT}/context/doc-templates/ua-user-guide-template.md`, `ua-concept-topic-template.md`, `api-reference-template.md` (or the EN equivalents on an `en` project). Detect the type from the page's structure and frontmatter.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-ua.md` (or `glossary-en.md`) and `formatting-conventions.md` — terms and formatting are rank 0.
 - `${CLAUDE_PLUGIN_ROOT}/context/changed-blocks.md` — the block vocabulary used in the report.
+- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` — only when a block you write links to another page (Step 2.8).
+- **`uk` page only:** `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/native-ukrainian.md` — natural-Ukrainian rules for the sentences you write (Step 2.2).
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/heading-anchors.md` — heading ids on a `uk` page (Step 2.7).
 
 Nothing else. Do not load style corpora; the reviewer does that afterwards.
@@ -40,16 +42,18 @@ Run the UI label check in `${CLAUDE_PLUGIN_ROOT}/context/ui-labels.md` before an
 2. Read the page once, whole. Note its type, section order, table shapes, how it names the UI elements the brief mentions, and any existing markers.
 3. For each brief item decide: **already present** (no edit — the page already states it; report it), **extend** (add a row, item, sentence or paragraph inside an existing block), **replace** (the page says X, the brief says Y with a source — Y wins; report "replaced X with Y (source …)"), **add section** (no existing block fits; place it where the template puts that kind of content), or **marker** (unknown).
 4. Honour the brief's "Do not touch" list absolutely.
+5. **A renamed UI label is one item that covers every place the page shows it.** Search the whole page for the old string and plan each hit: prose, bold labels, steps, table cells, Markdown image alt texts (`![…]`), `alt="…"` and `title="…"` props, captions (`<figcaption>`, an italic caption line) and admonitions. A hit where the word names something other than the renamed control (an operation, a section's topic) stays, and goes under "Not applied" with that reason. Never leave a hit unplanned for someone else to find.
 
 ## Step 2 — Edit
 
 1. **Smallest edit.** Change only the blocks your plan names. Every other sentence stays byte-identical — no reflow, no re-punctuation, no "while I'm here". Keep heading structure, order, tone and sentence patterns of the surrounding text.
-2. **Terms.** Use the glossary term. A UI label the brief quotes goes in exactly as the app shows it, in the page's language, with the project's formatting convention for labels. Record every new or renamed term for the report.
+2. **Terms and natural Ukrainian.** On a `uk` page, every sentence you write or rewrite follows `native-ukrainian.md`: a brief written in English is a source of facts, not a sentence template («Відкривається вікно…», not «Діалог … відкривається»; no «цей посібник проведе вас через…»). It doesn't license touching any other sentence. For a replace inside an existing sentence (a renamed label, a new value), change only the replaced words, even when the rest of that sentence breaks these rules. Use the glossary term. A UI label the brief quotes goes in exactly as the app shows it, in the page's language, with the project's formatting convention for labels. Record every new or renamed term for the report.
 3. **Markers.** For an unknown or unsourced item write `{/* NEEDS CONFIRMATION: <plain writer's note> */}` at the end of the affected line — a note a colleague would write, no tool or model names. A screenshot the brief marks as showing the old state gets `{/* ToDo: re-capture <file> */}` next to its reference.
 4. **Screenshots.** Reference new or re-captured files exactly by the names the brief gives, in the page's `.assets/` folder, with the project's screenshot embedding conventions. Never create or modify image files.
 5. **Frontmatter.** Update `last_update.date` if the page has it. Touch nothing else in the frontmatter unless the brief names the field (e.g. `description` must change because the page's scope changed).
-6. **MDX.** Never touch import lines or component props unless the brief names them.
+6. **MDX.** Never touch import lines or component props unless the brief names them. A renamed label names every prop that quotes it (Step 1.5).
 7. **Heading ids (`uk` pages).** A heading you add ends with its `{/* #id */}` comment, per `heading-anchors.md`. A heading you reword keeps its comment unchanged. Never add a comment to an existing heading unless the brief asks; when it does, rewrite the links to the old fragment in the same change (that file's rule 8) and list them in the report.
+8. **Links.** A link you add to another page is built as `internal-links.md` prescribes, from the target page's root pair: site-root-relative, no `.md`/`.mdx`, never `./` or `../`. A link the brief gives as a file path is converted the same way. An existing link outside your blocks stays as it is.
 
 ## Step 3 — Self-review before saving
 
@@ -58,8 +62,12 @@ Run the UI label check in `${CLAUDE_PLUGIN_ROOT}/context/ui-labels.md` before an
 - No item from "Do not touch" changed.
 - Table columns and list numbering are still consistent after the edit.
 - New terms match the glossary; UI labels match the brief exactly.
+- On a `uk` page, each sentence you wrote passes `native-ukrainian.md`'s §5 checklist, and its negative controls (§4b) are left alone.
 - Markers read as plain writer's notes.
 - Code blocks and inline code are byte-identical unless the brief changed them.
+- Every page link you added follows `internal-links.md`.
+- For every renamed label, search the saved page for the old string: each hit left is listed under "Not applied" with its reason.
+- Every marker that was on a line you changed is still on it, unless the brief resolved it (then it is reported).
 - On a `uk` page, every heading you added ends with a well-formed `{/* #id */}` that is unique on the page; no existing heading's comment changed.
 
 Fix anything that fails, then save.
@@ -86,7 +94,7 @@ Applied: <N> items · Already present: <N> · Markers added: <N> · Could not ap
 - <heading path>: <marker text>
 
 ## Not applied
-- <brief item> — <why: already present | contradicts "Do not touch" | no place in template — ask>
+- <brief item> — <why: already present | contradicts "Do not touch" | no place in template — ask | an old-label hit that names something else — ask>
 ```
 
 The "Changed sections" list is the input of `doc-style-reviewer` (scope mode) and `doc-translator` (sync mode) — see `${CLAUDE_PLUGIN_ROOT}/context/changed-blocks.md`.

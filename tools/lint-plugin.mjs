@@ -35,9 +35,6 @@ export const CORPORA = [
 // The repo is LF (.gitattributes); `--eol` is kept so older callers still work.
 export const EOL_CHECK = true;
 
-const UNREACHABLE = 'no ROUTING.md row reaches this rule file';
-const MSSG = `${PLUGIN}/context/microsoft-style-guide`;
-
 // Skills that write no file, so they need no self-review before saving.
 export const READ_ONLY_SKILLS = ['doc-alignment-checker', 'doc-style-reviewer', 'section-readiness'];
 
@@ -48,19 +45,6 @@ const contractGap = (skill, part, reason) => ({ file: `${PLUGIN}/skills/${skill}
 export const KNOWN_GAPS = [
   ...['cleanup-unused-screenshots', 'doc-style-fixer', 'extract-sme-screenshots']
     .map((s) => contractGap(s, 'self-review', 'no self-review written yet')),
-  ...[
-    `${PLUGIN}/context/google-developer-style-guide/language/reference-verbs.md`,
-    ...['acronyms', 'capitalization', 'numbers', 'word-choice/contractions', 'word-choice/plain-and-precise-language']
-      .map((f) => `${MSSG}/en-us/${f}.md`),
-    ...['accessibility', 'ai-and-bots', 'bits-and-bytes', 'cloud-computing', 'computers-and-devices', 'date-and-time',
-      'keys-and-shortcuts', 'mouse-interactions', 'security', 'special-characters', 'touch-and-pen', 'units-of-measure']
-      .map((f) => `${MSSG}/en-us/terminology/term-collections/${f}.md`),
-    ...['inclusive-language/inclusive-and-accessible', 'language-standards/abbreviations-and-acronyms',
-      'language-standards/capitalization-descriptors-prepositions', 'language-standards/grammar-style-overlay',
-      'language-standards/orthography-precedence', 'language-standards/punctuation-localization',
-      'locale-formats/numbers-and-placeholders']
-      .map((f) => `${MSSG}/uk-ua/${f}.md`),
-  ].map((file) => ({ file, message: UNREACHABLE, reason: 'no routing row yet' })),
 ];
 
 const KEY_LINE =/^([A-Za-z][\w-]*): (\S.*)$/;
