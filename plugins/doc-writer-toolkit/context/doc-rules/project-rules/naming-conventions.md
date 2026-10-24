@@ -25,7 +25,7 @@ semantic relationship, set out below.
    at `platform-rules/platform-rules.md`, not `platform-rules/index.md` and not
    `platform-rules/platformRules.md`.
 3. **Both locales use the same relative path and filename.** The Ukrainian source and its English
-   translation sit at the same path under their respective roots (the roots themselves are resolved
+   translation sit at the same path under the two roots of their root pair (the roots are resolved
    via `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`). The slug is derived once, from the English
    title, and shared — it is never re-derived from the Ukrainian title.
 

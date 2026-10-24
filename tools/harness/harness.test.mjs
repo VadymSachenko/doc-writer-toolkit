@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { makeFixture } from './fixture.mjs';
-import { changedPaths, check, frontmatterProblem, linkProblem, pageLinks } from './assertions.mjs';
+import { changedPaths, check, frontmatterProblem, headingIdProblems, linkProblem, pageLinks } from './assertions.mjs';
 import { builtInChecks, harnessSettings, loadCase, overLimit, parseUsage, readTranscript, summarize } from './run.mjs';
 import { compare, verdict } from './compare.mjs';
 import { coin, mask } from './blind.mjs';
@@ -55,6 +55,10 @@ test('assertions: files, patterns, frontmatter, links and the changed paths', ()
   assert.equal(run({ type: 'command', run: 'test -f new.md' }), true);
   assert.equal(run({ type: 'command', run: 'exit 3' }), false);
   assert.equal(run({ type: 'nonsense' }), false);
+  const calls = { ...ctx, skills: ['harness-x:extract-sme-screenshots'] };
+  assert.equal(check({ type: 'skill-called', skill: 'extract-sme-screenshots' }, calls).pass, true);
+  assert.equal(check({ type: 'skill-not-called', skill: 'extract-sme-screenshots' }, calls).pass, false);
+  assert.equal(check({ type: 'skill-not-called', skill: 'convert-sme-input' }, calls).pass, true);
 });
 
 test('assertions: helpers', () => {
@@ -68,6 +72,10 @@ test('assertions: helpers', () => {
   assert.match(frontmatterProblem('---\ntitle: T\n  date: 1\n---\n'), /no parent key/);
   assert.match(frontmatterProblem('---\nlast_update:\n  date: a: b\n---\n'), /date: value would not parse/);
   assert.deepEqual(changedPaths(' M a.md\n?? b/c.md\nR  old.md -> new.md\n'), ['a.md', 'b/c.md', 'new.md']);
+  const ok = '# Title\n\n## Статуси {/* #statuses */}\n\n### Нові {/* #new-statuses */}\n\nДив. [статуси](#statuses).\n\n```md\n## Code\n```\n';
+  assert.deepEqual(headingIdProblems(ok), []);
+  assert.deepEqual(headingIdProblems('## Old\n\n## A {/* #a */}\n\n## B {/* #a */}\n\n[x](#b)\n', ['Old']), ['repeated id: a', 'link to a missing id: #b']);
+  assert.deepEqual(headingIdProblems('## Bad {/* #Bad_Id */}\n## Plain\n'), ["no id: 'Bad {/* #Bad_Id */}'", "no id: 'Plain'"]);
 });
 
 const transcript = (sources, skills = []) => [

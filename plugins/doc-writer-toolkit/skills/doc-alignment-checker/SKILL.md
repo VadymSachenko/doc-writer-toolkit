@@ -9,27 +9,28 @@ You are checking whether a Ukrainian documentation page and its English counterp
 
 ## Scope
 
-- **In scope:** any Markdown/MDX page that exists in both the project's UA content root and its EN i18n root (see Path mapping).
-- **Out of scope:** content quality review, translation accuracy, style-guide compliance beyond the rules listed below. English-only reference sections with no UA counterpart (e.g. an API reference `docs/` tree in a project that splits UA and EN content into separate roots) are not checked here.
+- **In scope:** any Markdown/MDX page that exists under both roots of a declared root pair: its UA content root and its EN i18n root (see Path mapping). The caller may name either the UA or the EN page.
+- **Out of scope:** content quality review, translation accuracy, style-guide compliance beyond the rules listed below. A page outside every declared root pair is not checked here.
 
 ## Sources to load
 
 Load these files at the start of the task. Do not load others unless the user references them explicitly.
 
-- Follow `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` to resolve this project's **UA content root**, **EN i18n root**, and **UA URL prefix**. Do not assume `partner-cabinet/` or any other default.
+- Follow `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` to resolve the page's **root pair** (its **UA content root** and **EN i18n root**) and the **UA URL prefix of every declared pair**, for Check 5. Do not assume any default.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` — the shared page-to-page link contract. Check 5 checks links against this file's algorithm; do not restate it here.
+- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/heading-anchors.md` — the shared heading-id contract. Check 2 checks UA heading ids against it; do not restate it here.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` — the shared slug/title/filename convention. Check 11 checks title form and slug/filename agreement against this file; do not restate it here.
 - The UA page being checked (at the path resolved above).
 - The EN counterpart page (at the path resolved above).
 
 ## Path mapping
 
-Resolve the project's actual roots via `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` before doing anything else — do not assume `partner-cabinet/`.
+Resolve the page's root pair via `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` ("Resolving a page's root pair") before doing anything else — do not assume any folder. A UA or an EN path both identify the pair; the counterpart comes from the same pair.
 
 | Role | Path |
 |---|---|
-| Ukrainian | `<UA content root>/<relative-path>.md` |
-| English | `<EN i18n root>/<relative-path>.md` |
+| Ukrainian | `<pair's UA content root>/<relative-path>.md` |
+| English | `<pair's EN i18n root>/<relative-path>.md` |
 
 ## Step 0 — Identify main and secondary
 
@@ -58,11 +59,11 @@ Extract every heading (`#`, `##`, `###`, `####`) from both files in order. Count
 
 When comparing UA headings, strip the anchor comment (`{/* #slug */}`) before comparing structure. Additionally:
 
-- Every UA heading must have an `{/* #anchor */}` comment derived from the EN heading text in lowercase kebab-case. Flag any UA heading that is missing its anchor.
+- Every UA heading from `##` down must end with a well-formed `{/* #id */}` comment, per `heading-anchors.md`; the page title (`#`) takes none. The expected id is the one generated from the EN heading at the same position, or that heading's explicit `{#id}`. Flag a UA heading whose comment is missing or malformed, and an id used twice on the page.
 - EN headings must **not** have `{/* … */}` anchor comments.
 
 **Flag:** `[HEADING COUNT/LEVEL MISMATCH]` — list the position and differing headings side by side.
-**Flag:** `[UA HEADING MISSING ANCHOR]` — show the heading and the expected anchor.
+**Flag:** `[UA HEADING MISSING ANCHOR]` — show the heading and the expected anchor, and say that adding it changes the heading's fragment, so links to the old fragment change with it (`heading-anchors.md`, rule 8).
 
 ### Check 3 — Table structure
 
@@ -83,7 +84,7 @@ This check applies regardless of which file is main.
 
 ### Check 5 — Internal link prefixes
 
-Every page-to-page link in both files must match the output of the route-building algorithm in `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` for this project's declared **UA URL prefix** (resolved in Path mapping above). Flag any page link that uses a bare relative path (`./`, `../`), a hardcoded prefix, a leftover `.md`/`.mdx` extension, or a prefix other than the declared one. Per that file, this is a **structural match check only** — do not verify the target page exists, and do not touch asset links (`./.assets/…`), external URLs, same-page anchors, or MDX imports.
+Every page-to-page link in both files must match the output of the route-building algorithm in `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` for **one of the declared UA URL prefixes**, validated as that file's "Validating a route" prescribes. Per that file, this is a **structural match check only** — do not verify the target page exists, and do not touch asset links (`./.assets/…`), external URLs, same-page anchors, or MDX imports.
 
 **Flag:** `[LINK — INCORRECT PREFIX]` — show the full offending link and line number.
 
@@ -142,6 +143,7 @@ Format the report as follows:
 
 Main:      <path to main file>
 Secondary: <path to secondary file>
+Pair:      <pair id>          (only when the project declares more than one root pair)
 
 ### Bugs (must fix before publishing)
 - [FLAG TYPE] Description — line N (file)

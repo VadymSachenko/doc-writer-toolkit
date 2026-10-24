@@ -1,0 +1,42 @@
+{
+  "id": "tc-19-align-single-pair-prefix",
+  "description": "One pair: the checker flags the cross-pair link as a wrong prefix and leaves the portal link alone.",
+  "fixture": {
+    "shape": "single"
+  },
+  "prompt": "use doc-alignment-checker on `transactions/transactions`, main: ua",
+  "options": {
+    "maxTurns": 40,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "flags /webhooks/webhooks",
+      "type": "match",
+      "path": "output",
+      "pattern": "INCORRECT PREFIX[\\s\\S]{0,400}/webhooks/webhooks|/webhooks/webhooks[\\s\\S]{0,400}INCORRECT PREFIX"
+    },
+    {
+      "name": "does not flag the portal settings link",
+      "type": "no-match",
+      "path": "output",
+      "pattern": "INCORRECT PREFIX[^\\n]*/portal/settings/settings"
+    },
+    {
+      "name": "no Pair line",
+      "type": "no-match",
+      "path": "output",
+      "pattern": "^\\W*Pair:",
+      "flags": "m"
+    },
+    {
+      "type": "unchanged",
+      "ignore": [
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}
