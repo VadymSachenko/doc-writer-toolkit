@@ -87,7 +87,7 @@ It prints one row per step, with the exit code and the result line. A step whose
 
 | Step | Command | Checks |
 |---|---|---|
-| `lint` | `node tools/lint-plugin.mjs` | Skill and command frontmatter that strict YAML accepts; every `${CLAUDE_PLUGIN_ROOT}/…` path exists; every style-guide rule file is reachable from its `ROUTING.md` |
+| `lint` | `node tools/lint-plugin.mjs` | Skill and command frontmatter that strict YAML accepts; every `${CLAUDE_PLUGIN_ROOT}/…` path exists; every style-guide rule file is reachable from its `ROUTING.md`; no file has CRLF line endings |
 | `tools-tests` | `node --test tools/lint-plugin.test.mjs tools/check-visibility.test.mjs tools/harness/harness.test.mjs` | The tools' own tests, including the skill harness (no model calls) |
 | `ui-labels`, `locale-sync` | `npm test` in each folder under `plugins/doc-writer-toolkit/scripts/` | The scripts' suites. `locale-sync` takes about two minutes |
 | `validate` | `claude plugin validate plugins/doc-writer-toolkit` | The CLI's own plugin checks |
@@ -96,6 +96,14 @@ It prints one row per step, with the exit code and the result line. A step whose
 The lint prints the gaps listed in `KNOWN_GAPS` (`tools/lint-plugin.mjs`) as `known`, and they don't fail it. When you close one, remove its entry: an entry that no longer occurs fails the lint.
 
 CI (`.github/workflows/check.yml`) runs the same steps on every pull request and every push to `main`. The two CLI steps run in their own job, with the CLI version pinned. Neither needs credentials.
+
+## Line endings
+
+Every text file is LF, set by `.gitattributes`, and the lint fails on CRLF. The commit that converted the repo is listed in `.git-blame-ignore-revs`. GitHub skips it in blame by itself; to skip it locally, run this once:
+
+```bash
+git config blame.ignoreRevsFile .git-blame-ignore-revs
+```
 
 ## Validating JSON manifests
 

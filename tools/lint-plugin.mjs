@@ -5,7 +5,7 @@
 //   b. Every `${CLAUDE_PLUGIN_ROOT}/…` path named in the plugin's Markdown exists.
 //   c. Every style-guide rule file is reachable from a row of its corpus's ROUTING.md (consumers load nothing else).
 //      Gaps that exist today are listed in KNOWN_GAPS, each with the reason it's open.
-//   d. No tracked text file has CRLF line endings. Off until the repo moves to LF (EOL_CHECK); `--eol` runs it anyway.
+//   d. No tracked text file has CRLF line endings.
 // Prints `path:line: message` per finding and exits 1 when there is any. Known gaps print as `known (<reason>)`
 // and don't fail the run; a listed gap that no longer occurs does, so the list can only shrink.
 import fs from 'node:fs';
@@ -31,8 +31,8 @@ export const CORPORA = [
   },
 ];
 
-// Turned on when the repo moves to LF.
-export const EOL_CHECK = false;
+// The repo is LF (.gitattributes); `--eol` is kept so older callers still work.
+export const EOL_CHECK = true;
 
 const UNREACHABLE = 'no ROUTING.md row reaches this rule file';
 const MSSG = `${PLUGIN}/context/microsoft-style-guide`;
