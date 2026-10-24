@@ -36,6 +36,10 @@ async function findPage(root, rel) {
   return null;
 }
 
+// A label's decorative trailing punctuation, which a page drops from the bold span (`Статус:` → **Статус**, Ж1a).
+const TRAILING = /\s*[:.…!?]+$/u;
+const bare = (s) => s.replace(TRAILING, '');
+
 // Replaces **old** with **new** outside fenced code blocks, on the lines `keep(lineIndex)` accepts (default: all).
 // Returns the new text and the patched lines.
 export function replaceBold(text, oldText, newText, keep = null) {
@@ -212,6 +216,8 @@ export async function runSync(settings, { commit = false, dryRun = false, diffFi
       });
       return out;
     };
+    // Changes whose UA span was patched in its bare form, so the state file's span follows it.
+    const bareRenamed = new Set();
     // One change applied to one file: { text, hits, current, renamed, error }.
     const apply = (text, locale, v, c) => {
       if (category) return patchCategory(text, locale, v, categoryCtx(c));
@@ -223,7 +229,22 @@ export async function runSync(settings, { commit = false, dryRun = false, diffFi
         keep = (i) => only.has(fileMaps[locale].at[i]);
       }
       const r = replaceBold(text, v.old, v.new, keep);
-      return { ...r, current: !r.hits.length && replaceBold(text, v.new, v.new, keep).hits.length > 0, renamed: [] };
+      if (r.hits.length) return { ...r, current: false, renamed: [] };
+      // The page may write the label without its decorative punctuation: patch that bare span to the bare new string,
+      // unless another label in this locale is exactly the bare text, which the page may mean instead.
+      const oldBare = bare(v.old);
+      const newBare = bare(v.new) || v.new;
+      if (oldBare && oldBare !== v.old) {
+        const b = replaceBold(text, oldBare, newBare, keep);
+        if (b.hits.length) {
+          const other = Object.entries(store.labels[locale] ?? {}).find(([k, s]) => s === oldBare && k !== c.toKey && !isLib(k));
+          if (other) return { error: `the page writes the label without its punctuation (**${oldBare}**), which is also the label ${other[0]}: patch it by hand` };
+          if (locale === 'uk') bareRenamed.add(c.toKey);
+          return { ...b, current: false, renamed: [] };
+        }
+      }
+      const current = replaceBold(text, v.new, v.new, keep).hits.length > 0 || (oldBare !== v.old && replaceBold(text, newBare, newBare, keep).hits.length > 0);
+      return { ...r, current, renamed: [] };
     };
 
     for (const { key, change } of siblingChecks) {
@@ -294,7 +315,10 @@ export async function runSync(settings, { commit = false, dryRun = false, diffFi
         const scoped = scopedOf(text);
         const base = scoped?.span ?? text;
         // A category's span is its UA label: it only follows the label once the UA file really has the new value.
-        const renamedBase = uk?.old === base && uk.new && (!category || uaLabelOk) ? uk.new : base;
+        const renamedBase =
+          uk?.old === base && uk.new && (!category || uaLabelOk) ? uk.new
+          : uk?.old && uk.new && bareRenamed.has(c.toKey) && base === bare(uk.old) ? bare(uk.new) || uk.new
+          : base;
         const renamed = scoped ? `${renamedBase}@${scoped.scope}` : renamedBase;
         if (renamed !== text) delete newSpans[text];
         newSpans[renamed] = `label:${c.toKey}`;
