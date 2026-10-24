@@ -117,7 +117,7 @@ span           class  key                 ru            tr            kk
 2. Renames the span in the state file (a scoped key keeps its heading) and rebinds rekeyed keys.
 3. Advances each locale's `sourceBlob` to the patched UA blob **only if** it equalled the UA blob before the patch, so a translation that was already stale stays stale. Sets `labelSnapshot` when every patch for that locale succeeded.
 
-A span that dropped the label's decorative punctuation (`**Створити**` bound to `Створити!`) is not found yet: `sync` looks for `**old**` only, reports the page in `notFound`, and the locale `labels` check then blocks `record` until it is patched by hand.
+A span that dropped the label's decorative trailing punctuation (`**Статус**` bound to `Статус:`) is patched in that bare form, to the new string without its own trailing punctuation (`**Стан**` for `Стан:`), and the state file's span follows. When another label in that locale is exactly the bare text, the page may mean that label, so the span is reported in `unpatched` for a writer instead.
 
 It never patches a page when any of its files has uncommitted changes (reported in `skipped`; the diff stays pending). Run it again after committing. It is idempotent: a string already at its new value is reported as `alreadyCurrent`.
 

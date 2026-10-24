@@ -246,6 +246,45 @@ test('import → change → check → import → sync (fixture repo, command ada
   assert.equal((await cli(dir, 'check')).code, 0);
 });
 
+test('sync patches a span that dropped the label\'s decorative punctuation, unless another label is that bare text', async () => {
+  const { dir, write } = await fixtureRepo();
+  const en = 'i18n/en/docusaurus-plugin-content-docs/current';
+  const tr = 'i18n/tr/docusaurus-plugin-content-docs/current';
+  const base = {
+    uk: { 'filter.status': 'Статус:', 'filter.priority': 'Пріоритет:', 'col.priority': 'Пріоритет' },
+    en: { 'filter.status': 'Status:', 'filter.priority': 'Priority:', 'col.priority': 'Priority' },
+    tr: { 'filter.status': 'Durum:', 'filter.priority': 'Öncelik:', 'col.priority': 'Öncelik' },
+  };
+  for (const [l, m] of Object.entries(base)) await write(`labels/${l}.json`, m);
+  await write('docs/bare/bare.md', 'Виберіть **Статус** і **Пріоритет** у фільтрі.\n');
+  await write(`${en}/bare/bare.md`, 'Choose **Status** and **Priority** in the filter.\n');
+  await write(`${tr}/bare/bare.md`, 'Filtrede **Durum** ve **Öncelik** seçin.\n');
+  await write('.doc-toolkit/pages/bare/bare.json', { spans: { Статус: 'label:filter.status', Пріоритет: 'label:filter.priority' }, locales: {} });
+  await git(dir, 'add', '-A');
+  await git(dir, 'commit', '-qm', 'bare page');
+  assert.equal((await cli(dir, 'import')).code, 0);
+  await git(dir, 'add', '-A');
+  await git(dir, 'commit', '-qm', 'labels');
+
+  await write('labels/uk.json', { ...base.uk, 'filter.status': 'Стан:', 'filter.priority': 'Важливість:' });
+  await write('labels/en.json', { ...base.en, 'filter.status': 'State:', 'filter.priority': 'Importance:' });
+  await write('labels/tr.json', { ...base.tr, 'filter.status': 'Durum:', 'filter.priority': 'Önem:' });
+  assert.equal((await cli(dir, 'import')).code, 0);
+  await git(dir, 'add', '-A');
+  await git(dir, 'commit', '-qm', 'renamed labels');
+
+  const synced = await cli(dir, 'sync');
+  assert.equal(synced.code, 0, synced.stderr);
+  const mine = (list) => list.filter((p) => p.page === 'bare/bare');
+  assert.deepEqual(mine(synced.out.patched).map((p) => [p.locale, p.old, p.new]).sort(), [['en', 'Status:', 'State:'], ['uk', 'Статус:', 'Стан:']]);
+  assert.deepEqual(mine(synced.out.unpatched).map((p) => [p.locale, p.key]).sort(), [['en', 'filter.priority'], ['tr', 'filter.priority'], ['uk', 'filter.priority']]);
+  assert.ok(mine(synced.out.unpatched).every((p) => /without its punctuation/.test(p.reason)));
+  assert.equal(await fs.readFile(path.join(dir, 'docs/bare/bare.md'), 'utf8'), 'Виберіть **Стан** і **Пріоритет** у фільтрі.\n');
+  assert.equal(await fs.readFile(path.join(dir, `${en}/bare/bare.md`), 'utf8'), 'Choose **State** and **Priority** in the filter.\n');
+  const state = JSON.parse(await fs.readFile(path.join(dir, '.doc-toolkit/pages/bare/bare.json'), 'utf8'));
+  assert.deepEqual(state.spans, { Стан: 'label:filter.status', Пріоритет: 'label:filter.priority' });
+});
+
 test('sync --commit commits a snapshot that has no label diff, and only the snapshot', async () => {
   const { dir, write } = await fixtureRepo();
   assert.equal((await cli(dir, 'import')).code, 0);
