@@ -19,7 +19,7 @@ This skill does **not** write documentation pages. It does not plan structure. I
 1. `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — resolve content root and language.
 2. `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/value-realism.md` — mandatory rules for all values entered into the UI via Playwright. Load before any UI interaction step.
 3. `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-capture.md` — scope ladder, two-shot pattern, annotation patterns, blur patterns. Load before any screenshot step.
-4. The host project's `CLAUDE.md` — for `Admin UI:`, `API test collection:`, and credentials (via `.env`).
+4. The host project's `CLAUDE.md` — for `Admin UI:`, `API test collection:`, `API collection runner:`, and credentials (via `.env`).
 5. The section's `.sources/section-readiness.json` — to know which pages exist, their states, and marker counts.
 6. The section's existing `.sources/sme-interview.md` if present — to know what questions are already open.
 
@@ -35,11 +35,32 @@ Do not load style-guide corpora or templates — this skill writes no documentat
 
 Apply the Value realism rule from `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/value-realism.md`.
 
-## Step 0 — Resolve config and check prerequisites
+## Tools required
+
+This skill needs two concrete tools to do its work. Neither is assumed present — the preflight in Step 0 checks both and stops if either is missing.
+
+- **Navigation + screenshots — a Playwright MCP server.** Drives the browser (navigate, click, fill fields, capture screenshots) against the test-environment Admin UI. This is what the skill actually operates when it says "navigate to the screen" or "capture the screenshot".
+- **API seeding — a collection runner.** Runs the project's API test collection to set up test-env state (e.g. `newman` for a Postman collection, or whatever runner the project uses). This is what the skill operates when it says "call the API test collection".
+
+**Both are resolved from the host project's `CLAUDE.md` "Documentation toolkit configuration" block**, declared the same way `Admin UI:` and `API test collection:` are — for example:
+
+```md
+## Documentation toolkit configuration
+
+- **Admin UI:** playwright            # navigation/screenshot driver — Playwright MCP server
+- **API test collection:** .sources/<collection>.postman_collection.json
+- **API collection runner:** newman   # runner for the collection above
+```
+
+Defaults when a field is present but unspecified: **Playwright MCP** for navigation/screenshots, and a **collection runner** (`newman` or equivalent) for API seeding. Read the concrete tool from that config; do not hardcode a different one.
+
+## Step 0 — Preflight: resolve config and confirm tools are available
+
+Run these checks before anything else. If any check fails, **stop and report exactly what is missing and how to fix it** — do not attempt to explore or seed without its driving tool.
 
 1. Read `.env` at the project root. Extract the variables needed for this section (at minimum: `OPERATOR_BASE_URL`, `OPERATOR_USERNAME`, `OPERATOR_PASSWORD`). If any are missing, stop and list them.
-2. Confirm `Admin UI: playwright` is declared in `CLAUDE.md`. If not, stop — Playwright is required for this skill.
-3. Confirm the `API test collection:` field points at an existing file. If it's not declared but a `.sources/UCPay.postman_collection.json` (or similar) exists, use it and note that it is not yet declared in `CLAUDE.md` — offer to add the declaration.
+2. **Navigation tool preflight.** Confirm `Admin UI: playwright` is declared in `CLAUDE.md` **and** that a Playwright MCP server is actually connected/available in the current session. If the field is missing, stop: "app-explorer needs a navigation tool. Declare `Admin UI: playwright` in the host project's CLAUDE.md 'Documentation toolkit configuration' block." If the field is declared but no Playwright MCP server is reachable, stop: "Playwright MCP server is not available in this session — connect it before running app-explorer; this skill cannot navigate or capture screenshots without it."
+3. **Seeding tool preflight.** Confirm the `API test collection:` field points at an existing file. If it's not declared but a `.sources/*.postman_collection.json` or equivalent exists, use it and note that it is not yet declared in `CLAUDE.md` — offer to add the declaration. Then confirm a collection runner is available (the `API collection runner:` field, defaulting to `newman`). If no collection file can be found, stop: "app-explorer needs an API test collection to seed scenarios — declare `API test collection:` in CLAUDE.md pointing at the collection file." If a collection exists but no runner is available, stop: "No API collection runner is available — install/enable the declared runner (e.g. `newman`) before running app-explorer; this skill cannot seed scenarios without it."
 4. Read `.sources/section-readiness.json`. Extract: the section verdict, list of pages, marker counts, and whether `sme-interview.md` is present.
 5. Read `.sources/sme-interview.md` if present. Extract every open question or `{/* NEEDS CONFIRMATION */}` item mentioned — these are the specific things to watch for during exploration.
 
