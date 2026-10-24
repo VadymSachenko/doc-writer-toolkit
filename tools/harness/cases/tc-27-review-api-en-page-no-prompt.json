@@ -23,7 +23,8 @@
       "name": "no language prompt",
       "type": "no-match",
       "path": "output",
-      "pattern": "(?i)(isn't|is not|not) (among|one of) the (project's )?declared|which language|proceed anyway"
+      "pattern": "(isn't|is not|not) (among|one of) the (project's )?declared|which language|proceed anyway",
+      "flags": "i"
     },
     {
       "type": "unchanged",

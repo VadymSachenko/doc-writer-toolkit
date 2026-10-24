@@ -17,7 +17,8 @@
       "name": "reports the missing section",
       "type": "match",
       "path": "output",
-      "pattern": "(?i)Отримання транзакції|Get a transaction"
+      "pattern": "Отримання транзакції|Get a transaction",
+      "flags": "i"
     },
     {
       "name": "names the pair",

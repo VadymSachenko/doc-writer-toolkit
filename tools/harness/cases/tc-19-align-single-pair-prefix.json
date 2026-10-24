@@ -29,7 +29,8 @@
       "name": "no Pair line",
       "type": "no-match",
       "path": "output",
-      "pattern": "(?m)^\\W*Pair:"
+      "pattern": "^\\W*Pair:",
+      "flags": "m"
     },
     {
       "type": "unchanged",
