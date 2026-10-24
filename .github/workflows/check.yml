@@ -28,7 +28,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
-      - name: Lint the plugin (frontmatter, plugin-root paths, routing coverage)
+      - name: Lint the plugin (frontmatter, plugin-root paths, routing coverage, line endings)
         run: node tools/lint-plugin.mjs
       - name: Test the tools
         if: ${{ !cancelled() }}
