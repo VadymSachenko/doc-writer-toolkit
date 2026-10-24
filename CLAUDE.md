@@ -105,6 +105,10 @@ Three skills form a linear pipeline turning a raw meeting recording into doc-rea
 
 All three operate on `.sources/` and `.assets/` folders that live *inside the host project*, next to the doc page being worked on — not inside this repo.
 
+### Icon-only controls (Ж8 + `identify-ui-icon`)
+
+A control with no text is split along two halves. The rule — how a step names the control and shows its icon — is Ж8 in `context/doc-rules/project-rules/formatting-conventions.md`, which every writer, the updater, the translator and the reviewer already load; no skill restates it. The name comes only from evidence (a tooltip or `aria-label` that `app-explorer` records); without one, Ж8 prescribes a description plus a `NEEDS CONFIRMATION` marker. The lookup — glyph → Iconify id, SVG or screenshot crop — is the on-demand `identify-ui-icon` skill (`/identify-icon`), which the writers call by name only when a step hits such a control. The host picks the render with `Icon rendering:` (`iconify-component`, `iconify-svg`, `screenshot-crop` (default), `describe`), registered in `context/project-paths.md`.
+
 ### Section-authoring pipeline (v1 orchestration skills)
 
 Four skills move a whole menu *section* (not just one page) toward publish-ready. Each is invocable on its own and each has a thin command wrapper:

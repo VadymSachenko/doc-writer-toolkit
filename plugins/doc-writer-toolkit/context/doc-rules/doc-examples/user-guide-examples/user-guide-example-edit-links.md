@@ -13,7 +13,7 @@ Before you start, read the [reference information](#reference-information-edit-a
 
 ## Edit a link
 
-Navigate to the **Links** page, and for the link you want to edit, click <Icon icon="ic:sharp-edit" height="24" style={{ color: '#9564ff' }} /> **Edit**. This opens the link editing page.
+Navigate to the **Links** page, and for the link you want to edit, click the <Icon icon="ic:sharp-edit" height="20" /> **Edit** button. This opens the link editing page.
 
 The link editing process consists of two steps:
 
@@ -48,11 +48,11 @@ To edit flows, follow these steps:
 1. Edit existing flows:
    1. Click the flow you want to change.
    2. In the **Split traffic** field of the flow, change its value to `0`. To change the traffic percentage of one flow, you must have at least two flows available for redistributing the traffic.
-   3. To remove existing screens or add new ones, in the **Onboarding** and **Payment** sections, use the <Icon icon="ic:baseline-minus" height="24" style={{ color: '#868686' }} />**Remove** and <Icon icon="ic:baseline-plus" height="24" style={{ color: '#868686' }} />**Add screen** buttons.
+   3. To remove existing screens or add new ones, in the **Onboarding** and **Payment** sections, use the <Icon icon="ic:baseline-minus" height="20" /> **Remove** and <Icon icon="ic:baseline-plus" height="20" /> **Add screen** buttons.
    4. For **Flow name**, enter a new name for the flow.
 2. Add new flows:
-   1. To create a new flow, copy one of the existing flows by clicking <Icon icon="clarity:copy-line" height="24" style={{ color: '#868686' }} />**Copy**. This creates a new flow named `Variant_`*`SEQUENCE_LETTER`* with 0% traffic allocation. You can rename added flows as needed.
-   2. To remove existing screens or add new ones, in the **Onboarding** and **Payment** sections, use the <Icon icon="ic:baseline-minus" height="24" style={{ color: '#868686' }} />**Remove** and <Icon icon="ic:baseline-plus" height="24" style={{ color: '#868686' }} />**Add screen** buttons.
+   1. To create a new flow, copy one of the existing flows by clicking the <Icon icon="clarity:copy-line" height="20" /> **Copy** button. This creates a new flow named `Variant_`*`SEQUENCE_LETTER`* with 0% traffic allocation. You can rename added flows as needed.
+   2. To remove existing screens or add new ones, in the **Onboarding** and **Payment** sections, use the <Icon icon="ic:baseline-minus" height="20" /> **Remove** and <Icon icon="ic:baseline-plus" height="20" /> **Add screen** buttons.
 3. For each flow, in **Split traffic**, set the split traffic values so that all flows have 100% of the traffic in total.
 
 ![Link creation: Flows, Onboarding, and Payment sections](./.assets/link-editing-flows-onboarding-and-payment-sections.png)
@@ -64,7 +64,7 @@ To edit flows, follow these steps:
 
 ![Link editing: Flow details section](./.assets/link-editing-flow-details-section.png)
 
-5. To save changes, click <Icon icon="material-symbols:save" height="18" style={{ color: '#868686' }} />**SAVE**.
+5. To save changes, click the <Icon icon="material-symbols:save" height="20" /> **SAVE** button.
 
 ## Reference information: Edit a link
 

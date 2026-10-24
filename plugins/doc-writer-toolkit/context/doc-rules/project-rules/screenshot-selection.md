@@ -50,6 +50,9 @@ If the filename is non-descriptive (e.g., `image.png`, `image copy.png`, a rando
 | Side panel / filter panel | `-pane` | `filters-pane.png` |
 | Standalone form | `-form` | `add-receipt-form.png` |
 | Confirmation banner / toast | `-banner` | `receipt-uploaded-banner.png` |
+| Icon of an icon-only control (crop or SVG) | `-icon` | `delete-icon.png` |
+
+An icon file is not a screenshot of the page: it sits inline in a step, with the markup in Ж8 of `formatting-conventions.md`, not with the two embed forms below.
 
 Use the Bash tool: `mv "./.assets/old-name.png" "./.assets/new-name.png"`. Rename before drafting so all embed references use the final filename.
 

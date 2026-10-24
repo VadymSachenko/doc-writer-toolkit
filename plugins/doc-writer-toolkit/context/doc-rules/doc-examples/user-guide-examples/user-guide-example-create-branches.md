@@ -46,9 +46,9 @@ Before you start, read the [reference information](#reference-information-create
 
     :::info
 
-    To adjust screen sequence in the flow, drag screens up and down using the <Icon icon="material-symbols:drag-indicator" height="24" style={{ color: 'grey' }} /> **Drag me!** button.
+    To adjust screen sequence in the flow, drag screens up and down using the <Icon icon="material-symbols:drag-indicator" height="20" /> **Drag me** button.
 
-    To delete a redundant screen, click <Icon icon="mdi:delete-forever" height="24" style={{ color: '#ec5152' }} /> **Delete**.
+    To delete a redundant screen, click the <Icon icon="mdi:delete-forever" height="20" /> **Delete** button.
 
     :::
 

@@ -100,6 +100,7 @@ For each screen in the plan:
    - All visible UI elements: button labels, field names, column headers, status values, dropdown options, tab names. **Record every label exactly as the UI shows it — keep any decorative terminal punctuation (`Create!`, `Receiving:`, `What's new?`).** This is the "exact observed label" representation in `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` Ж1a: `app-notes.md` is evidence, so it preserves the literal wording. The writer applies Ж1a normalization (stripping decorative punctuation) when the label goes into prose — do **not** normalize here.
    - What happens in each state (empty, loaded, success, error)
    - Any warnings, banners, or contextual messages
+   - **Icon-only controls** (a control with no visible text): its place, its glyph in a few words, and its accessible name exactly as the UI gives it: the tooltip on hover, or the `aria-label` / `title` attribute, or `none`. Writers name the control from this only (`formatting-conventions.md` Ж8). If the DOM names the Iconify icon (an `icon` or `data-icon` attribute such as `mdi:delete-outline`), record that id too.
    - The exact wording of any label you are unsure about
 3. Before capturing, identify sensitive fields on the screen (financial amounts, IDs, card/account numbers, customer names and emails, internal hostnames). Apply blur per `screenshot-capture.md` Section 4 before shooting; restore after.
 4. Capture screenshots following `screenshot-capture.md`:
@@ -139,6 +140,7 @@ Write `.sources/app-notes.md` in the section folder. This is the evidence file e
 - Tabs: {name}, {name}
 - Statuses: {value}, {value}
 - Fields: {name}, {name}
+- Icon-only controls: {place} — {glyph} — name: {tooltip or aria-label, exact} | none — Iconify id: {id from the DOM} | none
 
 **Screenshots:** {filename.png}, {filename.png}
 **Screenshot locales:** {only when declared: per file, the locales promoted, and each failed locale with its reason}

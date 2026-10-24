@@ -93,7 +93,8 @@ For each `resolvable` marker:
 - Remove the `{/* NEEDS CONFIRMATION: ... */}` comment.
 - Replace the uncertain text with the confirmed answer.
 - Keep surrounding prose intact — only change what the marker flagged. On a `uk` page, the words you write follow `native-ukrainian.md` (source 8); the rest of the sentence stays as it is.
-- Use the exact UI label/term as observed, not a paraphrase — but when it goes into **prose inside a bold span**, apply Ж1a of `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md`: strip decorative terminal punctuation (`Create!` → **Create**, `Receiving:` → **Receiving**, `What's new?` → **What's new**) while preserving internal symbols (`Save & close` stays **Save & close**). The observed literal (with punctuation) stays the evidence in `app-notes.md`; the normalized form is what the page shows. If normalization leaves no useful label, follow the icon-only-control workflow instead.
+- Use the exact UI label/term as observed, not a paraphrase — but when it goes into **prose inside a bold span**, apply Ж1a of `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md`: strip decorative terminal punctuation (`Create!` → **Create**, `Receiving:` → **Receiving**, `What's new?` → **What's new**) while preserving internal symbols (`Save & close` stays **Save & close**). The observed literal (with punctuation) stays the evidence in `app-notes.md`; the normalized form is what the page shows. If normalization leaves no useful label, treat it as an icon-only control and follow Ж8 of the same file instead.
+- A Ж8 branch-3 marker (an icon-only control with no known name) that new evidence answers with a tooltip or `aria-label` becomes the branch-2 form: replace the description with the descriptor and the bold name, keep the icon markup as it is, and remove the marker.
 
 For each `screenshot-available` marker:
 - Remove the `{/* ToDo: add a screenshot */}` comment.
