@@ -1,6 +1,6 @@
 ---
 name: resolve-markers
-description: Resolves every {/* NEEDS CONFIRMATION */} and {/* ToDo */} marker in a section's doc pages automatically using whatever evidence is available — app-notes.md (if app-explorer has run), sme-interview.md, existing screenshots in .assets/, and direct app observation via Playwright. No questions asked when the answer can be found. Only stops for markers that genuinely cannot be answered from any available source. Use explicitly ("resolve-markers: docs/transactions", "use resolve-markers on the archive section").
+description: 'Resolves every {/* NEEDS CONFIRMATION */} and {/* ToDo */} marker in a section''s doc pages automatically using whatever evidence is available — app-notes.md (if app-explorer has run), sme-interview.md, existing screenshots in .assets/, and direct app observation via Playwright. No questions asked when the answer can be found. Only stops for markers that genuinely cannot be answered from any available source. Use explicitly ("resolve-markers: docs/transactions", "use resolve-markers on the archive section").'
 ---
 
 # resolve-markers

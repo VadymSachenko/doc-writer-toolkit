@@ -1,6 +1,6 @@
 ---
 name: api-doc-writer
-description: Writes API reference documentation pages for UniComPay following the authoring rules in CLAUDE.md. Use explicitly ("use api-doc-writer to document...", "api-doc-writer: write the Create payin transaction page"). Produces one endpoint per page following ${CLAUDE_PLUGIN_ROOT}/context/doc-templates/api-reference-template.md, with a mandatory interview phase before drafting. Saves to the project-declared API reference root. Not for user guides, concept topics, or narrative API pages (route those to concept-doc-writer).
+description: 'Writes API reference documentation pages for UniComPay following the authoring rules in CLAUDE.md. Use explicitly ("use api-doc-writer to document...", "api-doc-writer: write the Create payin transaction page"). Produces one endpoint per page following ${CLAUDE_PLUGIN_ROOT}/context/doc-templates/api-reference-template.md, with a mandatory interview phase before drafting. Saves to the project-declared API reference root. Not for user guides, concept topics, or narrative API pages (route those to concept-doc-writer).'
 ---
 
 # api-doc-writer
