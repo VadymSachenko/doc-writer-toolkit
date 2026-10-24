@@ -17,7 +17,7 @@ You are writing a procedural user guide page for the UniComPay partner cabinet, 
 Load these files at the start of the task. Do not load others unless the user references them explicitly.
 
 **Content language (resolve first — decides which of the remaining bullets apply):**
-- Follow `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` to resolve this project's declared `Content language:` (`uk`, `en`, or `uk,en`) for the target file, plus its **UA URL prefix** (needed to build absolute links to other doc pages — see the internal-link rule in Step 6). For `uk,en`, the target file's location relative to the declared UA content root / EN i18n root decides which language you're drafting in. If undeclared, follow that file's fallback (ask once, offer to persist).
+- Follow `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` to resolve this project's declared `Content language:` (`uk`, `en`, or `uk,en`) for the target file, plus the **UA URL prefix of each link target's root pair** (needed to build absolute links to other doc pages — see the internal-link rule in Step 6). For `uk,en`, the target file's location — under any pair's UA content root or under any pair's EN i18n root — decides which language you're drafting in. If undeclared, follow that file's fallback (ask once, offer to persist).
 
 **Templates (load the one matching the resolved language):**
 - `uk` → `${CLAUDE_PLUGIN_ROOT}/context/doc-templates/ua-user-guide-template.md` — Операції/Етапи structure.
@@ -57,7 +57,7 @@ Run the UI label check in `${CLAUDE_PLUGIN_ROOT}/context/ui-labels.md` before an
 
 ### Step 1 — Locate inputs
 
-Resolve this project's UA content root (or, on an `en` page, its EN i18n root — see `project-paths.md`) for the target location; do not assume `partner-cabinet/`. Ask the user for the target doc folder if not provided (e.g., `<content root>/transactions/manage-transactions/filter-transactions/`). Sources live inside that folder.
+Resolve the target page's root pair (for a new page, its folder's) via `project-paths.md` — its UA content root, or, on an `en` page, its EN i18n root; do not assume any folder. With more than one pair declared, name the pair you resolved. Ask the user for the target doc folder if not provided (e.g., `<content root>/transactions/manage-transactions/filter-transactions/`). Sources live inside that folder.
 
 **Each user guide page has its own `.assets/` folder**, co-located with the page file (e.g., `filter-transactions/.assets/`). If the folder does not exist, create it before copying any screenshots into it. Never place a page's screenshots in a parent folder's `.assets/` or in a shared assets directory — every page owns its own copy of the screenshots it embeds, even if those screenshots duplicate files from another page.
 
@@ -69,7 +69,7 @@ List the files present. Expected contents:
 - `.assets/*.png` — screenshots already selected and ready to embed in the doc.
 - `.assets/ref/*.png` — reference-only screenshots (read for context; never embed in the doc). This folder is optional. If it does not exist or is empty, treat all files directly in `.assets/` as both context and embeddable.
 
-Also check existing approved pages under the content root for contextual consistency — only after exhausting the source files. Do not copy structure or prose from them.
+Also check existing approved pages under the pair's content root for contextual consistency — only after exhausting the source files. Do not copy structure or prose from them.
 
 If neither `.sources/` nor `.assets/` exists, ask the user where the inputs are before proceeding.
 
@@ -208,7 +208,7 @@ Apply the template resolved in "Sources to load". Choose the structure decided i
 - **Active voice, second person — not the product as subject:** in procedural steps and Result blocks, always use the imperative or the second person; never a system/product noun ("the Partner", "Партнер") as the grammatical subject. See `formatting-conventions.md`'s sentence-style section for the resolved language.
 - **No concept explanations in procedure steps.** If background context is needed, link to a concept topic instead.
 - **Heading ids (`uk` pages) follow the shared contract.** End every heading from `##` down with its `{/* #id */}` comment, and build every link to a heading from that id, exactly as `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/heading-anchors.md` prescribes. Do not restate its rules here.
-- **Internal links to other doc pages follow the shared contract.** Build every page-to-page link exactly as `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` prescribes — site-root-relative, the declared UA URL prefix joined to the target's path relative to the content root, no `.md`/`.mdx`, anchors preserved (e.g. `#reference-information-add-cards`). That file is authoritative for what is and isn't a page link (asset links `./.assets/…` and intra-page anchors `#…` are exempt); do not restate its algorithm here.
+- **Internal links to other doc pages follow the shared contract.** Build every page-to-page link exactly as `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` prescribes — site-root-relative, the UA URL prefix of the target page's pair joined to the target's path relative to that pair's content root, no `.md`/`.mdx`, anchors preserved (e.g. `#reference-information-add-cards`). That file is authoritative for what is and isn't a page link (asset links `./.assets/…` and intra-page anchors `#…` are exempt); do not restate its algorithm here.
 - **No "you're signed in to the partner cabinet" as a prerequisite.** That is always assumed.
 - **Do not name the partner-cabinet context explicitly in page body text.** The reader is already in it. `uk`: avoid «кабінет партнера», use «меню» — wrong: «в розділі X у кабінеті партнера», right: «в меню X». `en`: avoid explicit "in the partner cabinet"; use "the menu" or the feature's own name instead.
 - **Voice:** the UI element must not be the subject of an action. The action happens to/in the object. ✅ "Transactions appear in the table." ⛔ "The table displays transactions." Applies to Result blocks too.
@@ -251,7 +251,8 @@ Before writing to disk, check:
 - No UI element is the subject of an action in steps or Result blocks
 - References to the reference-information section in steps are inline links, not separate sentences — and each link's anchor matches the target heading's explicit `reference-information-<slug>` id (never a bare `#reference-information`)
 - On a `uk` page, every heading from `##` down ends with a well-formed, unique `{/* #id */}` per `heading-anchors.md`, and every `#…` link to a heading uses an id that exists
-- Every link to another doc page follows `internal-links.md` (declared UA URL prefix + path, no `.md`); no `./`/`../` page links, no hardcoded `/docs/` (asset links `./.assets/…` and intra-page anchors `#…` are exempt)
+- No template placeholder (`{slug}`, `{task-1-slug}`, any `{…}`) is left inside a heading id or a `#…` link, on a `uk` or an `en` page (`heading-anchors.md` rule 9)
+- Every link to another doc page follows `internal-links.md` (its pair's UA URL prefix + path, no `.md`); no `./`/`../` page links, no hardcoded `/docs/` (asset links `./.assets/…` and intra-page anchors `#…` are exempt)
 - No Атрибут/Опис reference table appears inside a numbered step or Accordion stage body
 - The Довідкова інформація table covers every visible field on each screen/form/table the user encounters, not only directly-interacted elements; read-only and display-only fields are included
 - Every attribute with a defined set of values uses `<ul><li>` in its description cell, not comma-separated prose
@@ -296,7 +297,7 @@ Fix every issue found before saving.
 
 ### Step 9 — Save
 
-Save to `<content root>/<target-folder>/<slug>.md`, where the target folder was confirmed in Step 1 and the `<slug>` and page title follow `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` (canonical English title → kebab-case slug; folder and basename share the slug; UA/EN titles are semantic equivalents; imperative-verb-phrase title for a user guide). If this page already exists with a mismatched filename/title, do not silently rename it — report the mismatch per that file's "Existing pages" rule.
+Save to `<pair's content root>/<target-folder>/<slug>.md`, where the target folder was confirmed in Step 1 and the `<slug>` and page title follow `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` (canonical English title → kebab-case slug; folder and basename share the slug; UA/EN titles are semantic equivalents; imperative-verb-phrase title for a user guide). If this page already exists with a mismatched filename/title, do not silently rename it — report the mismatch per that file's "Existing pages" rule.
 
 Do not update the sidebar config file (`sidebars.ts`, or a project's custom-id equivalent) — it's auto-generated.
 

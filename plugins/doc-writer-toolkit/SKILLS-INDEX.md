@@ -30,12 +30,12 @@ Canonical list of what the plugin ships. One line per skill; the invocation phra
 | `/check-section-readiness` | `section-readiness` |
 | `/plan-section` | `section-planner` |
 | `/explore-and-resolve` | `app-explorer` → `resolve-markers` |
-| `/doc-from-interview` | `convert-sme-input` → `user-guide-writer` (with verification and style review) |
+| `/doc-from-interview` | `extract-sme-screenshots` → `convert-sme-input` → the writer chosen by `type:` (`concept-doc-writer`, `user-guide-writer` or `api-doc-writer`) → `doc-style-reviewer` → `doc-style-fixer`, with optional code verification and live UI screenshots |
 | `/create-api-doc` | `api-doc-writer` |
 | `/update-doc-page` | `doc-page-updater` |
 | `/review-doc-style` | `doc-style-reviewer` |
 | `/fix-doc-style` | `doc-style-fixer` |
-| `/fix-doc-todos` | resolves link-type `{/* ToDo */}` markers across the project |
+| `/fix-doc-todos` | its own steps resolve link-type `{/* ToDo */}` markers across the project, then `doc-alignment-checker` checks each changed page |
 | `/translate-doc` | `doc-translator` |
 | `/check-doc-alignment` | `doc-alignment-checker` |
 | `/translate-locales` | `locale-translator` |

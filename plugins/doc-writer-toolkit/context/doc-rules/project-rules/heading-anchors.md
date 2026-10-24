@@ -45,6 +45,10 @@ verbatim, lands on the right heading in every locale.
 8. **Adding an id to an existing heading** changes that heading's fragment. Whoever adds it also
    rewrites, in the same change, every link that used the old fragment (search the content roots for
    `#<old fragment>`).
+9. **No placeholder left in an id.** A template's `{slug}` (or any `{…}`) left inside an explicit
+   `{#…}` id breaks the MDX build: MDX evaluates the inner braces as an expression
+   (`ReferenceError: slug is not defined`). Inside a `{/* #… */}` comment it builds, but the id comes out
+   wrong (`reference-information-{slug}`). Every id is filled in before the page is saved.
 
 ## Examples
 

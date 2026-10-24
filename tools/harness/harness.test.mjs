@@ -55,6 +55,10 @@ test('assertions: files, patterns, frontmatter, links and the changed paths', ()
   assert.equal(run({ type: 'command', run: 'test -f new.md' }), true);
   assert.equal(run({ type: 'command', run: 'exit 3' }), false);
   assert.equal(run({ type: 'nonsense' }), false);
+  const calls = { ...ctx, skills: ['harness-x:extract-sme-screenshots'] };
+  assert.equal(check({ type: 'skill-called', skill: 'extract-sme-screenshots' }, calls).pass, true);
+  assert.equal(check({ type: 'skill-not-called', skill: 'extract-sme-screenshots' }, calls).pass, false);
+  assert.equal(check({ type: 'skill-not-called', skill: 'convert-sme-input' }, calls).pass, true);
 });
 
 test('assertions: helpers', () => {
