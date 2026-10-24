@@ -28,7 +28,7 @@ when a new document introduces a new term not yet listed here.
 | Value | Meaning |
 |---|---|
 | `text` | ordinary type, no styling |
-| **`bold` (UI)** | visible UI label — bold, wording preserved verbatim (Ж1) |
+| **`bold` (UI)** | visible UI label — bold, wording preserved verbatim (Ж1; decorative trailing punctuation: Ж1a) |
 | `` `code` `` | literal system value or code entity — code font (Ж4) |
 | `*italic*` | a new term at its first definition, once (`GDSG-FORMAT-001`) |
 

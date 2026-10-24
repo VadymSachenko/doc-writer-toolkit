@@ -1,0 +1,57 @@
+{
+  "id": "tc-23b-updater-plain-term-colon-inside",
+  "description": "A brief adds a definition list of two concepts that are not UI labels: each item's bold term takes its colon inside the bold (Ж1), unlike a UI label (tc-23a).",
+  "fixture": {
+    "shape": "single"
+  },
+  "setup": [
+    "mkdir -p portal/transactions/.sources",
+    "cat > portal/transactions/.sources/change-brief.md <<'EOF'\n# Change brief — payment kinds\n\n## Page\nportal/transactions/transactions.md\n\n## What changed\n- The list holds payments of two kinds. Add a two-item bullet list after «Список оновлюється автоматично.» that defines each kind: a card payment is paid by the customer with a bank card; a bank transfer is paid from the customer's IBAN account. — source: ticket #42\n\n## Where in the page\nThe section «Перегляд транзакцій».\n\n## Screenshots\n- none\n\n## Terms\n- none\n\n## Do not touch\n- The sections «Фільтрування транзакцій» and «Повідомлення про платежі».\nEOF",
+    "git add -A && git commit -q -m 'Case setup'"
+  ],
+  "prompt": "use doc-page-updater with page `portal/transactions/transactions.md` and brief `portal/transactions/.sources/change-brief.md`",
+  "options": {
+    "maxTurns": 60,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)",
+      "Bash(node:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "card term, colon inside the bold",
+      "type": "match",
+      "path": "portal/transactions/transactions.md",
+      "pattern": "^\\s*[-*] \\*\\*[^*\\n]*[Кк]артк[^*\\n]*:\\*\\*",
+      "flags": "m"
+    },
+    {
+      "name": "transfer term, colon inside the bold",
+      "type": "match",
+      "path": "portal/transactions/transactions.md",
+      "pattern": "^\\s*[-*] \\*\\*[^*\\n]*[Пп]ереказ[^*\\n]*:\\*\\*",
+      "flags": "m"
+    },
+    {
+      "name": "no list term with the colon outside",
+      "type": "no-match",
+      "path": "portal/transactions/transactions.md",
+      "pattern": "^\\s*[-*] \\*\\*[^*\\n]+\\*\\*:",
+      "flags": "m"
+    },
+    {
+      "name": "nothing else changed",
+      "type": "diff-lines",
+      "path": "portal/transactions/transactions.md",
+      "allow": "[Кк]артк|[Пп]ереказ|IBAN"
+    },
+    {
+      "type": "changed-only",
+      "paths": [
+        "portal/transactions/",
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}
