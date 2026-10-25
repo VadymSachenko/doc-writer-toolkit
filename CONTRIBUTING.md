@@ -82,6 +82,7 @@ This repo is a Claude Code plugin marketplace. The deliverable is the Markdown/J
 - [ ] README.md — skills/commands prose updated if the change affects the public summary
 - [ ] WORKFLOW.md — quick reference tables updated; Gaps section updated if a gap was closed
 - [ ] Sibling SKILL.md files — Scope cross-references updated if the name changed
+- [ ] No product content added to the plugin: product terms, facts and rules belong in the host's product kit (`context/project-paths.md`, "Product kit")
 - [ ] CLAUDE.md — architecture section updated if the change affects the documented seam
 ```
 

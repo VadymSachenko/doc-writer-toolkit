@@ -2,7 +2,8 @@
   "id": "tc-29e-section-en-hand-edit",
   "description": "Every stage is done for both pages; then an EN page was edited by hand. Only its alignment runs again: nothing is translated or fixed, and no page changes.",
   "fixture": {
-    "shape": "single"
+    "shape": "single",
+    "kit": "migrated-701654b"
   },
   "setup": [
     "mkdir -p portal/reports/reports && cat > portal/reports/reports/reports.md <<'EOF'\n---\ntitle: Звіти\nsidebar_label: Звіти\n---\n\n# Звіти\n\n{/* ToDo: що таке звіти і для чого вони */}\nEOF",

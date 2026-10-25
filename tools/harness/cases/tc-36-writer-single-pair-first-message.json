@@ -2,7 +2,8 @@
   "id": "tc-36-writer-single-pair-first-message",
   "description": "One pair, no inputs: user-guide-writer names root portal/, names no pair, writes nothing, and stops to say which inputs are missing (its 'When inputs are insufficient' rule).",
   "fixture": {
-    "shape": "single"
+    "shape": "single",
+    "kit": "migrated-701654b"
   },
   "prompt": "use user-guide-writer for `portal/settings/currency-rules/`",
   "options": {

@@ -1,7 +1,7 @@
 {
   "id": "tc-01-translate-single-pair",
   "description": "A host with one root pair: doc-translator writes the EN page at the pair's EN path, keeps link paths byte-identical, and names no pair. The skill may also stamp `last_update` on the UA page.",
-  "fixture": { "shape": "single" },
+  "fixture": { "shape": "single", "kit": "migrated-701654b" },
   "setup": [
     "git rm -q i18n/en/docusaurus-plugin-content-docs-portal/current/transactions/transactions.md && git commit -q -m 'Remove the EN page'"
   ],

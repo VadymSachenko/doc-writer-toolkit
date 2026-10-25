@@ -2,7 +2,8 @@
   "id": "tc-05-translate-ambiguous-path-asks",
   "description": "Two pairs both hold transactions/transactions: doc-translator asks, lists both candidates and writes nothing.",
   "fixture": {
-    "shape": "multi"
+    "shape": "multi",
+    "kit": "migrated-701654b"
   },
   "prompt": "use doc-translator to translate `transactions/transactions`",
   "options": {

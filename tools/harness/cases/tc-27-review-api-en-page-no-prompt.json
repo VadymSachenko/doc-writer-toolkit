@@ -2,7 +2,8 @@
   "id": "tc-27-review-api-en-page-no-prompt",
   "description": "Two pairs: reviewing a page under the API reference EN root runs as gdsg@en without a language prompt.",
   "fixture": {
-    "shape": "multi"
+    "shape": "multi",
+    "kit": "migrated-701654b"
   },
   "prompt": "/{plugin}:review-doc-style i18n/en/docusaurus-plugin-content-docs/current/transactions/transactions.md",
   "options": {

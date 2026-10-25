@@ -1,0 +1,46 @@
+{
+  "id": "tc-37c-writer-no-kit-says-so",
+  "description": "No product kit declared: user-guide-writer asks nothing about it, drafts and saves the page, and its report says that no product kit is declared.",
+  "fixture": {
+    "shape": "single"
+  },
+  "prompt": "use user-guide-writer for `portal/reports/monthly-digest/`. Skip questions and draft with your best guess, then save the page. Facts: the user selects **Звіти** in the menu, selects a month in the **Місяць** field and clicks **Завантажити**. The monthly statement of account movements downloads as a PDF: one row per credit or debit, with the date, amount, currency and the balance after it. The statement for a month is ready on the first day of the next month.",
+  "options": {
+    "maxTurns": 60,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "one page saved",
+      "type": "command",
+      "run": "test $(find portal/reports/monthly-digest -maxdepth 1 -name '*.md' | wc -l) -eq 1"
+    },
+    {
+      "name": "says no product kit is declared",
+      "type": "match",
+      "path": "output",
+      "pattern": "\\bno product kit\\b|\\b(doesn't|does not|didn't|did not) declare (a|any) product kit\\b|\\bproduct kit\\b[^.\\n]{0,40}\\b(not declared|undeclared|isn't declared|wasn't declared|none)\\b|немає набору продукту|без набору продукту|набір продукту[^.\\n]{0,40}не (оголошено|задекларовано|вказано)",
+      "flags": "i"
+    },
+    {
+      "name": "no kit folder made",
+      "type": "absent",
+      "path": "doc-kit"
+    },
+    {
+      "name": "no starter-kit file copied",
+      "type": "command",
+      "run": "test -z \"$(git status --porcelain --untracked-files=all | grep -E '(glossary-(ua|en)|product-(facts|rules))\\.md$')\""
+    },
+    {
+      "type": "changed-only",
+      "paths": [
+        "portal/reports/monthly-digest/",
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}

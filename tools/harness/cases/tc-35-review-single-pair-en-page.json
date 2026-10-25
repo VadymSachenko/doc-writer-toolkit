@@ -2,7 +2,8 @@
   "id": "tc-35-review-single-pair-en-page",
   "description": "One pair: reviewing the portal EN page runs as gdsg@en without a language prompt.",
   "fixture": {
-    "shape": "single"
+    "shape": "single",
+    "kit": "migrated-701654b"
   },
   "prompt": "/{plugin}:review-doc-style i18n/en/docusaurus-plugin-content-docs-portal/current/transactions/transactions.md",
   "options": {

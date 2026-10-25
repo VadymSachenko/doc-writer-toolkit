@@ -45,7 +45,7 @@ If the filename is non-descriptive (e.g., `image.png`, `image copy.png`, a rando
 
 | UI element type | Suffix | Example |
 |---|---|---|
-| Full-page menu or table | `-page` or `-page-{tab}` | `transactions-page-payout-tab.png` |
+| Full-page menu or table | `-page` or `-page-{tab}` | `transactions-page-refunds-tab.png` |
 | Dialog / modal window | `-dialog` | `transaction-receipts-dialog.png` |
 | Side panel / filter panel | `-pane` | `filters-pane.png` |
 | Standalone form | `-form` | `add-receipt-form.png` |

@@ -1,0 +1,50 @@
+{
+  "id": "tc-37a-translate-kit-glossary-term",
+  "description": "A declared product kit whose EN glossary maps «відомість руху коштів» to the rare term \"ledger digest\": doc-translator reads the kit glossary and uses that term, not \"statement\".",
+  "fixture": {
+    "shape": "single",
+    "kit": "sentinel-term"
+  },
+  "setup": [
+    "mkdir -p portal/statements && cat > portal/statements/statements.md <<'EOF'\n---\ntitle: Відомість руху коштів\nsidebar_label: Відомість руху коштів\n---\n\n# Відомість руху коштів\n\nВідомість руху коштів показує всі надходження і списання вашого акаунта за місяць.\n\n## Що містить відомість\n\nКожен рядок відомості руху коштів описує одну операцію: дату, суму, валюту і залишок після неї.\n\n## Коли формується відомість\n\nВідомість руху коштів за попередній місяць формується першого числа кожного місяця.\nEOF\ngit add -A && git commit -q -m 'Case setup'"
+  ],
+  "prompt": "use doc-translator to translate `statements/statements`",
+  "options": {
+    "maxTurns": 40,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "type": "exists",
+      "path": "i18n/en/docusaurus-plugin-content-docs-portal/current/statements/statements.md"
+    },
+    {
+      "name": "kit EN glossary read",
+      "type": "read",
+      "path": "doc-kit/glossary-en.md"
+    },
+    {
+      "name": "uses the kit term",
+      "type": "match",
+      "path": "i18n/en/docusaurus-plugin-content-docs-portal/current/statements/statements.md",
+      "pattern": "[Ll]edger digest"
+    },
+    {
+      "name": "no banned synonym",
+      "type": "no-match",
+      "path": "i18n/en/docusaurus-plugin-content-docs-portal/current/statements/statements.md",
+      "pattern": "\\b[Ss]tatements?\\b"
+    },
+    {
+      "type": "changed-only",
+      "paths": [
+        "i18n/en/docusaurus-plugin-content-docs-portal/current/statements/",
+        "portal/statements/statements.md",
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}

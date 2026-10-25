@@ -4,12 +4,15 @@
 //   single  one root pair: `portal/` (UA) and its EN i18n tree.
 //   multi   two pairs: `portal/` and an API reference pair `docs/`, whose EN page has one section missing.
 // Options: --locales de,pl adds further locales to docusaurus.config.ts; --docusaurus adds what `docusaurus build`
-// needs (package.json, sidebars). Usage: node tools/harness/fixture.mjs <dest> single|multi [--locales …] [--docusaurus]
+// needs (package.json, sidebars); --kit <name> declares a product kit and writes it from tools/harness/kits/<name>.json.
+// Usage: node tools/harness/fixture.mjs <dest> single|multi [--locales …] [--docusaurus] [--kit <name>]
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+const here = path.dirname(fileURLToPath(import.meta.url));
+const REPO = path.join(here, '..', '..');
 const PORTAL_EN = 'i18n/en/docusaurus-plugin-content-docs-portal/current';
 const DOCS_EN = 'i18n/en/docusaurus-plugin-content-docs/current';
 
@@ -118,7 +121,7 @@ const docsWebhooksUk = page('Вебхуки', `
 `);
 
 const files = {
-  common: (shape, locales) => ({
+  common: (shape, locales, kit) => ({
     'CLAUDE.md': `# Fixture host\n\nA neutral test host for the documentation toolkit.\n\n## Documentation toolkit configuration\n\n${[
       '- **Style guide:** `gdsg`',
       '- **Content language:** `uk`',
@@ -132,6 +135,7 @@ const files = {
       ] : []),
       '- **App:** `web-app`',
       '- **UI label source:** `command cat labels/{locale}.json`',
+      ...(kit ? [`- **Product kit:** \`${kit.folder}\``] : []),
     ].join('\n')}\n`,
     'docusaurus.config.ts': docusaurusConfig(shape, locales),
     '.gitignore': 'node_modules\nbuild/\n.docusaurus/\n',
@@ -178,10 +182,77 @@ function docusaurusConfig(shape, locales) {
 `;
 }
 
-export function makeFixture(dest, shape, { locales = [], docusaurus = false } = {}) {
+// A product kit: `{ folder, files }`, or the name of tools/harness/kits/<name>.json, which holds one. `folder`
+// defaults to `doc-kit/`. Each file is a string, a `{ git: '<rev>:<path>', lines, replace }` source read from this
+// repo's history (`lines`: '3-5,9', 1-based; `replace`: [old, new] pairs, each found exactly once), or a list of
+// both, joined. A kit with no files is declared but not written: the "declared folder is missing" case.
+export function resolveKit(kit) {
+  if (kit == null) return null;
+  let spec = kit;
+  if (typeof kit === 'string') {
+    const file = path.join(here, 'kits', `${kit}.json`);
+    if (!fs.existsSync(file)) throw new Error(`unknown kit '${kit}' (no ${path.relative(REPO, file)})`);
+    spec = JSON.parse(fs.readFileSync(file, 'utf8'));
+  }
+  if (typeof spec !== 'object' || Array.isArray(spec)) throw new Error('a kit is an object or the name of a file in tools/harness/kits/');
+  const folder = (spec.folder ?? 'doc-kit/').replace(/\/?$/, '/');
+  const kitFiles = spec.files ?? {};
+  for (const [rel, source] of Object.entries(kitFiles)) checkSource(source, rel);
+  return { folder, files: kitFiles };
+}
+
+function checkSource(source, rel) {
+  if (typeof source === 'string') return;
+  if (Array.isArray(source)) return source.forEach((part) => checkSource(part, rel));
+  if (typeof source?.git !== 'string' || !source.git.includes(':')) throw new Error(`kit file ${rel}: a source is a string, a list, or { git: '<rev>:<path>' }`);
+}
+
+// The top of the git checkout that holds `dir`, or null when `dir` is in none.
+export function gitTop(dir) {
+  const s = spawnSync('git', ['-C', dir, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' });
+  return s.status === 0 ? s.stdout.trim() : null;
+}
+
+// Where `{ git }` sources are read from when the caller names no checkout: the one that holds the harness.
+// run.mjs passes the checkout of its --tree instead, since a copied harness may sit outside any repo.
+export const defaultRepo = () => gitTop(here) ?? REPO;
+
+export function kitSource(source, rel = 'kit file', repo = defaultRepo()) {
+  if (typeof source === 'string') return source;
+  if (Array.isArray(source)) return source.map((part) => kitSource(part, rel, repo)).join('');
+  const rev = source.git.slice(0, source.git.indexOf(':'));
+  if (!gitTop(repo)) throw new Error(`${rel}: the kit reads ${source.git} from git, and ${repo} is not a git checkout`);
+  const gitOut = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  try { gitOut('cat-file', '-e', `${rev}^{commit}`); } catch {
+    throw new Error(`${rel}: the kit needs commit ${rev}: fetch full history (git fetch --unshallow)`);
+  }
+  let text = gitOut('show', source.git);
+  if (source.lines) {
+    const all = text.split('\n');
+    text = source.lines.split(',').map((range) => {
+      const [from, to = from] = range.split('-').map(Number);
+      return all.slice(from - 1, to).map((l) => `${l}\n`).join('');
+    }).join('');
+  }
+  for (const [old, now] of source.replace ?? []) {
+    if (text.split(old).length !== 2) throw new Error(`${rel}: '${old}' is not in ${source.git} exactly once`);
+    text = text.replace(old, () => now);
+  }
+  return text;
+}
+
+// The kit's files as { '<folder><path>': text }, read from `repo` for git sources. Throws on a missing commit.
+export function kitFiles(kit, repo = defaultRepo()) {
+  const k = resolveKit(kit);
+  return Object.fromEntries(Object.entries(k?.files ?? {}).map(([rel, source]) => [`${k.folder}${rel}`, kitSource(source, rel, repo)]));
+}
+
+export function makeFixture(dest, shape, { locales = [], docusaurus = false, kit = null, repo = defaultRepo() } = {}) {
   if (!['single', 'multi'].includes(shape)) throw new Error(`unknown fixture shape '${shape}' (single or multi)`);
   if (fs.existsSync(dest) && fs.readdirSync(dest).length) throw new Error(`${dest} is not empty`);
-  const tree = { ...files.common(shape, locales), ...(shape === 'multi' ? files.multi() : {}), ...(docusaurus ? files.docusaurus() : {}) };
+  const k = resolveKit(kit);
+  const kitTree = kitFiles(kit, repo);
+  const tree = { ...files.common(shape, locales, k), ...(shape === 'multi' ? files.multi() : {}), ...(docusaurus ? files.docusaurus() : {}), ...kitTree };
   for (const [rel, text] of Object.entries(tree)) {
     fs.mkdirSync(path.dirname(path.join(dest, rel)), { recursive: true });
     fs.writeFileSync(path.join(dest, rel), text);
@@ -194,13 +265,18 @@ export function makeFixture(dest, shape, { locales = [], docusaurus = false } = 
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const [dest, shape] = process.argv.slice(2).filter((a, i, all) => !a.startsWith('--') && all[i - 1] !== '--locales');
-  const i = process.argv.indexOf('--locales');
-  const locales = i === -1 ? [] : process.argv[i + 1].split(',').filter(Boolean);
+  const valued = ['--locales', '--kit'];
+  const [dest, shape] = process.argv.slice(2).filter((a, i, all) => !a.startsWith('--') && !valued.includes(all[i - 1]));
+  const value = (name) => { const i = process.argv.indexOf(name); return i === -1 ? null : process.argv[i + 1]; };
+  const locales = (value('--locales') ?? '').split(',').filter(Boolean);
   if (!dest || !shape) {
-    console.error('usage: node tools/harness/fixture.mjs <dest> single|multi [--locales de,pl] [--docusaurus]');
+    console.error('usage: node tools/harness/fixture.mjs <dest> single|multi [--locales de,pl] [--docusaurus] [--kit <name>]');
     process.exit(2);
   }
-  const written = makeFixture(path.resolve(dest), shape, { locales, docusaurus: process.argv.includes('--docusaurus') });
+  let written;
+  try { written = makeFixture(path.resolve(dest), shape, { locales, docusaurus: process.argv.includes('--docusaurus'), kit: value('--kit') }); } catch (e) {
+    console.error(`fixture: ${e.message}`);
+    process.exit(1);
+  }
   console.log(`${dest}: ${shape}, ${written.length} files, 1 commit`);
 }

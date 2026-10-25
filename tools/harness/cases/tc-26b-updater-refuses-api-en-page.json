@@ -2,7 +2,8 @@
   "id": "tc-26b-updater-refuses-api-en-page",
   "description": "Two pairs: doc-page-updater refuses a page under the API reference pair's EN root.",
   "fixture": {
-    "shape": "multi"
+    "shape": "multi",
+    "kit": "migrated-701654b"
   },
   "prompt": "use doc-page-updater: page `i18n/en/docusaurus-plugin-content-docs/current/transactions/transactions.md`, brief `docs/.sources/change-brief-webhooks.md`, dry-run",
   "options": {

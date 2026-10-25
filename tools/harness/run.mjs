@@ -14,7 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { makeFixture } from './fixture.mjs';
+import { gitTop, kitFiles, makeFixture, resolveKit } from './fixture.mjs';
 import { check, label as nameOf } from './assertions.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -26,6 +26,7 @@ export function loadCase(idOrPath) {
   const file = idOrPath.endsWith('.json') ? path.resolve(idOrPath) : path.join(here, 'cases', `${idOrPath}.json`);
   const c = JSON.parse(fs.readFileSync(file, 'utf8'));
   for (const key of ['id', 'fixture', 'prompt', 'assertions']) if (!(key in c)) throw new Error(`${file}: missing '${key}'`);
+  try { resolveKit(c.fixture.kit); } catch (e) { throw new Error(`${file}: ${e.message}`); }
   for (const a of c.assertions) {
     for (const key of ['pattern', 'allow']) {
       if (typeof a[key] !== 'string') continue;
@@ -44,11 +45,12 @@ export function sentinelCopy(tree, sentinel, dir) {
   return copy;
 }
 
-// The init and result events of a stream-json transcript, and every Skill call.
+// The init and result events of a stream-json transcript, every Skill call and the path of every Read call.
 export function readTranscript(text) {
   let init = null;
   let result = null;
   const skills = [];
+  const reads = [];
   for (const line of text.split('\n')) {
     if (!line.trim()) continue;
     let e;
@@ -56,10 +58,13 @@ export function readTranscript(text) {
     if (e.type === 'system' && e.subtype === 'init') init = e;
     if (e.type === 'result') result = e;
     if (e.type === 'assistant') {
-      for (const c of e.message?.content ?? []) if (c.type === 'tool_use' && c.name === 'Skill') skills.push(c.input?.skill ?? '');
+      for (const c of e.message?.content ?? []) {
+        if (c.type === 'tool_use' && c.name === 'Skill') skills.push(c.input?.skill ?? '');
+        if (c.type === 'tool_use' && c.name === 'Read' && c.input?.file_path) reads.push(path.normalize(c.input.file_path));
+      }
     }
   }
-  return { init, result, skills };
+  return { init, result, skills, reads };
 }
 
 // The two checks every run makes before its case's own assertions.
@@ -123,10 +128,10 @@ function claudeArgs(c, prompt, copy, model) {
   return args;
 }
 
-export function runOnce(c, { copy, sentinel, ownSkills, dir, model, claude = 'claude' }) {
+export function runOnce(c, { copy, sentinel, ownSkills, dir, model, claude = 'claude', repo }) {
   const host = path.join(dir, 'host');
   fs.mkdirSync(host, { recursive: true });
-  makeFixture(host, c.fixture.shape, c.fixture);
+  makeFixture(host, c.fixture.shape, { ...c.fixture, ...(repo ? { repo } : {}) });
   for (const cmd of c.setup ?? []) {
     const s = spawnSync('sh', ['-c', cmd], { cwd: host, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 'Fixture', GIT_AUTHOR_EMAIL: 'fixture@example.com', GIT_COMMITTER_NAME: 'Fixture', GIT_COMMITTER_EMAIL: 'fixture@example.com' } });
     if (s.status !== 0) throw new Error(`${c.id}: setup '${cmd}' exited ${s.status}: ${s.stderr}`);
@@ -156,7 +161,7 @@ export function runOnce(c, { copy, sentinel, ownSkills, dir, model, claude = 'cl
 export function score(c, t, { host, output, status, sentinel, ownSkills }) {
   return [
     ...builtInChecks(t, sentinel, ownSkills),
-    ...c.assertions.map((a) => ({ name: nameOf(a), ...check(a, { host, output, status, skills: t.skills }) })),
+    ...c.assertions.map((a) => ({ name: nameOf(a), ...check(a, { host, output, status, skills: t.skills, reads: t.reads }) })),
   ];
 }
 
@@ -203,14 +208,17 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   fs.mkdirSync(base, { recursive: true });
   const copy = sentinelCopy(path.resolve(tree), sentinel, path.join(base, '.plugin'));
   const ownSkills = new Set([...fs.readdirSync(path.join(copy, 'skills')), ...fs.readdirSync(path.join(copy, 'commands')).map((f) => f.replace(/\.md$/, ''))]);
-  const options = { copy, sentinel, ownSkills, model: option('--model'), claude: option('--claude', process.env.CLAUDE_BIN || 'claude') };
+  // A kit's git sources come from the checkout of the tree under test, which has the commits of main and the
+  // branch alike. A copy of the harness may sit outside any repo, so its own folder is only the fallback.
+  const repo = gitTop(path.resolve(tree)) ?? gitTop(here) ?? here;
+  const options = { copy, sentinel, ownSkills, model: option('--model'), claude: option('--claude', process.env.CLAUDE_BIN || 'claude'), repo };
   const pass = { label: labelName, tree: path.resolve(tree), sentinel, model: options.model ?? 'default', cases: [], costUsd: 0, stopped: null };
   let warned = false;
   // --resume keeps the cases a stopped pass already finished with the same number of runs.
   if (process.argv.includes('--resume') && fs.existsSync(path.join(base, 'pass.json'))) {
     const before = JSON.parse(fs.readFileSync(path.join(base, 'pass.json'), 'utf8'));
     const wanted = ids.map((id) => loadCase(id).id);
-    pass.cases = before.cases.filter((s) => s.runs === runs && wanted.includes(s.case));
+    pass.cases = before.cases.filter((s) => s.runs === runs && !s.error && wanted.includes(s.case));
     pass.costUsd = Number(pass.cases.reduce((sum, s) => sum + s.costUsd, 0).toFixed(4));
   }
   const save = () => {
@@ -223,6 +231,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     if (pass.cases.some((s) => s.case === c.id)) continue;
     const caseDir = path.join(base, c.id);
     fs.rmSync(caseDir, { recursive: true, force: true });
+    // A kit that can't be built, such as one that needs a commit this clone lacks, fails its case only.
+    try { kitFiles(c.fixture.kit, repo); } catch (e) {
+      console.error(`${c.id}: not run: ${e.message}`);
+      pass.cases.push({ case: c.id, runs, passedRuns: 0, assertions: [{ name: 'kit built', passed: 0 }], costUsd: 0, seconds: 0, error: e.message });
+      save();
+      continue;
+    }
     const results = [];
     for (let n = 1; n <= runs; n++) {
       const usage = readUsage(options.claude);
@@ -258,6 +273,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     for (const a of s.assertions) console.log(`  ${a.passed}/${s.runs}  ${a.name}`);
   }
   console.log(`pass '${labelName}': $${pass.costUsd.toFixed(2)} in total, results in ${base}`);
+  const broken = pass.cases.filter((s) => s.error);
+  if (broken.length) {
+    for (const s of broken) console.log(`${s.case}: not run: ${s.error}`);
+    process.exitCode = 1;
+  }
   if (pass.stopped) {
     console.log(`stopped before ${pass.stopped.before}: ${pass.stopped.reason}. Run the rest later with the same arguments plus --resume.`);
     process.exitCode = 4;

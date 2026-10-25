@@ -21,13 +21,13 @@ This document {resource description. Example: describes how to retrieve shipment
 
 {List benefits for developers if applicable.}
 
-{/* Optional: Include this section if the endpoint requires setup steps before it can be called (partner configuration, token generation, feature flags, etc.). Omit if none apply. */}
+{/* Optional: Include this section if the endpoint requires setup steps before it can be called (account configuration, token generation, feature flags, etc.). Omit if none apply. */}
 ## Prerequisites
 
 Before calling this endpoint, ensure the following:
 
-- {Prerequisite 1. Example: You have generated an API token in the partner cabinet.}
-- {Prerequisite 2. Example: Webhook URLs are configured for your partner account.}
+- {Prerequisite 1. Example: You have generated an API token in the app.}
+- {Prerequisite 2. Example: Webhook URLs are configured for your account.}
 
 ## Authentication
 
@@ -49,7 +49,7 @@ To {action}, send the request:
 ---
 
 `{METHOD} {base_url}/{endpoint}/{{path_parameter}}`
-{/* Example: `GET https://api.unicompay.com/transaction/{{transaction_uuid}}`
+{/* Example: `GET https://api.example.com/transaction/{{transaction_uuid}}`
      Use the real base URL for this endpoint's host group. Do not use example.com placeholders. */}
 
 ---
@@ -68,7 +68,7 @@ To {action}, send the request:
 Standard headers table (copy as-is when brief says "Standard"):
 | Header key | Header value example | Required | Description |
 |---|---|---|---|
-| `ApiKey` | *`API_TOKEN`* | ✓ | Your API token: a 128-character lowercase alphanumeric string you generate during registration in your partner cabinet. |
+| `ApiKey` | *`API_TOKEN`* | ✓ | Your API token, which you generate in the app. |
 | `Content-Type` | `application/json` | ✓ | Must be `application/json`. |
 */}
 

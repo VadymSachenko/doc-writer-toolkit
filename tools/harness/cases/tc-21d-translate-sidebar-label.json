@@ -2,7 +2,8 @@
   "id": "tc-21d-translate-sidebar-label",
   "description": "The UA page has a short sidebar_label: the EN page gets an English label for the same subject, not the UA text and not the full title.",
   "fixture": {
-    "shape": "single"
+    "shape": "single",
+    "kit": "migrated-701654b"
   },
   "setup": [
     "mkdir -p portal/payment-status-webhook-notifications i18n/en/docusaurus-plugin-content-docs-portal/current/payment-status-webhook-notifications",

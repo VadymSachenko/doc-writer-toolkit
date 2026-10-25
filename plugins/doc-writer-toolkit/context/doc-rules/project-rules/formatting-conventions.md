@@ -27,9 +27,10 @@ metadata:
 | Що | Де живе |
 |---|---|
 | Правопис української мови | `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/ua-grammar/` (маршрутизація — через `INDEX.md`) |
-| Затверджені терміни та їхній рендер | `glossary-ua.md` / `glossary-en.md` у цій же теці |
+| Затверджені терміни та їхній рендер | `glossary-ua.md` / `glossary-en.md` набору продукту (`${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`, «Product kit»); як читати таблицю — `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/glossary-format.md` |
 | Структура сторінки, шаблони | `${CLAUDE_PLUGIN_ROOT}/context/doc-templates/` |
-| Продуктові факти про API | `api-integration-context.md` у цій же теці |
+| Продуктові факти про API | `product-facts.md` набору продукту |
+| Правила лише для цього продукту: назва й скорочення, ключові заміни термінів, назви розділів інтерфейсу | `product-rules.md` набору продукту |
 
 ---
 
@@ -52,7 +53,7 @@ metadata:
 | Код-сутність: константа, поле БД, query-параметр, назва структури, модуля, репозиторію, шлях, файл | `code font` | параметр `paymentMethod` | the `paymentMethod` parameter |
 | Плейсхолдер | `*UPPER_SNAKE*` курсивом | `*COLLECTION_ID*` | `*COLLECTION_ID*` |
 | Новий термін у місці його визначення | *курсив*, один раз | *квазіреквізит* | *quasi requisite* |
-| Людське поняття, назва продукту, назва фічі | звичайний текст | платіжний метод, UniComPay | payment method, UniComPay |
+| Людське поняття, назва продукту, назва фічі | звичайний текст | платіжний метод, назва продукту | payment method, the product name |
 | Емфаза «це важливо» | **немає рендеру** — переписати речення | — | — |
 
 ### Ж1 — Жирний = видима мітка UI (Bold = visible UI label)
@@ -212,7 +213,7 @@ use a clear project convention consistently»). Перевірка **не** по
 увазі те саме.
 
 **Реєстр обраних рендерів — глосарій.** Колонка **Рендер** у `glossary-ua.md` / `glossary-en.md`
-є нормативною: рендер сутності береться звідти, а не вигадується на місці. Сутності, якої там
+набору продукту є нормативною: рендер сутності береться звідти, а не вигадується на місці. Сутності, якої там
 немає, місце в глосарії, а не в прозі з імпровізованим рендером (див. Ж4, останній пункт).
 
 **Проєктне рішення** — прямої норми в корпусі немає; `GDSG-FORMAT-TEXT` вимагає лише «use
@@ -232,11 +233,13 @@ formatting consistently and sparingly».
 нього **немає** затвердженого перекладу і його **немає** в коді. Це не привід вигадати рендер на
 місці. Дії, у цьому порядку:
 
-1. Додати запис у `glossary-ua.md` / `glossary-en.md` разом із колонкою **Рендер**.
-2. Синхронізувати двомовний `glossary.md`.
+1. Додати запис у `glossary-ua.md` / `glossary-en.md` набору продукту разом із колонкою **Рендер**.
+2. Синхронізувати двомовний `glossary.md`, якщо набір продукту його має.
 3. Поки термін не затверджено — поставити поруч
    `{/* NEEDS CONFIRMATION: термін «…» не має затвердженого перекладу */}` і вжити робочий
    варіант **однаково по всьому документу** (Ж3).
+
+Без набору продукту глосарію немає, тож лишається тільки крок 3.
 
 Що не можна: лишити англійське слово в українській прозі «як є» тільки тому, що так казав SME.
 Мова інтерв'ю — не рендер документа.
@@ -255,8 +258,8 @@ organization, domain name»; `GDSG-UI-001` — про мітки.
 
 | ⛔ Не так | ✅ Так |
 |---|---|
-| `controllers/adm/paycard` у репозиторії UCPay-adm-BE | `controllers/adm/paycard` у репозиторії `UCPay-adm-BE` |
-| **UCPay-adm-BE** | `UCPay-adm-BE` |
+| `src/handlers/refunds` у репозиторії billing-api | `src/handlers/refunds` у репозиторії `billing-api` |
+| **billing-api** | `billing-api` |
 
 **Проєктне рішення.** У корпусі прямої норми **немає**: `GDSG-CODE-001` перелічує «filenames and
 paths, package names», але репозиторій не згадує, а протилежний пункт того ж правила («Do not use
@@ -435,25 +438,19 @@ text», «Do not hard-code colors that become unreadable in high-contrast themes
 
 ### Термінологія
 
-- Канонічні терміни — з `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-ua.md`
+- Канонічні терміни — з `glossary-ua.md` набору продукту (`${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`, «Product kit»)
   разом із колонкою **Рендер**. Глосарій нормативний: він задає і термін, і його написання.
-- Ключові заміни: **Партнер** (не «провайдер», «клієнт», «мерчант»); **Кінцевий клієнт** (не
-  «кінцевий користувач»); **Транзакція** (не «запит», «операція», «аплікація»); **Вхідна
-  транзакція** (не «поповнення»); **Вихідна транзакція** (не «виплата» як синонім); **Вебхук**
-  (не «колбек», «нотифікація», «пуш»); **API-токен** (не «партнерський токен»); **Кабінет
-  партнера** (не «дашборд», «портал»); **Віджет** (не «компонент»). Повний перелік і всі «не
-  використовуйте» — у глосарії.
+- Ключові заміни термінів, якщо продукт їх має, — у `product-rules.md` набору продукту.
 - Новий термін, якого в глосарії немає, спершу додається в глосарій — див. Ж4.
 
 ### Назви, бренди, латинка
 
-- **UniComPay** — офіційна назва платформи, без транслітерації: не «Юнікомпей», не «Unicompay»,
-  не «UCP Pay». **UCP** — скорочення, тільки після першої повної згадки «UniComPay (UCP)».
+- Назва продукту та її скорочення — за `product-rules.md` набору продукту.
 - Технічні абревіатури — латинкою, без кирилічної транслітерації: API, UUID, IBAN, JSON, HTTP,
   URL. Не «АПІ», не «апі», не «джейсон».
 - Назва платформи, продукту чи фічі — звичайним текстом, не жирним (Ж1).
-- Назви розділів кабінету партнера — з великої, як власні назви: **Моніторинг**, **Архів**,
-  **Налаштування**. Це водночас видимі мітки UI, тож жирний тут за Ж1 доречний.
+- Назви розділів інтерфейсу продукту, якщо вони мають особливе написання, — у `product-rules.md`
+  набору продукту.
 - При першій згадці нового скорочення — повна форма + скорочення в дужках, далі тільки
   скорочення (`GDSG-LANGUAGE-ABBREVIATIONS`).
 
@@ -511,7 +508,7 @@ text», «Do not hard-code colors that become unreadable in high-contrast themes
 | ⛔ Не так | ✅ Так |
 |---|---|
 | натисніть **на** кнопку | натисніть **кнопку** / виберіть **кнопку** |
-| на стороні API | з боку API / у системі UCPay |
+| на стороні API | з боку API |
 | клікнути | натиснути |
 | заскролити | гортати |
 | зайти у систему | увійти в систему |
@@ -537,21 +534,15 @@ language-specific.
 
 ### Terminology
 
-- Canonical terms come from
-  `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/glossary-en.md`, including its **Render**
+- Canonical terms come from the product kit's `glossary-en.md`
+  (`${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`, "Product kit"), including its **Render**
   column. The glossary is normative for both the term and its rendering.
-- Key substitutions: **Partner** (not provider, client, merchant); **End client** (not end user,
-  customer); **Transaction** (not application, operation); **Inbound / Outbound transaction** (not
-  pay-in / payout — except operator cabinet docs, where **Payin** / **Payout** are the standard
-  terms); **Webhook** (not callback, notification, push); **API token** (not partner token, bearer
-  token); **Partner cabinet** (not dashboard, partner portal); **Widget** (not component). The full
-  list and every "don't use" synonym live in the glossary.
+- Key term substitutions, when the product has them, are in the kit's `product-rules.md`.
 - A term that isn't in the glossary yet gets added to the glossary first — see Ж4.
 
 ### Names, brands, abbreviations
 
-- **UniComPay** is the official platform name; **UCP** is the abbreviation, used only after the
-  first full mention "UniComPay (UCP)".
+- The product name and its abbreviation follow the kit's `product-rules.md`.
 - Technical abbreviations stay as-is: API, UUID, IBAN, JSON, HTTP, URL.
 - A platform, product, or feature name is ordinary type, never bold (Ж1).
 - Expand a new abbreviation at first mention, then use the short form only
@@ -582,9 +573,9 @@ language-specific.
 - Numbers: spell out under 10 in prose, use numerals from 10 up; exact data always in numerals.
   Non-breaking space between a number and its unit (`GDSG-FORMAT-NUMBERS`).
 - Don't use a slash for "and/or": "view or edit", not "view/edit".
-- US spelling per the corpus — **with one project exception**: the transaction status value is
-  `cancelled` (UK spelling), because it is a literal code value, not prose. It never becomes
-  `canceled`. Prose around it still follows US spelling.
+- US spelling per the corpus. A literal code value keeps the spelling of the code, even when it
+  differs (Ж4); the prose around it still follows US spelling. A product's own exceptions are in
+  the kit's `product-rules.md`.
 
 ### Icon-only controls (Ж8)
 

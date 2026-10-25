@@ -2,7 +2,8 @@
   "id": "tc-22a-writer-merges-commit-step",
   "description": "user-guide-writer drafts a change-password procedure: entering the passwords and clicking Save share one step; no bare «Натисніть **Зберегти**.» step.",
   "fixture": {
-    "shape": "single"
+    "shape": "single",
+    "kit": "migrated-701654b"
   },
   "prompt": "use user-guide-writer for `portal/profile/change-password/`. Skip questions and draft with your best guess, then save the page. Facts: to change the password, the user selects **Профіль** in the menu, clicks **Змінити пароль**, enters the old and new password in the **Зміна пароля** window, and clicks **Зберегти**. The new password works from the next sign-in.",
   "options": {

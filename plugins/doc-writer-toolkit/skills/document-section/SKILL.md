@@ -30,7 +30,7 @@ You are running one section folder through the whole documentation chain. Every 
 
 ## Sources to load
 
-1. `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — the section folder's root pair: its UA content root, its EN i18n root, and its id when the host declares more than one pair.
+1. `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — the section folder's root pair: its UA content root, its EN i18n root, and its id when the host declares more than one pair. Also its "Product kit" section, for Step 0.
 2. `${CLAUDE_PLUGIN_ROOT}/context/section-state.md` — the chain, the ledger, when a stage is done or stale, and the gates.
 3. The ledger, only through the script's `status` (below). Never read or edit `section-state.json` by hand.
 
@@ -56,10 +56,11 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/section-state/section-state.mjs record <secti
 ### Step 0 — Resolve the section and read the state
 
 1. No folder given → ask which, and stop. Resolve its root pair via `project-paths.md`. The folder doesn't exist → stop and say so.
-2. Run `status <section> --md` and show the block. No ledger → a fresh run, and Step 1 creates it.
-3. Continue without asking, unless `gate` is set (Steps 4, 5, 9, 10), a page due for `translate` has its EN page edited by hand (Step 10.2), or an approval went stale: a plan or a page changed after the user approved it. Say which before going on. When a page changed outside the run after one of its stages was done, say so too, before that page's next stage: which page, and which stages run again.
-4. `blocked` is not empty → retry those pages first, at their blocked stage. Recording that stage `running` clears the block; a page that fails again is blocked again, and the run goes on.
-5. Run the stage `next` names, for the pages it lists (only `page:` if passed), then `status` again. Repeat until a gate stops the run or `next.stage` is `null`.
+2. Resolve the product kit once, per `project-paths.md`, "Product kit", before any stage. A declared folder that doesn't exist → stop here and name the path; no stage runs. No kit declared → say so in your first status line, and carry that line into the final report.
+3. Run `status <section> --md` and show the block. No ledger → a fresh run, and Step 1 creates it.
+4. Continue without asking, unless `gate` is set (Steps 4, 5, 9, 10), a page due for `translate` has its EN page edited by hand (Step 10.2), or an approval went stale: a plan or a page changed after the user approved it. Say which before going on. When a page changed outside the run after one of its stages was done, say so too, before that page's next stage: which page, and which stages run again.
+5. `blocked` is not empty → retry those pages first, at their blocked stage. Recording that stage `running` clears the block; a page that fails again is blocked again, and the run goes on.
+6. Run the stage `next` names, for the pages it lists (only `page:` if passed), then `status` again. Repeat until a gate stops the run or `next.stage` is `null`.
 
 ### Step 1 — Readiness
 
@@ -148,6 +149,7 @@ An EN page edited by hand (`enHandEdited`) with its UA page unchanged only has i
 ### Step 13 — Final report
 
 - The section, its readiness verdict, and the root pair.
+- With no product kit declared, the line Step 0 showed for it.
 - Per page: the path, the action, the stages done, the review counts and rounds, the fixer's unapplied findings, and the open markers.
 - The pages `approve:` covered, when it was passed.
 - Blocked pages with their stage and reason, and skipped stages with theirs.

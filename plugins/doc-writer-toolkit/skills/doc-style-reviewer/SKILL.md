@@ -53,7 +53,7 @@ After opening any file whose frontmatter is `scope: mixed`, read its `language_s
 
 ## Step 3 — Load the project rank-0 layer
 
-Load the project rules layer described in the registry's "Project rank-0 layer" section: `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` (always, for every profile) and the glossary matching the profile's `<lang>` — `glossary-ua.md` or `glossary-en.md` (every profile except `ua-grammar`, which takes no terminology opinions).
+Load the project rules layer described in the registry's "Project rank-0 layer" section: `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` and, from the product kit, `<kit>/product-rules.md` if present (both always, for every profile), and the kit glossary matching the profile's `<lang>` — `<kit>/glossary-ua.md` or `<kit>/glossary-en.md`, read with `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/glossary-format.md` (every profile except `ua-grammar`, which takes no terminology opinions). How the kit is found, and what to do when none is declared or a file is missing, is in `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`, "Product kit".
 
 Also load `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` for the **title-form** rule only (every profile): in the Step 4 walk, check that the `title:` fits the page's doc type per that file — a user-guide title is an imperative phrase (not a gerund or "How to…"), a concept title is a noun phrase (not "Understanding…"), an API-reference title is a resource noun phrase — and report a form mismatch as a normal finding citing this file. This is a single-file review: do **not** attempt the slug/filename/locale-path agreement checks from that file (those are structural and belong to `doc-alignment-checker`).
 
@@ -171,7 +171,9 @@ Detected document language: <uk|en|mixed> (<percentage>% <script>)
 [+ language-mismatch note if the user was asked about a file/declaration conflict and chose to proceed]
 [+ note for every loaded file with an incomplete `scope: mixed` tag (no `language_specific_sections`), or a `language_specific_sections` heading not found in the body]
 Corpus files loaded: <bullet list of every file actually opened, for traceability>
+Product kit: <folder, or "not declared — no glossary, product facts or product rules loaded">
 Project glossary consulted: <path, or "not present — skipped">
+Product rules consulted: <path, or "not present — skipped">
 Project formatting conventions consulted: <path, or "not present — skipped">
 Project natural-Ukrainian rules consulted: <path, or "not present — skipped", or "n/a — @en profile">   # @uk profiles only
 

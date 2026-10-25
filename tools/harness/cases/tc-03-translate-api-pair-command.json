@@ -2,7 +2,8 @@
   "id": "tc-03-translate-api-pair-command",
   "description": "Two pairs: a docs/ page goes to the API reference EN tree, never the portal one, and the output names the pair.",
   "fixture": {
-    "shape": "multi"
+    "shape": "multi",
+    "kit": "migrated-701654b"
   },
   "prompt": "/{plugin}:translate-doc docs/webhooks/webhooks",
   "options": {

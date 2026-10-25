@@ -2,7 +2,8 @@
   "id": "tc-33b-doc-from-interview-hands-off",
   "description": "/doc-from-interview still hands off by name to extract-sme-screenshots and convert-sme-input. Its questions are answered in the prompt, and the run ends after Phase 2.",
   "fixture": {
-    "shape": "single"
+    "shape": "single",
+    "kit": "migrated-701654b"
   },
   "setup": [
     "mkdir -p portal/payments/.sources && ffmpeg -loglevel error -f lavfi -i color=c=blue:s=320x240:d=3 -f lavfi -i color=c=red:s=320x240:d=3 -filter_complex '[0][1]concat=n=2:v=1' portal/payments/.sources/demo.mp4 && printf '(0:00 - 0:02)\\nНатискаємо кнопку Зберегти у формі платежу.\\n\\n(0:02 - 0:05)\\nВідкриваємо вкладку Налаштування і вибираємо валюту.\\n' > portal/payments/.sources/demo.txt && git add -A && git commit -q -m 'Case setup'"
