@@ -48,7 +48,9 @@ option below and save it.
   set of procedures is split across multiple headings, restate the location in the first
   step of each one, even if the context is the same as the previous procedure's.
 - Prefix a truly optional step with **Optional:**, not **(Optional)**.
-- Avoid **please** and directional words such as *above*, *below*, *left*, or *right*.
+- Avoid **please**. Don't use directional words such as *above*, *below*, *left*, or
+  *right* to orient the reader (GDSG-A11Y-001, `principles/accessibility.md`). If a UI
+  element is hard to find, provide a screenshot.
 - For sequential menu commands, use an accessible `>` sequence; see the UI rules.
 - If pressing Enter is required, include it in the same step as the input.
 - Say what a command accomplishes; avoid “Run the following command” as a generic lead-in.

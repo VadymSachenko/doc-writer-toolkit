@@ -7,7 +7,7 @@
 
 - Official navigation pages: 70/70
 - Rule families: 35
-- Named rules: 46
+- Named rules: 47
 - Terminology: 598 entries in 46 chunks
 - Largest terminology chunk: 20 entries
 
@@ -15,7 +15,7 @@
 
 - Manifest-backed files: 81
 - Local Markdown links checked: 660
-- Router targets checked: 22
+- Router targets checked: 23
 - UTF-8 and common mojibake scan: passed
 - Raw website extracts retained: no
 
