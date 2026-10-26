@@ -1,0 +1,56 @@
+{
+  "id": "tc-39a-review-flags-directional",
+  "description": "gdsg review of a UA page: both steps that orient the reader by direction are reported under Ж9; a UI label that contains a direction word and a comparison are not.",
+  "fixture": {
+    "shape": "single",
+    "kit": "migrated-701654b"
+  },
+  "setup": [
+    "mkdir -p portal/chat",
+    "cat > portal/chat/send-file.md <<'EOF'\n---\ntitle: Надсилання файлу в чаті\nsidebar_label: Надсилання файлу\n---\n\n# Надсилання файлу в чаті\n\nУ чаті ви можете надіслати файл разом із повідомленням.\n\n## Надсилання файлу {/* #send-file */}\n\nЩоб надіслати файл, виконайте такі дії:\n\n1. У меню виберіть **Чат**.\n2. Натисніть кнопку зі скріпкою ліворуч від поля **Напишіть повідомлення**.\n3. Виберіть файл на комп'ютері.\n4. Щоб прибрати файл перед надсиланням, натисніть **Прибрати** праворуч від назви файлу.\n5. Натисніть **Надіслати**.\n\n## Закріплення чату {/* #pin-chat */}\n\nЩоб закріпити чат, у списку чатів відкрийте меню чату й виберіть **Закріпити праворуч**.\n\nФайл до 10 МБ надсилається одразу. Файл, розмір якого вище ліміту, система відхиляє.\nEOF",
+    "git add -A && git commit -q -m 'Case setup'"
+  ],
+  "prompt": "/{plugin}:review-doc-style portal/chat/send-file.md guide:gdsg",
+  "options": {
+    "maxTurns": 60,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "cites Ж9",
+      "type": "match",
+      "path": "output",
+      "pattern": "Ж9"
+    },
+    {
+      "name": "flags the paperclip step (line 15)",
+      "type": "match",
+      "path": "output",
+      "pattern": "^\\d+\\. \\*\\*\\[[^\\n]*Ж9(?:(?!^\\d+\\. \\*\\*\\[|^#{1,4} |^---)[\\s\\S])*?(ліворуч від поля|line 15\\b|рядок 15\\b)",
+      "flags": "m"
+    },
+    {
+      "name": "flags the Remove step (line 17)",
+      "type": "match",
+      "path": "output",
+      "pattern": "^\\d+\\. \\*\\*\\[[^\\n]*Ж9(?:(?!^\\d+\\. \\*\\*\\[|^#{1,4} |^---)[\\s\\S])*?(праворуч від назви|line 17\\b|рядок 17\\b)",
+      "flags": "m"
+    },
+    {
+      "name": "no Ж9 card for the label or the comparison",
+      "type": "no-match",
+      "path": "output",
+      "pattern": "^\\d+\\. \\*\\*\\[[^\\n]*Ж9(?:(?!^\\d+\\. \\*\\*\\[|^#{1,4} |^---)[\\s\\S])*?(Закріпити праворуч|вище ліміту|line 2[24]\\b|рядок 2[24]\\b)",
+      "flags": "m"
+    },
+    {
+      "type": "unchanged",
+      "ignore": [
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}
