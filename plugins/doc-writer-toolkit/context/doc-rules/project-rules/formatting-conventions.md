@@ -1,6 +1,6 @@
 ---
 name: Проєктні конвенції форматування
-description: Rank-0 project formatting conventions — what bold, code font and italic mean in this project's pages, how placeholders are written, how one entity is rendered consistently, how a code entity differs from a human concept, and how an icon-only control is named and shown. Core section is language-neutral; UA and EN sections carry the per-language conventions. Loaded for every guide profile, in drafting and in review.
+description: Rank-0 project formatting conventions — what bold, code font and italic mean in this project's pages, how placeholders are written, how one entity is rendered consistently, how a code entity differs from a human concept, how an icon-only control is named and shown, and how a page says where an element is (by container, never by direction). Core section is language-neutral; UA and EN sections carry the per-language conventions. Loaded for every guide profile, in drafting and in review.
 metadata:
   type: reference
 ---
@@ -341,8 +341,8 @@ tense for current behavior», а також розділ «Timeless documentatio
 2. **Лише іконка, назва відома** — підказка (tooltip) або `aria-label` з доказів: `app-notes.md`,
    нотатки автора, інтерв'ю SME → жирна назва й дескриптор, а перед назвою — іконка в рендері
    `Icon rendering:` (таблиця нижче). Назву пиши дослівно, як у підказці, з нормалізацією за Ж1a.
-3. **Лише іконка, назви в доказах немає** → опиши елемент словами за формою й місцем («кнопка з
-   трьома крапками в рядку платежу»), постав у кінці рядка
+3. **Лише іконка, назви в доказах немає** → опиши елемент словами за формою й контейнером («кнопка з
+   трьома крапками в рядку платежу»), а не за напрямком (Ж9), постав у кінці рядка
    `{/* NEEDS CONFIRMATION: назва кнопки з <форма> — у доказах немає підказки чи aria-label */}`
    мовою сторінки (на англійській сторінці — англійською) і все одно додай іконку як орієнтир.
    **Ніколи не вигадуй назву за формою іконки:** кошик не
@@ -411,6 +411,48 @@ text», «Do not hard-code colors that become unreadable in high-contrast themes
 **Проєктне рішення:** дерево з трьох гілок, маркер для невідомої назви, поле `Icon rendering:` і
 типове значення `screenshot-crop`.
 
+### Ж9 — Місце елемента: контейнер, а не напрямок (Locate by container, not direction)
+
+Текст сторінки не показує читачеві дорогу напрямком: ліворуч чи праворуч, вгорі чи внизу, над
+чи під іншим елементом, у куті екрана, на лівій панелі. Екранний читач не бачить, що «праворуч»;
+у мовах, що пишуться справа наліво, і на вузькому екрані розкладка інша. Слова для кожної мови —
+у мовних розділах нижче.
+
+**Що писати замість напрямку:**
+
+1. **Контейнер** — сторінка, вікно, панель, вкладка, розділ, рядок, поле, меню, панель
+   інструментів, де стоїть елемент. Контейнер з видимою міткою — жирним (Ж1), перед дією
+   (`procedure-steps.md`, правило 4): «У вікні **Переказ** натисніть **Підтвердити**».
+2. **Власна мітка елемента** часто знімає питання «де» зовсім: кнопку **Прибрати** читач знайде
+   за назвою, напрямок нічого не додає.
+3. **Зв'язок з названим елементом без напрямку** — лише коли контейнера немає: «біля поля
+   **Тема**», «у рядку файлу». Він однаковий в будь-якій розкладці.
+4. **Скриншот** (`screenshot-capture.md`, рамка навколо елемента), коли елемент усе одно
+   складно знайти.
+
+Місце в самому документі — так само без напрямку: «у наступній таблиці», «у попередньому
+розділі», а не «у таблиці нижче», «вище».
+
+**Контейнер не вигадуй.** Його назва береться зі сторінки або з доказів (`app-notes.md`,
+скриншот, інтерв'ю SME), як і назва елемента (Ж6, Ж8). Якщо доказ дає тільки напрямок («кнопка
+ліворуч від поля»), напиши зв'язок без напрямку (пункт 3) або, коли й елемента-орієнтира
+немає, `{/* NEEDS CONFIRMATION: де стоїть <елемент> — у доказах лише напрямок */}`.
+
+**Не порушення:** напрямок, який є самою дією або вмістом, а не дорогою до елемента: провести
+чи перетягнути в бік, клавіші зі стрілками, мітка UI зі словом напрямку (**Закріпити праворуч**,
+Ж1 — дослівно), значення налаштування (вирівнювання **Ліворуч**), порівняння («сума вище
+ліміту»). Опис поведінки, на який читач не спирається, щоб знайти елемент, теж не порушення.
+Рецензент його не позначає, а наявну сторінку автор не переписує заради нього.
+
+**Джерела корпусу:** `GDSG-A11Y-001` (`principles/accessibility.md`) — «Don't use directional
+language to orient the reader»; `GDSG-PROCEDURES` (`procedures/procedures.md`, «Step details»);
+`MWSG-A11Y-005` (`shared/accessibility/writing-for-accessibility.md`) — «Do not rely on direction
+alone».
+
+**Проєктне рішення:** правило діє в кожному профілі, і в `mssg-*` теж, хоча Microsoft допускає
+напрямок поряд з іншим орієнтиром: сторінки йдуть далі в інші локалі та до екранних читачів.
+Також проєктні — зв'язок «біля **X**» як запасний варіант і маркер, коли доказ дає лише напрямок.
+
 ### Чекліст ядра
 
 - [ ] Жодного жирного, який не є видимою міткою UI або міткою пункту списку (Ж1)?
@@ -428,6 +470,7 @@ text», «Do not hard-code colors that become unreadable in high-contrast themes
 - [ ] У тілі сторінки немає планів і майбутніх змін — вони в `{/* ToDo: … */}` (Ж6)?
 - [ ] Заголовки — однією мовою, мовою документа; код-сутності в них у `code font` (Ж7)?
 - [ ] Кожен елемент керування лише з іконкою названо жирною назвою з доказів і дескриптором, а без назви — описом і маркером `NEEDS CONFIRMATION`; іконка — у рендері `Icon rendering:`, з `alt=""`, без кольору й розміру з пам'яті (Ж8)? Стара форма іконки на наявній сторінці, яку зараз не пишуть, — знахідка-рішення (група 3, judgment-required), ніколи не механічна.
+- [ ] Жоден елемент не знайдено напрямком (ліворуч, праворуч, вгорі, внизу, над, під, у куті): місце задає контейнер, мітка, зв'язок «біля **X**» або скриншот; місце в документі — «наступний», «попередній» (Ж9)? Напрямок як дія чи мітка UI — не порушення.
 
 ---
 
@@ -500,6 +543,20 @@ text», «Do not hard-code colors that become unreadable in high-contrast themes
   «Дескриптори»).
 - Гілка 3, назви немає: ✅ «У рядку платежу натисніть кнопку з трьома крапками `<іконка>`.» і
   маркер у кінці рядка. ⛔ «натисніть кнопку **Меню**», коли «Меню» ніде в доказах немає.
+
+### Місце елемента (Ж9)
+
+- Слова напрямку, які Ж9 забороняє для орієнтації: **ліворуч, праворуч, зліва, справа, вгорі /
+  угорі, внизу / унизу, зверху, знизу, над, під, вище, нижче**, «у правому верхньому куті», «на
+  лівій панелі», «у правій частині», «наведений нижче».
+- ⛔ «Кнопка зі скріпкою ліворуч від поля **Напишіть повідомлення**.» → ✅ «Біля поля **Напишіть
+  повідомлення** натисніть кнопку зі скріпкою `<іконка>`.» (Ж8, гілка 3, з маркером).
+- ⛔ «Натисніть **Прибрати** праворуч від назви файлу.» → ✅ «У рядку файлу натисніть
+  **Прибрати**.»
+- ⛔ «Перевірте комісію під полем.» → ✅ «Перевірте комісію у вікні **Переказ**.»
+- ⛔ «У таблиці нижче…» → ✅ «У наступній таблиці…»; ⛔ «як описано вище» → ✅ «як описано в
+  розділі [Назва](/шлях#id)» або «у попередньому розділі».
+- Не плутай із порівнянням і дією: «сума вище ліміту», «проведіть картку ліворуч» — не порушення.
 
 ### Кальки й слова-заборони
 
@@ -588,3 +645,17 @@ language-specific.
   with the marker at the end of the line, in English: `{/* NEEDS CONFIRMATION: name of the
   three-dots button — no tooltip or aria-label in the evidence */}`. Never "click the **Menu** button" when "Menu" appears
   nowhere in the evidence.
+
+### Where an element is (Ж9)
+
+- The direction words Ж9 rules out for orientation: **left, right, left-hand, right-hand, top,
+  bottom, upper, lower, above, below, over, under**, "in the upper-right corner", "in the left
+  pane", "the following diagram" rather than "the diagram below".
+- ⛔ "The paperclip button to the left of the **Write a message** field." → ✅ "Next to the
+  **Write a message** field, click the paperclip button `<icon>`." (Ж8, branch 3, with the marker).
+- ⛔ "Click **Remove** to the right of the file name." → ✅ "In the file's row, click **Remove**."
+- ⛔ "Review the fee below the field." → ✅ "In the **Transfer** window, review the fee."
+- ⛔ "In the table below" → ✅ "In the following table"; ⛔ "as described above" → ✅ "as described
+  in the preceding section" (`GDSG-A11Y-001`).
+- Not a breach: a comparison or the action itself, such as "an amount above the limit" or "swipe
+  left".

@@ -60,14 +60,14 @@ Keep separate (a review state comes before an irreversible commit):
 
 ```md
 3. In the **Transfer** window, enter the amount.
-4. Review the fee shown below the field, then click **Confirm**.
+4. Review the fee shown for the amount, then click **Confirm**.
 ```
 
 Ukrainian:
 
 - ✅ «У вікні **Зміна пароля** введіть старий і новий пароль і натисніть **Зберегти**.»
 - ⛔ «У вікні **Зміна пароля** введіть старий і новий пароль.» + окремий крок «Натисніть **Зберегти**.»
-- ✅ (окремі кроки) «Введіть суму переказу.» → «Перевірте комісію під полем і натисніть **Підтвердити**.»
+- ✅ (окремі кроки) «Введіть суму переказу.» → «Перевірте комісію за переказ і натисніть **Підтвердити**.»
 
 ## Who does what
 

@@ -24,7 +24,7 @@ keyword, or path, and then load only the matching module.
 | `GDSG-NAMES-FILES` | Filenames and file types | [`names-and-naming/filenames-and-file-types.md`](names-and-naming/filenames-and-file-types.md) | filename, extension, file type, path, naming |
 | `GDSG-NAMES-PRODUCTS` | Product names and trademarks | [`names-and-naming/product-names-and-trademarks.md`](names-and-naming/product-names-and-trademarks.md) | product name, feature name, trademark, service, branding |
 | `GDSG-NAMES-EXAMPLES` | Safe and inclusive example data | [`names-and-naming/safe-example-data.md`](names-and-naming/safe-example-data.md) | example data, domain, IP address, personal data, fictional name |
-| `GDSG-PRINCIPLES-ACCESSIBILITY` | Write accessible documentation | [`principles/accessibility.md`](principles/accessibility.md) | accessibility, screen reader, keyboard, alt text, semantic HTML |
+| `GDSG-PRINCIPLES-ACCESSIBILITY` | Write accessible documentation | [`principles/accessibility.md`](principles/accessibility.md) | accessibility, screen reader, keyboard, alt text, semantic HTML, directional language |
 | `GDSG-PRINCIPLES-GLOBAL` | Write for a global audience | [`principles/global-audience.md`](principles/global-audience.md) | global audience, translation, localization, ambiguity |
 | `GDSG-PRINCIPLES-INCLUSIVE` | Write inclusive documentation | [`principles/inclusive-language.md`](principles/inclusive-language.md) | inclusive, gender, disability, ableist, non-inclusive |
 | `GDSG-PRINCIPLES-JARGON-PRESCRIPTIVE` | Jargon and prescriptive documentation | [`principles/jargon-and-prescriptive-writing.md`](principles/jargon-and-prescriptive-writing.md) | jargon, must, should, can, might, recommendation |
@@ -77,6 +77,7 @@ keyword, or path, and then load only the matching module.
 | `GDSG-TRADEMARK-001` | Use a trademark as a modifier | `names-and-naming/product-names-and-trademarks.md` |
 | `GDSG-EXAMPLE-001` | Use reserved, fictional data | `names-and-naming/safe-example-data.md` |
 | `GDSG-EXAMPLE-002` | Represent people inclusively | `names-and-naming/safe-example-data.md` |
+| `GDSG-A11Y-001` | Don't orient the reader by direction | `principles/accessibility.md` |
 | `GDSG-VOICE-001` | Be direct | `principles/voice-and-tone.md` |
 | `GDSG-VOICE-002` | Use literal language | `principles/voice-and-tone.md` |
 | `GDSG-VOICE-003` | Be polite without adding *please* | `principles/voice-and-tone.md` |

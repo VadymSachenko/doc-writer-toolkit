@@ -106,6 +106,16 @@ Otherwise it's a destination: skip it, and check only its link text.
 
 Both checks apply inside code blocks and inline code too: the skip list covers the *contents* of code, not the choice of an unsafe or malformed example inside it.
 
+### Always-run check — direction used to locate an element
+
+Run it in every profile except `ua-grammar`, regardless of Step 0 signals, inside the blocks under review (the whole page, or the Scope block in scope mode). The rule is Ж9 of `formatting-conventions.md` (Step 3), which outranks the corpus; it is easy to miss on a read-through because the sentence is otherwise correct.
+
+1. Search the prose for the direction words in Ж9's language section for the page's language (on a `uk` page «ліворуч», «праворуч», «вгорі», «внизу», «під», «нижче», …; on an `en` page *left*, *right*, *above*, *below*, …). Skip what the skip list skips, and bold UI labels: a label that contains the word is quoted verbatim (Ж1).
+2. For each hit, decide by Ж9 whether the word tells the reader where to find an element or a place in the document. Only then is it a finding. A comparison («сума вище ліміту»), a direction that is the action («проведіть ліворуч»), a setting's value, or «під час» is not.
+3. Report each finding as **[ACCESSIBILITY]**, cite `Ж9` — `project-rules/formatting-conventions.md`, and name the corpus rule it builds on (`GDSG-A11Y-001` in a `gdsg` profile, `MWSG-A11Y-005` in an `mssg-*` profile). The suggested fix uses a container, the element's own label, «біля **X**», or a screenshot, from what the page already names. When the page names no container to use, say so in the fix instead of inventing one.
+
+The occurrence sweep doesn't apply: each sentence is judged on its own.
+
 ### Terminology and spelling lookup
 Do this **reactively** during the review pass, never speculatively:
 - When reviewing prose, if a specific term or spelling arises that the loaded rules comment on, search the appropriate terminology index or grep `99-word-index.md` *only for that word*, then load the matched file only if needed.

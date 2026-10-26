@@ -7,7 +7,7 @@ content_types: [all, web, tutorial, reference]
 source_urls: [https://developers.google.com/style/accessibility]
 captured: 2026-07-16
 status: active
-keywords: [accessibility, screen reader, keyboard, alt text, semantic HTML]
+keywords: [accessibility, screen reader, keyboard, alt text, semantic HTML, directional language]
 ---
 
 # Write accessible documentation
@@ -15,13 +15,31 @@ keywords: [accessibility, screen reader, keyboard, alt text, semantic HTML]
 ## Language and structure
 
 - Use plain language, short sentences, active voice, and unambiguous pronouns.
-- Avoid double negatives and visual-only directions such as *above*, *below*,
-  *right*, or *the green button*.
+- Avoid double negatives. Do not identify an element only by a visual cue such as
+  *the green button*; see GDSG-A11Y-001 for direction.
 - Put prerequisites and preparation information before the task.
 - Use descriptive, hierarchical headings; do not skip heading levels.
 - Keep link text meaningful out of context. Do not use *click here* or a bare URL.
 - Use ordered lists for sequences and unordered lists for collections; preserve clear
   nesting and parallel syntax.
+
+## GDSG-A11Y-001 — Don't orient the reader by direction
+
+Don't use directional language to orient the reader, such as *above*, *below*, or
+*right-hand side*. It fails screen readers, and right-to-left layouts mirror the page.
+This is not a "not the only clue" rule: the direction is dropped even when another cue
+is present.
+
+- For a UI element, name its label and the place it is in: the page, dialog, pane, tab,
+  or toolbar. If an element is hard to find, provide a screenshot.
+- For a position in the document, use *earlier*, *preceding*, or *following*.
+- Don't use color, size, location, or another visual cue as the primary way to convey
+  information.
+
+**Recommended:** In the preceding diagram, clients run jobs on clusters.  
+**Recommended:** Click **Menu**.  
+**Not recommended:** In the diagram above, clients run jobs on clusters.  
+**Not recommended:** In the left-side panel, click the button with three lines.
 
 ## Images and media
 
@@ -36,8 +54,8 @@ keywords: [accessibility, screen reader, keyboard, alt text, semantic HTML]
 ## Interfaces and interaction
 
 - Use semantic controls and elements. Keep interaction available by keyboard.
-- Name a control by its visible label and provide enough context to locate it without
-  relying only on direction, color, shape, or position.
+- Name a control by its visible label, and locate it by the page, dialog, pane, or
+  toolbar it is in, not by direction (GDSG-A11Y-001), color, or shape.
 - Introduce an expandable or otherwise interactive element before it appears.
 - Ensure forms have explicit labels and useful instructions; do not use placeholder
   text as the only label.

@@ -6,7 +6,7 @@
   "source_pages": 70,
   "covered_source_pages": 70,
   "rule_families": 35,
-  "named_rules": 46,
+  "named_rules": 47,
   "terminology": {
     "entries": 598,
     "chunks": 46,
@@ -641,11 +641,17 @@
         "screen reader",
         "keyboard",
         "alt text",
-        "semantic HTML"
+        "semantic HTML",
+        "directional language"
       ],
-      "rules": [],
-      "bytes": 2334,
-      "sha256": "2bf835df5f259690295d2d03d11d2c58ccb22921fc80fd18fa3cb00f06df2fee"
+      "rules": [
+        {
+          "id": "GDSG-A11Y-001",
+          "title": "Don't orient the reader by direction"
+        }
+      ],
+      "bytes": 3322,
+      "sha256": "21269feba35bf81a6ae9b48f7ac9d83e7ff63632f19b263ac2256be0073aa1ae"
     },
     {
       "path": "principles/global-audience.md",
@@ -837,8 +843,8 @@
           "title": "Write actionable steps"
         }
       ],
-      "bytes": 3257,
-      "sha256": "af21b0f3f1e9aefc9f1054e8f1edd2c8f7a3656a514ae7587a38df37702511c5"
+      "bytes": 3391,
+      "sha256": "15849ece9ddd46ca0e00807054d1c2eb0397c244f6e920f2c96f2ca861aff774"
     },
     {
       "path": "punctuation/commas-and-colons.md",
@@ -2461,6 +2467,11 @@
       "id": "GDSG-EXAMPLE-002",
       "title": "Represent people inclusively",
       "file": "names-and-naming/safe-example-data.md"
+    },
+    {
+      "id": "GDSG-A11Y-001",
+      "title": "Don't orient the reader by direction",
+      "file": "principles/accessibility.md"
     },
     {
       "id": "GDSG-VOICE-001",
