@@ -145,3 +145,23 @@ Lives alongside a folder of `screen-HH-MM-SS.jpg` screenshots — `images/`, `tr
 **Why `--extract-at` OCRs its frames:** the alternative was leaving `ocr_text` blank there, documented as a known gap. This mode only ever pulls a few dozen frames at most (it exists specifically to avoid the bulk pass), so the OCR cost is tens of seconds, not the tens of minutes a full sweep costs — running it keeps `frames-index.json` actually useful for picking a screenshot without opening it, instead of a list a reader has to treat as half-blind for every frame this mode touches. The cost of this choice: `--extract-at` now needs `tesseract` and Pillow, where it used to run on bare `python3` with only `ffmpeg`. See "Prerequisites" above.
 
 The bulk pipeline writes this file fresh for `images/` and `transcript-key/images/` on every run. `--merge-from` and `--extract-at` **append** to whatever `frames-index.json` already exists at the destination (deduplicated by `screenshot` filename, re-sorted by `seconds`) rather than overwriting it — `--merge-from` carries over each copied screenshot's existing entry from the source folder's own index when one exists there, falling back to a bare `source: "visual-dedup"` entry otherwise. Running either mode again later only adds coverage, never loses it. There is no separate `coverage.json` — this file replaces it.
+
+## Tests
+
+The tests of the script's own logic run offline: no `ffmpeg`, no `tesseract`, no network and no `faster-whisper`. They use the standard library's `unittest`, so the venv gets no package beyond the two image packages the script already needs. `tests/requirements.txt` pins those two (`Pillow`, `ImageHash`) to the versions in `sme-video-requirements.txt`, and a test fails if the pins drift apart.
+
+From the repo root:
+
+```bash
+VENV=~/.cache/doc-writer-toolkit/sme-video-venv   # the skill's venv; any Python with the two packages works
+"$VENV/bin/python" plugins/doc-writer-toolkit/scripts/sme-video-context/tests/run.py
+```
+
+Without the skill's venv, make a throwaway one: `python3 -m venv .venv-sme && .venv-sme/bin/pip install -r plugins/doc-writer-toolkit/scripts/sme-video-context/tests/requirements.txt`. The command exits `0` when every test passes, `1` when one fails, and `2`, with the install steps, when a package is missing, so a missing package never reads as a pass. `node tools/regression.mjs` runs it as the `sme-video-context` row (on the skill's venv when it exists, else on `python3`), and CI runs it in its own job.
+
+What they cover:
+
+- **`tests/test_logic.py`** (standard library only): the time and file-name helpers; TurboScribe parsing with offsets; the transcript score (`transcript_relevance`) and `--plan-from-transcript`; the `frames-index.json` entries and their append-only rule; `--merge-from` (tolerance, carried entries, no overwrite); the `progress.json` fields, its once-a-second write and the `eta_s` window; the `--extract-at` option parsing; the transcript-driven package; and the plan and merge modes started as a command line.
+- **`tests/test_frames.py`** (Pillow and ImageHash): the de-duplication walk of the bulk pass on generated frames, with the OCR replaced by a lookup table; the targeted `--extract-at` pass with `ffmpeg` and the OCR replaced; the contact sheet and the OCR preparation.
+
+Not covered, because each needs the real tool: `ffmpeg` frame extraction and probing, `tesseract` itself, Whisper transcription, the worker pool behind `--jobs N`, and a whole run on a video.

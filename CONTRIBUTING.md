@@ -1,6 +1,6 @@
 # Contributing to doc-writer-toolkit
 
-This repo is a Claude Code plugin marketplace. The deliverable is the Markdown/JSON content under `plugins/doc-writer-toolkit/` — there is no app to build. A lint, a skill visibility check and the test suites of the five Node scripts run before every merge: see [Checks before a merge](#checks-before-a-merge). See [CLAUDE.md](CLAUDE.md) for a full architectural overview.
+This repo is a Claude Code plugin marketplace. The deliverable is the Markdown/JSON content under `plugins/doc-writer-toolkit/` — there is no app to build. A lint, a skill visibility check, the test suites of the five Node scripts and the unit tests of the Python script run before every merge: see [Checks before a merge](#checks-before-a-merge). See [CLAUDE.md](CLAUDE.md) for a full architectural overview.
 
 ## How to add a skill
 
@@ -101,12 +101,13 @@ It prints one row per step, with the exit code and the result line. A step whose
 | `lint` | `node tools/lint-plugin.mjs` | Skill and command frontmatter that strict YAML accepts; every `${CLAUDE_PLUGIN_ROOT}/…` path exists; every style-guide rule file is reachable from its `ROUTING.md`; no file has CRLF line endings; every skill carries the contract's five parts; every screenshot-annotation frame in a snippet is square and unfilled |
 | `tools-tests` | `node --test tools/lint-plugin.test.mjs tools/check-visibility.test.mjs tools/harness/harness.test.mjs` | The tools' own tests, including the skill harness (no model calls) |
 | `ui-labels`, `locale-sync`, `doc-align`, `screenshot-locales`, `section-state` | `npm test` in each folder under `plugins/doc-writer-toolkit/scripts/` | The scripts' suites. `locale-sync` takes about two minutes |
+| `sme-video-context` | `python3 plugins/doc-writer-toolkit/scripts/sme-video-context/tests/run.py` | The Python script's unit tests (standard-library `unittest`, offline). Locally the step runs on the skill's venv, `~/.cache/doc-writer-toolkit/sme-video-venv`, if it exists, else on `python3`; a missing `Pillow` or `ImageHash` shows as `not run` and fails the run, with the install steps in the output. CI installs only `tests/requirements.txt` |
 | `validate` | `claude plugin validate plugins/doc-writer-toolkit` | The CLI's own plugin checks |
 | `visibility` | `node tools/check-visibility.mjs` | Every skill and command loads with its description. It reads a copy under a sentinel name, so an installed copy can't stand in for the tree under review |
 
 The lint prints the gaps listed in `KNOWN_GAPS` (`tools/lint-plugin.mjs`) as `known`, and they don't fail it. When you close one, remove its entry: an entry that no longer occurs fails the lint.
 
-CI (`.github/workflows/check.yml`) runs the same steps on every pull request and every push to `main`. The two CLI steps run in their own job, with the CLI version pinned. Neither needs credentials.
+CI (`.github/workflows/check.yml`) runs the same steps on every pull request and every push to `main`. The two CLI steps run in their own job, with the CLI version pinned. The `sme-video-context` tests run in a job of their own too, on Python 3.9 with only the packages in `tests/requirements.txt` installed. None needs credentials.
 
 ## Line endings
 
