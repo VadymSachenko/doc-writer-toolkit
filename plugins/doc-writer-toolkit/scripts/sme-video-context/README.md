@@ -11,8 +11,9 @@ Two independent ways to get screenshots out of a recording:
 
 ```bash
 brew install ffmpeg tesseract tesseract-lang
-python3 -m venv .venv-sme-video
-.venv-sme-video/bin/pip install -r sme-video-requirements.txt
+VENV=~/.cache/doc-writer-toolkit/sme-video-venv   # the venv the extract-sme-screenshots skill uses
+[ -d "$VENV" ] || python3 -m venv "$VENV"
+"$VENV/bin/pip" install -r sme-video-requirements.txt
 ```
 
 `--plan-from-transcript` and `--merge-from` don't need this venv at all — they run on a bare `python3` (see each section below). `--extract-at` needs the system `tesseract` binary and the venv's Pillow (no `imagehash`, no `faster-whisper`) — see "Transcript-driven mode".
@@ -22,7 +23,8 @@ python3 -m venv .venv-sme-video
 Use a new output directory for every run:
 
 ```bash
-.venv-sme-video/bin/python sme_video_context.py \
+VENV=~/.cache/doc-writer-toolkit/sme-video-venv
+"$VENV/bin/python" sme_video_context.py \
   /path/to/meeting.mp4 \
   /path/to/output-package \
   --progress-file /path/to/output-package/progress.json
