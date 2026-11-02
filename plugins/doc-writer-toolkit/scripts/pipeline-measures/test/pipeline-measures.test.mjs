@@ -179,8 +179,8 @@ test('every measure on a fixture repo', async () => {
   assert.equal(p.smeReview.at, '2026-10-01T10:30:00.000Z');
   assert.deepEqual({ cards: p.smeReview.cards, cardsWithEntry: p.smeReview.cardsWithEntry, entries: p.smeReview.entries }, { cards: 2, cardsWithEntry: 1, entries: 2 });
   assert.equal(p.markersAtSmeReview, 3);
-  // The section "Open questions": three top-level items; the nested one and the next section's do not count.
-  assert.deepEqual(p.openQuestions, { section: true, items: 3 });
+  // The section "Open questions": four list items, the nested one included; the next section's item does not count.
+  assert.deepEqual(p.openQuestions, { section: true, items: 4 });
   // The owner's two commits: +2 -1 in the first (one line replaced by two), -1 in the second.
   assert.deepEqual(p.owner, { commits: 2, beforePipeline: 0, linesAdded: 2, linesRemoved: 2, lines: 4, files: 1 });
   // The final edit: the owner's commits after "Ready for merge", up to the merge.
@@ -206,7 +206,7 @@ test('every measure on a fixture repo', async () => {
   assert.equal(s.owner.lines, 6);
   assert.equal(s.finalEdit.lines, 4);
   assert.equal(s.smeReview.measured, 1);
-  assert.deepEqual(s.openQuestions, { prsWithSection: 1, items: 3 });
+  assert.deepEqual(s.openQuestions, { prsWithSection: 1, items: 4 });
   assert.match(r.table, /#10\s+merged/);
   assert.match(r.table, /#11\s+open/);
   assert.match(r.table, /n\/a/);
@@ -351,8 +351,8 @@ test('settings: a missing pattern, a bad regex, a bad date and a bad policy stop
 
 // ------------------------------------------------------------------ units
 
-test('openQuestions: heading level, items at the margin, the next heading ends the section', () => {
-  assert.deepEqual(openQuestions('## Open questions and markers\n\n- a\n- b\n### Sub\n- c\n## Next\n- d', 'open questions'), { section: true, items: 3 });
+test('openQuestions: heading level, every list item with nested ones, the next heading ends the section', () => {
+  assert.deepEqual(openQuestions('## Open questions and markers\n\n- a\n  - a1\n- b\n### Sub\n- c\n## Next\n- d', 'open questions'), { section: true, items: 4 });
   assert.deepEqual(openQuestions('# Description\ntext\n', 'Open questions'), { section: false, items: 0 });
   assert.deepEqual(openQuestions('## Open questions\r\n\r\n- a\r\n', 'Open questions'), { section: true, items: 1 });
   assert.deepEqual(openQuestions('## Open questions\n\nNone.\n', 'Open questions'), { section: true, items: 0 });

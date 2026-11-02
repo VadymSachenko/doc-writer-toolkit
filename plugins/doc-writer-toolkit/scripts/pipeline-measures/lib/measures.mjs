@@ -4,7 +4,7 @@ const OID = 12;
 const short = (oid) => oid.slice(0, OID);
 
 // The "Open questions" section of a PR description: whether it is there and how many items it lists. A section is
-// the heading's text up to the next heading of the same or a higher level; an item is a list line at the margin.
+// the heading's text up to the next heading of the same or a higher level; an item is a list line, nested ones included.
 export function openQuestions(body, heading) {
   const lines = String(body).replace(/\r\n/g, '\n').split('\n');
   const want = heading.trim().toLowerCase();
@@ -21,7 +21,7 @@ export function openQuestions(body, heading) {
       }
       continue;
     }
-    if (found && /^([-*+]|\d+[.)])\s+\S/.test(line)) items++;
+    if (found && /^\s*([-*+]|\d+[.)])\s+\S/.test(line)) items++;
   }
   return { section: found, items };
 }
