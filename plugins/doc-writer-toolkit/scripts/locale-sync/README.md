@@ -44,7 +44,8 @@ Flags override the `Documentation toolkit configuration` block of `<root>/CLAUDE
 | Flag | CLAUDE.md field | Meaning |
 |---|---|---|
 | `--ua-root`, `--en-root` | `UA content root:`, `EN i18n root:` | Required: the primary root pair. A locale's root is the EN root with its `en` path segment replaced. |
-| | `<Name> UA content root:`, `<Name> EN i18n root:`, `<Name> UA URL prefix:`, `<Name> Translation scope:` | One more root pair per `<Name>`, see [Root pairs](#root-pairs). |
+| | `Page link form:` | `route` (default) or `file-path`: the form `link-form` expects of the primary pair's page links. |
+| | `<Name> UA content root:`, `<Name> EN i18n root:`, `<Name> UA URL prefix:`, `<Name> Translation scope:`, `<Name> Page link form:` | One more root pair per `<Name>`, see [Root pairs](#root-pairs). |
 | `--pair` | | Narrows the run to these root pairs (comma-separated ids). Default: every declared pair. The unprefixed pair is `primary`. |
 | `--locales` | (from `docusaurus.config.ts`) | Narrows the run. Target locales are `i18n.locales` minus the default locale and `en`. A locale that is not configured is an error. Without a usable config, `--locales` is accepted with a warning. |
 | `--scope` | `Translation scope:` | Comma-separated folders or pages, relative to the repo root or the UA root. Default: the whole UA root. `none` is an empty scope. `--scope` replaces the scope of every pair; `<pair>:<folder>` applies to that pair only. |
@@ -68,7 +69,7 @@ A docs repo with two Docusaurus docs plugin instances has two UA content roots, 
 - **API reference Translation scope:** `api-reference`
 ```
 
-- **Name and id.** The name is any text in front of the field. Its id is the name in lower case, with each run of characters other than `a-z` and `0-9` replaced by one `-`: `API reference` → `api-reference`. The id must not be empty or `primary`, and two names can't give the same id. A pair needs both roots; `UA URL prefix` defaults to `/` and `Translation scope` to the whole UA root, as for the primary pair. Two pairs whose UA roots or EN roots are the same folder, or one inside the other, are a configuration error (exit `2`).
+- **Name and id.** The name is any text in front of the field. Its id is the name in lower case, with each run of characters other than `a-z` and `0-9` replaced by one `-`: `API reference` → `api-reference`. The id must not be empty or `primary`, and two names can't give the same id. A pair needs both roots; `UA URL prefix` defaults to `/`, `Translation scope` to the whole UA root and `Page link form` to `route`, as for the primary pair. Two pairs whose UA roots or EN roots are the same folder, or one inside the other, are a configuration error (exit `2`).
 - **Derived per pair, as for the primary pair:** the locale roots (the pair's EN root with `en` replaced by the locale) and the `current.json` of each locale (`<locale root>.json`).
 - **Shared by all pairs:** the label store, the term memory (one `terms/<locale>.tsv` per locale), the target locales and the build.
 - **Every command covers every pair**, unless `--pair <id>[,<id>]` narrows the run. `--ua-root`, `--en-root` and `--url-prefix` set the primary pair's roots.
@@ -231,7 +232,7 @@ Failures have a `check` name; warnings never block.
 | `code` | A fenced code block differs. Mermaid flowcharts compare with their labels blanked; other diagram types by first line and length. |
 | `inline-code` | A code-like inline span (no Cyrillic) is missing or changed. Inline code that holds Cyrillic is UI text and is translated. |
 | `links` | Link targets or URLs differ (as a multiset, so sentences may be reordered). |
-| `link-form` | A page link is not a site-root-relative route, or keeps `.md`/`.mdx` (`context/doc-rules/project-rules/internal-links.md`). It fails even when the UA page has the same link, because the locale build breaks on it: fix the UA page. Links to assets, anchors and other sites are exempt. |
+| `link-form` | A page link is not site-root-relative, or not in the form the page's root pair declares (`Page link form:`, `context/doc-rules/project-rules/internal-links.md`). `route` (the default): a link that keeps `.md`/`.mdx` fails. `file-path`: a `.md`/`.mdx` link passes unless it starts with the pair's UA content root, and a route fails when it points into the page's own pair (its longest matching UA URL prefix is the pair's); a route to another pair passes. It fails even when the UA page has the same link: the form is wrong on the UA page too, so fix it there. A locale link whose form differs from its UA link fails `links` as well. Links to assets, anchors and other sites are exempt. An unknown form is a configuration error (exit `2`). |
 | `images` | Image paths differ. |
 | `tags` | MDX/HTML tag names, attribute names or non-prose attribute values differ. `title`, `alt`, `label`, `description`, `caption`, `placeholder`, `aria-label`, `summary` values are prose. |
 | `markers` | The number of `ToDo` / `NEEDS CONFIRMATION` markers, or of other `{/* … */}` comments, differs. |
