@@ -17,7 +17,7 @@ You are checking whether a Ukrainian documentation page and its English counterp
 Load these files at the start of the task. Do not load others unless the user references them explicitly.
 
 - Follow `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` to resolve the page's **root pair** (its **UA content root** and **EN i18n root**) and the **UA URL prefix of every declared pair**, for Check 5. Do not assume any default.
-- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` — the shared page-to-page link contract. Check 5 checks links against this file's algorithm; do not restate it here.
+- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` — the shared page-to-page link contract. Check 5 checks links against this file's algorithms, in the form the page's root pair declares (`Page link form:`); do not restate it here.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/heading-anchors.md` — the shared heading-id contract. Check 2 checks UA heading ids against it; do not restate it here.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` — the shared slug/title/filename convention. Check 11 checks title form and slug/filename agreement against this file; do not restate it here.
 - The UA page being checked (at the path resolved above).
@@ -111,9 +111,9 @@ This check applies regardless of which file is main.
 
 ### Check 5 — Internal link prefixes
 
-Every page-to-page link in both files must match the output of the route-building algorithm in `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` for **one of the declared UA URL prefixes**, validated as that file's "Validating a route" prescribes. Per that file, this is a **structural match check only** — do not verify the target page exists, and do not touch asset links (`./.assets/…`), external URLs, same-page anchors, or MDX imports.
+Every page-to-page link in both files must have the form the page's root pair declares (`Page link form:`, `route` when absent, resolved through `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`) and match the output of that form's algorithm in `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md`, validated as that file's "Validating a page link" prescribes. In a `file-path` pair, a `.md` link to a page of the same pair is correct: never flag its extension. Per that file, this is a **structural match check only** — do not verify the target page exists, and do not touch asset links (`./.assets/…`), external URLs, same-page anchors, or MDX imports.
 
-**Flag:** `[LINK — INCORRECT PREFIX]` — show the full offending link and line number.
+**Flag:** `[LINK — INCORRECT PREFIX]` — show the full offending link and line number, and the pair's link form when it is `file-path`.
 
 ### Check 6 — Code blocks are identical
 
