@@ -85,7 +85,7 @@ VENV=~/.cache/doc-writer-toolkit/sme-video-venv
 # add --jobs N only to deliberately throttle below the script's cpu_count-1 default
 ```
 
-**Progress, without burning tokens on it:** the script rewrites `progress.json` atomically (schema: `stage`, `done`, `total`, `pct`, `elapsed_s`, `eta_s`) at most once a second. When the user asks for status, read that one file **once** and report the numbers back — that's the entire cost. Do not poll it in a loop, do not sleep-and-recheck repeatedly, and do not read the script's stdout in bulk to "watch" it; the file is the whole point of K2, exactly so progress doesn't cost anything beyond a single cheap read per question.
+**Progress, without burning tokens on it:** the script rewrites `progress.json` atomically (schema: `stage`, `done`, `total`, `pct`, `elapsed_s`, `eta_s`) at most once a second. When the user asks for status, read that one file **once** and report the numbers back — that's the entire cost. Do not poll it in a loop, do not sleep-and-recheck repeatedly, and do not read the script's stdout in bulk to "watch" it; the file is the whole point, exactly so progress doesn't cost anything beyond a single cheap read per question.
 
 ### Step 5 — Keep everything that lets a screenshot be found without opening it
 

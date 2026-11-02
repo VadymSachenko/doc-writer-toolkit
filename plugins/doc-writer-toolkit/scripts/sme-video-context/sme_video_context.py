@@ -48,7 +48,7 @@ class Candidate:
 
 
 class Progress:
-    """Atomically rewrites a K2-schema progress.json at most once a second, plus a
+    """Atomically rewrites progress.json (schema in the README) at most once a second, plus a
     single-line \\r progress bar on stderr. stdout is left alone — that's where the
     final summary lines the calling skill reads still live."""
 
@@ -226,7 +226,7 @@ def read_ocr(image: Image.Image, scratch: Path, language: str) -> str:
     prepared = prepare_for_ocr(image, 0.88)
     prepared.save(scratch)
     # tesseract starts its own OpenMP thread pool per invocation regardless of how many
-    # worker processes are already running it in parallel (D-10) — capping it to 1
+    # worker processes are already running it in parallel — capping it to 1
     # thread here is what makes `--jobs N` actually mean N-way parallelism instead of
     # N processes each fanning out further and oversubscribing the machine.
     env = {**os.environ, "OMP_THREAD_LIMIT": "1"}
