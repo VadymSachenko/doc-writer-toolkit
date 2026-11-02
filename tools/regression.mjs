@@ -24,6 +24,7 @@ const STEPS = [
   { id: 'doc-align', cmd: 'npm', args: ['test'], cwd: `${scripts}/doc-align` },
   { id: 'screenshot-locales', cmd: 'npm', args: ['test'], cwd: `${scripts}/screenshot-locales` },
   { id: 'section-state', cmd: 'npm', args: ['test'], cwd: `${scripts}/section-state` },
+  { id: 'pipeline-measures', cmd: 'npm', args: ['test'], cwd: `${scripts}/pipeline-measures` },
   { id: 'sme-video-context', cmd: python, args: [`${scripts}/sme-video-context/tests/run.py`], notRunExit: 2 },
   { id: 'validate', cmd: claude, args: ['plugin', 'validate', 'plugins/doc-writer-toolkit'] },
   { id: 'visibility', cmd: 'node', args: ['tools/check-visibility.mjs'], notRunExit: 2 },

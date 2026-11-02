@@ -53,6 +53,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: npm test
         working-directory: plugins/doc-writer-toolkit/scripts/section-state
+      - name: Test pipeline-measures
+        if: ${{ !cancelled() }}
+        run: npm test
+        working-directory: plugins/doc-writer-toolkit/scripts/pipeline-measures
 
   # The unit tests of the Python script behind extract-sme-screenshots. They install only the two image packages in
   # tests/requirements.txt, pinned as in sme-video-requirements.txt: no ffmpeg, no tesseract, no faster-whisper.
