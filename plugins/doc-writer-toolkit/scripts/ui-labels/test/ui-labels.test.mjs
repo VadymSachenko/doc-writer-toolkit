@@ -212,7 +212,7 @@ test('import → change → check → import → sync (fixture repo, command ada
     ['en', 'Save', 'Confirm'],
     ['tr', 'Kaydet', 'Onayla'],
   ]);
-  // Req 3, criterion 2a: the page bound to the sibling key still shows the old strings and is reported, not patched.
+  // The page bound to the sibling key still shows the old strings and is reported, not patched.
   assert.deepEqual(
     synced.out.checkBinding.map((c) => [c.page, c.locale, c.boundKey, c.changedKey, c.old, c.new]).sort(),
     [

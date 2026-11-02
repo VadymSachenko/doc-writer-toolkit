@@ -11,8 +11,9 @@ Two independent ways to get screenshots out of a recording:
 
 ```bash
 brew install ffmpeg tesseract tesseract-lang
-python3 -m venv .venv-sme-video
-.venv-sme-video/bin/pip install -r sme-video-requirements.txt
+VENV=~/.cache/doc-writer-toolkit/sme-video-venv   # the venv the extract-sme-screenshots skill uses
+[ -d "$VENV" ] || python3 -m venv "$VENV"
+"$VENV/bin/pip" install -r sme-video-requirements.txt
 ```
 
 `--plan-from-transcript` and `--merge-from` don't need this venv at all — they run on a bare `python3` (see each section below). `--extract-at` needs the system `tesseract` binary and the venv's Pillow (no `imagehash`, no `faster-whisper`) — see "Transcript-driven mode".
@@ -22,7 +23,8 @@ python3 -m venv .venv-sme-video
 Use a new output directory for every run:
 
 ```bash
-.venv-sme-video/bin/python sme_video_context.py \
+VENV=~/.cache/doc-writer-toolkit/sme-video-venv
+"$VENV/bin/python" sme_video_context.py \
   /path/to/meeting.mp4 \
   /path/to/output-package \
   --progress-file /path/to/output-package/progress.json
@@ -78,7 +80,7 @@ Rewritten atomically (write to `.tmp`, then `os.replace()`) at most once a secon
 - `stage`: one of `extract` (ffmpeg frame extraction), `hash` (perceptual hashing of every candidate frame), `ocr` (the selection walk, which OCRs frames on demand), `transcribe` (Whisper — not written when `--transcript` is used instead), `merge` (writing `context.md`, the contact sheet, `key/`, `transcript-key/`, and both `frames-index.json` files).
 - `done` / `total`: units appropriate to the current stage (frames for `extract`/`hash`/`ocr`, seconds of audio transcribed for `transcribe`, sub-steps for `merge`).
 - `pct`, `elapsed_s`: derived arithmetically from `done`/`total` and the current stage's start time — relative to the *current stage*, not the whole run.
-- `eta_s`: projected from throughput over a trailing ~20-second window of recent samples, not the whole-stage average (D-11) — so it reacts within a few seconds when throughput actually changes (e.g. swap pressure kicking in mid-run) instead of staying anchored to a faster start.
+- `eta_s`: projected from throughput over a trailing ~20-second window of recent samples, not the whole-stage average — so it reacts within a few seconds when throughput actually changes (e.g. swap pressure kicking in mid-run) instead of staying anchored to a faster start.
 
 A single read is the entire cost of checking status — don't poll in a loop; a fresh read a second or more after the last one is guaranteed to reflect current progress.
 
@@ -94,7 +96,7 @@ python3 sme_video_context.py --plan-from-transcript \
 
 # 2. Pick the seconds worth a screenshot from plan.json (e.g. score >= 4), then pull
 #    exactly those frames — ffmpeg + tesseract + the venv's Pillow, no imagehash/
-#    faster-whisper. Pass the same --transcript flag(s) again here (D-5): without them
+#    faster-whisper. Pass the same --transcript flag(s) again here: without them
 #    every frames-index.json entry this call writes comes out with transcript_text: "",
 #    score: 0, reasons: [] even though the frame itself was chosen *because* of what was
 #    said nearby — the plan (step 1) already proved the relevance, this step just needs
@@ -116,7 +118,7 @@ VENV=~/.cache/doc-writer-toolkit/sme-video-venv   # needs Pillow: pip install Pi
 
 `score`/`reasons` come from the same `transcript_relevance()` heuristic the bulk pipeline uses internally to guarantee transcript-important moments aren't skipped. Filtering by score (and picking which seconds are worth a screenshot) is the caller's decision — this mode only scores and reports, it doesn't filter or extract on its own.
 
-## `frames-index.json` (K8)
+## `frames-index.json`
 
 Lives alongside a folder of `screen-HH-MM-SS.jpg` screenshots — `images/`, `transcript-key/images/`, or a merged destination folder like `.sources/frames/{video}-frames/`. A frame taken between whole seconds gets the tenths too, `screen-HH-MM-SS_T.jpg` (`screen-00-00-58_5.jpg`), so two frames in the same second don't overwrite each other; its `timestamp` then reads `00:00:58.5`. Names sort in time order, and every mode reads both forms. One entry per screenshot in that folder:
 
@@ -137,9 +139,9 @@ Lives alongside a folder of `screen-HH-MM-SS.jpg` screenshots — `images/`, `tr
 
 - `visual-dedup`: kept by the bulk pHash+OCR pass (`images/`).
 - `transcript-key`: from `write_transcript_driven_package` (`transcript-key/images/`).
-- `targeted`: from `--extract-at`. Each newly extracted frame is OCR'd on the spot and scored against whatever `--transcript` file(s) were passed to that same `--extract-at` call — `ocr_text`, `transcript_text`, `score`, and `reasons` are filled exactly like the bulk pipeline's entries (D-5 fix; this mode used to leave all four empty regardless of input). Pass `--transcript` to get them filled; omitting it is still valid and correctly yields `transcript_text: ""`, `score: 0`, `reasons: []` (no `ocr_text: ""` — OCR still runs).
+- `targeted`: from `--extract-at`. Each newly extracted frame is OCR'd on the spot and scored against whatever `--transcript` file(s) were passed to that same `--extract-at` call — `ocr_text`, `transcript_text`, `score`, and `reasons` are filled exactly like the bulk pipeline's entries (this mode used to leave all four empty regardless of input). Pass `--transcript` to get them filled; omitting it is still valid and correctly yields `transcript_text: ""`, `score: 0`, `reasons: []` (no `ocr_text: ""` — OCR still runs).
 - Frames without a nearby transcript match get `score: 0`, `reasons: []` regardless of source.
 
-**Why `--extract-at` OCRs its frames (D-5 decision):** the alternative was leaving `ocr_text` blank there, documented as a known gap. This mode only ever pulls a few dozen frames at most (it exists specifically to avoid the bulk pass), so the OCR cost is tens of seconds, not the tens of minutes a full sweep costs — running it keeps `frames-index.json` actually useful for picking a screenshot without opening it, instead of a list a reader has to treat as half-blind for every frame this mode touches. The cost of this choice: `--extract-at` now needs `tesseract` and Pillow, where it used to run on bare `python3` with only `ffmpeg`. See "Prerequisites" above.
+**Why `--extract-at` OCRs its frames:** the alternative was leaving `ocr_text` blank there, documented as a known gap. This mode only ever pulls a few dozen frames at most (it exists specifically to avoid the bulk pass), so the OCR cost is tens of seconds, not the tens of minutes a full sweep costs — running it keeps `frames-index.json` actually useful for picking a screenshot without opening it, instead of a list a reader has to treat as half-blind for every frame this mode touches. The cost of this choice: `--extract-at` now needs `tesseract` and Pillow, where it used to run on bare `python3` with only `ffmpeg`. See "Prerequisites" above.
 
 The bulk pipeline writes this file fresh for `images/` and `transcript-key/images/` on every run. `--merge-from` and `--extract-at` **append** to whatever `frames-index.json` already exists at the destination (deduplicated by `screenshot` filename, re-sorted by `seconds`) rather than overwriting it — `--merge-from` carries over each copied screenshot's existing entry from the source folder's own index when one exists there, falling back to a bare `source: "visual-dedup"` entry otherwise. Running either mode again later only adds coverage, never loses it. There is no separate `coverage.json` — this file replaces it.

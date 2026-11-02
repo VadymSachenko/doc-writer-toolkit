@@ -85,7 +85,7 @@ VENV=~/.cache/doc-writer-toolkit/sme-video-venv
 # add --jobs N only to deliberately throttle below the script's cpu_count-1 default
 ```
 
-**Progress, without burning tokens on it:** the script rewrites `progress.json` atomically (schema: `stage`, `done`, `total`, `pct`, `elapsed_s`, `eta_s`) at most once a second. When the user asks for status, read that one file **once** and report the numbers back — that's the entire cost. Do not poll it in a loop, do not sleep-and-recheck repeatedly, and do not read the script's stdout in bulk to "watch" it; the file is the whole point of K2, exactly so progress doesn't cost anything beyond a single cheap read per question.
+**Progress, without burning tokens on it:** the script rewrites `progress.json` atomically (schema: `stage`, `done`, `total`, `pct`, `elapsed_s`, `eta_s`) at most once a second. When the user asks for status, read that one file **once** and report the numbers back — that's the entire cost. Do not poll it in a loop, do not sleep-and-recheck repeatedly, and do not read the script's stdout in bulk to "watch" it; the file is the whole point, exactly so progress doesn't cost anything beyond a single cheap read per question.
 
 ### Step 5 — Keep everything that lets a screenshot be found without opening it
 
@@ -137,7 +137,7 @@ VENV=~/.cache/doc-writer-toolkit/sme-video-venv
 - `--tolerance` (default 15s) controls how close an existing screenshot must be to count as already covering a requested second.
 - This mode needs `ffmpeg`, `tesseract` and the venv's Pillow (Step 3's Mode A setup) — no imagehash, no Whisper. That's what makes it cheap enough for `convert-sme-input` to call directly mid-workflow instead of only as a manual follow-up. Without `--transcript`, the call still extracts, but every new entry gets `score: 0`, no reasons and no transcript text.
 - This is also how Mode A's `--plan-from-transcript` output gets turned into screenshots: feed the seconds it picks straight into `--extract-at` as above.
-- Each new frame gets appended to `frames-index.json` (K8) alongside the existing entries — this call never overwrites the index, only adds to it.
+- Each new frame gets appended to `frames-index.json` alongside the existing entries — this call never overwrites the index, only adds to it.
 - Report how many new screenshots were extracted versus already covered.
 
 This is also what a manual "second pass" after `convert-sme-input` finishes looks like: pull every `(M:SS)`/`(M:SS–M:SS)` citation out of the finished `sme-interview.md` (for a range, use the midpoint) and run this once with all of them.
