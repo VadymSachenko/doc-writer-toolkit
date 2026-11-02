@@ -107,7 +107,7 @@ It prints one row per step, with the exit code and the result line. A step whose
 
 The lint prints the gaps listed in `KNOWN_GAPS` (`tools/lint-plugin.mjs`) as `known`, and they don't fail it. When you close one, remove its entry: an entry that no longer occurs fails the lint.
 
-CI (`.github/workflows/check.yml`) runs the same steps on every pull request and every push to `main`. The two CLI steps run in their own job, with the CLI version pinned. Neither needs credentials.
+CI (`.github/workflows/check.yml`) runs the same steps on every pull request and every push to `main`. The two CLI steps run in their own job, with the CLI version pinned. The `sme-video-context` tests run in a job of their own too, on Python 3.9 with only the packages in `tests/requirements.txt` installed. None needs credentials.
 
 ## Line endings
 
