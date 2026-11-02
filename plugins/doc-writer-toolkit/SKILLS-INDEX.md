@@ -2,7 +2,7 @@
 
 Canonical list of what the plugin ships. One line per skill; the invocation phrasing is what triggers it (all skills are explicit-invocation only). `WORKFLOW.md` at the repo root maps these to the writing process.
 
-## Skills (17)
+## Skills (18)
 
 | Skill | What it does | Invoke with |
 |---|---|---|
@@ -25,7 +25,7 @@ Canonical list of what the plugin ships. One line per skill; the invocation phra
 | `cleanup-unused-screenshots` | Moves candidate screenshots a page never referenced into `_unused/` (never deletes) | "cleanup-unused-screenshots for docs/routing" |
 | `identify-ui-icon` | Finds the picture for an icon-only control in the project's `Icon rendering:` form: an Iconify id (evidence first, then the Iconify API), its SVG, or a screenshot crop; falls back to a crop or a marker, never guesses an id and never names the control. The writers call it by name | "identify-ui-icon: the trash button in docs/payments/.assets/payments-page.png" |
 
-## Commands (13)
+## Commands (14)
 
 | Command | Underlying skill(s) |
 |---|---|
