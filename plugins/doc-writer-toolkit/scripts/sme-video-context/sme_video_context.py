@@ -30,8 +30,8 @@ from typing import TYPE_CHECKING, Optional
 # because convert-sme-input calls them directly without the full
 # ffmpeg+tesseract+Pillow+imagehash setup extract-sme-screenshots' bulk pass needs.
 # --extract-at now needs Pillow (imported lazily inside it) and the system `tesseract`
-# binary too, since D-5 made it OCR each newly extracted frame instead of leaving
-# ocr_text empty — see the README's "ocr_text decision" note.
+# binary too, since it OCRs each newly extracted frame instead of leaving
+# ocr_text empty — see the README's "Why `--extract-at` OCRs its frames" note.
 if TYPE_CHECKING:
     import imagehash
     from PIL import Image
@@ -52,7 +52,7 @@ class Progress:
     single-line \\r progress bar on stderr. stdout is left alone — that's where the
     final summary lines the calling skill reads still live."""
 
-    # Number of recent (time, done) samples `eta_s` is computed from (D-11). `_write`
+    # Number of recent (time, done) samples `eta_s` is computed from. `_write`
     # only ever appends at most once a second, so this is roughly a 20-second moving
     # window — long enough to smooth out a single slow frame, short enough to react
     # within a few writes when throughput actually changes (e.g. swap pressure
@@ -798,7 +798,7 @@ def extract_at_timestamps(
     extracted frame is OCR'd and scored against `transcript` the same way the bulk
     pipeline does (frames_index_entry/transcript_relevance), so frames-index.json
     entries from this mode carry real ocr_text/transcript_text/score/reasons instead
-    of coming out empty (D-5) — this mode only ever pulls a handful of frames, so the
+    of coming out empty — this mode only ever pulls a handful of frames, so the
     OCR pass stays cheap. `transcript` is `[]` when the caller has none to pass, in
     which case score/reasons/transcript_text are correctly 0/[]/"" for every frame.
     """

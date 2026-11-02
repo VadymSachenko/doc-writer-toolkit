@@ -116,7 +116,7 @@ export function linkFormProblem(target) {
 
 const frontmatterKeys = (fm) => new Map((fm?.entries ?? []).filter((e) => e.key !== 'last_update').map((e) => [e.key, e]));
 
-// Requirement 8: every deterministic check on one translated page. Pure: reads nothing but its arguments and the disk
+// Every deterministic check on one translated page. Pure: reads nothing but its arguments and the disk
 // (for asset links).
 export async function checkPage({ locale, uaText, targetText, targetFile, state, labels, meta, unverified = [], root, linkTitles = [], knownStrings = new Set() }) {
   const failures = [];

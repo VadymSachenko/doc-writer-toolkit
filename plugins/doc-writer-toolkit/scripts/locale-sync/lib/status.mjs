@@ -31,7 +31,7 @@ export async function runStatus(s, { selectors = [], overwrite = false, threshol
   const warnings = [...targetWarnings];
   for (const f of unsupported) warnings.push(`${f} is a YAML category file: only _category_.json files are tracked, so its label is not translated by this process.`);
 
-  // Only committed content is translated (Requirement 4, criterion 7).
+  // Only committed content is translated.
   const unitPaths = new Set(units.map((p) => p.path));
   const known = new Set([...all, ...categories].map((p) => p.path));
   for (const ps of s.pairs) {

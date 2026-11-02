@@ -137,7 +137,7 @@ VENV=~/.cache/doc-writer-toolkit/sme-video-venv
 - `--tolerance` (default 15s) controls how close an existing screenshot must be to count as already covering a requested second.
 - This mode needs `ffmpeg`, `tesseract` and the venv's Pillow (Step 3's Mode A setup) — no imagehash, no Whisper. That's what makes it cheap enough for `convert-sme-input` to call directly mid-workflow instead of only as a manual follow-up. Without `--transcript`, the call still extracts, but every new entry gets `score: 0`, no reasons and no transcript text.
 - This is also how Mode A's `--plan-from-transcript` output gets turned into screenshots: feed the seconds it picks straight into `--extract-at` as above.
-- Each new frame gets appended to `frames-index.json` (K8) alongside the existing entries — this call never overwrites the index, only adds to it.
+- Each new frame gets appended to `frames-index.json` alongside the existing entries — this call never overwrites the index, only adds to it.
 - Report how many new screenshots were extracted versus already covered.
 
 This is also what a manual "second pass" after `convert-sme-input` finishes looks like: pull every `(M:SS)`/`(M:SS–M:SS)` citation out of the finished `sme-interview.md` (for a range, use the midpoint) and run this once with all of them.

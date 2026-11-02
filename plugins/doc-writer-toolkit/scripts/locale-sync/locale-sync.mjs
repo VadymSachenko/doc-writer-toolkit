@@ -33,9 +33,9 @@ Commands
   terms --usage <old>…      Where one locale's pages still use an old translation: page, line, block, and the --redo
                             value that re-translates those blocks. Narrow the pages with --scope.
   link-assets <page>…       Relative per-file symlinks to the EN screenshots in each locale; real files are overrides.
-  check <page>…             Every Requirement 8 check on the translated page. Exit 1 if any fails.
+  check <page>…             Every check on the translated page. Exit 1 if any fails.
   record <page>…            Runs the checks, then advances the page's state. Nothing is recorded if a check fails.
-  report [<page>…]          Requirement 13 tables: exists / images resolve / checks passed, local URLs, optional build.
+  report [<page>…]          Tables per page and locale: exists / images resolve / checks passed, local URLs, optional build.
   stray                     Changed or untracked files outside the places a run writes to (locale roots, their
                             current.json, the state root, .gitattributes). Exit 1 if any. Deletes nothing.
 

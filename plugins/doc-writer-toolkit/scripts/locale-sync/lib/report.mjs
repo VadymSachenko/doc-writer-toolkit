@@ -63,7 +63,7 @@ export function parseBuildErrors(s, locale, log) {
 
 const mark = (ok) => (ok ? '✓' : '✗');
 
-// Requirement 13: per page and locale, does the page exist, do its images resolve, did the checks pass — plus the local URLs of
+// The report: per page and locale, does the page exist, do its images resolve, did the checks pass — plus the local URLs of
 // the pages that changed, and (with --build) a build of each locale.
 export async function runReport(s, { changed = [], build = false, origin = 'http://localhost:3000', buildTimeoutMin = 30 } = {}) {
   const { targets } = await resolveTargets(s);

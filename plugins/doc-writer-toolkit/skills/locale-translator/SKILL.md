@@ -114,7 +114,7 @@ The units of the run are every page and category row with at least one `new` or 
 
    Each `<id>` is the unit's id exactly as `status` printed it (`<pair>:<id>` when the host has several root pairs).
 
-3. When a worker finishes, start that locale's next batch, until every queue is done. A locale whose worker fails or stops keeps its previous files and state; the other locales go on (Requirement 5, criterion 8).
+3. When a worker finishes, start that locale's next batch, until every queue is done. A locale whose worker fails or stops keeps its previous files and state; the other locales go on.
 4. If the run is interrupted, run it again: `status` shows what is still stale, because every page passed and recorded is `current`.
 
 Don't translate, check or record pages yourself, and don't read the workers' candidate files. Their results are in `<run>/<locale>/results.jsonl`, one line per unit.
