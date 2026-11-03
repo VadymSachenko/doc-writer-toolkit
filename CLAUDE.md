@@ -33,6 +33,7 @@ plugins/doc-writer-toolkit/
   scripts/screenshot-locales/            # Node, no deps: screenshot locales, per-locale paths, staging, all-or-nothing promotion (README + tests)
   scripts/section-state/                 # Node, no deps: the document-section ledger, status and record (README + tests)
   scripts/pipeline-measures/             # Node, no deps: read-only measures of a docs pipeline from git, gh and the tracker (README + tests)
+  scripts/visual-pack/                   # Node, no deps: one review sheet of the changed pages in every locale, captured with the host's Playwright (README + tests)
   scripts/sme-video-context/             # standalone Python tool, not auto-loaded; unittest tests in tests/ (README)
 ```
 
@@ -46,6 +47,7 @@ There's no build. What you'll actually run:
 - **Validate a manifest edit:** `python3 -m json.tool plugins/doc-writer-toolkit/.claude-plugin/plugin.json` (or `.claude-plugin/marketplace.json`) — just a JSON syntax check.
 - **Try a skill/command end-to-end:** it must be exercised from a *different* repo that has this plugin installed (see README's "Install into a project" section) or from a local checkout added via `extraKnownMarketplaces` pointing at a local path. There is no in-repo harness for running a skill.
 - **Test the Node scripts:** `npm test` in `plugins/doc-writer-toolkit/scripts/ui-labels/`, `.../scripts/locale-sync/`, `.../scripts/doc-align/` `.../scripts/screenshot-locales/`, `.../scripts/section-state/` and `.../scripts/pipeline-measures/`. Offline (throwaway git repos and the `command` label adapter; `doc-align` uses inline fixtures, `screenshot-locales` throwaway folders, `pipeline-measures` a throwaway repo with hand-made `gh` and Trello JSON); the `locale-sync` suite takes about two minutes. Keep each script's `README.md` in step with its flags and output fields, and add a test with every behaviour change.
+- **Test `visual-pack`:** `npm test` in `plugins/doc-writer-toolkit/scripts/visual-pack/` runs the offline tests, then the browser test if `VISUAL_PACK_PLAYWRIGHT_FROM` names a folder whose `node_modules` has Playwright with Chromium installed. Without it the run exits 2 (`not run`) after the offline tests passed. `npm run test:offline` runs the offline tests alone. See CONTRIBUTING.md, "Running the browser test".
 - **Test the Python script:** `python3 plugins/doc-writer-toolkit/scripts/sme-video-context/tests/run.py`, with the skill's venv (`~/.cache/doc-writer-toolkit/sme-video-venv/bin/python`) or any Python that has the two packages in `tests/requirements.txt`. Standard-library `unittest`, offline: no `ffmpeg`, `tesseract`, network or `faster-whisper`. Exit code 2 means a package is missing. Add a test with every behaviour change.
 - **`scripts/sme-video-context/sme_video_context.py`:** the Python tool. Setup and run commands are documented in `plugins/doc-writer-toolkit/scripts/sme-video-context/README.md` (needs system `ffmpeg`/`tesseract` plus a Python venv) — follow that file rather than duplicating the steps here, since the `extract-sme-screenshots` skill's own instructions are the current source of truth for how it's actually invoked.
 
@@ -136,6 +138,10 @@ Four skills move a whole menu *section* (not just one page) toward publish-ready
 ### Screenshot locales
 
 A host that needs screenshots in more than one UI language declares `Screenshot locales:` (separate from `Content language:`) and `Locale switch:`. Every Playwright consumer (`app-explorer`, `resolve-markers`, and the writers through them) then follows one contract, `context/doc-rules/project-rules/screenshot-locales.md`: one scenario per page or section, one capture per locale into a staging folder, and `scripts/screenshot-locales/` (no AI) to derive each locale's `.assets/` path from the root pairs and `docusaurus.config`, keep the per-section ledger (`.sources/screenshot-manifest.json`), and move a set into the docs only when every locale is there. `screenshot-capture.md` stays the one-shot, one-locale mechanic. A host without the declaration runs no new step: it captures once, into the `.assets/` the consuming skill names, as before. Further locales that aren't screenshot locales keep their `locale-sync link-assets` links to the EN images.
+
+### Visual review pack (`scripts/visual-pack/`)
+
+`visual-pack --range <range>` (no AI) finds the docs pages a git range changed, builds the host's site (or takes `--build-dir`), serves it on `127.0.0.1`, opens each page in each locale with the *host's own* Playwright (it has no dependency of its own; `--playwright-from` or `VISUAL_PACK_PLAYWRIGHT_FROM` says where) and writes one HTML sheet under the toolkit state root: pages in rows, locales in columns, the automatic findings on top (broken images, tables wider than the page, text left untranslated). Every request that isn't to the local server is blocked and counted. The model reads only the short summary on stdout. The script's README has the rules.
 
 ### Locale translation pipeline (`locale-translator`, `/translate-locales`)
 

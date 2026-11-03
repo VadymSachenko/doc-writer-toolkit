@@ -180,3 +180,17 @@ Write a pattern inside one backtick span: the scripts read only the first backti
 - **Draft commit pattern:** `^Draft:`
 - **SME review list:** `In SME review`
 ```
+
+## Visual review pack
+
+These fields are read by the `visual-pack` script (`${CLAUDE_PLUGIN_ROOT}/scripts/visual-pack/`), which builds one review sheet of the docs pages a git range changed, in every locale. No skill reads them. The script also reads the root pair fields (`UA content root:`, `EN i18n root:`, `UA URL prefix:` and the named pairs) and `Toolkit state root:` from the sections above, and the locales from `docusaurus.config`. Each flag of the script overrides its field.
+
+| Field | Required | Value | If absent |
+|---|---|---|---|
+| `Site base URL:` | no | The site's `baseUrl`, such as `/handbook/`, when `docusaurus.config` doesn't hold it as a string literal | read from `docusaurus.config`, else `/` |
+
+Where Playwright is isn't a field: the script loads the docs repo's own Playwright, or the folder named by `--playwright-from` or `VISUAL_PACK_PLAYWRIGHT_FROM`.
+
+```md
+- **Site base URL:** `/handbook/`
+```

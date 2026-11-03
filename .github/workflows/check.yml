@@ -57,6 +57,31 @@ jobs:
         if: ${{ !cancelled() }}
         run: npm test
         working-directory: plugins/doc-writer-toolkit/scripts/pipeline-measures
+      # The offline tests only: the browser test needs Playwright and runs in its own job below.
+      - name: Test visual-pack (offline)
+        if: ${{ !cancelled() }}
+        run: npm run test:offline
+        working-directory: plugins/doc-writer-toolkit/scripts/visual-pack
+
+  # The visual-pack tests with the browser test, which needs Playwright and Chromium. The script has no dependency of
+  # its own and loads Playwright from the folder VISUAL_PACK_PLAYWRIGHT_FROM names, so it is installed there, outside
+  # the checkout. The version is the one the docs repos use. A missing browser would make `npm test` exit 2, which fails.
+  visual-pack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 'lts/*'
+      - name: Install Playwright and Chromium
+        run: |
+          echo "VISUAL_PACK_PLAYWRIGHT_FROM=$RUNNER_TEMP/playwright" >> "$GITHUB_ENV"
+          npm install --prefix "$RUNNER_TEMP/playwright" playwright@1.61.1
+          "$RUNNER_TEMP/playwright/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Test visual-pack
+        run: npm test
+        working-directory: plugins/doc-writer-toolkit/scripts/visual-pack
 
   # The unit tests of the Python script behind extract-sme-screenshots. They install only the two image packages in
   # tests/requirements.txt, pinned as in sme-video-requirements.txt: no ffmpeg, no tesseract, no faster-whisper.
