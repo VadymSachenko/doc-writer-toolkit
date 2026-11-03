@@ -7,7 +7,7 @@ const cleanDir = (p) => posix.normalize(p.replace(/\\/g, '/')).replace(/^\.\//, 
 
 // Reuses the ui-labels config reader: same CLAUDE.md block, same flags, same state root.
 // `s.pairs` are the UA/EN root pairs the run covers (all declared ones unless `--pair` narrows them), each with its own
-// roots, URL prefix, scope and state folder. `s.ua`, `s.en` and `s.urlPrefix` stay the primary pair's.
+// roots, URL prefix, page link form, scope and state folder. `s.ua`, `s.en` and `s.urlPrefix` stay the primary pair's.
 export async function loadSyncSettings(values) {
   // `--locales` narrows the run here; ui-labels would treat it as the full target list.
   const { locales, ...rest } = values;
@@ -34,6 +34,7 @@ function pairView(s, pair) {
     ua: cleanDir(pair.ua),
     en: cleanDir(pair.en),
     urlPrefix: pair.urlPrefix,
+    linkForm: pair.linkForm,
     scopeSpec: pair.scope,
     scopeOverride: s.scopeOverride,
     statesDir: pagesDir(s.stateRoot, pair),

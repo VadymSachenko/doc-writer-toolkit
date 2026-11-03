@@ -104,21 +104,40 @@ export function yamlScalarProblem(value) {
   return null;
 }
 
-// A page link must be site-root-relative with no .md/.mdx (context/doc-rules/project-rules/internal-links.md). Links to
-// assets, anchors and other sites are not page links.
+// A page link must be site-root-relative and have the form its pair declares (context/doc-rules/project-rules/
+// internal-links.md). `route` (the default): no .md/.mdx. `file-path`: a link to a page of the same pair is the file's
+// path from the pair's UA content root, .md/.mdx kept; a link to another pair is still a route, since Docusaurus resolves
+// a file link only inside its own docs instance. `pair` is the linking page's: { linkForm, urlPrefix, ua }; `prefixes`
+// are the URL prefixes of every declared pair. Links to assets, anchors and other sites are not page links.
 const ASSET_LINK = /\.(png|jpe?g|gif|svg|webp|pdf|zip|csv|json|ya?ml|txt|mp4|webm)(#.*)?$/i;
-export function linkFormProblem(target) {
+const segments = (p) => p.split('/').filter(Boolean);
+const startsWith = (segs, prefix) => prefix.every((x, i) => segs[i] === x);
+export function linkFormProblem(target, { pair = null, prefixes = [] } = {}) {
   if (/^([a-z][a-z0-9+.-]*:|#)/i.test(target) || ASSET_LINK.test(target) || target.includes('.assets/')) return null;
-  if (/\.mdx?(#|$)/i.test(target.split('?')[0])) return 'it has a file extension';
+  const bare = target.split(/[?#]/)[0];
+  const hasExt = /\.mdx?$/i.test(bare);
+  if (pair?.linkForm !== 'file-path') {
+    if (hasExt) return 'it has a file extension';
+    if (!target.startsWith('/')) return 'it is not site-root-relative';
+    return null;
+  }
   if (!target.startsWith('/')) return 'it is not site-root-relative';
-  return null;
+  const segs = segments(bare);
+  if (hasExt) {
+    const root = segments(pair.ua);
+    return root.length && startsWith(segs, root) ? `it repeats the UA content root ${pair.ua}/: a file-path link starts below it` : null;
+  }
+  // The longest whole-segment prefix match names the target's pair; an unmatched route is left to the skills.
+  const own = segments(pair.urlPrefix);
+  const best = prefixes.map(segments).filter((p) => startsWith(segs, p)).sort((a, b) => b.length - a.length)[0];
+  return best && best.join('/') === own.join('/') ? 'it is a route, but this root pair links its own pages by file path (Page link form: file-path)' : null;
 }
 
 const frontmatterKeys = (fm) => new Map((fm?.entries ?? []).filter((e) => e.key !== 'last_update').map((e) => [e.key, e]));
 
 // Every deterministic check on one translated page. Pure: reads nothing but its arguments and the disk
 // (for asset links).
-export async function checkPage({ locale, uaText, targetText, targetFile, state, labels, meta, unverified = [], root, linkTitles = [], knownStrings = new Set() }) {
+export async function checkPage({ locale, uaText, targetText, targetFile, state, labels, meta, unverified = [], root, linkTitles = [], knownStrings = new Set(), linkForm = {} }) {
   const failures = [];
   const warnings = [];
   const fail = (check, message, detail = {}) => failures.push({ check, message, ...detail });
@@ -209,9 +228,12 @@ export async function checkPage({ locale, uaText, targetText, targetFile, state,
     const d = multisetDiff(a, b);
     if (d.missing.length || d.extra.length) fail(check, `${label} differ from the UA page.`, { missing: head(d.missing), extra: head(d.extra) });
   }
-  // Copied verbatim from UA, a page link in file form still breaks the locale build: the UA page has to be fixed.
-  const badForm = [...new Set(tr.links)].map((target) => [target, linkFormProblem(target)]).filter(([, p]) => p);
-  if (badForm.length) fail('link-form', 'Page links must be site-root-relative routes with no .md/.mdx. Fix them on the UA page too, then translate again.', { links: head(badForm.map(([target, problem]) => `${target}: ${problem}`)) });
+  // A link copied verbatim from UA in the wrong form is wrong on the UA page too: it has to be fixed there.
+  const badForm = [...new Set(tr.links)].map((target) => [target, linkFormProblem(target, linkForm)]).filter(([, p]) => p);
+  const formRule = linkForm.pair?.linkForm === 'file-path'
+    ? 'Page links must be site-root-relative: file paths with .md/.mdx to pages of this root pair (Page link form: file-path), routes with no .md/.mdx to other pairs.'
+    : 'Page links must be site-root-relative routes with no .md/.mdx.';
+  if (badForm.length) fail('link-form', `${formRule} Fix them on the UA page too, then translate again.`, { links: head(badForm.map(([target, problem]) => `${target}: ${problem}`)) });
 
   // ToDo / NEEDS CONFIRMATION markers and other comments.
   if (ua.markers !== tr.markers) fail('markers', `The UA page has ${ua.markers} ToDo / NEEDS CONFIRMATION markers but the translation has ${tr.markers}.`);
@@ -328,7 +350,7 @@ export async function checkTranslation(s, page, locale, { candidate = null, unve
   const terms = await readTerms(s, locale);
   const knownStrings = new Set([...terms.entries.map((e) => e.target), ...Object.values(labels?.[locale] ?? {})].map(normString));
   const linkTitles = targetText === null ? [] : await titleLinks(s, page, uaText, locale);
-  const result = await checkPage({ locale, uaText, targetText, targetFile, state, labels, meta: st?.meta, unverified: [...unverified, ...(state.locales[locale]?.unverified ?? [])].filter(Boolean), root: s.root, linkTitles, knownStrings });
+  const result = await checkPage({ locale, uaText, targetText, targetFile, state, labels, meta: st?.meta, unverified: [...unverified, ...(state.locales[locale]?.unverified ?? [])].filter(Boolean), root: s.root, linkTitles, knownStrings, linkForm: { pair: page.ps, prefixes: (s.declaredPairs ?? [page.ps]).map((p) => p.urlPrefix) } });
   return { ...result, page: page.ref, locale, file: targetFile, uaText, targetText, state, store: st, labels };
 }
 

@@ -1868,7 +1868,7 @@ test('check: frontmatter that would not parse, a page link in file form, and a b
     assert.match(r.failures.find((x) => x.check === expected).message, message, name);
   }
 
-  // A page link in file form fails even when the UA page has the same link: the locale build breaks on it either way.
+  // A page link in file form fails even when the UA page has the same link: it is wrong on the UA page too.
   const uaFile = path.join(f.dir, 'docs/filters/filters.md');
   const ua = await fs.readFile(uaFile, 'utf8');
   await fs.writeFile(uaFile, ua.replace('(/filters/)', '(/docs/filters/filters.md)'));
@@ -1886,4 +1886,80 @@ test('check: frontmatter that would not parse, a page link in file form, and a b
   await f.write(`${TR_ROOT}/filters/filters.md`, edit(TR, 'description: Filtrelerle nasıl çalışacağınızı öğrenin', 'description: Filtreler: nasıl çalışacağınızı öğrenin'));
   const rec = await cli(f.dir, 'record', 'filters', '--locales', 'tr');
   assert.notEqual(rec.code, 0);
+});
+
+// `Page link form: file-path`: links between pages of the pair keep .md/.mdx, links to another pair stay routes.
+const toFilePaths = (t) => t.replace('(/filters/)', '(/filters/filters.md)').replace('(/overview/)', '(/overview/overview.md#intro)');
+const writeUa = async (f, text, file = 'docs/filters/filters.md') => {
+  await f.write(file, text);
+  await f.commit('ua');
+};
+async function filePathFixture(lines = '- **Page link form:** `file-path`\n') {
+  const f = await translatedFixture();
+  await f.write('CLAUDE.md', (await f.read('CLAUDE.md')).replace('\n## Other', `${lines}\n## Other`));
+  await writeUa(f, toFilePaths(UA));
+  return f;
+}
+
+test('check: with Page link form file-path, .md links pass and a route to a page of the pair fails', async () => {
+  const f = await filePathFixture();
+  let r = await checks(f, toFilePaths);
+  assert.equal(r.code, 0, JSON.stringify(r.failures, null, 2));
+
+  // The locale link lost its extension while UA keeps it: a different link, and a route where the pair wants a file path.
+  r = await checks(f, (t) => toFilePaths(t).replace('(/filters/filters.md)', '(/filters/filters)'));
+  assert.equal(r.code, 1);
+  assert.ok(r.checks.includes('links') && r.checks.includes('link-form'), JSON.stringify(r.checks));
+  const failure = r.failures.find((x) => x.check === 'link-form');
+  assert.match(failure.message, /file paths with \.md\/\.mdx/);
+  assert.deepEqual(failure.links, ['/filters/filters: it is a route, but this root pair links its own pages by file path (Page link form: file-path)']);
+
+  // A route on both pages fails too, and so do a relative link and a path that repeats the content root.
+  await writeUa(f, toFilePaths(UA).replace('(/filters/filters.md)', '(/filters/filters)'));
+  r = await checks(f, (t) => toFilePaths(t).replace('(/filters/filters.md)', '(/filters/filters)'));
+  assert.deepEqual([r.code, r.checks], [1, ['link-form']]);
+  await writeUa(f, toFilePaths(UA).replace('(/filters/filters.md)', '(../filters/filters.md)').replace('(/overview/overview.md#intro)', '(/docs/overview/overview.md)'));
+  r = await checks(f, (t) => toFilePaths(t).replace('(/filters/filters.md)', '(../filters/filters.md)').replace('(/overview/overview.md#intro)', '(/docs/overview/overview.md)'));
+  assert.deepEqual(r.failures.find((x) => x.check === 'link-form').links, [
+    '../filters/filters.md: it is not site-root-relative',
+    '/docs/overview/overview.md: it repeats the UA content root docs/: a file-path link starts below it',
+  ]);
+});
+
+const pairChecks = async (f, mutate) => {
+  await f.write(`${TR_ROOT}/filters/filters.md`, mutate(TR));
+  const r = await cli(f.dir, 'check', 'primary:filters/filters', '--locales', 'tr');
+  return { code: r.code, checks: r.out.results?.[0]?.checks, failures: r.out.results?.[0]?.failures ?? r.out };
+};
+
+test('check: Page link form is per root pair, and a link to another pair stays a route', async () => {
+  // The primary pair keeps routes: its .md link fails even though the other pair uses file paths.
+  const f = await translatedFixture();
+  await addGuides(f);
+  await f.write('CLAUDE.md', (await f.read('CLAUDE.md')).replace('\n## Other', '- **Guides Page link form:** `file-path`\n\n## Other'));
+  let r = await pairChecks(f, (t) => t);
+  assert.equal(r.code, 0, JSON.stringify(r.failures, null, 2));
+  await writeUa(f, toFilePaths(UA));
+  r = await pairChecks(f, toFilePaths);
+  assert.deepEqual([r.code, r.checks], [1, ['link-form']]);
+
+  // A guides page links its own pages by file path and a primary page by route.
+  const page = (t) => t.replace('Див. [Фільтри](/filters/).', 'Див. [Фільтри](/filters/) і [Вступ](/intro/intro.md).').replace('Bkz. [Filtreler](/filters/).', 'Bkz. [Filtreler](/filters/) ve [Giriş](/intro/intro.md).');
+  await writeUa(f, page(G_PAGE), `${G_UA}/filters/filters.md`);
+  await f.write(`${G_TR}/filters/filters.md`, page(G_PAGE_TR));
+  await f.write(`${G_TR}/filters/.assets/panel.png`, 'png-en-guides');
+  r = await cli(f.dir, 'check', 'guides:filters/filters', '--locales', 'tr');
+  assert.deepEqual(r.out.results[0].failures.filter((x) => x.check === 'link-form'), []);
+  const route = (t) => page(t).replace('(/intro/intro.md)', '(/guides/intro/intro)');
+  await writeUa(f, route(G_PAGE), `${G_UA}/filters/filters.md`);
+  await f.write(`${G_TR}/filters/filters.md`, route(G_PAGE_TR));
+  r = await cli(f.dir, 'check', 'guides:filters/filters', '--locales', 'tr');
+  assert.deepEqual(r.out.results[0].failures.find((x) => x.check === 'link-form')?.links, ['/guides/intro/intro: it is a route, but this root pair links its own pages by file path (Page link form: file-path)']);
+});
+
+test('check: an unknown Page link form is a configuration error (exit 2)', async () => {
+  const f = await filePathFixture('- **Page link form:** `relative`\n');
+  const r = await cli(f.dir, 'check', 'filters', '--locales', 'tr');
+  assert.equal(r.code, 2);
+  assert.match(r.out.error, /'Page link form: relative' is not a page link form\. Use route or file-path\./);
 });
