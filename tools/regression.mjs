@@ -3,6 +3,7 @@
 // its exit code and result line. A step whose tool is missing is `not run`, which fails the run unless
 // --allow-not-run is passed. --skip <step,...> leaves steps out; --out <dir> saves each step's full output.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +11,10 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const scripts = 'plugins/doc-writer-toolkit/scripts';
 const claude = process.env.CLAUDE_BIN || 'claude';
+// The Python tests of sme-video-context run on the venv of the extract-sme-screenshots skill when it exists,
+// else on python3. Their runner exits 2 when an image package is missing, which shows as `not run`.
+const smeVenvPython = path.join(os.homedir(), '.cache', 'doc-writer-toolkit', 'sme-video-venv', 'bin', 'python');
+const python = fs.existsSync(smeVenvPython) ? smeVenvPython : 'python3';
 
 const STEPS = [
   { id: 'lint', cmd: 'node', args: ['tools/lint-plugin.mjs'] },
@@ -19,6 +24,7 @@ const STEPS = [
   { id: 'doc-align', cmd: 'npm', args: ['test'], cwd: `${scripts}/doc-align` },
   { id: 'screenshot-locales', cmd: 'npm', args: ['test'], cwd: `${scripts}/screenshot-locales` },
   { id: 'section-state', cmd: 'npm', args: ['test'], cwd: `${scripts}/section-state` },
+  { id: 'sme-video-context', cmd: python, args: [`${scripts}/sme-video-context/tests/run.py`], notRunExit: 2 },
   { id: 'validate', cmd: claude, args: ['plugin', 'validate', 'plugins/doc-writer-toolkit'] },
   { id: 'visibility', cmd: 'node', args: ['tools/check-visibility.mjs'], notRunExit: 2 },
 ];
@@ -28,6 +34,8 @@ export function resultLine(output) {
   const lines = output.split('\n').map((l) => l.trim()).filter(Boolean);
   const counts = lines.filter((l) => /^ℹ (tests|pass|fail) \d+$/.test(l));
   if (counts.length) return counts.map((l) => l.slice(2)).join(', ');
+  const ran = lines.find((l) => /^Ran \d+ tests? in /.test(l));
+  if (ran) return `${ran.replace(/ in [\d.]+s$/, '')}, ${lines.at(-1)}`; // unittest: "Ran 111 tests, OK"
   const known = lines.filter((l) => /^(lint-plugin|check-visibility):|Validation (passed|failed)/.test(l));
   if (known.length) {
     // `validate` prints one "Found N error(s)" block per file.

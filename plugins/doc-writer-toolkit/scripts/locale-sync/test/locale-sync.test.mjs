@@ -631,7 +631,7 @@ test('check: a faithful translation passes every check', async () => {
   assert.deepEqual(r.out.results[0].checks, []);
 });
 
-test('check: each Requirement 8 failure is caught by its own check', async () => {
+test('check: each kind of failure is caught by its own check', async () => {
   const f = await translatedFixture();
   const cases = [
     ['headings: a heading is missing', (t) => edit(t, '### Ek işlemler {/* #extra */}\n\nFiltreleri sıfırlayabilirsiniz.\n\n', ''), 'headings'],

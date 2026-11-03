@@ -10,7 +10,7 @@ import { withLock } from './lock.mjs';
 import { decidedOccurrences, groupBySpan, inUiContext, spanOccurrences, uiParts } from './spans.mjs';
 import { decisionAt, pageScopes, parseScopedKey, sectionMap } from './scope.mjs';
 
-// The binding pass (Requirement 3), once for all locales. Every bold span (and Cyrillic inline-code span) in the UA text
+// The binding pass, once for all locales. Every bold span (and Cyrillic inline-code span) in the UA text
 // that some locale will translate gets one decision per page: `label:<key>`, `unverified` (UI context, no dictionary
 // match), `term` or `emphasis`. The script records what it can decide on its own and returns the rest (`ask`) for the
 // model, which answers through `bind --decisions`. A decision may be scoped to a heading (`<span>@<heading>`, see
@@ -18,7 +18,7 @@ import { decisionAt, pageScopes, parseScopedKey, sectionMap } from './scope.mjs'
 
 const DECISION = /^(?:term|emphasis|unverified|label:.+)$/;
 
-// Namespace heuristic (Requirement 3, criterion 2): among keys with the same UA string, the one whose namespace matches
+// Namespace heuristic: among keys with the same UA string, the one whose namespace matches
 // the page's area. The area is the page path (2 points) and the namespaces of keys already bound on the page (1 point
 // per bound key, at most 2). A key needs 2 points and must beat every other candidate; otherwise the model decides.
 const tokens = (text) => text.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length >= 3);

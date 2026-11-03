@@ -18,9 +18,9 @@ Run it from the docs repo root (or pass `--root`). Needs Node 18.3+ and `git`. T
 | `bind [<page>…]` | The binding pass: records the span decisions the script can make and lists the rest (`ask`) for the model. `bind --decisions <file>` records the model's answers. |
 | `terms <UA term>…` | Per locale, the recorded translation and the UI string of each term, and which terms still need a translation. `terms --add <file> --locales <locale>` appends entries (`--replace` corrects them), `terms --drop <UA term>…` removes them, `terms --usage <old translation>…` finds the blocks that still use a translation. |
 | `link-assets <page>…` | Relative per-file symlinks from each locale's `.assets/` to the EN screenshots. Pages only. |
-| `check <page>…` | Every Requirement 8 check on a translated page, or the category checks. Exit `1` if any fails. |
+| `check <page>…` | Every check on a translated page (see Checks below), or the category checks. Exit `1` if any fails. |
 | `record <page>…` | Runs the checks, and only if they all pass advances the unit's state. |
-| `report [<page>…]` | The Requirement 13 tables. Pages only. Positional pages are the "changed pages" for the URL list. `--md` prints Markdown, `--build` also builds each locale. |
+| `report [<page>…]` | The tables per page and locale: exists, images resolve, checks passed, local URLs (see Report below). Pages only. Positional pages are the "changed pages" for the URL list. `--md` prints Markdown, `--build` also builds each locale. |
 | `stray` | Files that are changed or untracked in the repo outside the places a run writes to. Exit `1` if any. Deletes nothing. |
 
 A `<page>` is a page id (`disputes/manage-disputes`), a path, or a folder, relative to the repo root or the UA content root. A sidebar category is selected by its id (`api-reference/_category_`), its path, or its folder. A selector that matches nothing is an input error (exit `2`). A host that declares more than one root pair also takes qualified ids (`<pair>:<id>`), and a bare id or folder that two pairs have is an input error (see [Root pairs](#root-pairs)).
@@ -35,7 +35,7 @@ The flow of a run: `status` → `bind` (once for all locales) → `terms` / `ter
 blocks → (translate the blocks) → apply → link-assets → check --candidate → record --candidate
 ```
 
-`record --candidate` re-runs the checks itself, so the state cannot advance on a page that fails them, and a failing candidate never reaches the translation path (Requirement 8, criterion 2). Without `--candidate`, `check` and `record` read the translation where it is on disk; then a failing page stays on disk and the caller restores it (`git checkout -- <file>`, or removes it if it is new).
+`record --candidate` re-runs the checks itself, so the state cannot advance on a page that fails them, and a failing candidate never reaches the translation path. Without `--candidate`, `check` and `record` read the translation where it is on disk; then a failing page stays on disk and the caller restores it (`git checkout -- <file>`, or removes it if it is new).
 
 ## Configuration
 
