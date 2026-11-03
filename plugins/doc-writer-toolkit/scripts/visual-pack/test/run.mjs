@@ -32,7 +32,7 @@ if (reason) {
   console.error(
     `visual-pack browser test not run: ${reason}.\n` +
       'Set VISUAL_PACK_PLAYWRIGHT_FROM to a folder whose node_modules has playwright, with Chromium installed (npx playwright install chromium).\n' +
-      'The offline tests above passed. See CONTRIBUTING.md, "Checks before a merge".',
+      'The offline tests above passed. See CONTRIBUTING.md, "Running the browser test".',
   );
   process.exit(2);
 }
