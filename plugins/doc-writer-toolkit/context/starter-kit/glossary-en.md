@@ -13,3 +13,12 @@ them with your product's terms.
 |---|---|---|---|
 | Account | `text` | | The set of user details a person signs in to the app with. Don't use: profile (as a synonym), login. |
 | `active` | `code` | `active` | Account status value: the account is active. UI label: **Active**. |
+
+## Names
+
+Names of banks, payment systems and other organizations: the same rows as in `glossary-ua.md`, in the same order. How to fill a row: `glossary-format.md`, "Names". The two rows below are samples: replace them with the names your pages use.
+
+| UA form | EN form | Source |
+|---|---|---|
+| Лунобанк | Lunobank | app: `banks.lunobank` (UA, EN) |
+| Банк Світанок | Svitanok Bank | site: https://svitanok.example/ (UA), https://svitanok.example/en/ (EN) |

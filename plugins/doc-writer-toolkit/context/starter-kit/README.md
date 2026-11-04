@@ -16,7 +16,7 @@ How skills find the kit, and what they do without one, is in `${CLAUDE_PLUGIN_RO
 
 | File | What to put in it |
 |---|---|
-| `glossary-ua.md`, `glossary-en.md` | The approved terms for Ukrainian and English pages, with their render. The format is `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/glossary-format.md`. Replace the two sample rows. |
+| `glossary-ua.md`, `glossary-en.md` | The approved terms for Ukrainian and English pages, with their render, and the names table: the UA and EN forms of each bank, payment system or other organization your pages name, with the source of each form. The format is `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/glossary-format.md`. Replace the sample rows of both tables. |
 | `product-facts.md` | Facts about the product and its API that the writers read as background: concepts, roles, statuses, limits. |
 | `product-rules.md` | Rules that hold for this product only, such as its name and short name, the terms that replace common synonyms, and the names of its UI sections. They are rank 0, like `formatting-conventions.md`. |
 | `templates/` (optional, not in this folder) | A page template from `${CLAUDE_PLUGIN_ROOT}/context/doc-templates/`, copied under the same file name, with your own examples. A skill reads it in place of the plugin's. Keep the plugin template's structure: skills refer to its variants and sections by name. |
