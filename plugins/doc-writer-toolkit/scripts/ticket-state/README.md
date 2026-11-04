@@ -88,7 +88,7 @@ The runner takes no command.
 |---|---|
 | `--dry-run` | Prints the plan: each step with its tracker and forge calls or its `claude` command line, the triage, the starts, the cleanup each close would do, and the report. Writes nothing (no ledger, lock, report or run log) and sends no change; the output lists every request sent (`requests`, reads only) and every write the modules caught (`caught`). |
 | `--morning` | Also triages the intake cards that are due, in one session (`limits.triageBatch` cards, highest priority first). |
-| `--manual` | A manual run: it ignores the limits and the allowance guard, starts only the ready tickets named with `--ticket`, and its tickets stay out of the counts for their whole life. |
+| `--manual` | A manual run: it ignores the limits and the allowance guard, starts only the ready tickets named with `--ticket`, and its tickets stay out of the counts for their whole life. With `--morning` it triages only the named intake cards. |
 | `--ticket <key>` | With `--manual`: only these tickets (repeatable). |
 | `--usage-file <file\|->` | The `/usage` text (default: the runner runs `claude -p /usage` before and after each session). |
 | `--claude <bin>` | The `claude` command. |

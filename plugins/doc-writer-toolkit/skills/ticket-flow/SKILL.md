@@ -38,11 +38,11 @@ Run each command as one Bash call, from the host repo, with `--root` set to it. 
 
 ### Step 3 — The plan
 
-`node ${CLAUDE_PLUGIN_ROOT}/scripts/ticket-state/runner.mjs --dry-run --root <host>`, with `--manual --ticket <key>` for each named ticket on `run`. Show each planned step: the ticket, the stage, the role and model (or "no model" and its tracker and forge calls), and for a close step the work files it would move to the Trash. Confirm that `caught` is empty and `requests.writes` is empty: a dry run that sent a change is a bug to report, not to go past. For `plan`, stop here.
+`node ${CLAUDE_PLUGIN_ROOT}/scripts/ticket-state/runner.mjs --dry-run --root <host>`, with `--manual --ticket <key>` for each named ticket on `run`, and `--morning` when a named card is still in the intake (Step 2 lists it there): the manual run then triages only the named cards first. Show each planned step: the ticket, the stage, the role and model (or "no model" and its tracker and forge calls), and for a close step the work files it would move to the Trash. Confirm that `caught` is empty and `requests.writes` is empty: a dry run that sent a change is a bug to report, not to go past. For `plan`, stop here.
 
 ### Step 4 — The manual run
 
-Only for `run`, and only after the user says yes to the plan of Step 3. `runner.mjs --manual --ticket <key> … --root <host>`. It may take long: each step with a model is a separate headless session. A manual run ignores the WIP limits, and its tickets stay out of the counts for their whole life; say so before the user confirms. If a scheduled run holds the group, the manual run stops there: report it, and don't retry.
+Only for `run`, and only after the user says yes to the plan of Step 3. `runner.mjs --manual --ticket <key> … --root <host>`, with `--morning` as in Step 3. It may take long: each step with a model is a separate headless session. A manual run ignores the WIP limits, and its tickets stay out of the counts for their whole life; say so before the user confirms. If a scheduled run holds the group, the manual run stops there: report it, and don't retry.
 
 ### Step 5 — Handover
 

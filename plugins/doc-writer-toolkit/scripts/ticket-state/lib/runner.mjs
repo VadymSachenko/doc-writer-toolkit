@@ -412,9 +412,10 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
     await pool(finishing, sessionNear() ? 1 : settings.limits.parallel, (step) => advance(step));
   }
 
-  // Mornings: triage every intake card quiet for its hours, high priority first, in one session.
+  // Mornings: triage every intake card quiet for its hours, high priority first, in one session. A manual run that
+  // names tickets triages only those.
   if (morning) {
-    const due = st.intake.due.slice(0, settings.limits.triageBatch);
+    const due = st.intake.due.filter((c) => !manual || !named.length || named.includes(c.key)).slice(0, settings.limits.triageBatch);
     if (due.length) {
       const step = { stage: 'triage', role: 'triage', keys: due.map((c) => c.key), group: null, cards: due.map((c) => ({ key: c.key, url: c.card.url, shortLink: c.card.shortLink, priority: c.priority })) };
       if (planOnly) out.triage = describe(step);

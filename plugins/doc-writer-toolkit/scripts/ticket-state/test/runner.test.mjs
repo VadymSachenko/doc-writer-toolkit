@@ -163,6 +163,16 @@ test('a manual run starts the named ready ticket past the limits, and the ticket
   assert.deepEqual([st.wip.inProgress, st.wip.manual], [4, 1], "past the limit of 3; the manual ticket stays out of the count");
 });
 
+test('a manual morning run that names an intake card triages that card only; a scheduled morning takes every due card', async () => {
+  const { w } = busyWorld();
+  w.tracker.cards.push(card({ number: 504, status: 'intake', labels: ['Api'], lastActivity: ago(6) }));
+  const io = { readUsage: () => usageAt(5), now: () => NOW, spawnClaude: () => assert.fail('a dry run starts no session') };
+  const manual = await runDaily({ settings: w.settings, clients: w.clients(), io, options: { dryRun: true, morning: true, trigger: 'manual', named: ['503'] } });
+  assert.deepEqual(manual.triage.keys, ['503']);
+  const scheduled = await runDaily({ settings: w.settings, clients: w.clients(), io, options: { dryRun: true, morning: true } });
+  assert.deepEqual([...scheduled.triage.keys].sort(), ['503', '504']);
+});
+
 test('finishing comes first: merged, ready for merge, the chain, comments, answers, writing; higher priority first within a kind', () => {
   const t = (key, stage, extra = {}, priority = 'medium', createdAt = ago(10)) => ({ key, group: key, priority, createdAt, next: { stage, role: null, ...extra }, card: null });
   const st = { tickets: [t('1', 'plan'), t('2', 'write', {}, 'high'), t('3', 'answerComments', { pr: 'r#1' }), t('4', 'close'), t('5', 'translate', { pr: 'r#2' }), t('6', 'answers'), t('7', 'readyForMerge', { pr: 'r#3' }), t('8', 'plan', {}, 'medium', ago(100)), t('9', 'start')] };
