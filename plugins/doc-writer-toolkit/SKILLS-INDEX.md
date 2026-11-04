@@ -2,7 +2,7 @@
 
 Canonical list of what the plugin ships. One line per skill; the invocation phrasing is what triggers it (all skills are explicit-invocation only). `WORKFLOW.md` at the repo root maps these to the writing process.
 
-## Skills (18)
+## Skills (19)
 
 | Skill | What it does | Invoke with |
 |---|---|---|
@@ -19,13 +19,14 @@ Canonical list of what the plugin ships. One line per skill; the invocation phra
 | `resolve-markers` | Resolves `{/* NEEDS CONFIRMATION */}` and `{/* ToDo */}` markers in a section from app-notes, SME notes, screenshots and the live app | "resolve-markers: docs/transactions" |
 | `doc-style-reviewer` | Read-only style/grammar findings report under one guide profile (`gdsg`, `mssg-en`, `mssg-ua`, `ua-grammar`); scope mode reviews only changed blocks | "review-doc-style docs/balance/balance.md", "… --changed origin/main" |
 | `doc-style-fixer` | Applies a reviewer report: mechanical fixes in batch, substantive rewrites with consent (or pre-approved via `apply:`), judgment calls asked | "fix-doc-style docs/balance/balance.md apply:mechanical,substantive" |
+| `doc-style-pass` | One style pass for the person who approves the page: the review, then the fixer with `apply:mechanical,substantive`, then one numbered «before» → «after» list with the judgment questions after it. Undoes the items named by number, logs every decision in `<state root>/style-rejections.jsonl`, and proposes a `product-rules.md` exception line for a rule rejected three times in a row | "/style-pass docs/balance/balance.md", "… undo:2,5" |
 | `doc-translator` | Translates an approved UA page into EN at the declared i18n path; sync mode re-translates only changed blocks into an existing EN page | "translate-doc balance/balance", "… --sync --base origin/main" |
 | `locale-translator` | Translates the approved UA pages into every further locale the site declares (not EN), only where UA changed and block by block: label check first, UI labels from the app's dictionaries, per-locale term memory, one worker per locale, scripted checks, build and a per-page report. Never commits. A plain-language guide for people: [`HOW-IT-WORKS.md`](skills/locale-translator/HOW-IT-WORKS.md) | "/translate-locales", "locale-translator: translate the settings section into kk only" |
 | `doc-alignment-checker` | Checks a UA page and its EN counterpart for structural alignment | "check-doc-alignment balance/balance" |
 | `cleanup-unused-screenshots` | Moves candidate screenshots a page never referenced into `_unused/` (never deletes) | "cleanup-unused-screenshots for docs/routing" |
 | `identify-ui-icon` | Finds the picture for an icon-only control in the project's `Icon rendering:` form: an Iconify id (evidence first, then the Iconify API), its SVG, or a screenshot crop; falls back to a crop or a marker, never guesses an id and never names the control. The writers call it by name | "identify-ui-icon: the trash button in docs/payments/.assets/payments-page.png" |
 
-## Commands (14)
+## Commands (15)
 
 | Command | Underlying skill(s) |
 |---|---|
@@ -38,6 +39,7 @@ Canonical list of what the plugin ships. One line per skill; the invocation phra
 | `/update-doc-page` | `doc-page-updater` |
 | `/review-doc-style` | `doc-style-reviewer` |
 | `/fix-doc-style` | `doc-style-fixer` |
+| `/style-pass` | `doc-style-pass`: `doc-style-reviewer` → `doc-style-fixer` (`apply:mechanical,substantive`) → one numbered list to undo by number |
 | `/fix-doc-todos` | its own steps resolve link-type `{/* ToDo */}` markers across the project, then `doc-alignment-checker` checks each changed page |
 | `/translate-doc` | `doc-translator` |
 | `/check-doc-alignment` | `doc-alignment-checker` |

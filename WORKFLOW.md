@@ -75,6 +75,7 @@ flowchart TD
 | Resolve markers | `resolve-markers` | Batch-answers `{/* NEEDS CONFIRMATION */}` markers from evidence |
 | Review style | `doc-style-reviewer` | Read-only findings report (gdsg / mssg-en / mssg-ua / ua-grammar) |
 | Fix style | `doc-style-fixer` | Applies the reviewer's findings to the file |
+| Style pass | `doc-style-pass` | Review and fix in one run, ending in one numbered «before» → «after» list to undo by number; logs the rejections and proposes a product rule for a rule rejected three times |
 | Translate | `doc-translator` | UA → EN, preserves MDX, enforces EN glossary |
 | Translate — further locales | `locale-translator` | UA → every other locale of the site (not EN), only changed blocks, UI labels from the app's own dictionaries, scripted checks |
 | Alignment check | `doc-alignment-checker` | Checks UA and EN pages are structurally in sync |
@@ -97,6 +98,7 @@ The full per-page pipeline from an SME video to a style-reviewed draft (`/doc-fr
 | `/explore-and-resolve` | `app-explorer` → `resolve-markers` |
 | `/review-doc-style` | `doc-style-reviewer` |
 | `/fix-doc-style` | `doc-style-fixer` |
+| `/style-pass` | `doc-style-pass`: `doc-style-reviewer` → `doc-style-fixer` → one numbered list |
 | `/fix-doc-todos` | its own steps resolve link-type `{/* ToDo */}` markers, then `doc-alignment-checker` |
 | `/translate-doc` | `doc-translator` |
 | `/check-doc-alignment` | `doc-alignment-checker` |
