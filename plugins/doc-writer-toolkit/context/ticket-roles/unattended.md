@@ -1,0 +1,13 @@
+# Working unattended
+
+The runner of the ticket flow (`scripts/ticket-state/`) appends this to every role's instructions. It started you with `claude -p` for one stage of one ticket or group, with no person present.
+
+- **No one answers.** A question in the chat goes nowhere, and a tool call your permissions don't allow is denied, not asked. When the stage can't go on, record it failed with the reason and stop.
+- **One command per Bash call.** No `&&`, `||`, `;`, pipes, heredocs or `$(…)`. Headless runs deny compound calls. Change directory with a `cd` call of its own; it carries to the next call.
+- **Files with the Write tool.** A comment text, a description or a long JSON result goes into a file you write with the Write tool, under the ticket flow state folder (`tmp/` in it), and its path goes to the script (`--text-file`, `--body-file`, `--result-file`).
+- **The owner's checkouts stay as they are.** Never `git checkout`, `git switch` or `git pull` in them. Work in a worktree of the target repo, as the host's git rules say; push with an explicit refspec to the ticket's branch, never to the base branch.
+- **Every tracker and forge change goes through the scripts:** `scripts/tracker/tracker.mjs` for cards (comment, labels, moves, descriptions) and `scripts/forge/forge.mjs` for PRs (open, edit, review comments on lines, replies, suggestions, labels). Never compose a REST call, a `curl`, or a `gh` command.
+- **Texts the team reads** follow the host's templates, in the team's language, impersonal, with no tool, model or plugin names and no commit trailers.
+- **Never** merge, approve, dismiss a review, resolve a conversation, close a PR, delete a branch, archive or delete a card, or set the owner's merge-ready label. The scripts have no operation for any of these.
+- **Record the stage when it ends**, with the command in your brief: `done` with its result, or `failed` with the reason. A record the tracker, the forge or the files don't support is refused: fix the cause, never the record. Run `ticket-state status --ticket <key>` to see what the ticket's state is now.
+- **Name the work files you leave outside git.** Every file or folder the stage created or downloaded that git doesn't track and the pages don't need (a video and its parts, audio, a transcript, frames, a downloaded attachment, a run folder, a clone) goes into the record's result as `"files": [{ "path": "<from the host root>", "kind": "video|videoPart|audio|transcript|frames|attachment|runDir|clone|other" }]`. When every PR of the ticket is merged, the close step moves them to the Trash; the distilled notes (`sme-interview.md`, `app-notes.md`) stay. A path you don't record is never removed, and you never remove one yourself.

@@ -1,0 +1,129 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { readAllLedgers } from './ledger.mjs';
+
+// The morning report (design §7): a local file `<state>/reports/<date>.md`, written with no model call. Nothing goes to
+// the tracker or the forge. A separate skill reads it on demand.
+
+export const reportPath = (state, date) => path.join(state, 'reports', `${date}.md`);
+export const runLogPath = (state, date) => path.join(state, 'runs', `${date}.jsonl`);
+
+export function localDate(ms = Date.now()) {
+  return new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms));
+}
+
+export function readRunLog(state, date) {
+  try {
+    return fs
+      .readFileSync(runLogPath(state, date), 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+  } catch (e) {
+    if (e.code === 'ENOENT') return [];
+    throw e;
+  }
+}
+
+export function appendRunLog(state, date, entries) {
+  if (!entries.length) return;
+  const file = runLogPath(state, date);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.appendFileSync(file, entries.map((e) => JSON.stringify(e)).join('\n') + '\n');
+}
+
+export function writeReport(state, date, text) {
+  const file = reportPath(state, date);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.tmp-${process.pid}-${crypto.randomBytes(3).toString('hex')}`;
+  fs.writeFileSync(tmp, text);
+  fs.renameSync(tmp, file);
+  return file;
+}
+
+const mb = (bytes) => `${((bytes ?? 0) / 1048576).toFixed(1)} MB`;
+const link = (t) => (t.card?.url ? `[${t.key}](${t.card.url})` : t.key);
+const cardName = (t) => (t.card?.name ? ` ${t.card.name.replace(/\s+/g, ' ').slice(0, 90)}` : '');
+const list = (rows, empty = 'none') => (rows.length ? rows.map((r) => `- ${r}`).join('\n') : `- ${empty}`);
+
+// The report's text, from a status, the ledgers, the run log, the cards left in the host jobs' watch lists and the
+// weekly roles proposal.
+export function renderReport({ settings, st, date, runLog = [], watched = [], proposal = null, ledgers = readAllLedgers(settings.state) }) {
+  const out = [];
+  const byKey = new Map(ledgers.map((l) => [l.key, l]));
+  out.push(`# Ticket flow, ${date}`, '');
+  const a = st.allowance;
+  out.push(`Mode \`${st.mode}\`. In progress ${st.wip.inProgress} of ${st.wip.limits.inProgress}, waiting ${st.wip.waiting} of ${st.wip.limits.waiting}${st.wip.manual ? `, ${st.wip.manual} started by hand (not counted)` : ''}.`);
+  out.push(a ? `Allowance: day ${a.day} of the week window, ${a.used}% of the week used of ${a.cap}% allowed by now, ${a.remaining}% left today; finishing the tickets in work needs about ${a.inWork}%${a.inWorkUnknown?.length ? ` plus ${a.inWorkUnknown.length} ticket(s) with no estimate yet` : ''}.` : 'Allowance: no usage reading.');
+  out.push('');
+
+  const waitingOwner = st.tickets.filter((t) => ['questions', 'planGate', 'ownerBlock', 'paused', 'reworkWait'].includes(t.state));
+  out.push('## Waiting for you', '', list(waitingOwner.map((t) => `${link(t)}${cardName(t)}: ${t.state}${t.gate?.why ? `, ${t.gate.why}` : ''}`)), '');
+
+  const places = [];
+  const check = [];
+  const ready = [];
+  const checkLabel = settings.forge.checkLabel?.toLowerCase();
+  for (const t of st.tickets) {
+    const l = byKey.get(t.key);
+    for (const p of t.prs ?? []) {
+      const open = (l?.places ?? []).filter((x) => x.repo === p.repo && Number(x.pr) === Number(p.number) && (x.state ?? 'open') === 'open').length;
+      if (p.stage === 'placesWait') places.push(`${p.url ? `[${p.id}](${p.url})` : p.id} (${link(t)}): ${open} open place(s)`);
+      if (checkLabel && (p.labels ?? []).some((x) => x.toLowerCase() === checkLabel)) check.push(`${p.url ? `[${p.id}](${p.url})` : p.id} (${link(t)})`);
+      if (p.stage === 'readyForMerge') ready.push(`${p.url ? `[${p.id}](${p.url})` : p.id} (${link(t)}): ready for your final edit and the merge`);
+      else if (p.stage === 'finalReview' && t.state !== 'finalReview' && t.prs.length > 1) ready.push(`${p.id} (${link(t)}): approved and gone on by itself to the final review; the card stands where the slower PR is`);
+    }
+  }
+  out.push('## PRs with places', '', list(places), '');
+  out.push(`## PRs labelled «${settings.forge.checkLabel ?? 'check'}»`, '', list(check), '');
+
+  const videos = [];
+  for (const t of st.tickets.filter((x) => (x.derivedState ?? x.state) === 'videoGate')) {
+    const l = byKey.get(t.key);
+    const parts = (l?.video?.videos ?? []).flatMap((v) => v.parts.map((p) => ({ ...p, video: v.file })));
+    const missing = parts.filter((p) => !p.transcript || !fs.existsSync(path.resolve(settings.root, p.transcript)));
+    const failed = missing.flatMap((p) => (p.tries ?? []).filter((x) => x.outcome === 'failed').map((x) => x.reason)).filter(Boolean);
+    const today = missing.slice(0, settings.video.partsPerDay);
+    videos.push(`${link(t)}: ${missing.length} part(s) without a transcript; to upload today: ${today.map((p) => `\`${p.file}\` (from ${p.start ?? 0} s, save as \`${p.transcript}\`)`).join(', ') || 'none'}${failed.length ? `; the automatic try failed: ${[...new Set(failed)].join('; ')}` : ''}`);
+  }
+  out.push('## Videos waiting for transcripts', '', list(videos), '');
+  out.push('## Ready for merge', '', list(ready), '');
+
+  for (const w of watched) out.push(`## Cards left in ${w.list}`, '', list(w.cards.map((c) => `[${c.name}](${c.url}), last activity ${c.lastActivity}`)), '');
+
+  out.push('## Starting and finishing', '');
+  const steps = st.tickets.filter((t) => t.next);
+  out.push(list(steps.map((t) => `${link(t)}: next ${t.next.stage}${t.next.pr ? ` on ${t.next.pr}` : ''}${t.next.role ? ` (${t.next.role})` : ' (no model)'}`), 'nothing to finish'));
+  out.push('', list(st.startable.map((g) => `start ${g.group} (${g.priority}${g.estimate !== null ? `, about ${g.estimate}%` : ', no estimate yet'})`), 'no group can start'));
+  if (st.notStarted.length) out.push('', list(st.notStarted.map((g) => `${g.group} (${g.priority}) didn't start: ${g.reasons.join('; ')}`)));
+  out.push('');
+
+  const odd = st.tickets.filter((t) => t.mismatch?.length || t.hand || ['outside', 'merged'].includes(t.state));
+  out.push('## Mismatches and tickets in your hands', '', list(odd.map((t) => `${link(t)}${cardName(t)}: ${t.state}${t.hand ? ', mode hand' : ''}${t.mismatch?.length ? `; ${t.mismatch.join('; ')}` : ''}${t.notes?.length ? `; ${t.notes.join('; ')}` : ''}`)), '');
+  if (st.notTickets.length) out.push('## Cards that are not tickets', '', list(st.notTickets.map((c) => `[${c.key}](${c.card.url})${cardName(c)}: ${c.why}`)), '');
+
+  // Cleanup after the merge (D-074): what went today, and what stays because a PR was closed unmerged.
+  const onDate = (iso) => Boolean(iso) && Number.isFinite(Date.parse(iso)) && localDate(Date.parse(iso)) === date;
+  const cleaned = ledgers.filter((l) => l.stages?.close?.result?.cleanup && onDate(l.stages.close.at));
+  const freed = cleaned.reduce((s, l) => s + (l.stages.close.result.cleanup.freedBytes ?? 0), 0);
+  const removedLines = cleaned.flatMap((l) => {
+    const c = l.stages.close.result.cleanup;
+    if (c.blocked) return [`${l.key}: ${c.blocked}`];
+    return [`${l.key}: ${c.removed.length} path(s), ${mb(c.freedBytes)} ${c.mode === 'delete' ? 'deleted' : 'moved to the Trash'}${c.removed.length ? ` (${c.removed.map((r) => `\`${r.path}\``).join(', ')})` : ''}${c.kept.length ? `; kept ${c.kept.map((k) => `\`${k.path}\` (${k.reason})`).join(', ')}` : ''}`];
+  });
+  const unmerged = st.tickets.filter((t) => t.state === 'outside' && (t.notes ?? []).some((n) => /closed unmerged/.test(n)) && (byKey.get(t.key)?.files ?? []).length);
+  for (const t of unmerged) removedLines.push(`${t.key}: a PR was closed unmerged, so its ${byKey.get(t.key).files.length} work file(s) stay (${mb(byKey.get(t.key).files.reduce((s, f) => s + (f.bytes ?? 0), 0))})`);
+  out.push('## Work files removed after the merge', '', list(removedLines), ...(freed ? ['', `Space freed today: ${mb(freed)}.`] : []), '');
+
+  const failures = runLog.filter((e) => e.outcome === 'failed' || e.kind === 'guard');
+  out.push('## Failures and guard stops', '', list(failures.map((e) => `${e.at} ${[e.key ?? e.group ?? (e.keys ?? []).join(', '), e.stage ?? e.what].filter(Boolean).join(' ')}: ${e.note ?? e.reason ?? e.outcome}`)), '');
+
+  const today = ledgers.flatMap((l) => (l.runs ?? []).filter((r) => onDate(r.start)).map((r) => ({ ...r, key: l.key })));
+  const cost = today.reduce((s, r) => s + (typeof r.costUsd === 'number' ? r.costUsd * (r.share ?? 1) : 0), 0);
+  out.push("## The day's cost", '', `${today.length} session(s) today, about $${cost.toFixed(2)} by the CLI's estimate.${a ? ` Week: ${a.used}% used.` : ''}`, '');
+  if (proposal?.proposals?.length) {
+    out.push('## Proposed changes to the roles (yes or no)', '', list(proposal.proposals.map((p) => `${p.role}: ${p.change} (${p.why})`)), '');
+  }
+  return out.join('\n');
+}
