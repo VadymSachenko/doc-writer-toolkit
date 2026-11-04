@@ -1,9 +1,11 @@
 // Compares two parsed pages and sorts the findings into bugs, warnings and passed. `check` is the Check number
 // in skills/doc-alignment-checker/SKILL.md, null for the counts that have no Check of their own (images, links,
 // admonitions). Severity follows the skill: heading count and levels and code blocks are bugs, the rest warnings.
+// With a names table (--names), Check 12 also compares the names of organizations against it.
 
 import { parse } from './parse.mjs';
 import { detectUa, enHeadingIds, headingComments, headingText, uaHeadingId } from './headings.mjs';
+import { findNames, searchable } from './names.mjs';
 
 const trunc = (s, n = 80) => (s.length <= n ? s : `${s.slice(0, n - 1)}…`);
 const hLabel = (h) => `${'#'.repeat(h.level)} ${trunc(headingText(h.raw))}`;
@@ -31,7 +33,9 @@ class Report {
     if (ran !== false && this.bugs.length + this.warnings.length === before) this.passed.push({ check, name });
   }
   toJSON() {
-    return { main: this.main, secondary: this.secondary, ua: this.ua, bugs: this.bugs, warnings: this.warnings, passed: this.passed };
+    const out = { main: this.main, secondary: this.secondary, ua: this.ua, bugs: this.bugs, warnings: this.warnings, passed: this.passed };
+    if (this.names) out.names = this.names;
+    return out;
   }
 }
 
@@ -172,8 +176,45 @@ function checkMarkers(r, m, s) {
   }
 }
 
-// mainText / secondaryText: the two pages. ua: 'main' | 'secondary' | undefined (detect).
-export function compare(mainText, secondaryText, { mainPath = 'main', secondaryPath = 'secondary', ua } = {}) {
+// Check 12, names of organizations (Ж10): each name a names-table row finds in a page must be that row's form for
+// the page's language. A UA form and an EN form that differ are a pair, not a mismatch. A row found in one page
+// only is reported too. Names the table lacks are the skill's to find: the script knows only the table's rows.
+function checkNames(r, m, s, names) {
+  const tableFile = names.tables[0]?.file ?? r.secondary;
+  r.names = { rows: names.rows.length, found: [] };
+  if (!names.tables.some((t) => t.found)) {
+    r.warn(12, 'NAMES-TABLE-MISSING', `no names table (a table under '## Names' or '## Назви') in ${names.tables.map((t) => t.file).join(', ')}`, 1, tableFile);
+    return;
+  }
+  if (!r.ua) {
+    r.warn(12, 'NAMES-SKIPPED', 'cannot tell which page is UA; pass --ua main|secondary to check names', 1, r.secondary);
+    return;
+  }
+  const side = (page, isUa) => findNames(searchable(page.prose), names.rows, isUa ? 'ua' : 'en');
+  const inMain = side(m, r.ua === 'main');
+  const inSecondary = side(s, r.ua === 'secondary');
+  r.sub(12, 'Names follow the names table', () => {
+    for (const [hits, file, isUa] of [[inMain, r.main, r.ua === 'main'], [inSecondary, r.secondary, r.ua === 'secondary']]) {
+      for (const h of hits.filter((x) => !x.exact)) {
+        const row = names.rows[h.index];
+        const lang = isUa ? 'UA' : 'EN';
+        r.warn(12, 'NAME-SPELLING', `'${h.text}' is not the names table's ${lang} form '${isUa ? row.ua : row.en}'`, h.line, file);
+      }
+    }
+    names.rows.forEach((row, i) => {
+      const a = inMain.filter((h) => h.index === i);
+      const b = inSecondary.filter((h) => h.index === i);
+      if (a.length || b.length) r.names.found.push({ ua: row.ua, en: row.en, main: a.length, secondary: b.length });
+      const label = row.ua === row.en ? `'${row.ua}'` : `'${row.ua}' / '${row.en}'`;
+      if (a.length && !b.length) r.warn(12, 'NAME-MISSING-IN-SECONDARY', `${label} is named in main (${a.length}x), not in secondary`, a[0].line, r.main);
+      if (b.length && !a.length) r.warn(12, 'NAME-MISSING-IN-MAIN', `${label} is named in secondary (${b.length}x), not in main`, b[0].line, r.secondary);
+    });
+  });
+}
+
+// mainText / secondaryText: the two pages. ua: 'main' | 'secondary' | undefined (detect). names: the names table
+// for Check 12, { tables: [{ file, found }], rows: [{ ua, en, source }] }, or undefined to skip the check.
+export function compare(mainText, secondaryText, { mainPath = 'main', secondaryPath = 'secondary', ua, names } = {}) {
   const m = parse(mainText);
   const s = parse(secondaryText);
   const r = new Report(mainPath, secondaryPath, ua ?? detectUa(mainText, secondaryText, m, s));
@@ -187,5 +228,6 @@ export function compare(mainText, secondaryText, { mainPath = 'main', secondaryP
   countCheck(r, null, 'Image count', 'IMAGE-COUNT-MISMATCH', m.images, s.images);
   countCheck(r, null, 'Link count', 'LINK-COUNT-MISMATCH', m.links, s.links);
   checkAdmonitions(r, m, s);
+  if (names) checkNames(r, m, s, names);
   return r.toJSON();
 }

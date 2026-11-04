@@ -89,7 +89,7 @@ The folder is the host's own, committed with its pages. It sits outside every co
 
 | File | Holds | Optional |
 |---|---|---|
-| `glossary-ua.md`, `glossary-en.md` | The approved terms for Ukrainian and English pages, with their render. Read with `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/glossary-format.md`, which says how to read the table. | no |
+| `glossary-ua.md`, `glossary-en.md` | The approved terms for Ukrainian and English pages, with their render, and the names table of organizations (Ж10). Read with `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/glossary-format.md`, which says how to read the tables. | no |
 | `product-facts.md` | Facts about the product and its API, read as background. | no |
 | `product-rules.md` | Rules for this product only, such as its name and short name, key terms and the names of its UI sections. | yes |
 | `templates/<name>` | A page template under the plugin's file name. It replaces `${CLAUDE_PLUGIN_ROOT}/context/doc-templates/<name>` for this host. | yes |

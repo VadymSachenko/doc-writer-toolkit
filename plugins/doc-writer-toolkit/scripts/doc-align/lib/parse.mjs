@@ -115,5 +115,6 @@ export function parse(text) {
 
   // The section of a marker: the index of the last heading above it, -1 before the first heading.
   for (const mk of page.markers) mk.section = page.headings.filter((h) => h.line <= mk.line).length - 1;
+  page.prose = prose; // for the names check (names.mjs)
   return page;
 }

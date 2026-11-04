@@ -97,6 +97,8 @@ Use `glossary-en.md` as the single source of truth. Before translating prose, sc
 
 **System name:** write the product's own name exactly as `glossary-en.md`'s rule for translated pages says — in prose, comments, and UI labels.
 
+**Names of organizations** (banks, payment systems, companies): Ж10 of `formatting-conventions.md` decides the EN form; its names table is the `## Names` section of `glossary-en.md`.
+
 Key mappings:
 
 | UA | EN |
