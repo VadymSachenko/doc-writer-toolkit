@@ -107,6 +107,7 @@ export async function loadSettings(values) {
     enRoot: pick('en-root', 'en i18n root'),
     urlPrefix: pick('url-prefix', 'ua url prefix'),
     scopeSpec: claude['translation scope'] ?? null,
+    linkForm: claude['page link form'] ?? null,
     pairSpec: values.pair ?? null,
     tickets,
   };
@@ -122,12 +123,19 @@ export function requireSource(settings) {
   return parseSource(settings.sourceSpec);
 }
 
-// UA/EN root pairs. The unprefixed fields (`UA content root:`, `EN i18n root:`, `UA URL prefix:`, `Translation scope:`)
-// are the primary pair, id `primary`; the flags override them. The same fields with a name in front
+// UA/EN root pairs. The unprefixed fields (`UA content root:`, `EN i18n root:`, `UA URL prefix:`, `Translation scope:`,
+// `Page link form:`) are the primary pair, id `primary`; the flags override them. The same fields with a name in front
 // (`API reference UA content root:` …) declare one more pair per name. The name is any text; its slug
 // (`API reference` -> `api-reference`) is the pair's id, which `--pair`, qualified unit ids and the state folder use.
 export const PRIMARY = 'primary';
-const PAIR_FIELDS = { ua: 'ua content root', en: 'en i18n root', urlPrefix: 'ua url prefix', scope: 'translation scope' };
+const PAIR_FIELDS = { ua: 'ua content root', en: 'en i18n root', urlPrefix: 'ua url prefix', scope: 'translation scope', linkForm: 'page link form' };
+// How a pair's pages link to each other (context/doc-rules/project-rules/internal-links.md).
+export const LINK_FORMS = ['route', 'file-path'];
+function linkFormOf(value, field) {
+  const form = (value ?? 'route').trim().toLowerCase();
+  if (!LINK_FORMS.includes(form)) throw new CliError(`'${field}: ${value}' is not a page link form. Use ${LINK_FORMS.join(' or ')}.`, { code: 2 });
+  return form;
+}
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export const pairSlug = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 
@@ -135,7 +143,7 @@ const within = (a, b) => a === b || a.startsWith(b.endsWith('/') ? b : `${b}/`);
 const dirOf = (p) => path.posix.normalize(String(p).replace(/\\/g, '/')).replace(/^\.\//, '').replace(/\/+$/, '');
 
 // Every declared pair, primary first, then the others in the order CLAUDE.md declares them: { id, name, primary, ua, en,
-// urlPrefix, scope }. Exits 2 on a missing root, an unusable name, or roots that overlap.
+// urlPrefix, scope, linkForm }. Exits 2 on a missing root, an unusable name, an unknown link form, or roots that overlap.
 export function requirePairs(settings) {
   const missing = [];
   if (!settings.uaRoot) missing.push('UA content root');
@@ -146,7 +154,7 @@ export function requirePairs(settings) {
       data: { missing },
     });
   }
-  const pairs = [{ id: PRIMARY, name: null, primary: true, ua: settings.uaRoot, en: settings.enRoot, urlPrefix: settings.urlPrefix ?? '/', scope: settings.scopeSpec ?? null }];
+  const pairs = [{ id: PRIMARY, name: null, primary: true, ua: settings.uaRoot, en: settings.enRoot, urlPrefix: settings.urlPrefix ?? '/', scope: settings.scopeSpec ?? null, linkForm: linkFormOf(settings.linkForm, 'Page link form') }];
 
   const claude = settings.claude ?? {};
   const named = new Map(); // lowercase name -> { name, fields }
@@ -168,7 +176,7 @@ export function requirePairs(settings) {
     if (id === PRIMARY) throw new CliError(`The root pair '${name}' can't be called '${PRIMARY}': that is the id of the unprefixed pair.`, { code: 2 });
     const twin = pairs.find((p) => p.id === id);
     if (twin) throw new CliError(`The root pairs '${twin.name}' and '${name}' have the same id '${id}'. Rename one.`, { code: 2 });
-    pairs.push({ id, name, primary: false, ua: fields.ua, en: fields.en, urlPrefix: fields.urlPrefix ?? '/', scope: fields.scope ?? null });
+    pairs.push({ id, name, primary: false, ua: fields.ua, en: fields.en, urlPrefix: fields.urlPrefix ?? '/', scope: fields.scope ?? null, linkForm: linkFormOf(fields.linkForm, `${name} Page link form`) });
   }
 
   // A page in two UA roots, or two pairs writing the same locale files, can't be told apart.

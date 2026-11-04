@@ -11,7 +11,7 @@ After an SME approves a Ukrainian (UA) page, the page is translated into every f
 - Scripts decide what changed and check every translated page.
 - A page that fails a check isn't saved.
 
-Claude only does what needs language skills: deciding what a bold word is and translating text.
+Claude only does what needs language skills: deciding what a bold word is and translating text. **Nobody decides after Claude either.** You answer for the UA and EN pages only, so the run never asks you about a word in another language. Each doubt is settled by fixed rules: the app's own text first, then the glossary (term memory), then Claude's own choice, saved in the glossary so later runs keep it. The report tells you what was decided, for information.
 
 ## Who does what
 
@@ -21,7 +21,7 @@ Claude only does what needs language skills: deciding what a bold word is and tr
 | **`locale-sync` script** | No | Finds which pages changed, cuts out exactly the changed pieces, puts translated pieces back, links screenshots, runs the checks and saves progress. |
 | **Coordinator** (the Claude session where you type `/translate-locales`) | Yes | Runs the steps in order, decides what each bold word means, translates new terms, starts the workers and writes the report. It never translates pages itself. |
 | **Workers** (one Claude helper per language, running in parallel) | Yes | Translate the pages of one language, check each one, save the ones that pass. |
-| **You** | — | Start the run after SME approval, answer when asked, review the site visually, commit. |
+| **You** | — | Start the run after SME approval, give the go-ahead for a large run, read the UA notes, commit. |
 
 ## Recommended model and effort
 
@@ -91,20 +91,26 @@ flowchart TD
 
     tm --> w1 & w2 & w3 & w4
 
-    subgraph step6["Step 6 · Build and report"]
-        bl["Script builds the site in every changed language<br/>and lists every page: exists? screenshots? checks passed?"]
-        bl --> rp["Coordinator writes the report:<br/>failures, unconfirmed buttons, things for a writer to decide"]
+    subgraph step6["Step 6 · Settle doubts (no questions)"]
+        sd["Coordinator decides every doubt the workers flagged:<br/>app's text, then glossary, then its own choice, saved.<br/>Pages that use an old word are redone"]
     end
 
-    w1 & w2 & w3 & w4 --> bl
-    rp --> you(["You look at the site in a few languages and commit"])
+    w1 & w2 & w3 & w4 --> sd
+
+    subgraph step7["Step 7 · Build and report"]
+        bl["Script builds the site in every changed language<br/>and lists every page: exists? screenshots? checks passed?"]
+        bl --> rp["Coordinator writes the report:<br/>pages not saved, UA notes,<br/>what it decided (for information)"]
+    end
+
+    sd --> bl
+    rp --> you(["You read the UA notes and commit"])
 
     classDef script fill:#e3f2fd,stroke:#1565c0,color:#0d47a1
     classDef ai fill:#fff3e0,stroke:#ef6c00,color:#e65100
     classDef human fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20
     classDef stop fill:#ffebee,stroke:#c62828,color:#b71c1c
     class lc,imp,st,bd,bl script
-    class bq,kinds,tm,w1,w2,w3,w4,rp ai
+    class bq,kinds,tm,w1,w2,w3,w4,sd,rp ai
     class start,ask,you human
     class stop1,done0 stop
 ```
@@ -116,9 +122,10 @@ Colours: **blue** is a script (no AI), **orange** is Claude, **green** is you, *
 1. **Button names.** The app's UI texts (the frontend's locale files on the branch the docs repo declares, plus the ticket's feature branch if there is one) are compared with the saved copy in the docs repo. If the app renamed a button that the docs mention, the script renames it on every page in every language. Then the run stops so you can commit that rename first. Otherwise the renamed page would look changed and be translated again in full.
 2. **What changed.** Only **committed** UA text counts. A page is translated when it's new, or when it changed since the last translation. On the first run that's every page, so the coordinator asks before starting.
 3. **Bold words.** In these docs, bold usually means a button or field name, but not always. Each bold word is classified once, and the decision is saved for the page, so every language follows the same decision. Most cases are decided by the script, for example when the word is in the app's texts and comes right after «натисніть» or «поле». Claude decides the unclear ones. One word can mean different controls in different sections of a page (a tab and a switch both called «Сповіщення»). Then the decision is saved per section.
-4. **Glossary.** Each domain term (an entity, a status, a role, or a generic word such as "button" or "field") gets one translation per language, saved in that language's term memory. If the app itself shows that word, the app's text wins.
+4. **Glossary.** Each domain term (an entity, a status, a role, or a generic word such as "button" or "field") gets one translation per language, saved in that language's term memory. If the app itself shows that word, the app's text wins, and the glossary is corrected to match it. A term saved twice (two branches merged) keeps the first translation.
 5. **Translation.** One worker per language, all running at the same time. Each one goes through its pages one at a time (see the next diagram). If one language fails, the others continue.
-6. **Build and report.** The site is built per language, so broken links and missing images show up. The report lists every page × language with ✓/✗, the local URLs to look at, and everything that needs a person's decision. **Nothing is committed: you commit.**
+6. **Settle doubts.** A worker that doubts a glossary word, or sees an old word for it, or a link that names a page differently from its title, flags it instead of choosing. The coordinator decides each one by the rules (the app's text, then the glossary, then its own choice, saved), and the pages that use an old word are redone in the same run. Only a large redo, over 10 pages, waits for your OK on the size.
+7. **Build and report.** The site is built per language, so broken links and missing images show up. The report lists every page × language with ✓/✗, the local URLs to look at, the pages that weren't saved, notes about the UA text, and what the run decided, for information. Nothing in it asks about another language's wording. **Nothing is committed: you commit.**
 
 ## One page, one language: what a worker does
 
@@ -160,7 +167,7 @@ What the worker gets for each piece: the UA text, the exact app text for every b
 | Frontmatter | A title or description left in Ukrainian |
 | Link titles (warning only) | A link that names a page differently from that page's title |
 
-**What no check can catch:** a wrong meaning, an awkward sentence, or a wrong word in prose. That's why a native speaker should look at a few pages now and then, and why fixing a term is a supported operation (see "Fixing a translation after a run" below).
+**What no check can catch:** a wrong meaning, an awkward sentence, or a wrong word in prose. No one reviews these languages, so the guard is the rules, the glossary and the workers' self-review. A term found wrong later is fixed with a supported operation (see "Fixing a translation after a run" below).
 
 ## How it knows what changed
 
@@ -229,7 +236,7 @@ Two assumptions to keep in mind. The source language must be Ukrainian: the rule
 
 Saved pages are fixed piece by piece, never by translating the whole page again:
 
-- **A glossary term is wrong** (a native speaker finds it means something else): correct the term, ask the script where the old word is used, and redo just those paragraphs.
+- **A glossary term is wrong** (it turns out to mean something else): correct the term, ask the script where the old word is used, and redo just those paragraphs.
 - **A bold word should be a different button in one section:** save a decision for that section. The check then points to the lines to redo.
 - **A link or page title is in the wrong form:** redo that line.
 
@@ -241,7 +248,7 @@ Every behaviour has one owner. Change it there, then check the ripple effects in
 
 | If you change… | Owner file | Watch out for |
 |---|---|---|
-| The order of steps, when to stop or ask, the report | `SKILL.md` | The self-review list at the end of `SKILL.md` must still match. Users of every docs repo rely on "stop after a label rename". |
+| The order of steps, when to stop or ask, the report | `SKILL.md` | The self-review list at the end of `SKILL.md` must still match. Users of every docs repo rely on "stop after a label rename", and on a run that asks nothing about another language's wording (`context/locale-translation.md`, T6). |
 | What a worker does per page | `worker.md` | The coordinator's worker prompt in `SKILL.md` (Step 5). Its shared lines come first so they can be reused across workers. Keep the language-specific lines last. |
 | Translation rules (style, word order, titles, polite form) | `context/locale-translation.md` | **Only new or changed text follows new rules.** Pages already translated stay as they are until their UA changes, or until you redo them. A rule that must apply everywhere needs a redo of every page. |
 | How pages are cut into pieces | `scripts/locale-sync/lib/parse.mjs` | Pieces are matched to old translations **by position**. If the same page now splits differently, saved translations may stop matching: changes become "unmapped" or whole pages are retranslated. Run both test suites and a `--dry-run` on every docs repo that uses the skill. |
@@ -258,7 +265,7 @@ Every script change needs a test: `npm test` in `scripts/ui-labels/` and in `scr
 
 ## Known limits
 
-- **No language review.** Meaning and naturalness rest on the rules and the worker's self-review. Ask a native speaker to spot-check new languages, and correct terms when they find something.
+- **No language review.** Meaning and naturalness rest on the rules, the glossary and the worker's self-review. No one confirms them, and the run asks no one: what it decides is in the report, for information. A wrong term is corrected when it is found.
 - **Only what the app's texts contain is confirmed.** Server messages, hardcoded texts and third-party widgets (for example, the date picker) aren't in the app's text files. Those words are translated as normal text and listed as unconfirmed.
 - **A renamed button is patched word for word.** If the new name needs a different grammatical form in a UA sentence, a writer must fix that sentence. The label check's report names it.
 - **Only committed UA text is translated.** Uncommitted edits wait for the next run.

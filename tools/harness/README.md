@@ -33,14 +33,24 @@ Keep `--out` outside the repo: run outputs never belong in it.
 
 Every run is a full session on your plan. Measured on one plan: one run of `tc-01` used under 1% of the 5-hour session and under 1% of the week. A smaller plan has smaller limits, so the same run takes a larger share.
 
-- **The guard:** before each run, the runner reads `claude -p /usage`. It stops once the 5-hour session is at 80% or the week at 50%, prints where it stopped, and exits 4. Run the rest later with the same arguments plus `--resume`: finished cases are kept. With an API key, `/usage` shows no plan bars, and the guard stays out of the way.
-- **Your own limits:** set them in `tools/harness/local.json`, which git ignores, or in the environment, which wins:
+- **The guard:** before each run, the runner reads `claude -p /usage`. It stops once the 5-hour session is at 80%, or once the week's use reaches the daily allowance. It prints where it stopped and exits 4. Run the rest later with the same arguments plus `--resume`: finished cases are kept. With an API key, `/usage` shows no plan bars, and the guard stays out of the way.
+- **The daily allowance:** automated work may use 10% of the week per day, counted from the weekly reset, and what a day leaves unused carries over. A run is allowed only while the week's use is below `dailyWeekPercent` × the day of the week window, at most 100. The window starts 7 days before the reset, in whole 24-hour days, and its first day is day 1. Example: the reset is Saturday 05:59. On Wednesday 10:00 it is day 5, so runs are allowed below 50%.
+  - The guard reads the "Current week (all models)" line and ignores per-model lines. The reset prints without a year and in the zone it names (`resets Nov 7 at 6am (Europe/Kiev)` or `Nov 7 at 5:59am (Europe/Kiev)`); the guard takes the first year in which that date is not more than a day past, and converts the zone with `Intl`, so DST and month or year ends are covered. With no zone named, it uses the machine's.
+  - If the reset can't be read, the run stops with a message that says so. The guard never runs blind.
+- **Your own limits:** set them in `tools/harness/local.json`, which is ignored by version control, or in the environment, which wins:
 
   ```json
-  { "maxSessionPercent": 60, "maxWeekPercent": 30 }
+  { "maxSessionPercent": 100, "dailyWeekPercent": 10, "maxWeekPercent": 50 }
   ```
 
-  `HARNESS_MAX_SESSION_PERCENT=60 HARNESS_MAX_WEEK_PERCENT=30 node tools/harness/run.mjs …`
+  `HARNESS_MAX_SESSION_PERCENT=60 HARNESS_DAILY_WEEK_PERCENT=5 HARNESS_MAX_WEEK_PERCENT=30 node tools/harness/run.mjs …`
+
+  | Setting | Default | Meaning |
+  |---|---|---|
+  | `maxSessionPercent` | 80 | Stops at this share of the 5-hour session |
+  | `dailyWeekPercent` | 10 | The share of the week each day of the window adds to the allowance |
+  | `maxWeekPercent` | none | An extra fixed cap on the week. When set, the smaller of it and the daily allowance wins |
+
 - **Off:** `{ "mode": "off" }` in `local.json`, or `HARNESS_MODE=off`. The runner then makes no run and exits 3, so a script can tell "off" from "failed". The harness's own tests (`harness.test.mjs`) make no model calls and still run, and so does the rest of the regression set.
 
 ## What a run does

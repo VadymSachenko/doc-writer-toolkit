@@ -1,6 +1,6 @@
 ---
 name: locale-translation
-description: Shared rules for translating approved UA pages into the target locales other than EN. Covers 1:1 block structure, what stays byte-identical, UI labels and the generic-noun rule, term memory, the per-locale register table, per-language calque traps and the worker's self-review checklist. Used by locale-translator. Referenced, never copied.
+description: Shared rules for translating approved UA pages into the target locales other than EN. Covers 1:1 block structure, what stays byte-identical, UI labels and the generic-noun rule, term memory, names of organizations, the per-locale register table, per-language calque traps and the worker's self-review checklist. Used by locale-translator. Referenced, never copied.
 ---
 
 # Locale translation
@@ -87,17 +87,19 @@ The binding pass classifies every bold span (and every Cyrillic inline-code span
 A term is a domain noun phrase that must read the same on every page: an entity, a status, a role, a generic UI noun (L2), an unverified label (L4). Ordinary vocabulary isn't a term.
 
 - **T1. The UI wins.** A term that equals a UI string in the label store takes that locale's store string. Unlike a label (L1), a term in prose is inflected as the sentence needs, and written in lowercase mid-sentence where the language writes that noun in lowercase (the store's `Makbuz` is `makbuz` in a tr sentence).
-- **T2. Term memory comes next.** A term with an entry in `<state root>/terms/<locale>.tsv` takes the recorded translation, inflected as needed. Never translate a recorded term differently. If a recorded translation looks wrong, use it anyway and report it.
+- **T2. Term memory comes next.** A term with an entry in `<state root>/terms/<locale>.tsv` takes the recorded translation, inflected as needed. Never translate a recorded term differently. If a recorded translation looks wrong, use it anyway and flag it: the run decides it (T6).
 - **T3. A new term is recorded once.** The terminology pass translates the new terms of the run per locale, and the run appends them. A worker that meets a term with no entry translates it and returns it as a new entry. Later pages and runs reuse it.
 - **T4. Only the terms in the blocks.** Term lookup returns the entries whose UA term occurs in the blocks being translated, matched by stem or prefix to cover UA inflection. The whole file is never loaded.
 - **T5. Never reuse the app's word for another concept.** Before you record a translation, check it against the UI strings and term rows you have. When the app writes «транзакція» as tr `işlem`, «дії» is `eylemler`, not `işlemler`, which a reader takes as "transactions".
+- **T6. The run decides; nobody is asked.** No person reviews or confirms a translation into these locales, so no choice of wording is left open. A doubt about a term is settled in this order: the app's string (T1); then a translation that would be the app's word for another concept is replaced (T5); then the recorded translation (T2); then the run's own translation, recorded in term memory (T3), so later runs keep it. A changed translation is applied to the pages that use the old one. The report states each decision for information and asks nothing about wording. A suspected error in the UA source is the exception: it is reported to the owner of the UA page (P6).
+- **T7. A name of an organization takes its own form, never a translation.** A bank, a payment system, a company or another organization or product follows Ж10 of `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md`, by what the text refers to. A UI label is the store string (L1). An API value in code font stays byte-identical (§3). The organization itself is written as it writes its own name in this language, on its own site; where it has no form in this language, in the Latin form, which is the EN form of the product kit's names table (`${CLAUDE_PLUGIN_ROOT}/context/doc-rules/glossary-format.md`, "Names"), not the EN page. Never translate the words a name is made of: UA «Банк Світанок», EN form `Svitanok Bank`, is tr `Svitanok Bank`, never `Şafak Bankası`. Keep its letters; inflect it only as the language inflects a foreign proper name. A name is recorded in term memory like a term (T3), so every page and run uses one form.
 
 **Format of `terms/<locale>.tsv`:**
 
 - UTF-8, one entry per line: `<UA term><TAB><translation>`. No header, no comments.
 - Both sides are in dictionary form: nominative singular, or plural for a plural-only term.
 - Lines are sorted by the UA term in byte order (`LC_ALL=C sort`), one line per UA term.
-- `.gitattributes` holds `<state root>/terms/*.tsv merge=union`, so the new lines of two branches both survive a merge. If a UA term then appears on two lines with different translations, report the conflict and use the first line until a writer deletes one.
+- `.gitattributes` holds `<state root>/terms/*.tsv merge=union`, so the new lines of two branches both survive a merge. If a UA term then appears on two lines with different translations, use the first line: the run keeps it, drops the other and aligns the pages that use the dropped one (T6).
 
 ## 6. Register
 
@@ -169,7 +171,8 @@ The worker runs one pass over the blocks it translated, not over the unchanged r
 - [ ] Blocks still mirror UA one to one, and anchors, markers, code, links and formatting are untouched (S1–S5, §3).
 - [ ] Each bound label is the store string, verbatim, in bold (L1). Each listed part of a markup span is its store string, with the markup kept (L5).
 - [ ] Nothing touches a label's closing `**` (L2): no letter, digit, apostrophe or hyphen right after it, except tg `-ро`.
-- [ ] Every term matches its store string or term-memory entry, and each generic UI noun has one translation (T1, T2, L2).
+- [ ] Every term matches its store string or term-memory entry, and each generic UI noun has one translation (T1, T2, L2). A doubt about a term is flagged, never written as another word (T6).
+- [ ] Every name of an organization follows what the text refers to: a label is the store string, a value stays as it is, the organization is its own form in this language or the names table's Latin EN form, the same on every page, and never a translation of its words (T7).
 - [ ] Every unverified span is listed with its reason (L4).
 - [ ] Every form that addresses the reader matches the register row (R1).
 - [ ] This locale's traps: `tr` `az` `uz` `kk` `ky` → V1–V5, K1–K3 · `tg` → V1–V5, G1–G3 · `ru` → U1–U3 · `es` → E1–E3.

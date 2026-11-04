@@ -78,6 +78,7 @@ export function builtInChecks({ init, skills }, sentinel, ownSkills) {
 }
 
 // Settings from tools/harness/local.json (untracked, per machine), overridden by HARNESS_* variables.
+// dailyWeekPercent is the share of the week each day of the window adds to the allowance; maxWeekPercent, when set, is a hard cap on top.
 export function harnessSettings(env = process.env, file = path.join(here, 'local.json')) {
   let local = {};
   try { local = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* no local settings */ }
@@ -85,11 +86,13 @@ export function harnessSettings(env = process.env, file = path.join(here, 'local
   return {
     mode: env.HARNESS_MODE ?? local.mode ?? 'on',
     maxSessionPercent: num(env.HARNESS_MAX_SESSION_PERCENT) ?? local.maxSessionPercent ?? 80,
-    maxWeekPercent: num(env.HARNESS_MAX_WEEK_PERCENT) ?? local.maxWeekPercent ?? 50,
+    dailyWeekPercent: num(env.HARNESS_DAILY_WEEK_PERCENT) ?? local.dailyWeekPercent ?? 10,
+    maxWeekPercent: num(env.HARNESS_MAX_WEEK_PERCENT) ?? local.maxWeekPercent ?? null,
   };
 }
 
 // The plan's usage bars from `/usage`. Either is null when the output has none (an API key has no plan limits).
+// Only the "all models" week line counts: a per-model line, such as "Current week (Fable)", never matches.
 export function parseUsage(text) {
   const bar = (re) => {
     const m = re.exec(text);
@@ -101,13 +104,83 @@ export function parseUsage(text) {
   };
 }
 
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function zoneParts(ms, timeZone) {
+  const f = new Intl.DateTimeFormat('en-US', { timeZone, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' });
+  const p = Object.fromEntries(f.formatToParts(new Date(ms)).map((x) => [x.type, Number(x.value)]));
+  return { year: p.year, month: p.month, day: p.day, hour: p.hour, minute: p.minute, second: p.second };
+}
+
+// The zone's offset from UTC at an instant, in ms.
+function zoneOffset(ms, timeZone) {
+  const p = zoneParts(ms, timeZone);
+  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - Math.floor(ms / 1000) * 1000;
+}
+
+// The instant at which a zone's wall clock reads the given time, as { ms, exists }. Null when the date does not exist
+// (Feb 29 in a common year). `exists` is false when the date does but the zone skips that time (a DST gap); `ms` is then approximate.
+function wallToInstant({ year, month, day, hour, minute }, timeZone) {
+  const guess = Date.UTC(year, month - 1, day, hour, minute);
+  if (new Date(guess).getUTCMonth() !== month - 1 || new Date(guess).getUTCDate() !== day) return null;
+  const first = zoneOffset(guess, timeZone);
+  let ms = guess - first;
+  const second = zoneOffset(ms, timeZone);
+  if (second !== first) ms = guess - second;
+  const back = zoneParts(ms, timeZone);
+  return { ms, exists: back.year === year && back.month === month && back.day === day && back.hour === hour && back.minute === minute };
+}
+
+// A reset as /usage prints it, "Nov 7 at 6am (Europe/Kiev)" or "Nov 7 at 5:59am (Europe/Kiev)", as an instant (ms).
+// It carries no year: the first year whose date is not more than a day in the past wins.
+// No named zone means the machine's own. Returns null when the text can't be read.
+export function parseReset(text, now = new Date()) {
+  const m = /^([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+at\s+(\d{1,2})(?::(\d{2}))?\s*([ap]m)\b\s*(?:\(([^)]+)\))?/i.exec(String(text ?? '').trim());
+  if (!m) return null;
+  const month = MONTHS.indexOf(m[1].slice(0, 3).toLowerCase()) + 1;
+  const hour12 = Number(m[3]);
+  const minute = m[4] === undefined ? 0 : Number(m[4]);
+  if (!month || hour12 < 1 || hour12 > 12 || minute > 59) return null;
+  const hour = (hour12 % 12) + (m[5].toLowerCase() === 'pm' ? 12 : 0);
+  const timeZone = m[6]?.trim() || Intl.DateTimeFormat().resolvedOptions().timeZone;
+  try {
+    const nowMs = now.getTime();
+    const thisYear = new Date(nowMs).getUTCFullYear();
+    for (let year = thisYear - 1; year <= thisYear + 1; year++) {
+      const at = wallToInstant({ year, month, day: Number(m[2]), hour, minute }, timeZone);
+      if (at && at.ms >= nowMs - DAY_MS) return at.exists ? at.ms : null;
+    }
+  } catch { /* an unknown time zone */ }
+  return null;
+}
+
+// The week window at `now`: the day of it (the window starts 7 days before the reset; its first day is 1), the share of the
+// week automated work may have used by now (`allowance`), and the figure a run is stopped at (`cap`, which maxWeekPercent can lower).
+// Null when the reset can't be read.
+export function weekAllowance(week, settings, now = new Date()) {
+  const reset = parseReset(week.resets, now);
+  if (reset === null) return null;
+  const day = Math.min(7, Math.max(1, Math.floor((now.getTime() - (reset - 7 * DAY_MS)) / DAY_MS) + 1));
+  const allowance = Math.min(100, settings.dailyWeekPercent * day);
+  const cap = settings.maxWeekPercent == null ? allowance : Math.min(allowance, settings.maxWeekPercent);
+  return { day, allowance, cap };
+}
+
 // Why the next run must not start, or null.
-export function overLimit(usage, settings) {
+export function overLimit(usage, settings, now = new Date()) {
   if (usage.session && usage.session.percent >= settings.maxSessionPercent) {
     return `the 5-hour session is at ${usage.session.percent}% (limit ${settings.maxSessionPercent}%), resets ${usage.session.resets ?? 'later'}`;
   }
-  if (usage.week && usage.week.percent >= settings.maxWeekPercent) {
-    return `the week is at ${usage.week.percent}% (limit ${settings.maxWeekPercent}%), resets ${usage.week.resets ?? 'later'}`;
+  if (usage.week) {
+    const w = weekAllowance(usage.week, settings, now);
+    if (!w) {
+      return `the week is at ${usage.week.percent}%, but its reset can't be read from /usage ("${usage.week.resets ?? 'no reset printed'}"), so the daily allowance can't be counted; not running blind`;
+    }
+    if (usage.week.percent >= w.cap) {
+      const why = w.cap < w.allowance ? `limit ${settings.maxWeekPercent}%` : `allowance ${w.allowance}%: ${settings.dailyWeekPercent}% a day, day ${w.day} of 7`;
+      return `the week is at ${usage.week.percent}% (${why}), resets ${usage.week.resets ?? 'later'}`;
+    }
   }
   return null;
 }
