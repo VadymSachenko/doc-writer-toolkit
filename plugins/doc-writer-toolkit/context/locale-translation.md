@@ -5,7 +5,7 @@ description: Shared rules for translating approved UA pages into the target loca
 
 # Locale translation
 
-These rules apply to every target locale except `en`. `doc-translator` owns UA → EN and has its own rules, which don't apply here. The source is always the UA page. Never read the EN page or use it as a reference: it is restructured for EN readers.
+These rules apply to every target locale except `en`. `doc-translator` owns UA → EN and has its own rules, which don't apply here. The files this one cites for a shared contract (heading ids, code blocks) hold for EN too. The source is always the UA page. Never read the EN page or use it as a reference: it is restructured for EN readers.
 
 This file holds no product terms (they come from the label store and term memory), no orthography of the target languages, and no procedure (which script runs when belongs to `locale-translator`). Rule IDs (`P1`, `L2`…) are for the checklist and the run report. Each rule is stated here only.
 
@@ -46,7 +46,7 @@ This file holds no product terms (they come from the label store and term memory
 
 | Stays byte-identical | Is translated |
 |---|---|
-| Fenced code blocks, comments inside them included (mermaid: see the last row) | Prose: paragraphs, list items, table cells, admonition bodies and titles, link text |
+| The code part of a fenced code block: code, data, ids, keywords, arrows, whitespace and the number of lines (`${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/code-blocks.md`) | Prose: paragraphs, list items, table cells, admonition bodies and titles, link text |
 | Inline code without Cyrillic, including placeholders in italic code font | Inline code that contains Cyrillic. It is UI text in code style, so it goes through the label lookup like a bold span (§4) and keeps its backticks. |
 | URLs, link targets, `#anchor` links, image and asset paths | Heading text. The anchor comment stays (S3). |
 | MDX and HTML component and attribute names, `import` lines, `{…}` expressions, admonition keywords (`:::note`) | The prose attribute values `title`, `alt`, `label`, `description`, `caption`, `placeholder`, `aria-label` and `summary` |
@@ -54,7 +54,7 @@ This file holds no product terms (they come from the label store and term memory
 | Frontmatter keys, and the values of every key not listed on the right | The frontmatter values of `title`, `description`, `sidebar_label`, `pagination_label`, `tags` and `keywords`. `title` and `description` must end up different from UA. |
 | `last_update`: `locale-sync record` sets it, never the worker | |
 | `{/* #anchor */}` and every `{/* … */}` comment that isn't a marker | Marker text. `{/* ToDo: … */}` and `{/* NEEDS CONFIRMATION: … */}` keep their keyword, and the text after the colon is translated. The number of markers doesn't change. |
-| Mermaid ids, keywords, arrows and the number of lines | Mermaid node and edge labels, participant aliases and messages |
+| Data in a code block (JSON values, request and response bodies, strings), Ukrainian letters included | The reader text of a code block: diagram labels, comments and the descriptions of a folder tree, as `code-blocks.md` defines them. That file is the rule for code blocks here and for UA → EN alike. |
 
 The UA page is never modified.
 
@@ -168,7 +168,7 @@ The worker runs one pass over the blocks it translated, not over the unchanged r
 - [ ] No noun chain where a verb works, and no officialese (P3, P4).
 - [ ] Task titles and headings use the locale's title form from the P7 table, with the UA noun's number (P7). A UA dash for a missing "is" follows the target's punctuation (P8).
 - [ ] Every link whose UA text names a page uses that page's title from its `links` row, inflected only (P9).
-- [ ] Blocks still mirror UA one to one, and anchors, markers, code, links and formatting are untouched (S1–S5, §3).
+- [ ] Blocks still mirror UA one to one, and anchors, markers, code, links and formatting are untouched (S1–S5, §3). In a code block only the diagram labels, comments and tree descriptions changed, and none of them is left in Ukrainian (`code-blocks.md`).
 - [ ] Each bound label is the store string, verbatim, in bold (L1). Each listed part of a markup span is its store string, with the markup kept (L5).
 - [ ] Nothing touches a label's closing `**` (L2): no letter, digit, apostrophe or hyphen right after it, except tg `-ро`.
 - [ ] Every term matches its store string or term-memory entry, and each generic UI noun has one translation (T1, T2, L2). A doubt about a term is flagged, never written as another word (T6).
