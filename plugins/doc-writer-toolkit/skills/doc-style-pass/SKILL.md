@@ -1,6 +1,6 @@
 ---
 name: doc-style-pass
-description: 'One style pass on one documentation page, UA or EN, for the person who approves it: runs doc-style-reviewer, then doc-style-fixer in its apply:mechanical,substantive mode, and ends in a single numbered list (every applied change as «before» → «after» with its rule, then the judgment questions, never applied). The user answers with the numbers to undo: those changes get their exact «before» back, and every decision is logged in the host''s <state root>/style-decisions.jsonl. A rule rejected three times with no acceptance in between is proposed once as one exception line for the product kit''s product-rules.md, written only on a yes. Never invoked implicitly: it edits files. Use explicitly ("/style-pass docs/balance/balance.md", "use doc-style-pass on docs/balance/balance.md").'
+description: 'One style pass on one documentation page, UA or EN, for the person who approves it: runs doc-style-reviewer, then doc-style-fixer in its apply:mechanical,substantive mode, and ends in a single numbered list (every applied change as «before» → «after» with its rule, then the judgment questions, never applied). The user answers with the numbers to undo: those changes get their exact «before» back, and every decision is logged in the host''s <state root>/style-decisions.jsonl. A rule rejected in three passes with no acceptance in between is proposed once as one exception line for the product kit''s product-rules.md, written only on a yes. Never invoked implicitly: it edits files. Use explicitly ("/style-pass docs/balance/balance.md", "use doc-style-pass on docs/balance/balance.md").'
 ---
 
 # doc-style-pass
@@ -9,7 +9,7 @@ You run one style pass on exactly one page for the person who approves it. They 
 
 ## Scope
 
-- **In scope:** one page, UA or EN, under any root pair, the whole page or only its changed blocks (scope mode); running `doc-style-reviewer` and then `doc-style-fixer` with `apply:mechanical,substantive`; the numbered list; undoing the items the user names; the decision log; proposing an exception line for a rule the user keeps rejecting.
+- **In scope:** one page, UA or EN, under any root pair, the whole page or only its changed blocks (scope mode); running `doc-style-reviewer` and then `doc-style-fixer` with `apply:mechanical,substantive`; the numbered list; undoing the items the user names; the decision log; proposing an exception line for a rule the user keeps rejecting, pass after pass.
 - **Out of scope:**
   - Finding and classifying. `doc-style-reviewer` finds, `doc-style-fixer` classifies and applies. This skill adds no finding, moves no finding to another bucket, and changes nothing on the page that the fixer didn't change, except an undo and a question the user answered with its wording.
   - Bucket 3 (judgment-required) fixes: they are listed as questions and never applied on their own.
@@ -47,7 +47,7 @@ Nothing else. The reviewer and the fixer load their own sources.
    - With `undo:` or `keep:all`: go to Step 6 with that record.
    - Otherwise show its list again (Step 5) and ask for the answer. Start a new pass only when the user says to drop the old one: set its `"closed"` to `"dropped"` and log nothing for it.
    - `undo:` or `keep:all` with no open record: stop and say there is no open pass for this page.
-4. Copy the page byte for byte to `<run>/<page id>.before.md` (`cp`). This snapshot is the «before» of everything that follows.
+4. Copy the page byte for byte to `<run>/<page id>.before.md` (`cp`). This snapshot is the «before» of everything that follows. The time you take it, `YYYY-MM-DDTHH:MM:SS` (`date +%Y-%m-%dT%H:%M:%S`), is the pass id: every log line of this pass carries it (Step 6), and Step 7 counts rejections by it.
 
 ## Step 2 — Review
 
@@ -75,6 +75,7 @@ The list is built from what changed on disk, not from memory of the fixer's repo
      "page": "docs/balance/balance.md",
      "guide": "gdsg@uk",
      "date": "2026-11-04",
+     "pass": "2026-11-04T10:14:03",
      "closed": false,
      "items": [
        {
@@ -138,21 +139,21 @@ The excerpts shown are the record's. Only a long one (over about 120 characters)
 4. **Log.** Append to `<state root>/style-decisions.jsonl` one JSON line per item, in list order: `"decision": "rejected"` for an undone item, `"decision": "accepted"` for a kept one. An item still waiting (point 1 or 2) gets its line once it's settled.
 
    ```json
-   {"date":"2026-11-04","page":"docs/balance/balance.md","guide":"gdsg@uk","rule":{"file":"ua-grammar/01a-vowels-alternations.md","id":"§7"},"finding":"[UA-SPELLING] Straight apostrophe","before":"обов'язково перегляньте","after":"обов’язково перегляньте","decision":"rejected"}
+   {"date":"2026-11-04","pass":"2026-11-04T10:14:03","page":"docs/balance/balance.md","guide":"gdsg@uk","rule":{"file":"ua-grammar/01a-vowels-alternations.md","id":"§7"},"finding":"[UA-SPELLING] Straight apostrophe","before":"обов'язково перегляньте","after":"обов’язково перегляньте","decision":"rejected"}
    ```
 
    `before` and `after` are the first place's; an item with several places adds `"places": <count>`. An item with `alsoRules` gets one line per rule, the same decision on each, so every rule's count stays right. No line breaks inside a line.
 5. In the pass record, add the answer and set `"closed": true`.
 
-## Step 7 — Propose an exception for a rule rejected three times
+## Step 7 — Propose an exception for a rule rejected in three passes
 
 For each rule (`rule.file` plus `rule.id`) that has a `rejected` line from this pass:
 
-1. Read that rule's lines in the log, in file order. Its streak is the number of `rejected` lines after its last `accepted` line, or from the start when there is none. An `exception` line after the last `accepted` line means the rule was already proposed in this streak: skip it.
-2. **A streak of 3 or more:** propose one line for `<kit>/product-rules.md`. It is the narrowest rule that would have kept every rejected text of the streak, says what the pages do, and names the corpus rule it overrides, in the language of the file's other lines. For example: `- Keep «<text>» as written, an exception to §7 (ua-grammar/01a-vowels-alternations.md): rejected in the style review three times.` Show it with the streak's rejected «before» → «after» under it, and ask yes or no. One proposal per rule.
+1. Read that rule's lines in the log, in file order, and group them by `pass`. **A rule counts once per pass:** a pass with an `accepted` line for the rule is an acceptance, even if the same pass also rejected it elsewhere on the page; a pass with only `rejected` lines for it is one rejection, however many items it undid. The streak is the number of rejecting passes after the last accepting pass, or from the start when there is none. An `exception` line after the last accepting pass means the rule was already proposed in this streak: skip it.
+2. **A streak of 3 passes or more:** propose one line for `<kit>/product-rules.md`. It is the narrowest rule that would have kept every rejected text of the streak, says what the pages do, and names the corpus rule it overrides, in the language of the file's other lines. For example: `- Keep «<text>» as written, an exception to §7 (ua-grammar/01a-vowels-alternations.md): rejected in three style passes.` Show it with the streak's rejected «before» → «after» under it, and ask yes or no. One proposal per rule.
 3. **Yes:** append the line under `## Other rules`. Add that heading at the end of the file when it has none; when the file doesn't exist, create it with `# Product rules` and `## Other rules`, the section names of `${CLAUDE_PLUGIN_ROOT}/context/starter-kit/product-rules.md`. `doc-style-reviewer` loads this file as rank 0, so the rule stops firing there on its next run. **No:** change nothing in the kit.
-4. Log the answer: `{"date":"…","rule":{…},"decision":"exception","answer":"yes"|"no","line":"<the proposed line>"}`. A proposal left without an answer isn't logged, so the next pass that rejects the rule offers it again.
-5. **No product kit declared:** propose no file edit. Say that the rule has been rejected three times and that a product kit would hold the exception (`project-paths.md`, "Product kit"), and log `"answer": "no-kit"`.
+4. Log the answer: `{"date":"…","pass":"…","rule":{…},"decision":"exception","answer":"yes"|"no","line":"<the proposed line>"}`. A proposal left without an answer isn't logged, so the next pass that rejects the rule offers it again.
+5. **No product kit declared:** propose no file edit. Say that the rule has been rejected in three passes and that a product kit would hold the exception (`project-paths.md`, "Product kit"), and log `"answer": "no-kit"`.
 
 ## Self-review before saving
 
