@@ -1,9 +1,9 @@
 # doc-align
 
-Counts and pairs the structural elements of two Markdown/MDX pages, a **main** page (the source of truth) and a **secondary** page that must conform to it, and checks the heading ids of the UA one. Node, no dependencies. No AI is involved. The `doc-alignment-checker` skill runs it so the counting is exact on long pages, and spends the model only on what needs judgment.
+Counts and pairs the structural elements of two Markdown/MDX pages, a **main** page (the source of truth) and a **secondary** page that must conform to it, and checks the heading ids of the UA one. Given a names table, it also checks the names of organizations in both pages against it. Node, no dependencies. No AI is involved. The `doc-alignment-checker` skill runs it so the counting is exact on long pages, and spends the model only on what needs judgment.
 
 ```
-node ${CLAUDE_PLUGIN_ROOT}/scripts/doc-align/doc-align.mjs <main-file> <secondary-file> [--ua main|secondary]
+node ${CLAUDE_PLUGIN_ROOT}/scripts/doc-align/doc-align.mjs <main-file> <secondary-file> [--ua main|secondary] [--names <glossary-file>]...
 ```
 
 Needs Node 18.3+. Tests: `npm test` in this folder (offline, fixtures inline).
@@ -12,7 +12,7 @@ Needs Node 18.3+. Tests: `npm test` in this folder (offline, fixtures inline).
 
 It reports differences in structure. It never judges meaning or language, and never decides whether a difference is intended: each finding is a candidate for the skill to interpret.
 
-Out of scope, by design (the skill does these): Type-column language, link targets and prefixes (`internal-links.md`), Cyrillic text in the EN page, untranslated prose in the UA page, and title, slug and filename naming. Whether an EN heading's wording may use an explicit id (`heading-anchors.md`, rule 6) is a judgment too: the script only checks that the ids agree.
+Out of scope, by design (the skill does these): Type-column language, link targets and prefixes (`internal-links.md`), Cyrillic text in the EN page, untranslated prose in the UA page, title, slug and filename naming, and names of organizations that the names table lacks (the script knows only the table's rows). Whether an EN heading's wording may use an explicit id (`heading-anchors.md`, rule 6) is a judgment too: the script only checks that the ids agree.
 
 The reader is line based and code aware: fenced code blocks and the frontmatter are skipped, and inline code is blanked before links, images, `<details>` and markers are counted. A heading inside a code block is not a heading.
 
@@ -21,6 +21,7 @@ The reader is line based and code aware: fenced code blocks and the frontmatter 
 - `<main-file>`: the source-of-truth page.
 - `<secondary-file>`: the page that must conform.
 - `--ua main|secondary`: which file is the UA page, for the heading-id checks. Without it, the UA page is the one with more Cyrillic letters in its heading text, and if that is a tie, in its whole text. If that is a tie too (no Cyrillic in either page), the heading-id checks are skipped with a `HEADING-ID-SKIPPED` warning. Pass the flag when a page's headings are mostly Latin text.
+- `--names <glossary-file>`: a product kit glossary that holds the names table (a table under `## Names` or `## Назви`, columns UA form, EN form, Source: `context/doc-rules/glossary-format.md`, "Names"). Turns on Check 12. Give it more than once to read both glossaries: the rows are merged, one per UA/EN pair. A glossary without the table is not an error: the report then has a `NAMES-TABLE-MISSING` warning.
 - `-h`, `--help`: the usage text.
 
 Both paths are echoed as given into the report's `main` and `secondary` fields and each finding's `file`.
@@ -58,11 +59,12 @@ Output is one JSON report on stdout. A failure prints `{"error": …}` on stdout
 | `main`, `secondary` | The two paths as passed. |
 | `ua` | `main` or `secondary`: the file the heading-id checks read as UA. `null` when they were skipped. |
 | `bugs[]`, `warnings[]` | One finding each: `check`, `flag`, `description`, `line`, `file`. |
-| `check` | The Check number in `skills/doc-alignment-checker/SKILL.md` (1, 2, 3, 6, 7 or 8), or `null` for the image, link and admonition counts, which have no Check of their own. |
+| `check` | The Check number in `skills/doc-alignment-checker/SKILL.md` (1, 2, 3, 6, 7, 8 or 12), or `null` for the image, link and admonition counts, which have no Check of their own. |
 | `flag` | One of the flags below. |
 | `description` | What differs, with the counts or the headings involved. |
 | `line`, `file` | Where to look: 1-based line in that file. For a count difference, the last item of the file that has more; line `1` when there is nothing to point at. |
 | `passed[]` | `{ check, name }` for every sub-check that ran and found nothing. A sub-check that could not run (the heading-id comparison when the heading counts differ, the id checks when `ua` is `null`) is in neither list. |
+| `names` | Only with `--names`. `rows`: the number of table rows read. `found[]`: `{ ua, en, main, secondary }` for every row named in either page, with the number of times in each. |
 
 ## Checks and flags
 
@@ -83,6 +85,9 @@ Severity follows the skill: heading count and levels and code blocks are bugs, e
 | `null` | Image count | `IMAGE-COUNT-MISMATCH` | warning |
 | `null` | Link count | `LINK-COUNT-MISMATCH` | warning |
 | `null` | Admonition count and types | `ADMONITION-MISMATCH` | warning |
+| 12 | Names follow the names table (only with `--names`) | `NAME-SPELLING`, `NAME-MISSING-IN-SECONDARY`, `NAME-MISSING-IN-MAIN` | warning |
+| 12 | (no names table in the given files) | `NAMES-TABLE-MISSING` | warning |
+| 12 | (cannot tell which page is UA) | `NAMES-SKIPPED` | warning |
 
 What each one compares:
 
@@ -98,7 +103,8 @@ What each one compares:
 - **Images.** `![alt](src)` and `<img src="…">`.
 - **Links.** Inline `[text](target)` links, not images, in prose, headings and table rows.
 - **Admonitions.** Opening lines `:::type`, tallied by type.
+- **Names** (Ж10 in `context/doc-rules/project-rules/formatting-conventions.md`). Each table row is looked for in the prose of both pages: not in bold spans (a UI label keeps the app's form, Ж1), inline or fenced code (a code value keeps the code's form, Ж4), comments, link targets, URLs, HTML tags or the frontmatter. An occurrence is one or more words, separated by single spaces, whose loose key equals the key of the row's UA or EN form. The loose key is the text in lower case, Cyrillic transliterated, letters and digits only, with i/y, g/h, w/v and kh/h folded, so «Моно банк», «МоноБанк» and "Monobank" are one name. A name written as more or fewer words than its form counts only when each word has three letters or more, so "a pay slip" is not A-Pay. An occurrence is right when it is the form for its page's language, character for character; a Cyrillic UA form may carry a case ending (Лунобанку), an EN form a possessive (Lunobank's). `NAME-SPELLING`: any other spelling, on its line. A UA form and an EN form that differ are a pair, never a finding. `NAME-MISSING-IN-SECONDARY` / `-MAIN`: a row named in one page and not in the other.
 
 ## How the skill uses it
 
-`doc-alignment-checker` runs it as Step 1.5, after both files are loaded. It reads the JSON, treats each finding as a candidate (a difference may be intended), and supplies Checks 1, 2, 3, 6, 7 and 8 from it. It still runs its semantic checks itself. When the script can't run, the skill counts by hand as each Check describes and says so in its report.
+`doc-alignment-checker` runs it as Step 1.5, after both files are loaded. It reads the JSON, treats each finding as a candidate (a difference may be intended), and supplies Checks 1, 2, 3, 6, 7 and 8 from it, and the table part of Check 12 when the host's product kit has a names table. It still runs its semantic checks itself. When the script can't run, the skill counts by hand as each Check describes and says so in its report.

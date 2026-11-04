@@ -29,7 +29,7 @@ plugins/doc-writer-toolkit/
   context/microsoft-style-guide/         # distilled MSSG corpus, EN + UA localization (routed loading)
   scripts/ui-labels/                     # Node, no deps: UI label store, label check, rename sync (README + tests)
   scripts/locale-sync/                   # Node, no deps: stale detection, changed blocks, checks, state (README + tests)
-  scripts/doc-align/                     # Node, no deps: UA/EN structural counts and heading ids for doc-alignment-checker (README + tests)
+  scripts/doc-align/                     # Node, no deps: UA/EN structural counts, heading ids and names-table check for doc-alignment-checker (README + tests)
   scripts/screenshot-locales/            # Node, no deps: screenshot locales, per-locale paths, staging, all-or-nothing promotion (README + tests)
   scripts/section-state/                 # Node, no deps: the document-section ledger, status and record (README + tests)
   scripts/sme-video-context/             # standalone Python tool, not auto-loaded; unittest tests in tests/ (README)

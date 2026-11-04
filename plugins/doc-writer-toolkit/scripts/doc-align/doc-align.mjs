@@ -2,8 +2,9 @@
 import fs from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import { compare } from './lib/compare.mjs';
+import { mergeRows, parseNamesTable } from './lib/names.mjs';
 
-const USAGE = `doc-align <main-file> <secondary-file> [--ua main|secondary]
+const USAGE = `doc-align <main-file> <secondary-file> [--ua main|secondary] [--names <glossary-file>]...
 
 Compares the structure of two Markdown/MDX pages, a main (source of truth) and a secondary that must conform
 to it, and prints one JSON report: { main, secondary, ua, bugs, warnings, passed }.
@@ -11,11 +12,14 @@ to it, and prints one JSON report: { main, secondary, ua, bugs, warnings, passed
 Options
   --ua main|secondary   which file is the UA page, for the heading-id checks (default: the one with more
                         Cyrillic letters in its headings, else in its whole text)
+  --names <file>        a product kit glossary with a names table ('## Names' or '## Назви'); checks the
+                        names of organizations against it (Check 12). May be given more than once
   -h, --help            this text
 `;
 
 const OPTIONS = {
   ua: { type: 'string' },
+  names: { type: 'string', multiple: true },
   help: { type: 'boolean', short: 'h' },
 };
 
@@ -45,7 +49,13 @@ async function main() {
   if (values.ua !== undefined && !['main', 'secondary'].includes(values.ua)) throw new CliError(`--ua takes 'main' or 'secondary', not '${values.ua}'.`);
   const [mainPath, secondaryPath] = positionals;
   const [mainText, secondaryText] = [await read(mainPath), await read(secondaryPath)];
-  const report = compare(mainText, secondaryText, { mainPath, secondaryPath, ua: values.ua });
+  let names;
+  if (values.names) {
+    const tables = [];
+    for (const file of values.names) tables.push({ file, ...parseNamesTable(await read(file)) });
+    names = { tables: tables.map(({ file, found }) => ({ file, found })), rows: mergeRows(tables) };
+  }
+  const report = compare(mainText, secondaryText, { mainPath, secondaryPath, ua: values.ua, names });
   process.stdout.write(JSON.stringify(report, null, 2) + '\n');
   return 0;
 }

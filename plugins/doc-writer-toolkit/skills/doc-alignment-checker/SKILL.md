@@ -1,6 +1,6 @@
 ---
 name: doc-alignment-checker
-description: Checks whether a UA documentation page and its EN counterpart are structurally aligned, using the project's own declared content roots. The caller specifies which version is the source of truth (main). Reports structural gaps, type-column violations, bad link prefixes, mismatched tables, and missing markers. Use explicitly ("check-doc-alignment", "use doc-alignment-checker to check...").
+description: Checks whether a UA documentation page and its EN counterpart are structurally aligned, using the project's own declared content roots. The caller specifies which version is the source of truth (main). Reports structural gaps, type-column violations, bad link prefixes, mismatched tables, missing markers, and names of organizations that differ from the names table of the product kit or are missing from it. Use explicitly ("check-doc-alignment", "use doc-alignment-checker to check...").
 ---
 
 # doc-alignment-checker
@@ -20,6 +20,7 @@ Load these files at the start of the task. Do not load others unless the user re
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` — the shared page-to-page link contract. Check 5 checks links against this file's algorithms, in the form the page's root pair declares (`Page link form:`); do not restate it here.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/heading-anchors.md` — the shared heading-id contract. Check 2 checks UA heading ids against it; do not restate it here.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` — the shared slug/title/filename convention. Check 11 checks title form and slug/filename agreement against this file; do not restate it here.
+- The product kit's names table, for Check 12: the `## Назви` / `## Names` section of `<kit>/glossary-ua.md` and `<kit>/glossary-en.md` (`${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`, "Product kit"; the format is `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/glossary-format.md`, "Names"). Read only that section. With no kit declared, say so and run Check 12 without a table.
 - The UA page being checked (at the path resolved above).
 - The EN counterpart page (at the path resolved above).
 
@@ -50,8 +51,10 @@ A Node script does the mechanical counting, so it is exact on long pages: dates,
 Run it with the main file first and the secondary file second:
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/doc-align/doc-align.mjs <main-file> <secondary-file>
+node ${CLAUDE_PLUGIN_ROOT}/scripts/doc-align/doc-align.mjs <main-file> <secondary-file> --names <kit>/glossary-ua.md --names <kit>/glossary-en.md
 ```
+
+Leave out each `--names` whose file isn't there, and both with no kit declared.
 
 It prints one JSON report: `bugs[]`, `warnings[]` and `passed[]`. Each finding has a `check` (the Check number below), a `flag`, a `description`, a `line` and a `file`. The fields, flags and exit codes are in `${CLAUDE_PLUGIN_ROOT}/scripts/doc-align/README.md`. Read that file only when a finding is unclear.
 
@@ -62,7 +65,7 @@ It prints one JSON report: `bugs[]`, `warnings[]` and `passed[]`. Each finding h
 
 If the script can't run (no Node, or an exit other than `0`), count by hand as each Check below describes, and say in the report that the counts were done by hand.
 
-The semantic checks are always yours, whether the script ran or not: Check 4 (Type column language), Check 5 (link prefixes, per `internal-links.md`), Check 9 (Cyrillic text in the EN file), Check 10 (untranslated prose) and Check 11 (naming).
+The semantic checks are always yours, whether the script ran or not: Check 4 (Type column language), Check 5 (link prefixes, per `internal-links.md`), Check 9 (Cyrillic text in the EN file), Check 10 (untranslated prose), Check 11 (naming) and the names the table lacks in Check 12.
 
 ## Step 2 — Run all checks
 
@@ -167,6 +170,18 @@ Per that file, **report the mismatch — never rename**. `index.md` and other ge
 
 **Flag:** `[NAMING — TITLE/SLUG MISMATCH]` — show the filename, both titles (and labels), and what disagrees.
 
+### Check 12 — Names of organizations
+
+Names of banks, payment systems, companies and other organizations or products follow Ж10 of `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md`; the names table pairs the UA and EN form of each.
+
+- **A name the table has.** The script finds it in both pages (its `names.found` lists the rows it found). A UA form and an EN form from one row are a pair, never a mismatch, however different they look (Лунобанк — Lunobank). A spelling that isn't the row's form for its page's language is `NAME-SPELLING`. A row named in one page only is `NAME-MISSING-IN-SECONDARY` / `-MAIN`: report it unless the other page names the organization in a way the table should list too.
+- **A name the table lacks.** Read both pages for names of organizations or third-party products that no row covers (the script can't see them). List each one with its form in each page and its line. Don't judge which form is right: Ж10 says where the form comes from, and a row is added to the kit, not decided here. The host's own product name is not in scope (`product-rules.md`).
+- **Not a finding:** a name inside a bold UI label or in code font (the app's or the code's own form, Ж1 and Ж4), a URL, and a name inside a quoted system message.
+
+**Flag:** `[NAME — NOT THE TABLE'S FORM]` — show the form found, the table's form for that language, and the line. Script flag: `NAME-SPELLING`.
+**Flag:** `[NAME — IN ONE VERSION ONLY]` — show the row and the version that names it. Script flags: `NAME-MISSING-IN-SECONDARY`, `NAME-MISSING-IN-MAIN`.
+**Flag:** `[NAME — NOT IN THE NAMES TABLE]` — show the name as each version writes it, with lines, and say that its row belongs in the kit's names table (Ж10). With no names table (`NAMES-TABLE-MISSING`, or no kit declared), list every name here and say so once.
+
 ## Step 3 — Report
 
 Format the report as follows:
@@ -193,7 +208,7 @@ Severity rules:
 | Severity | Checks |
 |---|---|
 | **Bug** | Type column not English; incorrect link prefix; code block mismatch; heading count/level mismatch; Cyrillic text in EN file |
-| **Warning** | Date mismatch; table row/column mismatch; `<details>` count mismatch; marker mismatch; untranslated prose in UA file; UA heading missing anchor; title/slug/filename mismatch |
+| **Warning** | Date mismatch; table row/column mismatch; `<details>` count mismatch; marker mismatch; untranslated prose in UA file; UA heading missing anchor; title/slug/filename mismatch; every names finding (Check 12) |
 
 If no issues are found for a check, list it under **Passed**. Do not omit passed checks — a full green list is useful confirmation.
 

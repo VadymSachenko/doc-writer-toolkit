@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { compare } from '../lib/compare.mjs';
 import { cellCount } from '../lib/parse.mjs';
 import { createSlugger, slugify, uaHeadingId } from '../lib/headings.mjs';
+import { looseKey, mergeRows, parseNamesTable } from '../lib/names.mjs';
 
 const run = promisify(execFile);
 const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'doc-align.mjs');
@@ -387,4 +388,145 @@ test('CLI: exit 2 for bad usage or an unreadable file', async () => {
     assert.match(r.out.error, message);
     assert.match(r.stderr, /^doc-align: /);
   }
+});
+
+// Check 12: names of organizations against a names table (Ж10). Invented organizations.
+const NAMES_UA = `---
+name: Глосарій — українська
+---
+
+## Терміни
+
+| Термін | Рендер | Код-сутність | Визначення |
+|---|---|---|---|
+| Обліковий запис | \`текст\` | | Набір даних користувача. |
+
+## Назви
+
+| Форма UA | Форма EN | Джерело |
+|---|---|---|
+| Лунобанк | Lunobank | site: https://lunobank.example/ (UA), https://lunobank.example/en/ (EN) |
+| Банк Світанок | Svitanok Bank | site: https://svitanok.example/ |
+| fluxpay | fluxpay | app: \`providers.fluxpay\` |
+| A-Pay | A-Pay | site: https://a-pay.example/ |
+`;
+
+const NAMES_EN = NAMES_UA.replace('## Назви', '## Names').replace('| Форма UA | Форма EN | Джерело |', '| UA form | EN form | Source |');
+
+const tableOf = (text, file = 'glossary-ua.md') => {
+  const t = parseNamesTable(text);
+  return { tables: [{ file, found: t.found }], rows: t.rows };
+};
+
+const NUA = `# Оплата
+
+## Банки {/* #banks */}
+
+Клієнт платить через Лунобанк або Банк Світанок. Гроші надходять у Лунобанку за хвилину.
+
+Провайдер fluxpay приймає картки. У полі \`provider\` передайте \`LunoBANK\`. Кнопка **Оплатити в LunoBank** відкриває форму.
+
+Докладніше — на [сайті банку](https://lunobank.example/ua/).
+`;
+
+const NEN = `# Payment
+
+## Banks
+
+The client pays through Lunobank or Svitanok Bank. Money reaches Lunobank's account within a minute.
+
+The fluxpay provider accepts cards. In the \`provider\` field, pass \`LunoBANK\`. The **Pay in LunoBank** button opens the form.
+
+Open a pay slip on the [bank's site](https://lunobank.example/en/).
+`;
+
+test('Check 12: names table parsing', () => {
+  const ua = parseNamesTable(NAMES_UA);
+  assert.equal(ua.found, true);
+  assert.deepEqual(ua.rows.map((r) => [r.ua, r.en]), [['Лунобанк', 'Lunobank'], ['Банк Світанок', 'Svitanok Bank'], ['fluxpay', 'fluxpay'], ['A-Pay', 'A-Pay']]);
+  assert.equal(ua.rows[0].line, 15);
+  assert.deepEqual(parseNamesTable(NAMES_EN).rows, ua.rows);
+  assert.deepEqual(parseNamesTable('## Terms\n\n| a | b |\n|---|---|\n| x | y |\n'), { found: false, rows: [] });
+  // The same table in both glossaries gives each row once.
+  assert.equal(mergeRows([parseNamesTable(NAMES_UA), parseNamesTable(NAMES_EN)]).length, 4);
+  assert.equal(looseKey('Моно банк'), looseKey('Monobank'));
+  assert.equal(looseKey('ПриватБанк'), looseKey('PrivatBank'));
+});
+
+test('Check 12: a UA/EN pair from the table is not a mismatch', () => {
+  const r = compare(NUA, NEN, { mainPath: 'ua.md', secondaryPath: 'en.md', names: tableOf(NAMES_UA) });
+  assert.deepEqual(findings(r).filter((f) => f.check === 12), []);
+  assert.ok(r.passed.some((p) => p.check === 12 && p.name === 'Names follow the names table'));
+  assert.deepEqual(r.names, {
+    rows: 4,
+    found: [
+      { ua: 'Лунобанк', en: 'Lunobank', main: 2, secondary: 2 },
+      { ua: 'Банк Світанок', en: 'Svitanok Bank', main: 1, secondary: 1 },
+      { ua: 'fluxpay', en: 'fluxpay', main: 1, secondary: 1 },
+    ],
+  });
+  // EN as main gives the same result.
+  assert.deepEqual(compare(NEN, NUA, { names: tableOf(NAMES_EN) }).warnings.filter((f) => f.check === 12), []);
+  // Without --names there is no Check 12 and no names field.
+  const plain = compare(NUA, NEN);
+  assert.equal(plain.names, undefined);
+  assert.ok(!plain.passed.some((p) => p.check === 12));
+});
+
+test('Check 12: a code value or a UI label keeps its own form (Ж1, Ж4)', () => {
+  // `LunoBANK` (the code's value) and **LunoBank** (a label) differ from the table's forms and are not reported.
+  const r = compare(NUA, NEN, { names: tableOf(NAMES_UA) });
+  assert.ok(!r.warnings.some((f) => /LunoBANK|LunoBank/.test(f.description)));
+  // The same spelling in prose is reported.
+  const prose = compare(edit(NUA, 'Гроші надходять у Лунобанку', 'Гроші надходять у LunoBank'), NEN, { names: tableOf(NAMES_UA) });
+  assert.deepEqual(flags(prose), ['NAME-SPELLING']);
+  assert.match(prose.warnings[0].description, /'LunoBank' is not the names table's UA form 'Лунобанк'/);
+});
+
+test('Check 12: a spelling that differs from the table is reported on its line', () => {
+  const ua = edit(edit(NUA, 'через Лунобанк', 'через Луно банк'), 'Провайдер fluxpay', 'Провайдер Fluxpay');
+  const en = edit(NEN, 'through Lunobank', 'through LunoBank');
+  const r = compare(ua, en, { mainPath: 'ua.md', secondaryPath: 'en.md', names: tableOf(NAMES_UA) });
+  assert.deepEqual(r.warnings.map((f) => [f.flag, f.line, f.file]), [
+    ['NAME-SPELLING', 5, 'ua.md'],
+    ['NAME-SPELLING', 7, 'ua.md'],
+    ['NAME-SPELLING', 5, 'en.md'],
+  ]);
+  assert.match(r.warnings[0].description, /'Луно банк' is not the names table's UA form 'Лунобанк'/);
+  assert.match(r.warnings[1].description, /'Fluxpay' is not the names table's UA form 'fluxpay'/);
+  assert.match(r.warnings[2].description, /'LunoBank' is not the names table's EN form 'Lunobank'/);
+});
+
+test('Check 12: a name in one page only, and words that only look like a name', () => {
+  const r = compare(NUA, edit(NEN, 'through Lunobank or Svitanok Bank', 'through Lunobank'), { names: tableOf(NAMES_UA) });
+  assert.deepEqual(flags(r), ['NAME-MISSING-IN-SECONDARY']);
+  assert.match(r.warnings[0].description, /'Банк Світанок' \/ 'Svitanok Bank' is named in main \(1x\), not in secondary/);
+  // "a pay slip" is not A-Pay; a link target and a URL are not prose.
+  assert.ok(!compare(NUA, NEN, { names: tableOf(NAMES_UA) }).names.found.some((f) => f.en === 'A-Pay'));
+});
+
+test('Check 12: no names table, or no UA page', () => {
+  const none = compare(NUA, NEN, { names: { tables: [{ file: 'glossary-ua.md', found: false }], rows: [] } });
+  assert.deepEqual(flags(none), ['NAMES-TABLE-MISSING']);
+  assert.equal(none.warnings[0].file, 'glossary-ua.md');
+  const skipped = compare(NEN, NEN, { names: tableOf(NAMES_UA) });
+  assert.ok(flags(skipped).includes('NAMES-SKIPPED'));
+});
+
+test('CLI: --names reads the names table from one or more glossaries', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'doc-align-'));
+  const files = { ua: path.join(dir, 'ua.md'), en: path.join(dir, 'en.md'), gua: path.join(dir, 'glossary-ua.md'), gen: path.join(dir, 'glossary-en.md') };
+  await fs.writeFile(files.ua, NUA);
+  await fs.writeFile(files.en, edit(NEN, 'through Lunobank', 'through Monolith'));
+  await fs.writeFile(files.gua, NAMES_UA);
+  await fs.writeFile(files.gen, NAMES_EN);
+  const r = await cli(files.ua, files.en, '--names', files.gua, '--names', files.gen);
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(Object.keys(r.out), ['main', 'secondary', 'ua', 'bugs', 'warnings', 'passed', 'names']);
+  assert.equal(r.out.names.rows, 4);
+  assert.deepEqual(r.out.warnings.map((w) => w.flag), []);
+  assert.deepEqual(r.out.names.found[0], { ua: 'Лунобанк', en: 'Lunobank', main: 2, secondary: 1 });
+  const missing = await cli(files.ua, files.en, '--names', path.join(dir, 'nope.md'));
+  assert.equal(missing.code, 2);
+  assert.match(missing.out.error, /file not found/);
 });
