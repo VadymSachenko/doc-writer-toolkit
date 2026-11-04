@@ -181,6 +181,18 @@ Write a pattern inside one backtick span: the scripts read only the first backti
 - **SME review list:** `In SME review`
 ```
 
+## Ticket flow settings
+
+These fields are read by the `tracker` script (`${CLAUDE_PLUGIN_ROOT}/scripts/tracker/`), which speaks to the host's ticket tracker in statuses and transitions. No skill reads them yet. A project that doesn't use the script declares none. The flag of the script overrides the field.
+
+| Field | Required | Value | If absent |
+|---|---|---|---|
+| `Ticket flow settings:` | no | The host's ticket flow settings file, relative to the repo root. Its `tracker` object holds the board, the statuses with the lists they map to, the transitions, the labels and the names of the environment variables that hold the credentials; a file named `<name>.local.json` next to it overrides it key by key. The script's README lists the keys | `.claude/ticket-flow.json` |
+
+```md
+- **Ticket flow settings:** `.claude/ticket-flow.json`
+```
+
 ## Visual review pack
 
 These fields are read by the `visual-pack` script (`${CLAUDE_PLUGIN_ROOT}/scripts/visual-pack/`), which builds one review sheet of the docs pages a git range changed, in every locale. No skill reads them. The script also reads the root pair fields (`UA content root:`, `EN i18n root:`, `UA URL prefix:` and the named pairs) and `Toolkit state root:` from the sections above, and the locales from `docusaurus.config`. Each flag of the script overrides its field.

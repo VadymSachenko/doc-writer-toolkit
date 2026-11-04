@@ -1,0 +1,26 @@
+[
+  {
+    "id": "5f0000000000000000100012",
+    "type": "updateCard",
+    "date": "2026-11-01T12:00:00.000Z",
+    "data": {
+      "card": { "id": "5f00000000000000000c0003", "name": "#2002 - Add a currency", "shortLink": "Doin0003", "idList": "5f00000000000000000a0004" },
+      "old": { "idList": "5f00000000000000000a0003" },
+      "listBefore": { "id": "5f00000000000000000a0003", "name": "Ready" },
+      "listAfter": { "id": "5f00000000000000000a0004", "name": "Doing" }
+    },
+    "memberCreator": { "id": "5f0000000000000000200001", "username": "test_writer" }
+  },
+  {
+    "id": "5f0000000000000000100011",
+    "type": "updateCard",
+    "date": "2026-10-31T12:00:00.000Z",
+    "data": {
+      "card": { "id": "5f00000000000000000c0003", "name": "#2002 - Add a currency", "shortLink": "Doin0003", "idList": "5f00000000000000000a0003" },
+      "old": { "idList": "5f00000000000000000a0002" },
+      "listBefore": { "id": "5f00000000000000000a0002", "name": "Drafts" },
+      "listAfter": { "id": "5f00000000000000000a0003", "name": "Ready" }
+    },
+    "memberCreator": { "id": "5f0000000000000000200001", "username": "test_writer" }
+  }
+]
