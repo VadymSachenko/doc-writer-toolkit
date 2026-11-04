@@ -25,6 +25,7 @@ const STEPS = [
   { id: 'screenshot-locales', cmd: 'npm', args: ['test'], cwd: `${scripts}/screenshot-locales` },
   { id: 'section-state', cmd: 'npm', args: ['test'], cwd: `${scripts}/section-state` },
   { id: 'pipeline-measures', cmd: 'npm', args: ['test'], cwd: `${scripts}/pipeline-measures` },
+  { id: 'tracker', cmd: 'npm', args: ['test'], cwd: `${scripts}/tracker` },
   // The offline tests always; the browser test only where VISUAL_PACK_PLAYWRIGHT_FROM names a Playwright with Chromium.
   // Without it the runner exits 2 after the offline tests passed, which shows as `not run`.
   { id: 'visual-pack', cmd: 'npm', args: ['test'], cwd: `${scripts}/visual-pack`, notRunExit: 2 },
