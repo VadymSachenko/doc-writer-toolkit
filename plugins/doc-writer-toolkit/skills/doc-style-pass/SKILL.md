@@ -1,6 +1,6 @@
 ---
 name: doc-style-pass
-description: 'One style pass on one documentation page, UA or EN, for the person who approves it: runs doc-style-reviewer, then doc-style-fixer in its apply:mechanical,substantive mode, and ends in a single numbered list (every applied change as «before» → «after» with its rule, then the judgment questions, never applied). The user answers with the numbers to undo: those changes get their exact «before» back, and every decision is logged in the host''s <state root>/style-rejections.jsonl. A rule rejected three times with no acceptance in between is proposed once as one exception line for the product kit''s product-rules.md, written only on a yes. Never invoked implicitly: it edits files. Use explicitly ("/style-pass docs/balance/balance.md", "use doc-style-pass on docs/balance/balance.md").'
+description: 'One style pass on one documentation page, UA or EN, for the person who approves it: runs doc-style-reviewer, then doc-style-fixer in its apply:mechanical,substantive mode, and ends in a single numbered list (every applied change as «before» → «after» with its rule, then the judgment questions, never applied). The user answers with the numbers to undo: those changes get their exact «before» back, and every decision is logged in the host''s <state root>/style-decisions.jsonl. A rule rejected three times with no acceptance in between is proposed once as one exception line for the product kit''s product-rules.md, written only on a yes. Never invoked implicitly: it edits files. Use explicitly ("/style-pass docs/balance/balance.md", "use doc-style-pass on docs/balance/balance.md").'
 ---
 
 # doc-style-pass
@@ -27,7 +27,7 @@ You run one style pass on exactly one page for the person who approves it. They 
 
 1. `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`: `Toolkit state root:` ("Label store and locale translation"; default `.doc-toolkit/`) and the product kit ("Product kit").
 2. The page.
-3. `<state root>/style-rejections.jsonl`, if it exists: only the lines of the rules the user rejects in this pass (Step 7).
+3. `<state root>/style-decisions.jsonl`, if it exists: only the lines of the rules the user rejects in this pass (Step 7).
 4. `<kit>/product-rules.md`, only when Step 7 proposes a line.
 
 Nothing else. The reviewer and the fixer load their own sources.
@@ -36,7 +36,7 @@ Nothing else. The reviewer and the fixer load their own sources.
 
 - the page: through the fixer (Step 3), the undo and the answered questions (Step 6);
 - the run folder `<state root>/.run/style-pass/`: the snapshot `<page id>.before.md` and the pass record `<page id>.json`. `<page id>` is the page path from the repo root without its extension, `/` written as `__` (`docs/balance/balance.md` → `docs__balance__balance`). If `<state root>/.run/.gitignore` doesn't exist, write it with the single line `*`, so nothing in `.run/` is committed;
-- `<state root>/style-rejections.jsonl`: the decision log, committed with the pages;
+- `<state root>/style-decisions.jsonl`: the decision log, committed with the pages;
 - `<kit>/product-rules.md`: one line, only after the user's yes (Step 7).
 
 ## Step 1 — Start
@@ -135,7 +135,7 @@ The excerpts shown are the record's. Only a long one (over about 120 characters)
 1. **Unclear answers.** A number that isn't in the list, or an answer you can't read as undo, keep or wording: ask about that number. Apply nothing for it until it's clear.
 2. **Undo.** For every place of every item named: replace its `after` with its `before` in the page by an exact string replacement (the Edit tool), and only when `after` occurs exactly once in the page now. If it doesn't, the page changed since the pass: leave that item, name it and ask.
 3. **Questions.** A question answered with wording: apply exactly that wording at that finding's place, within the fixer's Step 4 limits (no marker, code or frontmatter, except a `title`/`description` the finding names). An unanswered question changes nothing. Questions aren't logged.
-4. **Log.** Append to `<state root>/style-rejections.jsonl` one JSON line per item, in list order: `"decision": "rejected"` for an undone item, `"decision": "accepted"` for a kept one. An item still waiting (point 1 or 2) gets its line once it's settled.
+4. **Log.** Append to `<state root>/style-decisions.jsonl` one JSON line per item, in list order: `"decision": "rejected"` for an undone item, `"decision": "accepted"` for a kept one. An item still waiting (point 1 or 2) gets its line once it's settled.
 
    ```json
    {"date":"2026-11-04","page":"docs/balance/balance.md","guide":"gdsg@uk","rule":{"file":"ua-grammar/01a-vowels-alternations.md","id":"§7"},"finding":"[UA-SPELLING] Straight apostrophe","before":"обов'язково перегляньте","after":"обов’язково перегляньте","decision":"rejected"}
