@@ -79,3 +79,6 @@ The plugin has no version number, so an install tracks this repository's commits
 ## Development
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). The regression set (`node tools/regression.mjs`) runs in CI on every pull request.
+
+Scratch line one for a throwaway check.
+Scratch line two for a throwaway check.
