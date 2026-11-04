@@ -22,9 +22,9 @@ Options
                         heading at the same position, and list the links that use the old fragments. Prints
                         { ua, en, proposals, links, unresolved, skipped }
   --root <dir>[=<url prefix>]
-                        with --propose-ids: a UA content root to search for links (prefix default '/'). May be
+                        with --propose-ids: a content root (UA, or EN) to search for links (prefix default '/'). May be
                         given more than once
-  --write               with --propose-ids: add the ids to the UA page and rewrite the links in place
+  --write               with --propose-ids: add the ids to the UA page and rewrite the listed links in place
   -h, --help            this text
 `;
 

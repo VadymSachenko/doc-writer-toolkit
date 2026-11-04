@@ -26,7 +26,7 @@ The reader is line based and code aware: fenced code blocks and the frontmatter 
 - `--ua main|secondary`: which file is the UA page, for the heading-id checks. Without it, the UA page is the one with more Cyrillic letters in its heading text, and if that is a tie, in its whole text. If that is a tie too (no Cyrillic in either page), the heading-id checks are skipped with a `HEADING-ID-SKIPPED` warning. Pass the flag when a page's headings are mostly Latin text.
 - `--names <glossary-file>`: a product kit glossary that holds the names table (a table under `## Names` or `## Назви`, columns UA form, EN form, UI forms, API values, Source: `context/doc-rules/glossary-format.md`, "Names"; only the first two, the organization's own forms, are compared, and a three-column table reads the same). Turns on Check 12. Give it more than once to read both glossaries: the rows are merged, one per UA/EN pair. A glossary without the table is not an error: the report then has a `NAMES-TABLE-MISSING` warning.
 - `--propose-ids`: propose the missing UA heading ids and find the links to their old fragments, instead of comparing (below). `--names` doesn't go with it.
-- `--root <dir>[=<url prefix>]`: with `--propose-ids`, a UA content root to search for links, and its UA URL prefix (default `/`). Give it once per root pair. EN roots are not searched.
+- `--root <dir>[=<url prefix>]`: with `--propose-ids`, a UA content root to search for links, and its UA URL prefix (default `/`). Give it once per root pair. An EN i18n root may be given too (with the same prefix as its UA root): an EN link copied from UA with an old fragment is broken in EN and gets the id as well.
 - `--write`: with `--propose-ids`, write the proposals into the UA page and the link rewrites into the pages that hold the links.
 - `-h`, `--help`: the usage text.
 
@@ -119,15 +119,15 @@ For every UA heading from `##` down without a `{/* #id */}` comment, the id is t
 - **A proposal with a `problem` is not written:** an EN anchor that is not lowercase ASCII kebab-case (`Fees & limits` slugs to `fees--limits`), or an id another UA heading of the page already has. Change the EN heading (a wording that slugs to a valid id, or an explicit `{#id}`, rule 6) and run again.
 - **A UA heading with an explicit `{#id}`** is in `skipped`: the comment replaces it by hand.
 
-**Links.** Searched on the UA page itself and in every `.md`/`.mdx` file under the `--root` folders (folders starting with `.` and `node_modules` left out). Fenced and inline code is skipped. A link target is `[text](target)`, `href="target"`, `to="target"` or `[label]: target`; its fragment is compared decoded, so a percent-encoded fragment matches. It reaches the UA page when it is:
+**Links.** Searched on the UA page and the EN page themselves (EN copies UA link targets verbatim) and in every `.md`/`.mdx` file under the `--root` folders (folders starting with `.` and `node_modules` left out). Fenced and inline code is skipped. A link target is `[text](target)`, `href="target"`, `to="target"` or `[label]: target`; its fragment is compared decoded, so a percent-encoded fragment matches. It reaches the UA page when it is:
 
-- a bare fragment (`#огляд-балансів`) on the UA page itself;
-- a relative `.md`/`.mdx` path that resolves to the UA file;
+- a bare fragment (`#огляд-балансів`) on the UA page or the EN page;
+- a relative `.md`/`.mdx` path that resolves to the UA or the EN file;
 - a site-root path equal to one of the UA page's routes, in the root that holds it: the route Docusaurus gives it (number prefixes dropped, `folder/folder.md` and `index.md` collapse to the folder, `slug:` wins, after the root's URL prefix), the route `internal-links.md` builds (URL prefix + path without extension), or the file-path form (`/` + path with extension). A trailing slash doesn't matter.
 
 A link with a matching fragment that can't be resolved (a relative route, or a site-root path while the UA page is under no `--root`) is in `unresolved`, for a person to check. A link to another page or site is ignored.
 
-**`--write`** appends ` {/* #<id> */}` to each UA heading line of a proposal without a problem, and replaces the old fragment with the id in each listed link (the path stays as written). No other byte changes and no line is added or removed, so the result is an id-only change (`heading-anchors.md`, "Id-only changes"). The EN page is never written.
+**`--write`** appends ` {/* #<id> */}` to each UA heading line of a proposal without a problem, and replaces the old fragment with the id in each listed link (the path stays as written). No other byte changes and no line is added or removed, so the result is an id-only change (`heading-anchors.md`, "Id-only changes"). On the EN page and the other pages, only the listed links change.
 
 ```json
 {

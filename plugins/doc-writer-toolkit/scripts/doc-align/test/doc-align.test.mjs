@@ -590,7 +590,7 @@ title: Balances
 
 # Balances
 
-See the [overview](#balances-overview), the [first reference](#reference-information-create-balance) and the [second](#reference-information-close-balance).
+See the [overview](#balances-overview), the [first reference](#reference-information-create-balance) and the [second](#reference-information-close-balance). The [filters](#фільтри) link was copied from UA.
 
 ## Balances overview
 
@@ -652,15 +652,16 @@ test('--propose-ids: each id is the EN anchor at the same position, explicit or 
   // The second "Ready section" gets `ready-section-1` in EN, numbered like Docusaurus numbers it: a valid id.
   assert.deepEqual(rows[5], [27, 'ready-section-1', 'generated', 'повтор', null]);
   assert.deepEqual(
-    r.links.map((l) => [l.line, l.url, l.newUrl]),
+    r.links.map((l) => [l.file, l.line, l.url, l.newUrl]),
     [
-      [7, '#огляд-балансів', '#balances-overview'],
-      [7, '#довідкова-інформація', '#reference-information-create-balance'],
-      [7, '#довідкова-інформація-1', '#reference-information-close-balance'],
+      ['ua.md', 7, '#огляд-балансів', '#balances-overview'],
+      ['ua.md', 7, '#довідкова-інформація', '#reference-information-create-balance'],
+      ['ua.md', 7, '#довідкова-інформація-1', '#reference-information-close-balance'],
+      ['en.md', 7, '#фільтри', '#filters'],
     ],
-    'links in inline code and code blocks are not links',
+    'links in inline code and code blocks are not links; an EN link copied from UA is found too',
   );
-  assert.deepEqual(r.warnings, ['no --root given: only links on the UA page itself are found']);
+  assert.deepEqual(r.warnings, ['no --root given: only links on the UA and EN pages themselves are found']);
 
   // An id another UA heading already has is not written either.
   const taken = await proposeIds('# Т\n\n## Огляд {/* #overview */}\n\n## Вступ\n', '# T\n\n## Overview\n\n## Overview {#overview}\n', { uaPath: 'ua.md', enPath: 'en.md' });
@@ -707,7 +708,7 @@ test('CLI --propose-ids --write: only the id comments and the link fragments cha
   const r = await cli(f.en, f.ua, '--propose-ids', '--root', f.root, '--write');
   assert.equal(r.code, 0, r.stderr);
   assert.equal(r.out.ua, f.ua, 'the UA page is found from its Cyrillic text');
-  assert.deepEqual(r.out.written, [f.ua, path.relative(process.cwd(), f.other)]);
+  assert.deepEqual(r.out.written, [f.ua, f.en, path.relative(process.cwd(), f.other)]);
   const ua = await fs.readFile(f.ua, 'utf8');
   let want = before.ua;
   for (const [from, to] of [
@@ -727,7 +728,7 @@ test('CLI --propose-ids --write: only the id comments and the link fragments cha
   const other = await fs.readFile(f.other, 'utf8');
   assert.equal(other.split('\n').length, before.other.split('\n').length);
   assert.ok(other.includes('[a](/balances/#balances-overview)') && other.includes('<Link to="/balances/#filters">') && other.includes('[e](../02-balances/#фільтри)') && other.includes('[d](/other/#огляд-балансів)'));
-  assert.equal(await fs.readFile(f.en, 'utf8'), before.en, 'the EN page is never written');
+  assert.equal(await fs.readFile(f.en, 'utf8'), edit(before.en, '[filters](#фільтри)', '[filters](#filters)'), 'in EN, only the copied link changes');
 
   // Afterwards the alignment check finds a missing id only on the heading whose proposal had a problem.
   const after = await cli(f.ua, f.en, '--ua', 'main');

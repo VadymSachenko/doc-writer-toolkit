@@ -115,29 +115,32 @@ export async function proposeIds(uaText, enText, { uaPath, enPath, roots = [], w
     report.proposals.push(p);
   }
 
-  // Links that use an old fragment: on the UA page itself, and in every page under the given roots.
+  // Links that use an old fragment: on the UA page and the EN page themselves (EN copies UA link targets verbatim),
+  // and in every page under the given roots. A link reaches the page when it reaches either file, or its route.
   const good = report.proposals.filter((p) => !p.problem);
   const byFragment = new Map(report.proposals.map((p) => [p.oldFragment, p]));
   const resolvedRoots = roots.map((r) => ({ ...r, abs: path.resolve(r.dir) }));
   const uaAbs = path.resolve(uaPath);
+  const enAbs = path.resolve(enPath);
+  const self = new Set([uaAbs, enAbs]);
   const reach = pageRoutes(uaAbs, uaText, resolvedRoots);
-  if (roots.length && !reach) report.warnings.push(`${uaPath} is under none of the given roots: only links on the page itself and relative .md links are found`);
-  if (!roots.length) report.warnings.push('no --root given: only links on the UA page itself are found');
-  const files = [uaAbs];
+  if (roots.length && !reach) report.warnings.push(`${uaPath} is under none of the given roots: only links on the two pages and relative .md links are found`);
+  if (!roots.length) report.warnings.push('no --root given: only links on the UA and EN pages themselves are found');
+  const files = [uaAbs, enAbs];
   for (const r of resolvedRoots) await walk(r.abs, files);
   const edits = new Map(); // abs file -> [{ line, start, end, id }]
   for (const file of [...new Set(files)]) {
-    const text = file === uaAbs ? uaText : await fs.readFile(file, 'utf8');
-    const display = file === uaAbs ? uaPath : toPosix(path.relative(process.cwd(), file));
+    const text = file === uaAbs ? uaText : file === enAbs ? enText : await fs.readFile(file, 'utf8');
+    const display = file === uaAbs ? uaPath : file === enAbs ? enPath : toPosix(path.relative(process.cwd(), file));
     parse(text).prose.forEach((line, n) => {
       for (const l of fragmentLinks(line)) {
         const p = byFragment.get(l.fragment);
         if (!p) continue;
         let hit = null;
-        if (l.path === '') hit = file === uaAbs;
+        if (l.path === '') hit = self.has(file);
         else if (/^[a-z][a-z0-9+.-]*:/i.test(l.path)) hit = false;
         else if (l.path.startsWith('/')) hit = reach ? reach.routes.has(normRoute(l.path)) : null;
-        else if (/\.mdx?$/.test(decode(l.path))) hit = path.resolve(path.dirname(file), decode(l.path)) === uaAbs;
+        else if (/\.mdx?$/.test(decode(l.path))) hit = self.has(path.resolve(path.dirname(file), decode(l.path)));
         if (hit === false) continue;
         const row = { file: display, line: n + 1, url: l.url, heading: p.line };
         if (hit === null) {
