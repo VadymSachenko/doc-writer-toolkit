@@ -148,6 +148,11 @@ export async function startFake({ onRequest } = {}) {
     state,
     behaviour,
     writes: () => requests.filter((r) => r.method !== 'GET'),
-    close: () => new Promise((resolve) => server.close(resolve)),
+    // Node 18's close() waits for idle keep-alive sockets (seconds each); close them at once.
+    close: () =>
+      new Promise((resolve) => {
+        server.close(resolve);
+        server.closeAllConnections?.();
+      }),
   };
 }
