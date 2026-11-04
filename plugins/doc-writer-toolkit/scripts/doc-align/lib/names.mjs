@@ -5,7 +5,9 @@
 // case ending); any other spelling is a variant. Bold spans (UI labels, Ж1), inline code (code values, Ж4),
 // comments, link targets, URLs and HTML tags are not prose here and are never searched.
 
-// The names table: the first table under `## Names` or `## Назви`. Columns: UA form, EN form, Source.
+// The names table: the first table under `## Names` or `## Назви`. Columns: UA form, EN form, UI forms, API
+// values, Source (glossary-format.md, "Names"). Only the first two, the organization's own forms, are compared
+// with prose; a three-column table (UA form, EN form, Source) reads the same.
 const NAMES_HEADING = /^##\s+(names|назви)\s*$/i;
 
 function cells(row) {
@@ -31,8 +33,10 @@ export function parseNamesTable(text) {
   if (i + 1 >= lines.length || !/^\|?[\s:|-]*-[\s:|-]*\|?\s*$/.test(lines[i + 1].trim())) return { found: false, rows: [] };
   const rows = [];
   for (let j = i + 2; j < lines.length && lines[j].trimStart().startsWith('|'); j++) {
-    const [ua = '', en = '', source = ''] = cells(lines[j]);
-    const row = { ua: plainForm(ua), en: plainForm(en), source, line: j + 1 };
+    const c = cells(lines[j]);
+    const [ua = '', en = ''] = c;
+    const row = { ua: plainForm(ua), en: plainForm(en), source: c.length > 2 ? c.at(-1) : '', line: j + 1 };
+    if (c.length >= 5) Object.assign(row, { ui: c[2], api: c[3] });
     if (row.ua || row.en) rows.push(row);
   }
   return { found: true, rows };
@@ -90,8 +94,16 @@ function prepare(rows) {
   return rows.map((row, index) => {
     const forms = [row.ua, row.en].filter(Boolean);
     const capsOnly = forms.every((f) => /\p{Lu}.*\p{Lu}/u.test(f) && f === f.toUpperCase());
-    return { row, index, capsOnly, keys: new Set(forms.map(looseKey).filter(Boolean)), sizes: forms.map((f) => wordsOf(f).length) };
+    const lower = new Set(forms.filter((f) => wordsOf(f).length === 1).map((f) => f.toLowerCase()));
+    const lowerForm = forms.some((f) => f === f.toLowerCase());
+    return { row, index, capsOnly, lower, lowerForm, keys: new Set(forms.map(looseKey).filter(Boolean)), sizes: forms.map((f) => wordsOf(f).length) };
   });
+}
+
+// True when the word at `offset` opens a line, a list item, a sentence or a table cell.
+function startsSentence(text, offset) {
+  const before = text.slice(text.lastIndexOf('\n', offset - 1) + 1, offset);
+  return /^\s*(?:(?:[-*+]|\d+[.)])\s+)?$/.test(before) || /[.!?:]\s+$/.test(before) || /\|\s*$/.test(before);
 }
 
 // True when `text` is `form` for a page in `lang` ('ua' | 'en'): the same characters, or, on a UA page, a Cyrillic
@@ -137,6 +149,12 @@ export function findNames(text, rows, lang) {
       // A name written in capitals only (TAP, KVB) counts only with two capitals or more, so the word "tap"
       // or "Tap" at the start of a sentence is never read as a spelling of it.
       if (p.capsOnly && !/\p{Lu}.*\p{Lu}/u.test(str)) continue;
+      // A one-word name that differs from its form only in case may be an ordinary word: in lower case when no
+      // form is, or at the start of a sentence, a list item or a table cell, it is not read as the name.
+      if (n === 1 && p.lower.has(str.toLowerCase())) {
+        const lowerWord = str === str.toLowerCase() && !p.lowerForm;
+        if (lowerWord || startsSentence(text, run[0].s)) continue;
+      }
       hit = { p, n, str };
     }
     if (!hit) continue;

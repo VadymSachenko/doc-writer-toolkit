@@ -507,6 +507,23 @@ test('Check 12: a name in one page only, and words that only look like a name', 
   const caps = { tables: [{ file: 'g.md', found: true }], rows: [{ ua: 'TAP', en: 'TAP', source: '' }] };
   const en = 'Tap **Save**, then tap the row. Pay with TAP or Tap-Pay. Pay with TaP.\n';
   assert.deepEqual(findNames(searchable(en.split('\n')), caps.rows, 'en').map((h) => [h.text, h.exact]), [['TAP', true], ['TaP', false]]);
+  // A one-word name that is also an ordinary word ("Tap" the organization): the verb in lower case and the word
+  // that opens a step, a sentence or a cell are not the name; "TAP" and "Tap" mid-sentence are.
+  const word = [{ ua: 'Tap', en: 'Tap', source: '' }];
+  const steps = '1. Tap **Save**.\n2. Then tap the row. Tap opens it.\n| Tap | the Tap merchant ID, issued by TAP |\n';
+  assert.deepEqual(findNames(searchable(steps.split('\n')), word, 'en').map((h) => [h.text, h.line, h.exact]), [['Tap', 3, true], ['TAP', 3, false]]);
+});
+
+test('Check 12: a five-column names table (UI forms, API values)', () => {
+  const t = parseNamesTable('## Names\n\n| UA form | EN form | UI forms | API values | Source |\n|---|---|---|---|---|\n| Лунобанк | Lunobank | LUNOBANK (admin) | `LUNO` (`bank`) | site: https://lunobank.example/ |\n');
+  assert.deepEqual(t.rows, [{ ua: 'Лунобанк', en: 'Lunobank', source: 'site: https://lunobank.example/', line: 5, ui: 'LUNOBANK (admin)', api: '`LUNO` (`bank`)' }]);
+  // Only the organization's own forms are compared with prose: the UI form in bold and the value in code are not
+  // findings, and the same UI form in prose is.
+  const ua = '# A\n\nВиберіть **LUNOBANK** і передайте `LUNO`. Оплата через Лунобанк.\n';
+  const en = '# A\n\nSelect **LUNOBANK** and pass `LUNO`. Payment through Lunobank.\n';
+  const names = { tables: [{ file: 'g.md', found: true }], rows: t.rows };
+  assert.deepEqual(findings(compare(ua, en, { names })).filter((f) => f.check === 12), []);
+  assert.deepEqual(flags(compare(ua, edit(en, 'through Lunobank', 'through LUNOBANK'), { names })), ['NAME-SPELLING']);
 });
 
 test('Check 12: no names table, or no UA page', () => {

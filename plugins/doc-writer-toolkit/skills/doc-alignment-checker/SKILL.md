@@ -172,11 +172,12 @@ Per that file, **report the mismatch — never rename**. `index.md` and other ge
 
 ### Check 12 — Names of organizations
 
-Names of banks, payment systems, companies and other organizations or products follow Ж10 of `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md`; the names table pairs the UA and EN form of each.
+Names of banks, payment systems, companies and other organizations or products follow Ж10 of `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md`: the form depends on what the text refers to. This check covers prose, where the text refers to the organization itself; the names table pairs its own UA and EN forms (the first two columns).
 
 - **A name the table has.** The script finds it in both pages (its `names.found` lists the rows it found). A UA form and an EN form from one row are a pair, never a mismatch, however different they look (Лунобанк — Lunobank). A spelling that isn't the row's form for its page's language is `NAME-SPELLING`. A row named in one page only is `NAME-MISSING-IN-SECONDARY` / `-MAIN`: report it unless the other page names the organization in a way the table should list too.
 - **A name the table lacks.** Read both pages for names of organizations or third-party products that no row covers (the script can't see them). List each one with its form in each page and its line. Don't judge which form is right: Ж10 says where the form comes from, and a row is added to the kit, not decided here. The host's own product name is not in scope (`product-rules.md`).
-- **Not a finding:** a name inside a bold UI label or in code font (the app's or the code's own form, Ж1 and Ж4), a URL, and a name inside a quoted system message.
+- **Not a finding:** a name inside a bold UI label or in code font (the app's form or the API's value, Ж1 and Ж4; the table's UI forms and API values columns list them), a URL, and a name inside a quoted system message.
+- **A value or a label written as prose.** When the prose names an API value or a UI element (a form from the table's API values or UI forms column) without code font or bold, report it with the form Ж10 gives that role, under the first flag below.
 
 **Flag:** `[NAME — NOT THE TABLE'S FORM]` — show the form found, the table's form for that language, and the line. Script flag: `NAME-SPELLING`.
 **Flag:** `[NAME — IN ONE VERSION ONLY]` — show the row and the version that names it. Script flags: `NAME-MISSING-IN-SECONDARY`, `NAME-MISSING-IN-MAIN`.
