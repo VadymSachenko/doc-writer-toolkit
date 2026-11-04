@@ -14,6 +14,7 @@ import { nodeAt } from './redo.mjs';
 import { readTerms } from './terms.mjs';
 import { alignTrees } from './diff.mjs';
 import { assetRefs, canonicalTags, cleanRef, linkTargets, markerCount, otherCommentCount, parsePage, PROSE_FM_KEYS, sections, splitCode } from './parse.mjs';
+import { fenceLang, fenceParts } from '../../doc-align/lib/fences.mjs';
 
 
 function analyze(text) {
@@ -71,26 +72,10 @@ const normString = (t) => t.normalize('NFC').replace(/\s+/g, ' ').trim().toLocal
 
 const head = (list, n = 8) => (list.length > n ? [...list.slice(0, n), `… and ${list.length - n} more`] : list);
 
-// Mermaid diagrams carry translatable labels. Flowcharts compare with their labels blanked; other diagram types only by
-// their first line and length, because their label syntax differs.
-function canonMermaid(f) {
-  const first = f.lines.find((l) => l.trim())?.trim() ?? '';
-  if (!/^(flowchart|graph)\b/.test(first)) return `${f.lines.length} lines, ${first}`;
-  return f.lines
-    .map((l) =>
-      l
-        .replace(/"[^"\n]*"/g, '""')
-        .replace(/\|[^|\n]*\|/g, '||')
-        .replace(/(--|==|-\.)\s+[^\n]*?\s+(-->|==>|\.->)/g, '$1 $2')
-        .replace(/\[[^\]\n]*\]/g, '[]')
-        .replace(/\([^()\n]*\)/g, '()')
-        .replace(/\{[^}\n]*\}/g, '{}')
-        .trimEnd(),
-    )
-    .join('\n');
-}
-
-const fenceKey = (f) => (/^mermaid\b/i.test(f.info) ? `mermaid\0${canonMermaid(f)}` : `${f.info}\0${f.lines.join('\n')}`);
+// A code block compares by its info string and its code part: diagram labels, comments and tree descriptions are
+// translated (context/doc-rules/project-rules/code-blocks.md, one implementation with doc-align). A diagram's info
+// string is not compared.
+const fenceKey = (f) => `${fenceLang(f.info) === 'mermaid' ? 'mermaid' : f.info}\0${fenceParts(f.info, f.lines).code.join('\n')}`;
 
 // Why a one-line frontmatter value would not parse as the string it shows, or null. The build stops on such a value,
 // and a translation adds them: an unquoted `: ` in a translated description is the usual one.
@@ -209,13 +194,13 @@ export async function checkPage({ locale, uaText, targetText, targetFile, state,
     if (bad.length) fail('counts', 'List, step, table-row or admonition counts differ from the UA page.', { sections: bad.slice(0, 6) });
   }
 
-  // Code blocks (mermaid labels excepted), inline code, links, images and MDX tags.
+  // Code blocks (their code part), inline code, links, images and MDX tags.
   const fa2 = ua.sc.fences.map(fenceKey);
   const ft2 = tr.sc.fences.map(fenceKey);
   if (fa2.length !== ft2.length) fail('code', `The UA page has ${fa2.length} code blocks but the translation has ${ft2.length}.`);
   else {
     const bad = fa2.map((k, i) => (k === ft2[i] ? null : i + 1)).filter(Boolean);
-    if (bad.length) fail('code', 'Code blocks must be byte-identical to the UA page (only the labels inside a mermaid flowchart may be translated).', { blocks: bad });
+    if (bad.length) fail('code', 'Code blocks must keep the code of the UA page byte for byte, line for line: only diagram labels, comments and tree descriptions are translated (code-blocks.md).', { blocks: bad });
   }
   // Inline code that holds Cyrillic is UI text shown in code style, not code: it is translated like prose.
   const codeLike = multisetDiff(ua.inline.filter((c) => !CYRILLIC.test(c)), tr.inline);
@@ -302,18 +287,20 @@ export async function checkPage({ locale, uaText, targetText, targetFile, state,
   }
   if (broken.length) fail('assets', 'Some image or asset references do not resolve.', { broken: broken.slice(0, 12) });
 
-  // Ukrainian-only letters left in the translation (prose, plus labels inside mermaid blocks).
+  // Ukrainian-only letters left in the translation: prose, plus the reader text of code blocks (diagram labels, comments,
+  // tree descriptions). The code part is data and keeps its letters.
+  const codeText = tr.sc.fences.flatMap((f) => fenceParts(f.info, f.lines).texts.map((t) => ({ text: t.text, line: f.startLine + t.line + 2 })));
   const hits = [];
   const scan = (text, line) => {
     const letters = uaOnlyLetters(text, locale);
     if (letters) hits.push({ line, letters, text: text.trim().slice(0, 100) });
   };
   tr.sc.prose.forEach((l, i) => scan(l, i + 1));
-  for (const f of tr.sc.fences) if (/^mermaid\b/i.test(f.info)) f.lines.forEach((l, i) => scan(l, f.startLine + i + 2));
+  for (const t of codeText) scan(t.text, t.line);
   if (hits.length) fail('ukrainian-letters', 'Letters that exist only in Ukrainian remain: part of the text was not translated.', { hits: hits.slice(0, 8), total: hits.length });
 
   // A translation written mostly in Latin letters must not keep any Cyrillic text either (the Ukrainian-only letters
-  // above miss untranslated words that happen to avoid them), mermaid labels included.
+  // above miss untranslated words that happen to avoid them), the reader text of code blocks included.
   const count = (re) => (tr.prose.match(re) ?? []).length;
   const cyr = count(/\p{Script=Cyrillic}/gu);
   const lat = count(/\p{Script=Latin}/gu);
@@ -321,7 +308,7 @@ export async function checkPage({ locale, uaText, targetText, targetFile, state,
     const stray = [];
     const find = (text, line) => CYRILLIC.test(text) && stray.push({ line, text: text.trim().slice(0, 100) });
     tr.sc.prose.forEach((l, i) => find(l, i + 1));
-    for (const f of tr.sc.fences) if (/^mermaid\b/i.test(f.info)) f.lines.forEach((l, i) => find(l, f.startLine + i + 2));
+    for (const t of codeText) find(t.text, t.line);
     // Only a warning: language pickers and similar lists legitimately show Cyrillic names on a Latin-script page.
     if (stray.length) warnings.push(`Cyrillic text remains in a translation written in Latin letters (${stray.length} lines, first at line ${stray[0].line}: ${stray[0].text}). Fine for language names; otherwise it is untranslated.`);
   }

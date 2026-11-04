@@ -2,12 +2,14 @@ import { abs, listUaPages, localePagePath, readIfExists, readState } from './pag
 import { selectPages } from './settings.mjs';
 import { cachedBlob } from './plan.mjs';
 import { parsePage, splitCode } from './parse.mjs';
+import { fenceParts } from '../../doc-align/lib/fences.mjs';
 import { parseCategory, readCategoryTarget } from './categories.mjs';
 import { usageMatcher } from './terms.mjs';
 import { blocksAtLines } from './redo.mjs';
 
 // `terms --usage`: where one locale's pages still use a term's old translation, so a correction reaches them. Matches
-// inflected forms by the target language's own stem rule (`usageMatcher`), in prose, frontmatter values and mermaid labels, never in code. Per page,
+// inflected forms by the target language's own stem rule (`usageMatcher`), in prose, frontmatter values and the reader text of code blocks (diagram
+// labels, comments, tree descriptions), never in code. Per page,
 // the blocks those lines belong to and the `--redo` value that re-translates exactly them.
 export async function termUsage(s, locale, olds, selectors = []) {
   const matchers = olds.map((t) => ({ old: t, re: usageMatcher(t) }));
@@ -29,7 +31,11 @@ export async function termUsage(s, locale, olds, selectors = []) {
     if (text === null) continue;
     const sc = splitCode(text);
     const searchable = [...sc.prose];
-    for (const f of sc.fences) if (/^mermaid\b/i.test(f.info)) f.lines.forEach((l, i) => (searchable[f.startLine + 1 + i] = l));
+    for (const f of sc.fences) {
+      const byLine = new Map();
+      for (const t of fenceParts(f.info, f.lines).texts) byLine.set(t.line, [...(byLine.get(t.line) ?? []), t.text]);
+      for (const [i, texts] of byLine) searchable[f.startLine + 1 + i] = texts.join(' ');
+    }
     const hits = [];
     searchable.forEach((line, i) => {
       const match = find(line);

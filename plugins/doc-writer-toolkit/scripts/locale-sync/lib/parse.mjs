@@ -2,6 +2,8 @@
 // `context/changed-blocks.md` talks about (sections, paragraphs, list items, table rows, code, admonitions,
 // MDX component bodies) and the inline facts the checks compare (bold spans, links, images, tags, markers).
 
+import { cyrillicText, fenceBlock, fenceLang } from '../../doc-align/lib/fences.mjs';
+
 const isBlank = (l) => l.trim() === '';
 const indentOf = (l) => l.match(/^[ \t]*/)[0].replace(/\t/g, '    ').length;
 const trimEnd = (l) => l.replace(/\s+$/, '');
@@ -459,6 +461,16 @@ export function parsePage(text) {
 }
 
 export const isLeaf = (n) => n.type !== 'section';
+
+// A block the translator never sees: an `import`, or a code block that is not a diagram and whose comments and tree
+// descriptions hold no Cyrillic (context/doc-rules/project-rules/code-blocks.md). Its UA text is copied. A diagram, or a
+// block with Ukrainian comments, goes to the worker, which translates only that text.
+export function isVerbatimNode(page, n) {
+  if (n.type === 'import') return true;
+  if (n.type !== 'code') return false;
+  const f = fenceBlock(page.lines.slice(n.start, n.end + 1));
+  return fenceLang(f.info) !== 'mermaid' && cyrillicText(f.info, f.lines).length === 0;
+}
 
 // Titles from the top section down to the node's own section (a section includes itself).
 export function sectionPath(node) {

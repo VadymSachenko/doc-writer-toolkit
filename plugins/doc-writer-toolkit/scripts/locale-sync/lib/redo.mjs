@@ -1,6 +1,6 @@
 import { CliError } from '../../ui-labels/lib/util.mjs';
 import { alignTrees } from './diff.mjs';
-import { anchorPath, boldSpans, nodeText, PROSE_FM_KEYS, sectionPath, splitCode, wordCount } from './parse.mjs';
+import { anchorPath, boldSpans, isVerbatimNode, nodeText, PROSE_FM_KEYS, sectionPath, splitCode, wordCount } from './parse.mjs';
 
 // Re-translating chosen blocks of a page that is current (`blocks --redo`, `apply --redo`): a term correction reaches
 // the pages through it (`terms --usage` finds the blocks). A block is picked by any line of it in the translation, and
@@ -32,7 +32,6 @@ export function nodeAt(sec, i) {
 const span = (page, s, e) => ({ lines: [s + 1, e + 1], text: nodeText(page, s, e) });
 const kindOf = (n) => (n.type === 'section' ? 'heading' : n.type === 'row' ? 'table-row' : n.type);
 const endOf = (n) => (n.type === 'section' ? n.headEnd : n.end);
-const isVerbatim = (page, n) => n.type === 'import' || (n.type === 'code' && !/mermaid/i.test(page.lines[n.start]));
 
 // Changes ({ id, op: 'replace', kind, ua, target, … }, as `blocks` returns them) for the blocks at `lines` (1-based, in
 // the translation), plus the lines that pick nothing (`skipped`, with a reason) or whose block has no UA counterpart
@@ -62,11 +61,12 @@ export function blocksAtLines(pageB, pageT, lines) {
       skipped.push({ line, reason: 'blank line' });
       continue;
     }
-    if (isVerbatim(pageT, t)) {
+    // A code block is judged by its UA text: the translation's comments are already translated.
+    const b = back.get(t);
+    if (b ? isVerbatimNode(pageB, b) : isVerbatimNode(pageT, t)) {
       skipped.push({ line, reason: 'code or import, copied verbatim' });
       continue;
     }
-    const b = back.get(t);
     if (!b) unmapped.push({ line, reason: 'the block has no counterpart in the UA page (the translation does not mirror it here)' });
     else picked.set(t, { t, b });
   }

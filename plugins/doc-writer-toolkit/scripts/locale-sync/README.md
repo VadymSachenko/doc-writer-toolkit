@@ -1,6 +1,6 @@
 # locale-sync
 
-Finds which Ukrainian (UA) pages are stale in each target locale, hands the translator exactly the blocks to write, links the screenshots, and checks the result. Node, no dependencies. No AI is involved: the model only translates. It reuses the `ui-labels` config reader, label store and page-state layout (`../ui-labels/lib/`) and the heading slugger of `doc-align` (`../doc-align/lib/headings.mjs`), so the three scripts must stay in the same plugin.
+Finds which Ukrainian (UA) pages are stale in each target locale, hands the translator exactly the blocks to write, links the screenshots, and checks the result. Node, no dependencies. No AI is involved: the model only translates. It reuses the `ui-labels` config reader, label store and page-state layout (`../ui-labels/lib/`) and the heading slugger and code-block reader of `doc-align` (`../doc-align/lib/headings.mjs`, `../doc-align/lib/fences.mjs`), so the three scripts must stay in the same plugin.
 
 ```
 node ${CLAUDE_PLUGIN_ROOT}/scripts/locale-sync/locale-sync.mjs <command> [<page|folder>…] [options]
@@ -134,7 +134,7 @@ A change:
 | `insertAfter`, `insertBefore` | For `add`: the translated block to insert after (and the first line of the one that follows). A section is inserted after the whole previous section. |
 | `insertAfterChange` | Several additions share an anchor: insert them in the listed order, each after the previous change. |
 | `bold` | Bold spans in `ua.text`: input for the binding pass. |
-| `verbatim` | Copy `ua.text` unchanged (an `import`, a non-mermaid code block, a non-prose frontmatter key). |
+| `verbatim` | Copy `ua.text` unchanged: an `import`, a non-prose frontmatter key, or a code block that is not a `mermaid` diagram and whose comments and tree descriptions hold no Cyrillic (`context/doc-rules/project-rules/code-blocks.md`). A diagram, or a block with Ukrainian comments, is `verbatim: false`: the worker translates its reader text and copies the rest. With `--redo`, the UA block decides, since the translation's comments are already translated. |
 | `note` | `section-body` only: more than half of the section changed. |
 
 Lines are 1-based. Everything not listed stays untouched.
@@ -235,7 +235,7 @@ The file format is in `context/locale-translation.md` §5: `<state root>/terms/<
 - **`terms --add <file> --locales <locale>`** appends entries from a TSV file in the same format or a JSON file (`{ "<UA term>": "<translation>" }` or `[{ ua, target }]`). A term already recorded with the same translation is `existing`; with a different one it is a `conflict` and is not written (a recorded term is never re-translated). The file is rewritten sorted. The first add also writes `<state root>/terms/*.tsv merge=union` into the repo's `.gitattributes` (not when the state root is outside the repo: `gitattributes: "outside-repo"`).
 - **`--replace`** with `--add`: a term recorded with a different translation is corrected instead (`replaced`: `ua`, `old`, `new`). Pages keep the old translation until their blocks are redone.
 - **`terms --drop <UA term>… --locales <locale>`** removes those terms' lines (`dropped`, `notFound`). Pages are not touched.
-- **`terms --usage <old translation>… --locales <locale>`** lists where that locale still uses a translation: per page, the matching lines (`hits`, matched by prefix like term lookup, in prose, frontmatter values and mermaid labels, never in code), the `blocks` they fall in, and `redo`, the `--redo` value that re-translates exactly those blocks. A category whose `current.json` messages match has `redo: "all"`. `upToDate: false` marks a page that must be translated first. `--scope` narrows the pages. Matching is by the target language's stem, not the UA rule that `terms <UA term>` uses: a word keeps its whole stem except one final vowel (the part suffixes replace) and takes any ending, so «жумушчу топ» finds «жумушчу топтун», and «bağlantı» finds «bağlantısı» but not «bağlanması». One- and two-letter words match exactly. Stem alternations («топ» → «тобу») are not matched: pass both forms. Check the hits before a redo: a derived word with the same stem still matches.
+- **`terms --usage <old translation>… --locales <locale>`** lists where that locale still uses a translation: per page, the matching lines (`hits`, matched by prefix like term lookup, in prose, frontmatter values and the reader text of code blocks: diagram labels, comments, tree descriptions; never in code or data), the `blocks` they fall in, and `redo`, the `--redo` value that re-translates exactly those blocks. A category whose `current.json` messages match has `redo: "all"`. `upToDate: false` marks a page that must be translated first. `--scope` narrows the pages. Matching is by the target language's stem, not the UA rule that `terms <UA term>` uses: a word keeps its whole stem except one final vowel (the part suffixes replace) and takes any ending, so «жумушчу топ» finds «жумушчу топтун», and «bağlantı» finds «bağlantısı» but not «bağlanması». One- and two-letter words match exactly. Stem alternations («топ» → «тобу») are not matched: pass both forms. Check the hits before a redo: a derived word with the same stem still matches.
 - A UA term on two lines (two branches merged by `merge=union`) is reported as a conflict wherever it is read; the first line wins until one is dropped (`locale-translator` keeps the first: `terms --drop`, then `terms --add`).
 
 **Correcting a term.** `terms --add <file> --replace` (or edit the row), then `terms --usage <old translation>` and, per listed page: `blocks <page> --redo <redo>` → translate the changes with the corrected term → `apply <page> --redo <redo> …` → `check --candidate` → `record --candidate`. Only those blocks change; the state stays current.
@@ -266,7 +266,7 @@ Failures have a `check` name; warnings never block.
 | `headings` | Count, levels or `{/* #anchor */}` comments differ. |
 | `structure` | A section's sequence of blocks differs from UA (a paragraph split or merged). Sentences inside a block may move freely. This keeps later runs mappable. |
 | `counts` | List items, numbered steps, table rows or admonition types per section differ. |
-| `code` | A fenced code block differs. Mermaid flowcharts compare with their labels blanked; other diagram types by first line and length. |
+| `code` | A fenced code block's code part differs: the count, the info string (not compared for `mermaid`), or anything but its reader text, whitespace and number of lines included. The reader text (diagram labels, comments, tree descriptions) is translated. Both parts are read by `doc-align`'s `lib/fences.mjs`, as its README lists per kind of block. |
 | `inline-code` | A code-like inline span (no Cyrillic) is missing or changed. Inline code that holds Cyrillic is UI text and is translated. |
 | `links` | Link targets or URLs differ (as a multiset, so sentences may be reordered). |
 | `link-form` | A page link is not site-root-relative, or not in the form the page's root pair declares (`Page link form:`, `context/doc-rules/project-rules/internal-links.md`). `route` (the default): a link that keeps `.md`/`.mdx` fails. `file-path`: a `.md`/`.mdx` link passes unless it starts with the pair's UA content root, and a route fails when it points into the page's own pair (its longest matching UA URL prefix is the pair's); a route to another pair passes. It fails even when the UA page has the same link: the form is wrong on the UA page too, so fix it there. A locale link whose form differs from its UA link fails `links` as well. Links to assets, anchors and other sites are exempt. An unknown form is a configuration error (exit `2`). |
@@ -275,11 +275,11 @@ Failures have a `check` name; warnings never block.
 | `markers` | The number of `ToDo` / `NEEDS CONFIRMATION` markers, or of other `{/* … */}` comments, differs. |
 | `labels` | A span bound to `label:<key>` in the page state is not present in bold, verbatim, as the label store's string for the locale (overlay first). A span with scoped decisions is checked per section: each translated section must show the string of the key that applies there (sections pair by position). Each failure carries `redo`: the first translation line of every block that holds the span (in that section, for a scoped span), ready for `blocks --redo`. One exception: when the UA span drops the trailing `:` `.` `…` `!` `?` of the UA store string (`Статус:` shown as `**Статус**`), the locale's string may drop its own trailing punctuation too. A key the store lacks for that locale needs the span in `unverified`. |
 | `assets` | A relative image/asset reference does not resolve (a dangling symlink breaks the Docusaurus build). |
-| `ukrainian-letters` | `є ї ґ` remain anywhere outside code (and `і` for `ru`, `ky`, `tg`), mermaid labels included. The word «Українська» is exempt: language pickers show it as it is. |
+| `ukrainian-letters` | `є ї ґ` remain anywhere outside code (and `і` for `ru`, `ky`, `tg`), the reader text of code blocks included (diagram labels, comments, tree descriptions). The code part of a block is data and keeps its letters. The word «Українська» is exempt: language pickers show it as it is. |
 
 Warnings:
 
-- A translation written mostly in Latin letters that still contains Cyrillic (an untranslated mermaid label, for example). It is not a failure because pages about the language picker legitimately list Cyrillic names.
+- A translation written mostly in Latin letters that still contains Cyrillic (an untranslated mermaid label or code comment, for example). It is not a failure because pages about the language picker legitimately list Cyrillic names.
 - A link whose UA text names the target page's title, and whose translated text doesn't name the target's translated title (same words, each one matched without its last letter, so an added case or possessive suffix still passes). Every mismatch is listed. Result field `linkTitles[]` (also in the `check` output): `line`, `text`, `url`, `title`.
 
 ## Recording (`record`)
@@ -326,6 +326,6 @@ A run writes to the locale roots, the locales' `current.json` (of every root pai
 ## Limits
 
 - Block parsing is line-based and tuned to Docusaurus MDX as these docs write it: top-level blocks start in column 0, list continuations are indented. Unusual constructs fall back to a paragraph; mapping then fails visibly (`unmapped`), it never mis-maps.
-- A mermaid diagram's labels are compared only for `flowchart` and `graph`.
+- A mermaid diagram's labels are found by rules for `flowchart`, `graph`, `sequenceDiagram`, `stateDiagram`, `erDiagram`, `classDiagram`, `gantt`, `journey` and `pie`. Other diagram types compare by their type line, line count and indentation only. Comments are found for the languages in `code-blocks.md`; in any other language a code block has no reader text.
 - `report` and `link-assets` cover pages only. Navbar and footer strings (`code.json`) are out of scope by design.
 - Only `.md` / `.mdx` pages are tracked. Symlinks need a filesystem that supports them (macOS, Linux).
