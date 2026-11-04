@@ -61,6 +61,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: npm test
         working-directory: plugins/doc-writer-toolkit/scripts/tracker
+      - name: Test forge
+        if: ${{ !cancelled() }}
+        run: npm test
+        working-directory: plugins/doc-writer-toolkit/scripts/forge
       # The offline tests only: the browser test needs Playwright and runs in its own job below.
       - name: Test visual-pack (offline)
         if: ${{ !cancelled() }}

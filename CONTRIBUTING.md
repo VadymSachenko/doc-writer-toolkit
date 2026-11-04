@@ -1,6 +1,6 @@
 # Contributing to doc-writer-toolkit
 
-This repo is a Claude Code plugin marketplace. The deliverable is the Markdown/JSON content under `plugins/doc-writer-toolkit/` — there is no app to build. A lint, a skill visibility check, the test suites of the eight Node scripts and the unit tests of the Python script run before every merge: see [Checks before a merge](#checks-before-a-merge). See [CLAUDE.md](CLAUDE.md) for a full architectural overview.
+This repo is a Claude Code plugin marketplace. The deliverable is the Markdown/JSON content under `plugins/doc-writer-toolkit/` — there is no app to build. A lint, a skill visibility check, the test suites of the nine Node scripts and the unit tests of the Python script run before every merge: see [Checks before a merge](#checks-before-a-merge). See [CLAUDE.md](CLAUDE.md) for a full architectural overview.
 
 ## How to add a skill
 
@@ -100,7 +100,7 @@ It prints one row per step, with the exit code and the result line. A step whose
 |---|---|---|
 | `lint` | `node tools/lint-plugin.mjs` | Skill and command frontmatter that strict YAML accepts; every `${CLAUDE_PLUGIN_ROOT}/…` path exists; every style-guide rule file is reachable from its `ROUTING.md`; no file has CRLF line endings; every skill carries the contract's five parts; every screenshot-annotation frame in a snippet is square and unfilled |
 | `tools-tests` | `node --test tools/lint-plugin.test.mjs tools/check-visibility.test.mjs tools/harness/harness.test.mjs` | The tools' own tests, including the skill harness (no model calls) |
-| `ui-labels`, `locale-sync`, `doc-align`, `screenshot-locales`, `section-state`, `pipeline-measures`, `tracker` | `npm test` in each folder under `plugins/doc-writer-toolkit/scripts/` | The scripts' suites. `locale-sync` takes about two minutes |
+| `ui-labels`, `locale-sync`, `doc-align`, `screenshot-locales`, `section-state`, `pipeline-measures`, `tracker`, `forge` | `npm test` in each folder under `plugins/doc-writer-toolkit/scripts/` | The scripts' suites. `locale-sync` takes about two minutes |
 | `visual-pack` | `npm test` in `plugins/doc-writer-toolkit/scripts/visual-pack/` | The offline tests, then the browser test: a fixture site with a broken image and a wide table, and the proof that the script calls no model and asks nothing but its local server. The browser test needs Playwright with Chromium, which this repo does not install: see "Running the browser test" below. Without it the step shows `not run` and fails the run, with the reason in the output |
 | `sme-video-context` | `python3 plugins/doc-writer-toolkit/scripts/sme-video-context/tests/run.py` | The Python script's unit tests (standard-library `unittest`, offline). Locally the step runs on the skill's venv, `~/.cache/doc-writer-toolkit/sme-video-venv`, if it exists, else on `python3`; a missing `Pillow` or `ImageHash` shows as `not run` and fails the run, with the install steps in the output. CI installs only `tests/requirements.txt` |
 | `validate` | `claude plugin validate plugins/doc-writer-toolkit` | The CLI's own plugin checks |

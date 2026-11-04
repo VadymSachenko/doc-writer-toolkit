@@ -184,11 +184,11 @@ Write a pattern inside one backtick span: the scripts read only the first backti
 
 ## Ticket flow settings
 
-These fields are read by the `tracker` script (`${CLAUDE_PLUGIN_ROOT}/scripts/tracker/`), which speaks to the host's ticket tracker in statuses and transitions. No skill reads them yet. A project that doesn't use the script declares none. The flag of the script overrides the field.
+These fields are read by the `tracker` script (`${CLAUDE_PLUGIN_ROOT}/scripts/tracker/`), which speaks to the host's ticket tracker in statuses and transitions, and by the `forge` script (`${CLAUDE_PLUGIN_ROOT}/scripts/forge/`), which speaks to the host's pull requests. No skill reads them yet. A project that doesn't use the script declares none. The flag of the script overrides the field.
 
 | Field | Required | Value | If absent |
 |---|---|---|---|
-| `Ticket flow settings:` | no | The host's ticket flow settings file, relative to the repo root. Its `tracker` object holds the board, the statuses with the lists they map to, the transitions, the labels and the names of the environment variables that hold the credentials; a file named `<name>.local.json` next to it overrides it key by key. The script's README lists the keys | `.claude/ticket-flow.json` |
+| `Ticket flow settings:` | no | The host's ticket flow settings file, relative to the repo root. Its `tracker` object holds the board, the statuses with the lists they map to, the transitions, the labels and the names of the environment variables that hold the credentials; its `forge` object and `targets` list hold the repositories, the people and the stage labels the forge script may touch; a file named `<name>.local.json` next to it overrides it key by key. Each script's README lists the keys | `.claude/ticket-flow.json` |
 
 ```md
 - **Ticket flow settings:** `.claude/ticket-flow.json`
