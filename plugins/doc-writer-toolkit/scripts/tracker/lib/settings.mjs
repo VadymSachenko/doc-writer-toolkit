@@ -15,7 +15,7 @@ export function deepMerge(base, over) {
   return out;
 }
 
-function readJsonFile(file, what) {
+export function readJsonFile(file, what) {
   let text;
   try {
     text = fs.readFileSync(file, 'utf8');
