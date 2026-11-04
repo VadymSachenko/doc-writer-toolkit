@@ -421,6 +421,9 @@ test('fences: the code part and the reader text of each kind of block', () => {
     'flowchart LR\n  A((…)) -.  … .-> B>…]\n  classDef warn fill:#f96',
     ['Коло', 'пунктир', 'Прапорець'],
   ]);
+  // Keywords of other diagram types are node ids in a flowchart; in a sequence diagram `link` is a kept line.
+  assert.deepEqual(parts('mermaid', 'flowchart LR\n  details[Деталі] --> link[Посилання]'), ['diagram', 'flowchart LR\n  details[…] --> link[…]', ['Деталі', 'Посилання']]);
+  assert.deepEqual(parts('mermaid', 'sequenceDiagram\n  link A: Панель @ https://example.com'), ['diagram', 'sequenceDiagram\n  link A: Панель @ https://example.com', []]);
   // A subgraph title without an id is the title; one ASCII word is an id.
   assert.deepEqual(parts('mermaid', 'graph TD\n  subgraph Перша група\n  end\n  subgraph g2\n  end'), ['diagram', 'graph TD\n  subgraph …\n  end\n  subgraph g2\n  end', ['Перша група']]);
   // Frontmatter title, %% comments and a multi-line state note are text; the init directive is code.

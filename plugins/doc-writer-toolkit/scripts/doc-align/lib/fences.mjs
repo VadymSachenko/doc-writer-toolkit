@@ -136,8 +136,19 @@ function splitPlain(lines) {
 
 // ---------------------------------------------------------------- mermaid
 
-// Lines a diagram keeps whole, in every diagram type: styling, classes, links, interaction and configuration.
-const KEEP = /^\s*(classDef|class|style|linkStyle|click|link|links|properties|details|direction|autonumber|activate|deactivate|destroy|end|dateFormat|axisFormat|tickInterval|todayMarker|excludes|includes|weekday|displayMode|showData)\b/;
+// Lines a diagram keeps whole: styling, classes, links, interaction and configuration. The keywords that only one diagram
+// type has count only there, so a flowchart node called `details` or `link` is still a node with a label.
+const KEEP_WORDS = {
+  all: 'classDef|class|style|linkStyle|click|direction|end',
+  sequenceDiagram: 'link|links|properties|details|autonumber|activate|deactivate|destroy',
+  gantt: 'dateFormat|axisFormat|tickInterval|todayMarker|excludes|includes|weekday|displayMode',
+  pie: 'showData',
+};
+const keepFor = (type) => {
+  let all = KEEP_WORDS.all;
+  if (type === 'classDiagram') all = all.replace('|class|', '|');
+  return new RegExp(`^\\s*(${[all, KEEP_WORDS[type]].filter(Boolean).join('|')})(?![\\w-])`);
+};
 
 // A line split into code and text by a list of [pattern, replace] steps. Each replace gets the `t` recorder first, then
 // the match and its groups.
@@ -192,7 +203,7 @@ function splitMermaid(lines) {
   const code = [];
   const { fm, at, type } = diagramHead(lines);
   const flow = /^(flowchart|graph)$/.test(type);
-  const keep = type === 'classDiagram' ? new RegExp(KEEP.source.replace('|class|', '|')) : KEEP;
+  const keep = keepFor(type);
   let note = false; // inside a multi-line state-diagram note
   lines.forEach((line, n) => {
     const t = recorder(texts, n);
