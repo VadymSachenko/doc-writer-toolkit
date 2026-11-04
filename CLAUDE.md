@@ -83,6 +83,10 @@ Commands in `commands/*.md` are thin: they bind `$ARGUMENTS` to concrete paths a
 
 `doc-style-reviewer` is the one skill with four selectable modes (`gdsg`, `mssg-en`, `mssg-ua`, `ua-grammar`) chosen via a `guide:` argument; each mode reads a different combination of the two corpora plus `ua-grammar/`.
 
+### Style pass (`doc-style-pass`, `/style-pass`)
+
+The pass for the person who approves a page, UA or EN. It runs `doc-style-reviewer`, then `doc-style-fixer` with `apply:mechanical,substantive` (no logic of its own about findings or buckets), and builds one numbered «before» → «after» list from the page's diff against a snapshot, with the bucket 3 questions after it. The user answers with the numbers to undo; each undone item gets its exact «before» back. Every decision goes into the host's `<state root>/style-decisions.jsonl`, and a rule rejected in three passes with no acceptance in between (several rejections in one pass count once) is proposed once as one line for the kit's `product-rules.md`, which the reviewer loads as rank 0. The snapshot and the pass record live in `<state root>/.run/style-pass/`, never committed. `/review-doc-style` and `/fix-doc-style` are unchanged.
+
 ### Content paths — and the style guide — are project-declared, not hardcoded
 
 No skill hardcodes a UA content root, an EN i18n root, a URL prefix, or a style-guide name. Every skill that reads/writes doc files by path (`doc-translator`, `doc-alignment-checker`, `concept-doc-writer`, `user-guide-writer`, `api-doc-writer`) or that consults a style guide while drafting resolves both from the *host* project's own `CLAUDE.md`, under a "Documentation toolkit configuration" section:
