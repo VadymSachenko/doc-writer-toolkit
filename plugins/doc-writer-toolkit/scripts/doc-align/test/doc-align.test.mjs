@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { compare } from '../lib/compare.mjs';
 import { cellCount } from '../lib/parse.mjs';
 import { createSlugger, slugify, uaHeadingId } from '../lib/headings.mjs';
-import { looseKey, mergeRows, parseNamesTable } from '../lib/names.mjs';
+import { findNames, looseKey, mergeRows, parseNamesTable, searchable } from '../lib/names.mjs';
 
 const run = promisify(execFile);
 const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'doc-align.mjs');
@@ -503,6 +503,10 @@ test('Check 12: a name in one page only, and words that only look like a name', 
   assert.match(r.warnings[0].description, /'Банк Світанок' \/ 'Svitanok Bank' is named in main \(1x\), not in secondary/);
   // "a pay slip" is not A-Pay; a link target and a URL are not prose.
   assert.ok(!compare(NUA, NEN, { names: tableOf(NAMES_UA) }).names.found.some((f) => f.en === 'A-Pay'));
+  // A name in capitals only is not the ordinary word: "Click" and "click" are not CLICK.
+  const caps = { tables: [{ file: 'g.md', found: true }], rows: [{ ua: 'CLICK', en: 'CLICK', source: '' }] };
+  const en = 'Click **Save**, then click the row. Pay with CLICK or Click-Pay. Pay with ClicK.\n';
+  assert.deepEqual(findNames(searchable(en.split('\n')), caps.rows, 'en').map((h) => [h.text, h.exact]), [['CLICK', true], ['ClicK', false]]);
 });
 
 test('Check 12: no names table, or no UA page', () => {

@@ -89,7 +89,8 @@ export function searchable(proseLines) {
 function prepare(rows) {
   return rows.map((row, index) => {
     const forms = [row.ua, row.en].filter(Boolean);
-    return { row, index, keys: new Set(forms.map(looseKey).filter(Boolean)), sizes: forms.map((f) => wordsOf(f).length) };
+    const capsOnly = forms.every((f) => /\p{Lu}.*\p{Lu}/u.test(f) && f === f.toUpperCase());
+    return { row, index, capsOnly, keys: new Set(forms.map(looseKey).filter(Boolean)), sizes: forms.map((f) => wordsOf(f).length) };
   });
 }
 
@@ -133,6 +134,9 @@ export function findNames(text, rows, lang) {
       // A name written as more or fewer words than its form counts only when every word has at least three
       // letters, so "a bank" is never read as a spelling of "A-Bank".
       if (!p.sizes.includes(n) && run.some((w) => [...w.w].length < 3)) continue;
+      // A name written in capitals only (CLICK, PUMB) counts only with two capitals or more, so the word "click"
+      // or "Click" at the start of a sentence is never read as a spelling of it.
+      if (p.capsOnly && !/\p{Lu}.*\p{Lu}/u.test(str)) continue;
       hit = { p, n, str };
     }
     if (!hit) continue;
