@@ -12,6 +12,7 @@ import { createSlugger, slugify, uaHeadingId } from '../lib/headings.mjs';
 import { findNames, looseKey, mergeRows, parseNamesTable, searchable } from '../lib/names.mjs';
 import { proposeIds } from '../lib/ids.mjs';
 import { isIdOnlyChange } from '../lib/idonly.mjs';
+import { codeDiff, fenceBlock, fenceParts } from '../lib/fences.mjs';
 
 const run = promisify(execFile);
 const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'doc-align.mjs');
@@ -127,7 +128,8 @@ const ALL_PASSED = [
   'EN headings carry no comment',
   'EN heading ids match the UA ids',
   'Table count, columns and rows',
-  'Code blocks identical',
+  'Code blocks keep their code',
+  'No Cyrillic in EN diagram labels or code comments',
   '<details> block count',
   'ToDo markers paired',
   'NEEDS CONFIRMATION markers paired',
@@ -282,10 +284,16 @@ test('Check 3: table count, columns and rows', () => {
   assert.equal(cellCount('a | b'), 2);
 });
 
-test('Check 6: code blocks are identical', () => {
+test('Check 6: code blocks keep their code', () => {
   const content = compare(UA, edit(EN, '{ "status": "active" }', '{ "status": "inactive" }'), { secondaryPath: 'en.md' });
   assert.deepEqual(content.bugs, [
-    { check: 6, flag: 'CODE-BLOCK-MISMATCH', description: 'code block 1 differs from line 1 of the block (contents must be byte-for-byte identical)', line: 25, file: 'en.md' },
+    {
+      check: 6,
+      flag: 'CODE-BLOCK-MISMATCH',
+      description: 'code block 1 differs from line 1 of the block (the code, data and line count must be identical; only labels, comments and descriptions are translated)',
+      line: 25,
+      file: 'en.md',
+    },
   ]);
   // Whitespace counts.
   assert.deepEqual(flags(compare(UA, edit(EN, '{ "status": "active" }', '{ "status": "active" } '))), ['CODE-BLOCK-MISMATCH']);
@@ -295,6 +303,152 @@ test('Check 6: code blocks are identical', () => {
   const count = compare(UA, edit(EN, '```json\n{ "status": "active" }\n```\n', ''));
   assert.deepEqual(flags(count), ['CODE-BLOCK-MISMATCH']);
   assert.match(count.bugs[0].description, /main has 1 code block\(s\), secondary has 0/);
+});
+
+// A pair whose code blocks hold reader text (code-blocks.md): diagram labels, comments and a tree's descriptions are
+// translated in EN, the code and the data are not.
+const fence = (info, body) => `\`\`\`${info}\n${body}\n\`\`\`\n`;
+const CODE_UA = [
+  '# Заявки',
+  '',
+  '## Потік {/* #flow */}',
+  '',
+  fence('mermaid', '%%{init: {"theme": "base"}}%%\nflowchart TD\n    A[Нова заявка] --> B{Сума більша за ліміт?}\n    B -->|Так| C(("Перевірка"))\n    B -- ні --> D[Заявку прийнято]\n    subgraph S1["Ручна перевірка"]\n        C\n    end'),
+  fence('mermaid', 'sequenceDiagram\n    participant App as Застосунок\n    participant Srv as Ваш сервер\n    App->>Srv: Надіслати заявку\n    alt Відповідь 200\n        Srv-->>App: 200 OK\n    else Немає відповіді\n        Note over App,Srv: Повтор через 10 хвилин\n    end'),
+  fence('mermaid', 'stateDiagram-v2\n    [*] --> draft: створено\n    state "Чернетка" as draft\n    draft --> [*]'),
+  fence('bash', '# Запустити сервіс\nnode app.js --port 8080   # порт за замовчуванням\necho "# не коментар" ${#items}'),
+  fence('jsonc', '{\n  // Сума в копійках\n  "amount": 1500, /* обов\'язково */\n  "callback": "https://example.com/hook" // адреса для сповіщень\n}'),
+  fence('sql', "SELECT id FROM requests -- усі заявки\nWHERE note = 'не -- коментар';"),
+  fence('text', 'service/\n├── api/        — обробники запитів\n└── store/      — збереження заявок'),
+  fence('json', '{ "payer": "Олена Коваль", "purpose": "Оплата // рахунку 42", "url": "https://example.com/a" }'),
+].join('\n');
+const CODE_EN = [
+  '# Requests',
+  '',
+  '## Flow',
+  '',
+  fence('mermaid', '%%{init: {"theme": "base"}}%%\nflowchart TD\n    A[New request] --> B{Amount above the limit?}\n    B -->|Yes| C(("Review"))\n    B -- no --> D[Request accepted]\n    subgraph S1["Manual review"]\n        C\n    end'),
+  fence('mermaid', 'sequenceDiagram\n    participant App as App\n    participant Srv as Your server\n    App->>Srv: Send the request\n    alt Response 200\n        Srv-->>App: 200 OK\n    else No response\n        Note over App,Srv: Retry in 10 minutes\n    end'),
+  fence('mermaid', 'stateDiagram-v2\n    [*] --> draft: created\n    state "Draft" as draft\n    draft --> [*]'),
+  fence('bash', '# Start the service\nnode app.js --port 8080   # default port\necho "# не коментар" ${#items}'),
+  fence('jsonc', '{\n  // Amount in cents\n  "amount": 1500, /* required */\n  "callback": "https://example.com/hook" // notification address\n}'),
+  fence('sql', "SELECT id FROM requests -- all requests\nWHERE note = 'не -- коментар';"),
+  fence('text', 'service/\n├── api/        — request handlers\n└── store/      — request storage'),
+  fence('json', '{ "payer": "Олена Коваль", "purpose": "Оплата // рахунку 42", "url": "https://example.com/a" }'),
+].join('\n');
+const codeFindings = (en) => findings(compare(CODE_UA, en, { secondaryPath: 'en.md' })).filter((f) => f.check === 6 || f.check === 9);
+
+test('Check 6: translated diagram labels, comments and tree descriptions pass; the data keeps its Cyrillic (AC-1)', () => {
+  const r = compare(CODE_UA, CODE_EN, { mainPath: 'ua.md', secondaryPath: 'en.md' });
+  assert.deepEqual(codeFindings(CODE_EN), []);
+  assert.ok(passedNames(r).includes('Code blocks keep their code'));
+  assert.ok(passedNames(r).includes('No Cyrillic in EN diagram labels or code comments'));
+  // EN as main works the same.
+  assert.deepEqual(findings(compare(CODE_EN, CODE_UA)).filter((f) => f.check === 6 || f.check === 9), []);
+});
+
+test('Check 6: a changed id, arrow, keyword, line count, code token, value or whitespace fails (AC-1)', () => {
+  const cases = [
+    ['a flowchart id', 'A[New request] --> B{', 'A[New request] --> X{'],
+    ['a flowchart arrow', 'B -->|Yes|', 'B ==>|Yes|'],
+    ['a subgraph id', 'subgraph S1["Manual review"]', 'subgraph S2["Manual review"]'],
+    ['the init directive', '{"theme": "base"}', '{"theme": "dark"}'],
+    ['a sequence keyword', '    else No response', '    opt No response'],
+    ['a participant id', 'participant Srv as Your server', 'participant Server as Your server'],
+    ['a message arrow', 'App->>Srv: Send', 'App->Srv: Send'],
+    ['a state transition', '[*] --> draft: created', '[*] --> drafted: created'],
+    ['a diagram line added', '    draft --> [*]', '    draft --> [*]\n    draft --> draft'],
+    ['a code token next to a comment', 'node app.js --port 8080', 'node app.js --port 9090'],
+    ['whitespace before a comment', '8080   # default port', '8080 # default port'],
+    ['a comment marker', '  // Amount in cents', '  # Amount in cents'],
+    ['a JSON value in a commented block', '"amount": 1500', '"amount": 15'],
+    ['a string that holds //', "'не -- коментар'", "'not -- a comment'"],
+    ['a code line added', '// notification address\n}', '// notification address\n  // more\n}'],
+    ['a tree path', '├── api/        — request handlers', '├── handlers/   — request handlers'],
+    ['a JSON data value', '"payer": "Олена Коваль"', '"payer": "Olena Koval"'],
+    ['a URL in a JSON block', '"url": "https://example.com/a"', '"url": "https://example.org/a"'],
+  ];
+  for (const [name, from, to] of cases) {
+    const got = codeFindings(edit(CODE_EN, from, to));
+    assert.deepEqual(got.map((f) => f.flag), ['CODE-BLOCK-MISMATCH'], name);
+  }
+  // The finding points at the first line that differs.
+  const [f] = codeFindings(edit(CODE_EN, '8080   # default port', '8080 # default port'));
+  assert.equal(f.line, CODE_EN.split('\n').indexOf('node app.js --port 8080   # default port') + 1);
+  assert.match(f.description, /^code block 4 differs from line 2 of the block \(the code, data and line count/);
+  const [d] = codeFindings(edit(CODE_EN, 'A[New request] --> B{', 'A[New request] --> X{'));
+  assert.match(d.description, /the diagram ids, keywords, arrows and lines must be identical/);
+});
+
+test('Check 9: Cyrillic left in an EN diagram label, comment or tree description is a bug; data is not (AC-1)', () => {
+  const cases = [
+    ['a node label', 'A[New request]', 'A[Нова заявка]', 'Нова заявка'],
+    ['an edge label', '-->|Yes|', '-->|Так|', 'Так'],
+    ['a participant alias', 'as Your server', 'as Ваш сервер', 'Ваш сервер'],
+    ['a message', 'Send the request', 'Надіслати заявку', 'Надіслати заявку'],
+    ['a note', 'Retry in 10 minutes', 'Повтор через 10 хвилин', 'Повтор через 10 хвилин'],
+    ['a state label', 'state "Draft"', 'state "Чернетка"', 'Чернетка'],
+    ['a # comment', '# Start the service', '# Запустити сервіс', 'Запустити сервіс'],
+    ['a // comment', '// Amount in cents', '// Сума в копійках', 'Сума в копійках'],
+    ['a /* */ comment', '/* required */', "/* обов'язково */", "обов'язково"],
+    ['a -- comment', '-- all requests', '-- усі заявки', 'усі заявки'],
+    ['a tree description', '— request handlers', '— обробники запитів', 'обробники запитів'],
+  ];
+  for (const [name, from, to, text] of cases) {
+    const en = edit(CODE_EN, from, to);
+    const got = codeFindings(en);
+    assert.deepEqual(got.map((f) => [f.check, f.flag]), [[9, 'CYRILLIC-IN-EN-CODE-TEXT']], name);
+    assert.ok(got[0].description.includes(`'${text}'`), `${name}: ${got[0].description}`);
+    assert.equal(en.split('\n')[got[0].line - 1].includes(to.split('\n')[0]), true, `${name}: the line`);
+    assert.equal(got[0].file, 'en.md');
+  }
+  // Cyrillic in the code part (a JSON value, a string a comment marker sits in) is data, not a finding: CODE_EN has it.
+  assert.ok(CODE_EN.includes('"Олена Коваль"') && CODE_EN.includes('"# не коментар"'));
+  // The UA page is never checked for it, and with no way to tell which page is UA the check doesn't run.
+  const latin = (t) => t.replace(/\p{Script=Cyrillic}+/gu, 'x');
+  const r = compare(latin(CODE_EN), latin(CODE_EN));
+  assert.equal(r.ua, null);
+  assert.ok(!passedNames(r).includes('No Cyrillic in EN diagram labels or code comments'));
+});
+
+test('fences: the code part and the reader text of each kind of block', () => {
+  const parts = (info, body) => {
+    const p = fenceParts(info, body.split('\n'));
+    return [p.kind, p.code.join('\n'), p.texts.map((t) => t.text)];
+  };
+  assert.deepEqual(parts('mermaid', 'flowchart LR\n  A(("Коло")) -.  пунктир .-> B>Прапорець]\n  classDef warn fill:#f96'), [
+    'diagram',
+    'flowchart LR\n  A((…)) -.  … .-> B>…]\n  classDef warn fill:#f96',
+    ['Коло', 'пунктир', 'Прапорець'],
+  ]);
+  // Keywords of other diagram types are node ids in a flowchart; in a sequence diagram `link` is a kept line.
+  assert.deepEqual(parts('mermaid', 'flowchart LR\n  details[Деталі] --> link[Посилання]'), ['diagram', 'flowchart LR\n  details[…] --> link[…]', ['Деталі', 'Посилання']]);
+  assert.deepEqual(parts('mermaid', 'sequenceDiagram\n  link A: Панель @ https://example.com'), ['diagram', 'sequenceDiagram\n  link A: Панель @ https://example.com', []]);
+  // A subgraph title without an id is the title; one ASCII word is an id.
+  assert.deepEqual(parts('mermaid', 'graph TD\n  subgraph Перша група\n  end\n  subgraph g2\n  end'), ['diagram', 'graph TD\n  subgraph …\n  end\n  subgraph g2\n  end', ['Перша група']]);
+  // Frontmatter title, %% comments and a multi-line state note are text; the init directive is code.
+  assert.deepEqual(parts('mermaid', '---\ntitle: Життєвий цикл\n---\n%%{init: {"theme": "dark"}}%%\nstateDiagram-v2\n  %% коментар\n  note right of a\n    Примітка\n  end note'), [
+    'diagram',
+    '---\ntitle: …\n---\n%%{init: {"theme": "dark"}}%%\nstateDiagram-v2\n  %%…\n  note right of a\n    …\n  end note',
+    ['Життєвий цикл', 'коментар', 'Примітка'],
+  ]);
+  // A diagram type without its own rules keeps its indentation; the rest of each line is text.
+  assert.deepEqual(parts('mermaid', 'mindmap\n  root\n    Гілка'), ['diagram', 'mindmap\n  …\n    …', ['root', 'Гілка']]);
+  // A shebang is code; `#` inside a word or a string is not a comment.
+  assert.deepEqual(parts('sh', '#!/bin/sh\nx=${#arr} # довжина\necho "a # b"'), ['comments', '#!/bin/sh\nx=${#arr} #…\necho "a # b"', ['довжина']]);
+  // A block comment spans lines.
+  assert.deepEqual(parts('go', '/* Перший\n * другий */\nx := 1'), ['comments', '/*…\n…*/\nx := 1', ['Перший', '* другий']]);
+  assert.deepEqual(parts('html', '<p>Don\'t</p> <!-- примітка -->'), ['comments', "<p>Don't</p> <!--…-->", ['примітка']]);
+  // json has no comments, and a language not in the table is all code.
+  assert.deepEqual(parts('json', '{ "a": 1 } // Сума'), ['code', '{ "a": 1 } // Сума', []]);
+  assert.deepEqual(parts('http', '# Запит\nGET /a'), ['code', '# Запит\nGET /a', []]);
+  // Plain text: only the part after ` — ` is a description; the info string's first word is the language.
+  assert.deepEqual(parts('', 'a/ — опис\nb—c'), ['plain', 'a/ — …\nb—c', ['опис']]);
+  assert.equal(fenceParts('json title="Відповідь"', ['{}']).lang, 'json');
+  // An emptied label or comment is a difference.
+  assert.equal(codeDiff({ info: 'js', lines: ['x // а'] }, { info: 'js', lines: ['x //'] }), 0);
+  assert.equal(codeDiff({ info: 'js', lines: ['x // а'] }, { info: 'js', lines: ['x // b'] }), -1);
+  assert.deepEqual(fenceBlock(['~~~yaml title="x"', 'a: 1', '~~~']), { info: 'yaml title="x"', lines: ['a: 1'] });
 });
 
 test('Check 7: <details> block count', () => {

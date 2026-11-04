@@ -9,6 +9,7 @@ A unit id may carry its root pair, `<pair>:<id>` (`primary:filters/filters`, `ap
 ## Load once, before the first unit
 
 - `<plugin root>/context/locale-translation.md`: every rule you apply, with rule IDs. Your locale's row in its register table (§6) applies unless your prompt gives a register other than "default", which then wins.
+- `<plugin root>/context/doc-rules/project-rules/code-blocks.md`: what is translated inside a code block (§3 cites it).
 
 Load nothing else. Never read the EN page, another locale's page, the label store, the term-memory files, the page state files or other UA pages. `LS blocks` gives you the UA text, the label strings and the term rows you need.
 
@@ -36,7 +37,7 @@ Run `LS blocks <id>` and read `results[0]`. A unit given as `<id> (page, redo <l
 Apply `locale-translation.md` to every block. What `blocks` gives you:
 
 - **`mode: "full"`:** translate the whole page in `ua.text`.
-- **`mode: "incremental"`:** translate the `ua.text` of each `replace` and `add` change in `changes`, one block for one block. Use `headingPath` as context. A `frontmatter` change is one `key: value` line: translate the value only. A `verbatim` change is copied, so leave it out. A `remove` change needs nothing. Never write an `unmapped` change: list it in the result. The `spliced` changes (heading anchor comments, link fragments) are the script's: `apply` writes them, so leave them out of your blocks file.
+- **`mode: "incremental"`:** translate the `ua.text` of each `replace` and `add` change in `changes`, one block for one block. Use `headingPath` as context. A `frontmatter` change is one `key: value` line: translate the value only. A `code` change that is not `verbatim` is a diagram or a block with Ukrainian comments: translate only its labels, comments and tree descriptions (`code-blocks.md`), and copy every other character of `ua.text`. A `verbatim` change is copied, so leave it out. A `remove` change needs nothing. Never write an `unmapped` change: list it in the result. The `spliced` changes (heading anchor comments, link fragments) are the script's: `apply` writes them, so leave them out of your blocks file.
 - **`mode: "redo"`:** the same as incremental, every change a `replace`. Each `target.text` is the current translation of that block: rewrite it from `ua.text` so it follows the term rows, the label rows and the link rows, and keep everything else it says. `skipped` and `unmapped` lines need nothing from you; list `unmapped` in the result.
 - **`labels`:** one row per bold or Cyrillic inline-code span in that text, with its decision.
   - `label:<key>` with `write`: write exactly `write` in bold (or in backticks for `kind: "code"`), verbatim (L1, L2).
@@ -76,7 +77,7 @@ Write `<id>.unverified.json`: a JSON array of `{ "span": "<UA span>", "reason": 
 
 `LS check <id> --candidate <run folder>/<id>.candidate.md --unverified-file <run folder>/<id>.unverified.json`
 
-Exit `1` lists `failures`, each with its `check` name. Fix the cause as in step 3 and re-check, at most twice. The usual causes: a block split or merged (`structure`, `counts`), a label not verbatim or with something attached (`labels`), Ukrainian letters left (`ukrainian-letters`), a changed link, code span or attribute (`links`, `inline-code`, `tags`), a missing marker (`markers`), a frontmatter value that needs quotes (`frontmatter`: quote it in single quotes). A `link-form` failure is in the UA page, not the translation: result `failed`, naming the link. If it still fails, result `failed` with the check names and one line on why. Don't record it: the locale keeps its previous file and state.
+Exit `1` lists `failures`, each with its `check` name. Fix the cause as in step 3 and re-check, at most twice. The usual causes: a block split or merged (`structure`, `counts`), a label not verbatim or with something attached (`labels`), Ukrainian letters left (`ukrainian-letters`), a changed link, code span or attribute (`links`, `inline-code`, `tags`), a code block changed outside its labels, comments and tree descriptions (`code`), a missing marker (`markers`), a frontmatter value that needs quotes (`frontmatter`: quote it in single quotes). A `link-form` failure is in the UA page, not the translation: result `failed`, naming the link. If it still fails, result `failed` with the check names and one line on why. Don't record it: the locale keeps its previous file and state.
 
 The `linkTitles` warning lists link texts that name a page differently from its title. A line you translated: rewrite the link text with the page's title from its `links` row (P9) and check again. A line outside your blocks: leave it, and list it in the result's `linkTitles` (`line`, `text`, `url`, `title`, as the warning gives them) for the coordinator. A warning never blocks recording.
 

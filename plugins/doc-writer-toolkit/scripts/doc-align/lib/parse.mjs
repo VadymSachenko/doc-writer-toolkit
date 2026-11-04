@@ -1,6 +1,6 @@
 // A line-based reader of one Markdown/MDX page. It finds the structural elements the alignment checks count
 // (frontmatter date, headings, tables, code fences, images, links, admonitions, <details>, markers) and their
-// line numbers. Fenced code and the frontmatter are skipped, and inline code is blanked before the inline scans,
+// line numbers. Fenced code and the frontmatter are skipped by the prose scans, and inline code is blanked before them,
 // so syntax that only appears in a code sample is never counted.
 
 const HEADING = /^(#{1,6})\s+(.*)$/;
@@ -56,7 +56,7 @@ export function parse(text) {
     }
   }
 
-  // Which lines are code, and the contents of each fence (compared byte for byte).
+  // Which lines are code, and the info string and contents of each fence (their code parts are compared, fences.mjs).
   const skip = lines.map((_, i) => i <= fmEnd);
   let state = null;
   let cur = null;
@@ -64,7 +64,7 @@ export function parse(text) {
     if (skip[i]) return;
     const next = fenceStep(state, line);
     if (!state && next) {
-      cur = { line: i + 1, lines: [] };
+      cur = { line: i + 1, info: line.replace(/^\s*(`{3,}|~{3,})/, '').trim(), lines: [] };
       skip[i] = true;
     } else if (state && !next) {
       page.fences.push(cur);
