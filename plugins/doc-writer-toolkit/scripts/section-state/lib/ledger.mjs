@@ -3,6 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { isIdOnlyChange } from '../../doc-align/lib/idonly.mjs';
 
 export const SCHEMA_VERSION = 1;
 export const SECTION_STAGES = ['readiness', 'explore', 'plan', 'planApproval', 'resolve'];
@@ -200,10 +201,31 @@ export function withoutDates(text) {
 }
 
 // Compares the file with an earlier version of it, the one with this hash, with every frontmatter `date:` blanked.
-// `committed` is false when that version is not in a commit reachable from HEAD: then nothing is compared.
-export async function dateOnlyChange(root, file, hash) {
-  if (!(await committedBlob(root, file, hash))) return { committed: false, dateOnly: false };
+// `dateOnly`: nothing else differs. `idOnly`: the rest is an id-only change (heading-anchors.md, "Id-only changes";
+// the predicate is doc-align's `isIdOnlyChange`). Either keeps the records made on the earlier version. `others` are
+// the other pages of the same change ({ path, before, after }), for links rewritten to their new ids. `committed` is
+// false when that version is not in a commit reachable from HEAD: then nothing is compared.
+export async function approvedChange(root, file, hash, others = []) {
+  if (!(await committedBlob(root, file, hash))) return { committed: false, dateOnly: false, idOnly: false };
   const before = await blobText(root, hash);
   const now = await readText(root, file);
-  return { committed: true, dateOnly: before !== null && now !== null && withoutDates(before) === withoutDates(now) };
+  if (before === null || now === null) return { committed: true, dateOnly: false, idOnly: false };
+  const page = { path: file, before: withoutDates(before), after: withoutDates(now) };
+  const dateOnly = page.before === page.after;
+  return { committed: true, dateOnly, idOnly: !dateOnly && isIdOnlyChange(page, [page, ...others]) };
+}
+
+// The other pages of the run, as the change that added ids saw them: before is the version before the translator added
+// its ids (`idBase` of the approval, else the approved version, else HEAD), after is the file now.
+export async function otherPages(root, ledger, page) {
+  const out = [];
+  for (const p of ledger.pages ?? []) {
+    if (p === page || p.id === page.id) continue;
+    const after = await readText(root, p.path);
+    if (after === null) continue;
+    const base = p.stages?.uaApproval?.idBase ?? p.stages?.uaApproval?.uaHash;
+    const before = (base ? await blobText(root, base) : null) ?? (await headText(root, p.path));
+    if (before !== null) out.push({ path: p.path, before: withoutDates(before), after: withoutDates(after) });
+  }
+  return out;
 }

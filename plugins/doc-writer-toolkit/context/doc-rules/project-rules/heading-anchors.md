@@ -66,7 +66,8 @@ comment (rule 2), and the updater adds one to an existing heading only when the 
 
 ## Id-only changes
 
-Two predicates, defined here once. Skills and scripts cite them by name and never restate them.
+Two predicates, defined here once. Skills and scripts cite them by name and never restate them. The id-only
+change has one implementation, `scripts/doc-align/lib/idonly.mjs` (`isIdOnlyChange`), which `section-state` uses.
 
 **Id-only change.** A UA change is id-only when its only differences from the approved version are (1)
 `{/* #id */}` comments added to headings that had none, and (2) link fragments rewritten from such a

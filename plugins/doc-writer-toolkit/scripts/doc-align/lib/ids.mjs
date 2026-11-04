@@ -27,7 +27,7 @@ const decode = (s) => {
 
 // Every link target with a fragment on one prose line (code already blanked): the path, the fragment as written and
 // decoded, and where the fragment starts and ends on the line.
-function fragmentLinks(line) {
+export function fragmentLinks(line) {
   const out = [];
   for (const m of line.matchAll(LINK)) {
     const pre = m[1] ?? m[3] ?? m[5];

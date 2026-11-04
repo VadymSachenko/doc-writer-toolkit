@@ -158,6 +158,10 @@ A link with a matching fragment that can't be resolved (a relative route, or a s
 
 Exit codes are as above: `0` it ran (proposals or not), `2` bad usage (`--root` or `--write` without `--propose-ids`, a `--root` that is not a folder, no way to tell the UA page).
 
+## The id-only predicate (`lib/idonly.mjs`)
+
+`isIdOnlyChange(page, changeSet)` is the id-only change of `heading-anchors.md` ("Id-only changes"), the one implementation the scripts share (`section-state` uses it). `page` and every entry of `changeSet` are `{ path, before, after }`; a link to another page counts when its path (a relative `.md`/`.mdx` path, or a site-root route or file path matched against the end of a page path) reaches a page of `changeSet` whose heading got that id. It compares line by line; a difference in code or in the frontmatter is a real change. `--write` above produces exactly such a change.
+
 ## How the skill uses it
 
 `doc-translator` runs `--propose-ids --write` after it saves the EN page, so every UA heading gets its id from the EN anchor, with the links rewritten in the same change. `doc-alignment-checker` runs it as Step 1.5, after both files are loaded. It reads the JSON, treats each finding as a candidate (a difference may be intended), and supplies Checks 1, 2, 3, 6, 7 and 8 from it, and the table part of Check 12 when the host's product kit has a names table. It still runs its semantic checks itself. When the script can't run, the skill counts by hand as each Check describes and says so in its report.

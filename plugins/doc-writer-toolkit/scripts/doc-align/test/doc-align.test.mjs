@@ -11,6 +11,7 @@ import { cellCount } from '../lib/parse.mjs';
 import { createSlugger, slugify, uaHeadingId } from '../lib/headings.mjs';
 import { findNames, looseKey, mergeRows, parseNamesTable, searchable } from '../lib/names.mjs';
 import { proposeIds } from '../lib/ids.mjs';
+import { isIdOnlyChange } from '../lib/idonly.mjs';
 
 const run = promisify(execFile);
 const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'doc-align.mjs');
@@ -752,4 +753,29 @@ test('CLI --propose-ids: usage errors', async () => {
     assert.equal(r.code, 2, args.join(' '));
     assert.match(r.out.error, message);
   }
+});
+
+// isIdOnlyChange: the id-only change of heading-anchors.md, the one implementation the scripts share.
+test('isIdOnlyChange: ids added and links rewritten to them; anything else is a real change', () => {
+  const before = '---\ntitle: Т\n---\n\n# Т\n\nДив. [огляд](#огляд-балансів) і `[код](#огляд-балансів)`.\n\n## Огляд балансів\n\nТекст.\n\n## Експорт {/* #export */}\n';
+  const after = before.replace('## Огляд балансів\n', '## Огляд балансів {/* #balances-overview */}\n').replace('[огляд](#огляд-балансів)', '[огляд](#balances-overview)');
+  const page = { path: 'docs/balances/balances.md', before, after };
+  assert.equal(isIdOnlyChange(page), true);
+  assert.equal(isIdOnlyChange({ ...page, after: before }), true, 'no change at all');
+  for (const [what, text] of [
+    ['a changed id', after.replace('{/* #export */}', '{/* #export-data */}')],
+    ['a removed id', after.replace(' {/* #export */}', '')],
+    ['a changed heading text', after.replace('## Огляд балансів {', '## Огляд рахунків {')],
+    ['a prose change', after.replace('Текст.', 'Інший текст.')],
+    ['a fragment in inline code', after.replace('`[код](#огляд-балансів)`', '`[код](#balances-overview)`')],
+    ['a fragment no heading got', after.replace('(#balances-overview)', '(#export)')],
+    ['an added line', `${after}\n`],
+  ]) assert.equal(isIdOnlyChange({ ...page, after: text }), false, what);
+
+  // A link on another page counts when its path resolves to a page of the same change whose heading got that id.
+  const other = { path: 'docs/other/other.md', before: 'Див. [огляд](/balances/#огляд-балансів).\n', after: 'Див. [огляд](/balances/#balances-overview).\n' };
+  assert.equal(isIdOnlyChange(other, [other, page]), true);
+  assert.equal(isIdOnlyChange({ ...other, before: other.before.replace('/balances/', '../balances/balances.md'), after: other.after.replace('/balances/', '../balances/balances.md') }, [other, page]), true, 'a relative file path');
+  assert.equal(isIdOnlyChange(other, [other]), false, 'the linked page is not part of the change');
+  assert.equal(isIdOnlyChange(other, [other, { ...page, after: before }]), false, 'the linked heading got no id');
 });
