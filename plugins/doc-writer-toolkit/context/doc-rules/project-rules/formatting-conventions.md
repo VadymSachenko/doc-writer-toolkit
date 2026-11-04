@@ -1,6 +1,6 @@
 ---
 name: Проєктні конвенції форматування
-description: Rank-0 project formatting conventions — what bold, code font and italic mean in this project's pages, how placeholders are written, how one entity is rendered consistently, how a code entity differs from a human concept, how an icon-only control is named and shown, and how a page says where an element is (by container, never by direction). Core section is language-neutral; UA and EN sections carry the per-language conventions. Loaded for every guide profile, in drafting and in review.
+description: Rank-0 project formatting conventions — what bold, code font and italic mean in this project's pages, how placeholders are written, how one entity is rendered consistently, how a code entity differs from a human concept, how an icon-only control is named and shown, and how a page says where an element is (by container, never by direction), and how a name of an organization or a product is written (the system's form, then the kit's names table, then the official localization). Core section is language-neutral; UA and EN sections carry the per-language conventions. Loaded for every guide profile, in drafting and in review.
 metadata:
   type: reference
 ---
@@ -27,7 +27,7 @@ metadata:
 | Що | Де живе |
 |---|---|
 | Правопис української мови | `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/ua-grammar/` (маршрутизація — через `INDEX.md`) |
-| Затверджені терміни та їхній рендер | `glossary-ua.md` / `glossary-en.md` набору продукту (`${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`, «Product kit»); як читати таблицю — `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/glossary-format.md` |
+| Затверджені терміни та їхній рендер, таблиця назв організацій (Ж10) | `glossary-ua.md` / `glossary-en.md` набору продукту (`${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`, «Product kit»); як читати таблицю — `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/glossary-format.md` |
 | Структура сторінки, шаблони | `${CLAUDE_PLUGIN_ROOT}/context/doc-templates/` |
 | Продуктові факти про API | `product-facts.md` набору продукту |
 | Правила лише для цього продукту: назва й скорочення, ключові заміни термінів, назви розділів інтерфейсу | `product-rules.md` набору продукту |
@@ -453,6 +453,60 @@ alone».
 напрямок поряд з іншим орієнтиром: сторінки йдуть далі в інші локалі та до екранних читачів.
 Також проєктні — зв'язок «біля **X**» як запасний варіант і маркер, коли доказ дає лише напрямок.
 
+### Ж10 — Назви організацій і продуктів (Names of organizations and products)
+
+Назва організації чи продукту — банку, платіжної системи, компанії, стороннього сервісу —
+пишеться за першим із цих джерел, яке її дає, окремо для кожної мови:
+
+1. **Як пише сама система.** У посібнику користувача — рядок застосунку цією мовою: так, як
+   інтерфейс показує назву (словник інтерфейсу — `${CLAUDE_PLUGIN_ROOT}/context/ui-labels.md`).
+   У документації API — значення так, як його має код, символ у символ, навіть коли стайл-гайд
+   чи граматика вимагають іншого.
+2. **Інакше — як дає таблиця назв** набору продукту: розділ «Назви» в `glossary-ua.md` /
+   `glossary-en.md` (`${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`, «Product kit»; як читати
+   таблицю — `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/glossary-format.md`, «Names»).
+3. **Інакше — офіційна локалізація організації цією мовою**, з її власного сайту (версія сайту
+   цією мовою, сторінка про організацію, юридична назва в підвалі). Знайдену форму разом із
+   джерелом додай рядком у таблицю назв обох глосаріїв. Поки рядка немає або сайт не дає форми цією
+   мовою, вжий форму з сайту однаково по всьому документу (Ж3) і постав поруч
+   `{/* NEEDS CONFIRMATION: назви «…» немає в таблиці назв */}` мовою сторінки.
+
+**Значення назви не перекладається ніколи.** Назву передають її власною формою цією мовою, а не
+перекладом слів, з яких вона складається: український банк «Світанок» англійською — Svitanok
+Bank, якщо так пише його сайт, і ніколи не Dawn Bank.
+
+**Що зберігається, а що ні:**
+
+- Літери, регістр, пробіли й дефіси форми — дослівно, і на початку речення теж: форма з малої
+  літери лишається з малої. Це **проєктний override rank-0** над корпусом і правописом: конфлікт
+  розв'язується мовчки, а відхилення від форми — звичайна знахідка з посиланням на Ж10.
+- Кириличну форму на українській сторінці відмінюють за правописом (у Банку Світанок, через
+  Лунобанк — у Лунобанку); латинську не відмінюють («через fluxpay»), а відмінок несе родове
+  слово поруч: «у банку fluxpay», «платіжна система KvitkaPay».
+- Рендер — за Ж1 і Ж4: у прозі назва — звичайний текст; мітка UI, що містить назву, — жирним, як
+  у застосунку; значення в коді — `code font`. Форма всередині мітки чи значення коду не
+  «виправляється» під таблицю.
+- UA- і EN-форми однієї назви можуть різнитися (Лунобанк — Lunobank): рядок таблиці пов'язує їх,
+  і це не розбіжність між версіями.
+
+Назва власного продукту хоста — не тут, а в `product-rules.md` набору продукту.
+
+| ⛔ Не так | ✅ Так | Чому |
+|---|---|---|
+| Dawn Bank (переклад слова «світанок») | Svitanok Bank | значення назви не перекладається |
+| Fluxpay (з великої, бо початок речення) | fluxpay | так пише застосунок і таблиця назв |
+| у полі `provider` передайте `Fluxpay` | у полі `provider` передайте `fluxPay` | API: значення як у коді, символ у символ |
+| Лунобанк, Луно банк і LunoBank на одній сторінці | Лунобанк усюди | одна сутність — один рендер (Ж3) |
+
+**Джерела корпусу:** `GDSG-NAMES-PRODUCTS` (`names-and-naming/product-names-and-trademarks.md`) —
+«Use the current official name and capitalization»; `GDSG-TRADEMARK-001` — «Follow the owner's
+spelling, capitalization»; `GDSG-CODE-001` — «Do not use code font for an ordinary product,
+service, organization».
+
+**Проєктне рішення понад корпус:** форма системи стоїть вище за офіційну, а значення коду — вище
+за стайл-гайд і граматику; порядок джерел, таблиця назв у наборі продукту і маркер для назви без
+рядка — проєктні.
+
 ### Чекліст ядра
 
 - [ ] Жодного жирного, який не є видимою міткою UI або міткою пункту списку (Ж1)?
@@ -471,6 +525,7 @@ alone».
 - [ ] Заголовки — однією мовою, мовою документа; код-сутності в них у `code font` (Ж7)?
 - [ ] Кожен елемент керування лише з іконкою названо жирною назвою з доказів і дескриптором, а без назви — описом і маркером `NEEDS CONFIRMATION`; іконка — у рендері `Icon rendering:`, з `alt=""`, без кольору й розміру з пам'яті (Ж8)? Стара форма іконки на наявній сторінці, яку зараз не пишуть, — знахідка-рішення (група 3, judgment-required), ніколи не механічна.
 - [ ] Жоден елемент не знайдено напрямком (ліворуч, праворуч, вгорі, внизу, над, під, у куті): місце задає контейнер, мітка, зв'язок «біля **X**» або скриншот; місце в документі — «наступний», «попередній» (Ж9)? Напрямок як дія чи мітка UI — не порушення.
+- [ ] Кожна назва організації чи продукту — у формі системи (рядок застосунку, значення коду), інакше з таблиці назв, інакше офіційна локалізація з маркером; значення назви не перекладено (Ж10)?
 
 ---
 
@@ -489,6 +544,7 @@ alone».
 ### Назви, бренди, латинка
 
 - Назва продукту та її скорочення — за `product-rules.md` набору продукту.
+- Назва іншої організації чи продукту (банку, платіжної системи, компанії) — за Ж10.
 - Технічні абревіатури — латинкою, без кирилічної транслітерації: API, UUID, IBAN, JSON, HTTP,
   URL. Не «АПІ», не «апі», не «джейсон».
 - Назва платформи, продукту чи фічі — звичайним текстом, не жирним (Ж1).
@@ -600,6 +656,7 @@ language-specific.
 ### Names, brands, abbreviations
 
 - The product name and its abbreviation follow the kit's `product-rules.md`.
+- The name of another organization or product (a bank, a payment system, a company) follows Ж10.
 - Technical abbreviations stay as-is: API, UUID, IBAN, JSON, HTTP, URL.
 - A platform, product, or feature name is ordinary type, never bold (Ж1).
 - Expand a new abbreviation at first mention, then use the short form only
