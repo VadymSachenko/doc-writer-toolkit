@@ -7,13 +7,13 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { main } from '../tracker.mjs';
-import { createTracker, resolveStatuses } from '../lib/tracker.mjs';
+import { createTracker, priorityOf, resolveStatuses } from '../lib/tracker.mjs';
 import { assertAdapter, READS, WRITES } from '../lib/adapter-contract.mjs';
 import { deepMerge, loadCredentials, loadSettings, parseEnvFile, validateTracker } from '../lib/settings.mjs';
 import { CliError, Refusal, TrackerError } from '../lib/errors.mjs';
 import { createAdapter, kinds } from '../adapters/index.mjs';
 import { createTrelloClient } from '../adapters/trello/client.mjs';
-import { action, createTrelloAdapter, namePrefixes } from '../adapters/trello/index.mjs';
+import { action, createTrelloAdapter, createdAt, namePrefixes } from '../adapters/trello/index.mjs';
 import { BOARD, C, KEY, L, TOKEN, WATCH, fixture, startFake, trackerSettings } from './fake-trello.mjs';
 import { memoryAdapter } from './memory-adapter.mjs';
 
@@ -168,6 +168,45 @@ test('listCards: a status with several lists reads each of them; a "done" card i
   assert.deepEqual(r.lists.map((l) => l.name), ['Finished', 'Closed, Oct 2026', 'Closed Sep, 2026']);
   assert.deepEqual(r.cards.map((c) => [c.id, c.status, c.list.name]), [[C.inbox2, 'done', 'Closed, Oct 2026']]);
   assert.equal(s.fake.requests.filter((q) => /^\/1\/lists\/.*\/cards$/.test(q.path)).length, 3);
+}));
+
+test('listCards: each card has a priority from the labels the settings name, medium without one, and when it was made', withFake({ settings: trackerSettings({ priority: { high: 'billing', low: 'needs answer' } }) }, async (s) => {
+  const intake = await s.tracker.listCards({ status: 'intake' });
+  assert.deepEqual(intake.cards.map((c) => [c.id, c.priority]), [[C.inbox1, 'high'], [C.inbox2, 'medium']]);
+  const doing = await s.tracker.listCards({ status: 'inProgress' });
+  assert.equal(doing.cards[0].priority, 'low', 'the low label');
+  // Trello's id starts with the creation time; the invented ids all start 5f000000.
+  assert.equal(intake.cards[0].createdAt, '2020-07-04T04:05:20.000Z');
+  s.fake.state.labels[C.doing] = ['5f00000000000000000b0001', '5f00000000000000000b0002'];
+  assert.equal((await s.tracker.listCards({ status: 'inProgress' })).cards[0].priority, 'high', 'both labels: high wins');
+  assert.equal((await s.tracker.readCard({ card: 'Doin0003' })).priority, 'high');
+  assert.equal((await s.tracker.findCards({ number: 2002 })).cards[0].priority, 'high');
+}));
+
+test('priority: the default label names are high and low; a tracker field of its own wins; the settings check the levels', () => {
+  assert.deepEqual(validateTracker(trackerSettings()).priority, { high: 'high', low: 'low' });
+  assert.deepEqual(validateTracker(trackerSettings({ priority: { low: 'later' } })).priority, { high: 'high', low: 'later' });
+  assert.throws(() => validateTracker(trackerSettings({ priority: { urgent: 'x' } })), (e) => e.exitCode === 2 && /tracker\.priority\.urgent is not a level/.test(e.message));
+  assert.throws(() => validateTracker(trackerSettings({ priority: { high: '' } })), /tracker\.priority\.high must be a label name/);
+  assert.throws(() => validateTracker(trackerSettings({ priority: 'high' })), /tracker\.priority must be/);
+  const label = (name) => ({ id: name, name, color: null });
+  assert.equal(priorityOf({ labels: [label('High ')] }), 'high', 'compared without case and spacing');
+  assert.equal(priorityOf({ labels: [label('low')] }), 'low');
+  assert.equal(priorityOf({ labels: [] }), 'medium');
+  assert.equal(priorityOf({ labels: [label('high')], priority: 'low' }), 'low', "a tracker's own field wins");
+  assert.equal(priorityOf({ labels: [], priority: 'urgent' }), 'medium', 'an unknown value is not a level');
+  assert.equal(createdAt('5f0000000000000000000001'), '2020-07-04T04:05:20.000Z');
+  assert.equal(createdAt('PROJ-1'), null);
+});
+
+test('listCardsOn: the open cards of a list on a watched board, by name; the board in the settings is read by status only', withFake({}, async (s) => {
+  const r = await s.tracker.listCardsOn({ board: WATCH, list: 'ship*' });
+  assert.deepEqual(r.lists.map((l) => l.name), ['Shipped']);
+  assert.deepEqual(r.cards.map((c) => [c.shortLink, c.status, c.list.name, c.priority]), [['Orig0001', null, 'Shipped', 'medium']]);
+  await rejects(s.tracker.listCardsOn({ board: BOARD, list: 'Drafts' }), 'notAllowed');
+  await rejects(s.tracker.listCardsOn({ board: '5f00000000000000000d0009', list: 'Shipped' }), 'notAllowed');
+  await rejects(s.tracker.listCardsOn({ board: WATCH, list: 'Nowhere' }), 'unknown');
+  assert.equal(s.fake.requests.filter((q) => q.path === `/1/lists/${L.drafts}/cards`).length, 0, 'the drafts list was never read');
 }));
 
 test('listCards: refuses a neverRead status without asking for its cards; refuses an unknown status', withFake({}, async (s) => {
@@ -613,7 +652,7 @@ test('the interface: an adapter that lacks a method is rejected; the Trello adap
 });
 
 test('no operation archives, deletes or renames a card; every write the module made is one of the allowed shapes', withFake({}, async (s) => {
-  assert.deepEqual(Object.keys(s.tracker).sort(), ['actionsSince', 'addLabel', 'comment', 'createCard', 'downloadAttachment', 'dryRun', 'findCards', 'listCards', 'move', 'readCard', 'removeLabel', 'setDescription', 'statuses']);
+  assert.deepEqual(Object.keys(s.tracker).sort(), ['actionsSince', 'addLabel', 'comment', 'createCard', 'downloadAttachment', 'dryRun', 'findCards', 'listCards', 'listCardsOn', 'move', 'readCard', 'removeLabel', 'setDescription', 'statuses']);
   assert.deepEqual([...WRITES].sort(), ['addLabel', 'comment', 'createCard', 'moveCard', 'removeLabel', 'setDescription']);
   assert.equal(READS.length, 11);
   await s.tracker.comment({ card: 'Doin0003', text: 'a' });
@@ -700,12 +739,17 @@ test('cli: text from a file or from standard input is stored exactly; both flags
 test('cli: usage errors are exit-2 errors; help prints the commands', async () => {
   const fake = await startFake();
   const root = hostRoot();
+  const exit2 = (re) => (e) => e.exitCode === 2 && re.test(e.message);
   try {
-    await assert.rejects(cli(['frobnicate'], { root, fake }), /unknown command/);
-    await assert.rejects(cli(['move', '--to', 'ready'], { root, fake }), /needs the card/);
-    await assert.rejects(cli(['list-cards', 'extra'], { root, fake }), /unexpected argument/);
-    await assert.rejects(cli(['list-cards'], { root, fake }), /needs --status/);
-    await assert.rejects(cli(['add-label', 'Inbx0001'], { root, fake }), /exactly one --label/);
+    await assert.rejects(cli(['frobnicate'], { root, fake }), exit2(/unknown command/));
+    await assert.rejects(cli(['move', '--to', 'ready'], { root, fake }), exit2(/needs the card/));
+    await assert.rejects(cli(['list-cards', 'extra'], { root, fake }), exit2(/unexpected argument/));
+    await assert.rejects(cli(['list-cards'], { root, fake }), exit2(/needs --status/));
+    await assert.rejects(cli(['list-cards', '--list', 'Shipped'], { root, fake }), exit2(/needs one --board/));
+    await assert.rejects(cli(['add-label', 'Inbx0001'], { root, fake }), exit2(/exactly one --label/));
+    assert.equal((await cli(['list-cards', '--board', WATCH, '--list', 'Shipped'], { root, fake })).json.count, 1);
+    const unknown = await run('node', [CLI, 'frobnicate', '--root', root]).catch((e) => e);
+    assert.equal(unknown.code, 2, 'an unknown command exits 2, as in the forge');
     let help = '';
     assert.equal(await main(['--help'], { stdout: { write: (s) => void (help += s) } }), 0);
     for (const c of ['statuses', 'list-cards', 'read-card', 'find-cards', 'actions-since', 'download-attachment', 'comment', 'move', 'add-label', 'remove-label', 'set-description', 'create-card']) assert.ok(help.includes(c), c);

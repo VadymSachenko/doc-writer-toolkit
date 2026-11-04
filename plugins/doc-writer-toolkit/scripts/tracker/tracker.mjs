@@ -17,7 +17,8 @@ with --dry-run it is printed (credentials removed) and not sent.
 
 Commands
   statuses                       The settings' statuses resolved to the board's lists, the lists no status owns.
-  list-cards --status <s>        The open cards of a status, each with its last activity time. Refuses a neverRead status.
+  list-cards --status <s>        The open cards of a status, each with its last activity time and priority. Refuses a neverRead status.
+  list-cards --board <id> --list <name>   The open cards of a list on a watched board.
   read-card <card>               One card with its comments, attachments, checklists, moves and links to other cards.
   find-cards --number <n>        Cards whose name starts with #<n> (archived too), on --board (repeatable) or the board.
   find-cards --link <url>        The card behind a link or short link (archived too).
@@ -38,6 +39,7 @@ Options
   --dry-run               print each change instead of sending it
   --status <s>, --to <s>  a status of the settings
   --number <n>, --link <url>, --board <id> (repeatable; the board or a watched board), --all-boards (the board and the watched ones)
+  --list <name>           list-cards on a watched board: the list's name ('*' allowed)
   --since <time>, --types <a,b>   actions-since: the start, and Trello's action filter
   --attachment <id|name>, --out <file>, --overwrite
   --text <t>, --text-file <file|->   the text (a file, or - for stdin; stored exactly, U+200C kept)
@@ -55,6 +57,7 @@ const OPTIONS = {
   number: { type: 'string' },
   link: { type: 'string' },
   board: { type: 'string', multiple: true },
+  list: { type: 'string' },
   'all-boards': { type: 'boolean' },
   since: { type: 'string' },
   types: { type: 'string' },
@@ -95,11 +98,12 @@ export async function main(argv, io = {}) {
     stdout.write(USAGE);
     return 0;
   }
-  if (!COMMANDS.includes(command)) throw new CliError(`unknown command '${command}'.\n\n${USAGE}`);
+  // Bad usage exits 2, as every other input the caller must fix (the forge and section-state scripts do the same).
+  if (!COMMANDS.includes(command)) throw new CliError(`unknown command '${command}'.\n\n${USAGE}`, { code: 2 });
   if (TAKES_CARD.includes(command) ? !card : card) {
-    throw new CliError(TAKES_CARD.includes(command) ? `${command} needs the card.\n\n${USAGE}` : `unexpected argument '${card}'`);
+    throw new CliError(TAKES_CARD.includes(command) ? `${command} needs the card.\n\n${USAGE}` : `unexpected argument '${card}'`, { code: 2 });
   }
-  if (rest.length) throw new CliError(`unexpected argument '${rest[0]}'`);
+  if (rest.length) throw new CliError(`unexpected argument '${rest[0]}'`, { code: 2 });
 
   const root = path.resolve(values.root ?? process.cwd());
   const settings = await loadSettings({ root, settings: values.settings });
@@ -129,6 +133,11 @@ export async function main(argv, io = {}) {
       result = await tracker.statuses();
       break;
     case 'list-cards':
+      if (values.list !== undefined) {
+        if (values.status || values.board?.length !== 1) throw new CliError('list-cards --list needs one --board (a watched board) and no --status', { code: 2 });
+        result = await tracker.listCardsOn({ board: values.board[0], list: values.list });
+        break;
+      }
       if (!values.status) throw new CliError('list-cards needs --status', { code: 2 });
       result = await tracker.listCards({ status: values.status });
       break;

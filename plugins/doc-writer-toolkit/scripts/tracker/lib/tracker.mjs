@@ -61,9 +61,22 @@ export function resolveStatuses(statuses, places) {
   return { statuses: resolved, statusOfPlace: claimed, places };
 }
 
+export const PRIORITIES = ['high', 'medium', 'low'];
+
+// A card's priority: the tracker's own field when the adapter gives one (Jira), else the labels the settings name
+// (`priority: { high, low }`). Neither is medium; a card with both labels is high.
+export function priorityOf(card, names = { high: 'high', low: 'low' }) {
+  if (PRIORITIES.includes(card.priority)) return card.priority;
+  const has = (name) => (card.labels ?? []).some((l) => norm(l.name) === norm(name));
+  if (has(names.high)) return 'high';
+  if (has(names.low)) return 'low';
+  return 'medium';
+}
+
 export function createTracker({ adapter, tracker, dryRun = false, now = () => Date.now() }) {
   assertAdapter(adapter);
   const { board, statuses: statusSpec, neverRead, transitions, labels: labelNames } = tracker;
+  const priorityNames = tracker.priority ?? { high: 'high', low: 'low' };
   const boards = [board, ...tracker.watchBoards];
 
   const knownStatus = (status) => {
@@ -87,6 +100,7 @@ export function createTracker({ adapter, tracker, dryRun = false, now = () => Da
     if (!desc) delete rest.desc;
     return {
       ...rest,
+      priority: priorityOf(card, priorityNames),
       boardId,
       status: onBoard ? statusOf(res, placeId) : null,
       list: { id: placeId, name: onBoard ? placeName(res, placeId) : null },
@@ -153,6 +167,24 @@ export function createTracker({ adapter, tracker, dryRun = false, now = () => Da
       const cards = [];
       for (const p of res.statuses[status].places) for (const c of await adapter.cardsIn(p.id)) cards.push(present(res, c));
       return { status, lists: res.statuses[status].places, count: cards.length, cards };
+    },
+
+    // The open cards of a list on a watched board, by the list's name (`*` allowed). The board in the settings is read
+    // by status only (`listCards`), so its neverRead statuses stay unread.
+    async listCardsOn({ board: wanted, list }) {
+      const b = checkBoard(wanted);
+      if (b === board) throw new Refusal('notAllowed', 'the board in the settings is read by status (--status), not by list name');
+      if (!bare(list)) throw new CliError('listCardsOn needs a list name (--list)', { code: 2 });
+      const places = (await adapter.places(b)).filter((p) => patternOf(list).test(norm(p.name)));
+      if (!places.length) throw new Refusal('unknown', `no list '${list}' on board ${b}`, { list });
+      const cards = [];
+      for (const p of places) {
+        for (const c of await adapter.cardsIn(p.id)) {
+          const { placeId, ...rest } = c;
+          cards.push({ ...rest, priority: priorityOf(c, priorityNames), status: null, list: { id: placeId, name: p.name } });
+        }
+      }
+      return { board: b, lists: places, count: cards.length, cards };
     },
 
     async readCard({ card: input }) {
@@ -324,6 +356,7 @@ export function createTracker({ adapter, tracker, dryRun = false, now = () => Da
     const { placeId, desc, ...rest } = card;
     return {
       ...rest,
+      priority: priorityOf(card, priorityNames),
       status: onBoard ? statusOf(res, placeId) : null,
       list: { id: placeId, name: names.find((p) => p.id === placeId)?.name ?? null },
     };

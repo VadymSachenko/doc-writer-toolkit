@@ -91,7 +91,7 @@ export async function startFake({ onRequest } = {}) {
       let m;
       if (req.method === 'GET') {
         if ((m = /^\/1\/boards\/([^/]+)\/lists$/.exec(p))) return json(res, 200, m[1] === BOARD ? fixture('lists') : [{ id: '5f00000000000000000a0101', name: 'Shipped' }]);
-        if ((m = /^\/1\/lists\/([^/]+)\/cards$/.exec(p))) return json(res, 200, cards().filter((c) => c.idList === m[1] && !c.closed));
+        if ((m = /^\/1\/lists\/([^/]+)\/cards$/.exec(p))) return json(res, 200, [...cards(), ...watchCards()].filter((c) => c.idList === m[1] && !c.closed));
         if ((m = /^\/1\/boards\/([^/]+)\/cards\/all$/.exec(p))) return json(res, 200, page(m[1] === BOARD ? cards() : watchCards(), q));
         if ((m = /^\/1\/boards\/([^/]+)\/labels$/.exec(p))) return json(res, 200, fixture('labels'));
         if ((m = /^\/1\/boards\/([^/]+)\/actions$/.exec(p))) {

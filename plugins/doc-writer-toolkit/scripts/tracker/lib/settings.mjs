@@ -79,8 +79,24 @@ export function validateTracker(t) {
     neverRead,
     transitions,
     labels,
+    priority: validatePriority(t.priority),
     credentials: { key: c.key, token: c.token, envFile: c.envFile ?? '.env' },
   };
+}
+
+// The labels that mark a card's priority: `{ high: <label name>, low: <label name> }`. A card with neither is medium.
+export const DEFAULT_PRIORITY = { high: 'high', low: 'low' };
+
+function validatePriority(p) {
+  if (p === undefined || p === null) return { ...DEFAULT_PRIORITY };
+  if (!isObject(p)) fail('tracker.priority must be { "high": <label name>, "low": <label name> }');
+  const out = { ...DEFAULT_PRIORITY };
+  for (const [level, name] of Object.entries(p)) {
+    if (!(level in DEFAULT_PRIORITY)) fail(`tracker.priority.${level} is not a level: name the labels for "high" and "low"; a card with neither is "medium"`);
+    if (typeof name !== 'string' || !name.trim()) fail(`tracker.priority.${level} must be a label name`);
+    out[level] = name;
+  }
+  return out;
 }
 
 // Where the settings file is: the flag, else the 'Ticket flow settings:' field of CLAUDE.md, else the default.

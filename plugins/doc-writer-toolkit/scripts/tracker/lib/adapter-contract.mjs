@@ -8,7 +8,9 @@
 //
 // Shapes
 //   Card     { id, shortLink, url, name, number, numbers, desc?, labels: [{ id, name, color }], placeId, boardId,
-//              lastActivity (ISO), closed }
+//              lastActivity (ISO), createdAt (ISO, or null when the tracker doesn't say), closed,
+//              priority? ('high'|'medium'|'low', only from a tracker with a priority field of its own; else the module
+//              reads it from the labels the settings name) }
 //   Comment  { id, author: { id, username } | null, time, text, edited }
 //   Action   { id, type, time, card: { id, shortLink, name } | null, by, text, placeId, placeBefore, placeAfter,
 //              changed: [field names], closed? }

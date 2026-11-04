@@ -27,7 +27,8 @@ The host's ticket flow settings file holds the `tracker` object. Its place is th
     },
     "neverRead": ["drafts"],
     "transitions": [["intake", "ready"], ["ready", "inProgress"], ["inProgress", "blocked"], ["blocked", "inProgress"], ["inProgress", "done"]],
-    "labels": { "needsAnswer": "needs answer" }
+    "labels": { "needsAnswer": "needs answer" },
+    "priority": { "high": "high", "low": "low" }
   }
 }
 ```
@@ -41,6 +42,7 @@ The host's ticket flow settings file holds the `tracker` object. Its place is th
 | `neverRead` | no | Statuses the module never reads: `list-cards` refuses them, `read-card` and `download-attachment` refuse a card in one, `actions-since` leaves out the actions on such a card. |
 | `transitions` | no | The `[from, to]` pairs `move` may run. Both must be in `statuses`. A pair that is not listed is refused. |
 | `labels` | no | `{ short key: label name }`: `add-label` and `remove-label` accept the key in place of the name. |
+| `priority` | no | The labels that mark a card's priority: `{ "high": <label name>, "low": <label name> }`, default `high` and `low`. A card with neither is `medium`; one with both is `high`. Names are compared without case and spacing. A tracker with a priority field of its own (Jira) gives it through the adapter, and that wins. |
 | `credentials` | required | The names of the two environment variables that hold the API key and token, and the file that may hold them (default `.env`, relative to the root). The environment wins over the file. The values are never printed, logged or written; a missing one is reported by its variable name. |
 
 **Lists are resolved on every run.** The board's open lists are read once per run and each status name is matched to them: ignoring case, spacing and U+200C; `*` matches any run of characters; an exact name claims a list before a pattern does, and a list belongs to the first status that claims it. A name that matches no list **stops the run** (exit 2, `unresolved`: the status and the name). Lists no status owns are outside the flow: `statuses` shows them as `unmapped`, `move` will not move a card out of one, and a card in one has `status: null`.
@@ -55,6 +57,7 @@ All print JSON on stdout: `{ "ok": true, "command": …, … }`. `<card>` is a c
 |---|---|---|
 | `statuses` | Resolves the settings' statuses to the board's lists. | `board`, `statuses[]` (`status`, `names`, `lists`, `target`, `neverRead`), `unmapped[]` (lists no status owns), `transitions`. |
 | `list-cards --status <s>` | The open cards of the status, from every list of it. **Refuses a `neverRead` status** (`refused: "neverRead"`) without asking for its cards. | `status`, `lists[]`, `count`, `cards[]` (a card is below). |
+| `list-cards --board <id> --list <name>` | The open cards of a list on a **watched** board, by the list's name (`*` allowed). The board in the settings is refused (`notAllowed`): it is read by status, so its `neverRead` lists stay unread. | `board`, `lists[]`, `count`, `cards[]` (`status` is `null`). |
 | `read-card <card>` | One card with what hangs on it. Refuses a card in a `neverRead` status. | A card, plus `comments[]`, `attachments[]`, `checklists[]`, `moves[]`, `links[]`. |
 | `find-cards --number <n>` | Cards whose name starts with `#<n>` (the first number of the name is the card's own; copies carry two), **archived too**, on `--board <id>` (repeatable) or the board. `--all-boards` searches the board and the watched ones. | `query`, `count`, `cards[]`: a card without `desc` (a card in a `neverRead` status is found by its name, its text is not returned). |
 | `find-cards --link <url>` | The card behind a card URL or short link, wherever it is and archived too. A link to nothing finds nothing (`count: 0`). | as above |
@@ -66,7 +69,7 @@ All print JSON on stdout: `{ "ok": true, "command": …, … }`. `<card>` is a c
 | `set-description <card> --text <t>` | Replaces the description. **An empty text is refused** (`empty`). The same text is a no-op. | `card`, `changed`. |
 | `create-card --status intake --name <n> [--desc <t>] [--label <name>]...` | Creates a card at the bottom of the `intake` status's first named list. **Any other status is refused** (`intake`). | `id`, `shortLink`, `url`, `status`, `list`, `labels`. |
 
-**A card** (`list-cards`, `read-card`, `find-cards`): `id`, `shortLink`, `url`, `name`, `number` (the first `#NNNN` of the name or `null`), `numbers` (all of them), `desc` (not in `find-cards`), `labels[]` (`id`, `name`, `color`), `lastActivity` (the card's last activity time, ISO), `closed` (archived), `boardId`, `status` (the card's status, or `null` outside the flow or on another board), `list` (`id`, `name`; `name` is `null` on a board the settings don't map).
+**A card** (`list-cards`, `read-card`, `find-cards`): `id`, `shortLink`, `url`, `name`, `number` (the first `#NNNN` of the name or `null`), `numbers` (all of them), `desc` (not in `find-cards`), `labels[]` (`id`, `name`, `color`), `priority` (`high`, `medium` or `low`, see `priority` in Settings), `lastActivity` (the card's last activity time, ISO), `createdAt` (when the card was made, ISO; Trello's id carries it), `closed` (archived), `boardId`, `status` (the card's status, or `null` outside the flow or on another board), `list` (`id`, `name`; `name` is `null` on a board the settings don't map).
 
 **`read-card` also gives:** `comments[]` (`id`, `author` (`id`, `username`), `time`, `text`, `edited`), oldest first and all of them, paged; `attachments[]` (`id`, `name`, `url`, `mimeType`, `bytes`, `isUpload`, `date`); `checklists[]` (`id`, `name`, `items[]` with `id`, `name`, `state`); `moves[]` (`time`, `from`, `to`, each with `id`, `name`, `status`), the card's moves between lists, oldest first; `links[]` (`shortLink`, `url`, `in`: where it was found, `description`, `comment`, `checklist` or `attachment`), the links to other cards, its own excluded. Following a link is the caller's job.
 
@@ -81,6 +84,7 @@ All print JSON on stdout: `{ "ok": true, "command": …, … }`. `<card>` is a c
 | `--dry-run` | Reads still run; every change is printed in `calls[]` (`method`, `path`, `form`, secrets removed) and not sent. It gets a fake id (`dry-run-N`). The output has `"dryRun": true`. |
 | `--status <s>`, `--to <s>` | A status of the settings. |
 | `--number <n>`, `--link <url>`, `--board <id>`, `--all-boards` | `find-cards` and `actions-since`. A board must be the board or a watched board in the settings. |
+| `--list <name>` | `list-cards` on a watched board (with one `--board`). |
 | `--since <time>`, `--types <a,b>` | `actions-since` (and the window of `comment --unless-header`). |
 | `--attachment <id\|name>`, `--out <file>`, `--overwrite` | `download-attachment`. |
 | `--text <t>`, `--text-file <file\|->` | The text of a comment or description; `-` is standard input. Stored exactly, U+200C kept, nothing trimmed. Give one of the two. |
@@ -91,7 +95,7 @@ All print JSON on stdout: `{ "ok": true, "command": …, … }`. `<card>` is a c
 
 ## Exit codes
 
-`0` ok · `1` a call to the tracker failed (a network error, or an HTTP status that is not handled; the JSON has `error`, `call` and `status`) · `2` bad usage, a missing or invalid setting, a missing credential, an unresolved list name, or a refusal. On `1` and `2` stdout holds `{"ok": false, "error": …}` and the message goes to stderr.
+`0` ok · `1` a call to the tracker failed (a network error, or an HTTP status that is not handled; the JSON has `error`, `call` and `status`) · `2` bad usage (an unknown command too, as in the `forge` script), a missing or invalid setting, a missing credential, an unresolved list name, or a refusal. On `1` and `2` stdout holds `{"ok": false, "error": …}` and the message goes to stderr.
 
 A refusal has `refused` in the JSON: `neverRead` (a read of a status the settings never read), `transition` (a move the settings do not list), `intake` (a card created outside intake), `empty` (an empty comment, description or name), `outsideFlow` (a card in a list no status owns, or on another board), `archived`, `notAllowed` (a board the settings don't name, a file that exists), `ambiguous`, `unknown` (a status, label, attachment or card reference that is not one).
 

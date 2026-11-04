@@ -37,8 +37,15 @@ function card(raw) {
     placeId: raw.idList,
     boardId: raw.idBoard,
     lastActivity: raw.dateLastActivity ?? null,
+    createdAt: createdAt(raw.id),
     closed: Boolean(raw.closed),
   };
+}
+
+// When the card was made: a Trello id starts with the creation time, in seconds, as 8 hex digits.
+export function createdAt(id) {
+  if (!/^[0-9a-f]{24}$/.test(String(id ?? ''))) return null;
+  return new Date(parseInt(id.slice(0, 8), 16) * 1000).toISOString();
 }
 
 const person = (m, id) => (m || id ? { id: m?.id ?? id, username: m?.username ?? null } : null);
