@@ -39,7 +39,8 @@ export const LOCAL_DEFAULTS = {
   },
   // The order a step that failed its gate climbs: one retry with the next model up, never down.
   modelLadder: ['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5'],
-  video: { transcriber: 'turboscribe', fallback: 'person', partMinutes: 30, partsPerDay: 3, browserProfile: null, transcriptHours: 2 },
+  // `transcriber`: the name of the host's transcription adapter (none by default). The automatic try needs `browserProfile`.
+  video: { transcriber: null, fallback: 'person', partMinutes: 30, partsPerDay: 3, browserProfile: null, transcriptHours: 2 },
   // What the close step does with a merged ticket's recorded work files (D-074).
   cleanup: { mode: 'trash', keep: DEFAULT_KEEP, trashDir: null },
 };

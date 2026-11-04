@@ -41,7 +41,7 @@ function wallToInstant({ year, month, day, hour, minute }, timeZone) {
   return { ms, exists: back.year === year && back.month === month && back.day === day && back.hour === hour && back.minute === minute };
 }
 
-// A reset as /usage prints it, "Nov 7 at 6am (Europe/Kiev)", as an instant (ms), or null.
+// A reset as /usage prints it, "Nov 7 at 6am (Europe/Paris)", as an instant (ms), or null.
 export function parseReset(text, now = new Date()) {
   const m = /^([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+at\s+(\d{1,2})(?::(\d{2}))?\s*([ap]m)\b\s*(?:\(([^)]+)\))?/i.exec(String(text ?? '').trim());
   if (!m) return null;
