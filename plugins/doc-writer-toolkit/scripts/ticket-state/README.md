@@ -149,7 +149,7 @@ claude -p <brief> --agents <state>/roles/agents.json --agent ticket-<role> --mod
   [--max-budget-usd <usd>] --permission-prompts none --output-format json --allowedTools … --disallowedTools … --add-dir <each target repo>
 ```
 
-The role files are `${CLAUDE_PLUGIN_ROOT}/context/ticket-roles/<role>.md` with `unattended.md` appended to each. The brief names the ticket, the stage, and the exact `record` command. A session passes when every ticket of the step recorded the stage done after it began; else it is retried once with the next model up (`modelLadder`), and a second failure stops the group. Each session's cost (the CLI's estimate, tokens, turns, and the week bar before and after) goes into the ledger's `runs`.
+The role files are `${CLAUDE_PLUGIN_ROOT}/context/ticket-roles/<role>.md` with `unattended.md` appended to each. The brief names the ticket, the stage, and the exact `record` command, each command with the settings file the runner read. A session passes when every ticket of the step recorded the stage done after it began; else it is retried once with the next model up (`modelLadder`), and a second failure stops the group. Each session's cost (the CLI's estimate, tokens, turns, and the week bar before and after) goes into the ledger's `runs`.
 
 **The guard.** A scheduled start or model step runs only while the week's use is below the day's allowance (`/usage` read before and after each session). No reading, no scheduled start. A manual run is not guarded.
 

@@ -76,11 +76,13 @@ export const nextModelUp = (model, ladder) => {
 export function briefFor(step, settings) {
   const root = settings.root;
   const ts = `node ${SCRIPT}`;
+  // The settings file the runner read, so a session of a run started with --settings finds the same one.
+  const at = `--root ${root}${settings.file ? ` --settings ${settings.file}` : ''}`;
   const keys = step.keys.join(', ');
   const rules = Object.entries(settings.hostRules ?? {}).map(([k, v]) => `- ${k}: ${v}`).join('\n');
   const cardOf = (key) => step.cards?.find((c) => c.key === key);
   const recordLine = (key) =>
-    `${ts} record ${key} --root ${root} --stage ${step.stage}${step.pr ? ` --pr ${step.pr}` : ''} --status done${step.stage === 'start' || step.stage === 'triage' ? ` --card ${cardOf(key)?.shortLink ?? '<card>'}` : ''}${step.stage === 'start' ? ` --started-by ${step.startedBy ?? 'schedule'}` : ''} --result ${step.stage === 'start' && step.group ? `'{"group":"${step.group}"}'` : '<json>'}`;
+    `${ts} record ${key} ${at} --stage ${step.stage}${step.pr ? ` --pr ${step.pr}` : ''} --status done${step.stage === 'start' || step.stage === 'triage' ? ` --card ${cardOf(key)?.shortLink ?? '<card>'}` : ''}${step.stage === 'start' ? ` --started-by ${step.startedBy ?? 'schedule'}` : ''} --result ${step.stage === 'start' && step.group ? `'{"group":"${step.group}"}'` : '<json>'}`;
   return [
     `Stage \`${step.stage}\` of ticket${step.keys.length > 1 ? 's' : ''} ${keys}${step.group ? ` (group ${step.group})` : ''}${step.pr ? `, PR ${step.pr}` : ''}.`,
     step.interrupted ? 'The last run of this stage was interrupted: read what it left and finish it.' : null,
@@ -90,8 +92,8 @@ export function briefFor(step, settings) {
     step.cards ? `Cards, highest priority first:\n${step.cards.map((c) => `- ${c.key}: ${c.url ?? c.shortLink} (${c.priority})`).join('\n')}` : null,
     '',
     `Host repo: ${root}`,
-    `Settings (merged): \`${ts} config --root ${root}\``,
-    `The ticket now: \`${ts} status --root ${root} --ticket ${step.keys[0]}\``,
+    `Settings (merged): \`${ts} config ${at}\``,
+    `The ticket now: \`${ts} status ${at} --ticket ${step.keys[0]}\``,
     rules ? `Host rules:\n${rules}` : null,
     '',
     'When the stage ends, record it, one command per call, for each ticket:',

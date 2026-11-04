@@ -8,7 +8,7 @@ import { makeClients } from '../lib/world.mjs';
 import { runRecord } from '../lib/record.mjs';
 import { lockOf } from '../lib/locks.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
-import { ROLE_DIR, agentsFile, collectSteps, commandFor, nextModelUp, proposeRoles, readRole, runDaily } from '../lib/runner.mjs';
+import { ROLE_DIR, agentsFile, briefFor, collectSteps, commandFor, nextModelUp, proposeRoles, readRole, runDaily } from '../lib/runner.mjs';
 import { localDate } from '../lib/report.mjs';
 
 // The daily run: finishing first, the morning triage, starts within the limits; one `claude -p` session per model
@@ -171,6 +171,13 @@ test('a manual morning run that names an intake card triages that card only; a s
   assert.deepEqual(manual.triage.keys, ['503']);
   const scheduled = await runDaily({ settings: w.settings, clients: w.clients(), io, options: { dryRun: true, morning: true } });
   assert.deepEqual([...scheduled.triage.keys].sort(), ['503', '504']);
+});
+
+test('the brief passes the settings file the runner read to every command it names', () => {
+  const { w } = busyWorld();
+  const brief = briefFor({ stage: 'plan', role: 'writer', keys: ['502'], group: '502' }, { ...w.settings, file: '/elsewhere/flow.json' });
+  for (const cmd of ['config', 'status', 'record 502']) assert.match(brief, new RegExp(`${cmd} --root \\S+ --settings /elsewhere/flow\\.json`));
+  assert.doesNotMatch(briefFor({ stage: 'plan', role: 'writer', keys: ['502'], group: '502' }, { ...w.settings, file: undefined }), /--settings/);
 });
 
 test('finishing comes first: merged, ready for merge, the chain, comments, answers, writing; higher priority first within a kind', () => {
