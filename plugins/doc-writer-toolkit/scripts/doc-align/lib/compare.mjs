@@ -1,11 +1,13 @@
 // Compares two parsed pages and sorts the findings into bugs, warnings and passed. `check` is the Check number
 // in skills/doc-alignment-checker/SKILL.md, null for the counts that have no Check of their own (images, links,
-// admonitions). Severity follows the skill: heading count and levels and code blocks are bugs, the rest warnings.
+// admonitions). Severity follows the skill: heading count and levels, code blocks and Cyrillic left in the EN page's
+// code text are bugs, the rest warnings.
 // With a names table (--names), Check 12 also compares the names of organizations against it.
 
 import { parse } from './parse.mjs';
 import { detectUa, enHeadingIds, headingComments, headingText, uaHeadingId } from './headings.mjs';
 import { findNames, searchable } from './names.mjs';
+import { codeDiff, cyrillicText, fenceParts } from './fences.mjs';
 
 const trunc = (s, n = 80) => (s.length <= n ? s : `${s.slice(0, n - 1)}…`);
 const hLabel = (h) => `${'#'.repeat(h.level)} ${trunc(headingText(h.raw))}`;
@@ -128,18 +130,34 @@ function checkTables(r, m, s) {
   });
 }
 
+// Check 6 compares each block's code part (code-blocks.md, fences.mjs): a diagram by its ids, keywords, arrows and
+// lines, any other block by everything but its comments and tree descriptions. Those are translated.
 function checkCode(r, m, s) {
-  r.sub(6, 'Code blocks identical', () => {
+  r.sub(6, 'Code blocks keep their code', () => {
     if (m.fences.length !== s.fences.length) {
       r.bug(6, 'CODE-BLOCK-MISMATCH', `main has ${m.fences.length} code block(s), secondary has ${s.fences.length}`, s.fences.at(-1)?.line ?? 1, r.secondary);
       return;
     }
     m.fences.forEach((mf, i) => {
       const sf = s.fences[i];
-      if (mf.lines.join('\n') === sf.lines.join('\n')) return;
-      let k = 0;
-      while (k < mf.lines.length && k < sf.lines.length && mf.lines[k] === sf.lines[k]) k++;
-      r.bug(6, 'CODE-BLOCK-MISMATCH', `code block ${i + 1} differs from line ${k + 1} of the block (contents must be byte-for-byte identical)`, sf.line + 1 + k, r.secondary);
+      const k = codeDiff(mf, sf);
+      if (k < 0) return;
+      const what = fenceParts(mf.info, mf.lines).kind === 'diagram' ? 'the diagram ids, keywords, arrows and lines' : 'the code, data and line count';
+      r.bug(6, 'CODE-BLOCK-MISMATCH', `code block ${i + 1} differs from line ${k + 1} of the block (${what} must be identical; only labels, comments and descriptions are translated)`, sf.line + 1 + k, r.secondary);
+    });
+  });
+}
+
+// Check 9, inside code blocks: Cyrillic left in the EN page's diagram labels, code comments and tree descriptions. The
+// prose part of Check 9 is the skill's. Data in a block (a JSON value, a string) keeps its Cyrillic.
+function checkCodeText(r, m, s) {
+  r.sub(9, 'No Cyrillic in EN diagram labels or code comments', () => {
+    if (!r.ua) return false;
+    const [en, enFile] = r.ua === 'main' ? [s, r.secondary] : [m, r.main];
+    en.fences.forEach((f, i) => {
+      for (const t of cyrillicText(f.info, f.lines)) {
+        r.bug(9, 'CYRILLIC-IN-EN-CODE-TEXT', `code block ${i + 1}: '${trunc(t.text, 60)}' is a label, comment or description left untranslated`, f.line + 1 + t.line, enFile);
+      }
     });
   });
 }
@@ -223,6 +241,7 @@ export function compare(mainText, secondaryText, { mainPath = 'main', secondaryP
   checkHeadingIds(r, m, s);
   checkTables(r, m, s);
   checkCode(r, m, s);
+  checkCodeText(r, m, s);
   countCheck(r, 7, '<details> block count', 'DETAILS-BLOCK-COUNT-MISMATCH', m.details, s.details);
   checkMarkers(r, m, s);
   countCheck(r, null, 'Image count', 'IMAGE-COUNT-MISMATCH', m.images, s.images);
