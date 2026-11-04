@@ -135,7 +135,7 @@ Don't translate, check or record pages yourself, and don't read the workers' can
 Workers keep to the rules and flag what they doubt. Nobody reviews a further locale after the run, so decide every flag here, in the order of `locale-translation.md` T6, and list each decision in the report for information. Read every `results.jsonl` (`termFlags`, `linkTitles`, `notes`); still don't read the candidate files.
 
 1. **Terms.** For each `termFlags` entry, run `LS terms <UA term> --locales <locale>` (add the UA plural when the app may name the concept in the plural, as a menu or a tab does) and decide:
-   - The app shows a string for this term in the locale (`ui`) → that string (T1).
+   - The app shows a string for this term in the locale (`ui`; reason `app` says so) → that string (T1).
    - The recorded translation is the app's word for another concept (T5) → your own translation, checked against the UI strings and term rows in the lookup.
    - Otherwise the recorded translation stays (T2). Reading better is no reason to change it, and a worker never writes another word.
 
