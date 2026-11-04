@@ -64,7 +64,7 @@ Run `doc-style-fixer <path> apply:mechanical,substantive` with the same `guide:`
 The list is built from what changed on disk, not from memory of the fixer's report.
 
 1. Run `git diff --no-index --word-diff=plain <run>/<page id>.before.md <path>`. Every `[-…-]{+…+}` is a change.
-2. Match each change to the finding it applies, by the reviewer card's location and suggested fix and by the fixer's report. **One item per applied finding.** A finding fixed in several places (the reviewer's occurrence sweep) is one item with several places. Changes of two findings that touch or overlap are one item naming both rules.
+2. Match each change to the finding it applies, by the reviewer card's location and suggested fix and by the fixer's report. **One item per applied finding.** A finding fixed in several places (the reviewer's occurrence sweep) is one item with several places. Changes of two findings that touch or overlap are one item naming both rules: `rule` holds the first, `alsoRules` the others.
 3. A change that matches no finding is still an item, with the rule `no finding: changed outside the report`. Say in Step 5 that it should be undone.
 4. Each place keeps `line` (in the fixed page), `before` and `after`. They are exact substrings, copied from the snapshot and from the fixed page, never retyped: `’` and `'`, `—` and `-`, `«` and `"` are different characters. Both carry the same surrounding words, widened until `before` occurs exactly once in the snapshot and `after` exactly once in the fixed page.
 5. Each bucket 3 finding becomes a question: its text on the page, its rule and the question the fixer asked.
@@ -141,7 +141,7 @@ The excerpts shown are the record's. Only a long one (over about 120 characters)
    {"date":"2026-11-04","page":"docs/balance/balance.md","guide":"gdsg@uk","rule":{"file":"ua-grammar/01a-vowels-alternations.md","id":"§7"},"finding":"[UA-SPELLING] Straight apostrophe","before":"обов'язково перегляньте","after":"обов’язково перегляньте","decision":"rejected"}
    ```
 
-   `before` and `after` are the first place's; an item with several places adds `"places": <count>`. One line per item, no line breaks inside it.
+   `before` and `after` are the first place's; an item with several places adds `"places": <count>`. An item with `alsoRules` gets one line per rule, the same decision on each, so every rule's count stays right. No line breaks inside a line.
 5. In the pass record, add the answer and set `"closed": true`.
 
 ## Step 7 — Propose an exception for a rule rejected three times
