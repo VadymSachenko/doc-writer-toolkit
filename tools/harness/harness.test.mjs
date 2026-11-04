@@ -6,7 +6,7 @@ import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { kitSource, makeFixture, resolveKit } from './fixture.mjs';
 import { changedPaths, check, frontmatterProblem, headingIdProblems, linkProblem, pageLinks, wasRead } from './assertions.mjs';
-import { builtInChecks, harnessSettings, loadCase, overLimit, parseUsage, readTranscript, summarize } from './run.mjs';
+import { builtInChecks, harnessSettings, loadCase, overLimit, parseReset, parseUsage, readTranscript, summarize, weekAllowance } from './run.mjs';
 import { compare, verdict } from './compare.mjs';
 import { coin, mask } from './blind.mjs';
 
@@ -186,35 +186,157 @@ test('the bundled cases load', () => {
   }
 });
 
-test('usage: parses the /usage bars, and the limits stop at or above the threshold', () => {
+// Recorded /usage texts (2026-11-04). The reset prints as "6am" and, on the same day, as "5:59am".
+const usageText = (week, reset = 'Nov 7 at 5:59am (Europe/Kiev)', extra = '') => `Current session: 21% used · resets Nov 4 at 12:10pm (Europe/Kiev)\nCurrent week (all models): ${week}% used · resets ${reset}\n${extra}`;
+const fableLine = 'Current week (Fable): 0% used · resets Nov 7 at 6am (Europe/Kiev)\n';
+const daily = { maxSessionPercent: 80, dailyWeekPercent: 10, maxWeekPercent: null };
+const at = (iso) => new Date(iso);
+
+test('usage: parses the /usage bars; the session limit stops at or above the threshold', () => {
   const text = 'Current session: 81% used · resets Oct 24 at 3:40pm (Europe/Kiev)\nCurrent week (all models): 12% used · resets Oct 31 at 6am (Europe/Kiev)\n';
   const usage = parseUsage(text);
   assert.deepEqual(usage.session, { percent: 81, resets: 'Oct 24 at 3:40pm (Europe/Kiev)' });
-  assert.equal(usage.week.percent, 12);
-  assert.match(overLimit(usage, { maxSessionPercent: 80, maxWeekPercent: 50 }), /5-hour session is at 81%/);
-  assert.equal(overLimit(usage, { maxSessionPercent: 90, maxWeekPercent: 50 }), null);
-  assert.match(overLimit(usage, { maxSessionPercent: 90, maxWeekPercent: 12 }), /week is at 12%/);
+  assert.deepEqual(usage.week, { percent: 12, resets: 'Oct 31 at 6am (Europe/Kiev)' });
+  const now = at('2026-10-26T10:00:00Z'); // day 2 of the week that resets Oct 31
+  assert.match(overLimit(usage, daily, now), /5-hour session is at 81%/);
+  assert.equal(overLimit(usage, { ...daily, maxSessionPercent: 90 }, now), null);
   assert.deepEqual(parseUsage('You are using an API key'), { session: null, week: null });
-  assert.equal(overLimit(parseUsage(''), { maxSessionPercent: 0, maxWeekPercent: 0 }), null);
+  assert.equal(overLimit(parseUsage(''), { maxSessionPercent: 0, dailyWeekPercent: 0, maxWeekPercent: 0 }), null);
+});
+
+test('reset: both time formats, the zone across DST, no year, the leap day', () => {
+  const now = at('2026-11-04T08:00:00Z');
+  const iso = (t, n = now) => new Date(parseReset(t, n)).toISOString();
+  assert.equal(iso('Nov 7 at 6am (Europe/Kiev)'), '2026-11-07T04:00:00.000Z');
+  assert.equal(iso('Nov 7 at 5:59am (Europe/Kiev)'), '2026-11-07T03:59:00.000Z');
+  assert.equal(iso('Nov 7 at 12pm (Europe/Kiev)'), '2026-11-07T10:00:00.000Z');
+  assert.equal(iso('Nov 7 at 12am (UTC)'), '2026-11-07T00:00:00.000Z');
+  // Kyiv leaves summer time on Oct 25, 2026: +3 before the switch, +2 after it.
+  const oct = at('2026-10-20T08:00:00Z');
+  assert.equal(iso('Oct 20 at 6am (Europe/Kiev)', oct), '2026-10-20T03:00:00.000Z');
+  assert.equal(iso('Oct 25 at 6am (Europe/Kiev)', oct), '2026-10-25T04:00:00.000Z');
+  // New York leaves summer time on Nov 1, 2026.
+  assert.equal(iso('Nov 1 at 6am (America/New_York)', oct), '2026-11-01T11:00:00.000Z');
+  assert.equal(iso('Oct 31 at 6am (America/New_York)', oct), '2026-10-31T10:00:00.000Z');
+  // The year: the next occurrence, or one that is less than a day past.
+  assert.equal(iso('Jan 2 at 6am (Europe/Kiev)', at('2026-12-30T10:00:00Z')), '2027-01-02T04:00:00.000Z');
+  assert.equal(iso('Dec 31 at 6am (Europe/Kiev)', at('2027-01-01T01:00:00Z')), '2026-12-31T04:00:00.000Z');
+  assert.equal(iso('Nov 7 at 6am (Europe/Kiev)', at('2026-11-07T09:00:00Z')), '2026-11-07T04:00:00.000Z');
+  assert.equal(iso('Nov 7 at 6am (Europe/Kiev)', at('2026-11-09T09:00:00Z')), '2027-11-07T04:00:00.000Z');
+  assert.equal(iso('Feb 29 at 6am (UTC)', at('2027-02-20T00:00:00Z')), '2028-02-29T06:00:00.000Z');
+  // Unreadable.
+  for (const bad of [null, '', 'soon', 'Nov 7', 'Nov 7 at 6 (Europe/Kiev)', 'Nov 7 at 13am (UTC)', 'Foo 7 at 6am (UTC)', 'Feb 30 at 6am (UTC)', 'Nov 7 at 6am (Mars/Olympus)']) {
+    assert.equal(parseReset(bad, now), null, String(bad));
+  }
+  // A wall-clock time the zone skips (Kyiv jumps from 3:00 to 4:00 on Mar 29, 2026).
+  assert.equal(parseReset('Mar 29 at 3:30am (Europe/Kiev)', at('2026-03-20T00:00:00Z')), null);
+  assert.equal(new Date(parseReset('Mar 29 at 4:30am (Europe/Kiev)', at('2026-03-20T00:00:00Z'))).toISOString(), '2026-03-29T01:30:00.000Z');
+});
+
+test('allowance: each day of the window, 10% a day, stops at the day\'s figure', () => {
+  // The reset is Sat Nov 7, 5:59 Kyiv (03:59Z), so the window starts Sat Oct 31 at 03:59Z. Day n is [start + (n-1) d, start + n d).
+  const start = Date.parse('2026-10-31T03:59:00Z');
+  for (let day = 1; day <= 7; day++) {
+    for (const offsetMin of [0, 13 * 60, 24 * 60 - 1]) {
+      const now = new Date(start + (day - 1) * 86400000 + offsetMin * 60000);
+      const below = usageText(10 * day - 1);
+      const atFigure = usageText(10 * day);
+      assert.equal(overLimit(parseUsage(below), daily, now), null, `day ${day} +${offsetMin} min, ${10 * day - 1}%`);
+      assert.match(overLimit(parseUsage(atFigure), daily, now), new RegExp(`week is at ${10 * day}% \\(allowance ${10 * day}%: 10% a day, day ${day} of 7\\)`), `day ${day} +${offsetMin} min`);
+    }
+  }
+  // The example: on Wednesday 10:00 (Kyiv) it is day 5, so a run is allowed below 50%.
+  const wed = at('2026-11-04T08:00:00Z');
+  assert.deepEqual(weekAllowance(parseUsage(usageText(39)).week, daily, wed), { day: 5, allowance: 50, cap: 50 });
+  assert.equal(overLimit(parseUsage(usageText(39)), daily, wed), null);
+  assert.equal(overLimit(parseUsage(usageText(49)), daily, wed), null);
+  assert.match(overLimit(parseUsage(usageText(50)), daily, wed), /week is at 50%/);
+  // The "6am" form reads the same way.
+  assert.equal(overLimit(parseUsage(usageText(49, 'Nov 7 at 6am (Europe/Kiev)')), daily, wed), null);
+  assert.match(overLimit(parseUsage(usageText(50, 'Nov 7 at 6am (Europe/Kiev)')), daily, wed), /week is at 50%/);
+});
+
+test('allowance: the day is clamped to the window, the figure to 100, and a day can add more than 10', () => {
+  const week = { percent: 0, resets: 'Nov 7 at 6am (Europe/Kiev)' };
+  assert.equal(weekAllowance(week, daily, at('2026-10-30T00:00:00Z')).day, 1); // a clock before the window
+  assert.equal(weekAllowance(week, daily, at('2026-11-07T08:00:00Z')).day, 7); // the reset just passed
+  assert.equal(weekAllowance(week, { ...daily, dailyWeekPercent: 20 }, at('2026-11-06T08:00:00Z')).allowance, 100);
+  assert.equal(weekAllowance(week, { ...daily, dailyWeekPercent: 20 }, at('2026-11-04T08:00:00Z')).allowance, 100);
+  assert.equal(weekAllowance(week, { ...daily, dailyWeekPercent: 25 }, at('2026-11-02T08:00:00Z')).allowance, 75);
+});
+
+test('allowance: a reset across the end of a month and of a year', () => {
+  // Reset Sun Nov 1, 5:59 Kyiv (03:59Z; the clocks went back on Oct 25): the window starts Oct 25 at 03:59Z.
+  const monthEnd = 'Nov 1 at 5:59am (Europe/Kiev)';
+  const cases = [['2026-10-25T10:00:00Z', 1], ['2026-10-27T10:00:00Z', 3], ['2026-10-31T10:00:00Z', 7]];
+  for (const [iso, day] of cases) {
+    assert.deepEqual(weekAllowance({ percent: 0, resets: monthEnd }, daily, at(iso)), { day, allowance: 10 * day, cap: 10 * day }, iso);
+  }
+  assert.equal(overLimit(parseUsage(usageText(69, monthEnd)), daily, at('2026-10-31T10:00:00Z')), null);
+  assert.match(overLimit(parseUsage(usageText(70, monthEnd)), daily, at('2026-10-31T10:00:00Z')), /week is at 70%/);
+  // Reset Sat Jan 2, 2027, 6am Kyiv: Dec 31 is day 6.
+  assert.equal(weekAllowance({ percent: 0, resets: 'Jan 2 at 6am (Europe/Kiev)' }, daily, at('2026-12-31T10:00:00Z')).day, 6);
+});
+
+test('allowance: the per-model week lines are ignored', () => {
+  const wed = at('2026-11-04T08:00:00Z');
+  const fable90 = 'Current week (Fable): 90% used · resets Nov 7 at 6am (Europe/Kiev)\n';
+  assert.equal(overLimit(parseUsage(usageText(39, undefined, fableLine)), daily, wed), null);
+  assert.equal(overLimit(parseUsage(usageText(39, undefined, fable90)), daily, wed), null);
+  // Even above the all-models line, and with a different reset.
+  const before = `Current week (Fable): 90% used · resets Nov 9 at 6am (Europe/Kiev)\n${usageText(39)}`;
+  assert.deepEqual(parseUsage(before).week, { percent: 39, resets: 'Nov 7 at 5:59am (Europe/Kiev)' });
+  assert.equal(overLimit(parseUsage(before), daily, wed), null);
+  // Only a per-model week line: no plan bar for the guard to read.
+  assert.equal(parseUsage(fable90).week, null);
+});
+
+test('allowance: maxWeekPercent, when set, lowers the figure; the smaller cap wins', () => {
+  const wed = at('2026-11-04T08:00:00Z'); // day 5, allowance 50
+  assert.match(overLimit(parseUsage(usageText(35)), { ...daily, maxWeekPercent: 30 }, wed), /week is at 35% \(limit 30%\)/);
+  assert.equal(overLimit(parseUsage(usageText(29)), { ...daily, maxWeekPercent: 30 }, wed), null);
+  assert.match(overLimit(parseUsage(usageText(55)), { ...daily, maxWeekPercent: 80 }, wed), /allowance 50%: 10% a day, day 5 of 7/);
+  assert.equal(overLimit(parseUsage(usageText(45)), { ...daily, maxWeekPercent: 80 }, wed), null);
+});
+
+test('allowance: a reset that can\'t be read stops the run with a message that says so', () => {
+  const wed = at('2026-11-04T08:00:00Z');
+  for (const reset of ['soon', 'later', 'Nov 7 at 6am (Mars/Olympus)', 'Nov 7']) {
+    const reason = overLimit(parseUsage(usageText(1, reset)), daily, wed);
+    assert.match(reason, /reset can't be read from \/usage/, reset);
+    assert.match(reason, /not running blind/, reset);
+    assert.ok(reason.includes(`"${reset}"`), reset);
+  }
+  // The week line printed with no reset at all.
+  const noReset = overLimit(parseUsage('Current session: 5% used\nCurrent week (all models): 1% used\n'), daily, wed);
+  assert.match(noReset, /no reset printed/);
+  // A high session reading still reports first.
+  assert.match(overLimit(parseUsage('Current session: 95% used · resets later\nCurrent week (all models): 1% used · resets later\n'), daily, wed), /5-hour session/);
 });
 
 test('settings: defaults, then local.json, then HARNESS_* variables', () => {
   const dir = tmp();
   const file = path.join(dir, 'local.json');
-  assert.deepEqual(harnessSettings({}, file), { mode: 'on', maxSessionPercent: 80, maxWeekPercent: 50 });
+  assert.deepEqual(harnessSettings({}, file), { mode: 'on', maxSessionPercent: 80, dailyWeekPercent: 10, maxWeekPercent: null });
   fs.writeFileSync(file, JSON.stringify({ mode: 'off', maxWeekPercent: 20 }));
-  assert.deepEqual(harnessSettings({}, file), { mode: 'off', maxSessionPercent: 80, maxWeekPercent: 20 });
-  assert.deepEqual(harnessSettings({ HARNESS_MODE: 'on', HARNESS_MAX_SESSION_PERCENT: '30' }, file), { mode: 'on', maxSessionPercent: 30, maxWeekPercent: 20 });
+  assert.deepEqual(harnessSettings({}, file), { mode: 'off', maxSessionPercent: 80, dailyWeekPercent: 10, maxWeekPercent: 20 });
+  fs.writeFileSync(file, JSON.stringify({ maxSessionPercent: 100, dailyWeekPercent: 15 }));
+  assert.deepEqual(harnessSettings({}, file), { mode: 'on', maxSessionPercent: 100, dailyWeekPercent: 15, maxWeekPercent: null });
+  assert.deepEqual(harnessSettings({ HARNESS_MODE: 'on', HARNESS_MAX_SESSION_PERCENT: '30', HARNESS_DAILY_WEEK_PERCENT: '5' }, file), { mode: 'on', maxSessionPercent: 30, dailyWeekPercent: 5, maxWeekPercent: null });
 });
 
-// A stand-in for the CLI: `/usage` prints FAKE_SESSION% and FAKE_WEEK%; a run prints a passing transcript.
+// A stand-in for the CLI: `/usage` prints FAKE_SESSION%, FAKE_WEEK% and the week's reset (FAKE_WEEK_RESET, or in about 3 days: day 5, 50% allowed);
+// a run prints a passing transcript.
 function fakeClaude(dir) {
   const bin = path.join(dir, 'fake-claude.mjs');
   fs.writeFileSync(bin, `#!/usr/bin/env node
 const args = process.argv.slice(2);
 if (args[1] === '/usage') {
   console.log('Current session: ' + process.env.FAKE_SESSION + '% used · resets soon');
-  console.log('Current week (all models): ' + (process.env.FAKE_WEEK ?? '1') + '% used · resets later');
+  const soon = new Date(Date.now() + 3 * 86400000);
+  const reset = process.env.FAKE_WEEK_RESET || soon.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' }) + ' ' + soon.getUTCDate() + ' at 6am (UTC)';
+  console.log('Current week (all models): ' + (process.env.FAKE_WEEK ?? '1') + '% used · resets ' + reset);
+  console.log('Current week (Fable): 0% used · resets ' + reset);
   process.exit(0);
 }
 const sentinel = args[args.indexOf('--plugin-dir') + 1].split('/').pop();
@@ -227,7 +349,7 @@ console.log(JSON.stringify({ type: 'result', subtype: 'success', num_turns: 1, t
 
 const runner = path.join(path.dirname(new URL(import.meta.url).pathname), 'run.mjs');
 const plugin = path.join(path.dirname(new URL(import.meta.url).pathname), '..', '..', 'plugins', 'doc-writer-toolkit');
-const harness = (args, env) => spawnSync('node', [runner, '--tree', plugin, ...args], { encoding: 'utf8', env: { ...process.env, HARNESS_MAX_SESSION_PERCENT: '', HARNESS_MAX_WEEK_PERCENT: '', HARNESS_MODE: '', ...env } });
+const harness = (args, env) => spawnSync('node', [runner, '--tree', plugin, ...args], { encoding: 'utf8', env: { ...process.env, HARNESS_MAX_SESSION_PERCENT: '', HARNESS_MAX_WEEK_PERCENT: '', HARNESS_DAILY_WEEK_PERCENT: '', HARNESS_MODE: '', ...env } });
 
 // A plain case with no kit: the runner tests build no kit, so they pass in a shallow clone too.
 function plainCase(dir) {
@@ -250,7 +372,17 @@ test('runner: off makes no run; the guard stops before a run; --resume skips fin
   assert.match(stopped.stdout, /stopped before plain-case run 1: the 5-hour session is at 95%/);
   assert.equal(JSON.parse(fs.readFileSync(path.join(out, 'x', 'pass.json'), 'utf8')).cases.length, 0);
 
-  const first = harness(['--label', 'x', '--case', plain, '--runs', '1', '--out', out, '--claude', claude], { FAKE_SESSION: '10' });
+  // The week: about 3 days to the reset is day 5, so 50% is allowed; 60% stops, 20% runs.
+  const overAllowance = harness(['--label', 'x', '--case', plain, '--runs', '1', '--out', out, '--claude', claude], { FAKE_SESSION: '10', FAKE_WEEK: '60' });
+  assert.equal(overAllowance.status, 4);
+  assert.match(overAllowance.stdout, /stopped before plain-case run 1: the week is at 60% \(allowance 50%: 10% a day, day 5 of 7\)/);
+  // A reset the guard can't read stops the run, and says so.
+  const blind = harness(['--label', 'x', '--case', plain, '--runs', '1', '--out', out, '--claude', claude], { FAKE_SESSION: '10', FAKE_WEEK_RESET: 'soon' });
+  assert.equal(blind.status, 4);
+  assert.match(blind.stdout, /stopped before plain-case run 1: the week is at 1%, but its reset can't be read from \/usage \("soon"\).*not running blind/);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(out, 'x', 'pass.json'), 'utf8')).cases.length, 0);
+
+  const first = harness(['--label', 'x', '--case', plain, '--runs', '1', '--out', out, '--claude', claude], { FAKE_SESSION: '10', FAKE_WEEK: '20' });
   assert.equal(first.status, 0, first.stderr);
   const run = JSON.parse(fs.readFileSync(path.join(out, 'x', 'plain-case', 'run-1', 'assertions.json'), 'utf8'));
   assert.equal(run.find((c) => c.name === 'sentinel-loaded').pass, true);
@@ -306,7 +438,7 @@ test('runner: a harness copy outside any repo reads kit sources from the tree; a
   fs.writeFileSync(missing, JSON.stringify({ id: 'missing-case', fixture: { shape: 'single', kit: { files: { 'a.md': { git: `${absent}:README.md` } } } }, prompt: 'p', assertions: [] }));
   const plain = plainCase(dir);
   const run = spawnSync('node', [path.join(copy, 'run.mjs'), '--tree', plugin, '--label', 'x', '--case', `${kitCase},${missing},${plain}`, '--runs', '1', '--out', out, '--claude', claude],
-    { cwd: dir, encoding: 'utf8', env: { ...process.env, HARNESS_MAX_SESSION_PERCENT: '', HARNESS_MAX_WEEK_PERCENT: '', HARNESS_MODE: '', FAKE_SESSION: '10' } });
+    { cwd: dir, encoding: 'utf8', env: { ...process.env, HARNESS_MAX_SESSION_PERCENT: '', HARNESS_MAX_WEEK_PERCENT: '', HARNESS_DAILY_WEEK_PERCENT: '', HARNESS_MODE: '', FAKE_SESSION: '10' } });
   assert.equal(run.status, 1, run.stderr);
   assert.match(run.stderr, /missing-case: not run: a\.md: the kit needs commit 0123456789abcdef0123456789abcdef01234567: fetch full history/);
   const pass = JSON.parse(fs.readFileSync(path.join(out, 'x', 'pass.json'), 'utf8'));
