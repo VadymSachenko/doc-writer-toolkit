@@ -449,8 +449,8 @@ test('Check 12: names table parsing', () => {
   assert.deepEqual(parseNamesTable('## Terms\n\n| a | b |\n|---|---|\n| x | y |\n'), { found: false, rows: [] });
   // The same table in both glossaries gives each row once.
   assert.equal(mergeRows([parseNamesTable(NAMES_UA), parseNamesTable(NAMES_EN)]).length, 4);
-  assert.equal(looseKey('Моно банк'), looseKey('Monobank'));
-  assert.equal(looseKey('ПриватБанк'), looseKey('PrivatBank'));
+  assert.equal(looseKey('Соно банк'), looseKey('Sonobank'));
+  assert.equal(looseKey('ВітрБанк'), looseKey('VitrBank'));
 });
 
 test('Check 12: a UA/EN pair from the table is not a mismatch', () => {
@@ -503,10 +503,10 @@ test('Check 12: a name in one page only, and words that only look like a name', 
   assert.match(r.warnings[0].description, /'Банк Світанок' \/ 'Svitanok Bank' is named in main \(1x\), not in secondary/);
   // "a pay slip" is not A-Pay; a link target and a URL are not prose.
   assert.ok(!compare(NUA, NEN, { names: tableOf(NAMES_UA) }).names.found.some((f) => f.en === 'A-Pay'));
-  // A name in capitals only is not the ordinary word: "Click" and "click" are not CLICK.
-  const caps = { tables: [{ file: 'g.md', found: true }], rows: [{ ua: 'CLICK', en: 'CLICK', source: '' }] };
-  const en = 'Click **Save**, then click the row. Pay with CLICK or Click-Pay. Pay with ClicK.\n';
-  assert.deepEqual(findNames(searchable(en.split('\n')), caps.rows, 'en').map((h) => [h.text, h.exact]), [['CLICK', true], ['ClicK', false]]);
+  // A name in capitals only is not the ordinary word: "Tap" and "tap" are not TAP.
+  const caps = { tables: [{ file: 'g.md', found: true }], rows: [{ ua: 'TAP', en: 'TAP', source: '' }] };
+  const en = 'Tap **Save**, then tap the row. Pay with TAP or Tap-Pay. Pay with TaP.\n';
+  assert.deepEqual(findNames(searchable(en.split('\n')), caps.rows, 'en').map((h) => [h.text, h.exact]), [['TAP', true], ['TaP', false]]);
 });
 
 test('Check 12: no names table, or no UA page', () => {

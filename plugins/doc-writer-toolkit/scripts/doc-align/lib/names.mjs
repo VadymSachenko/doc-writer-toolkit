@@ -45,8 +45,8 @@ export function mergeRows(tables) {
   return [...seen.values()];
 }
 
-// Loose key. The transliteration only serves matching: forms that sound alike get the same key, so «Монобанк»,
-// «Моно банк» and "Monobank" are one name. i/y, g/h, w/v and kh/h are folded on both sides.
+// Loose key. The transliteration only serves matching: forms that sound alike get the same key, so «Сонобанк»,
+// «Соно банк» and "Sonobank" are one name. i/y, g/h, w/v and kh/h are folded on both sides.
 const TRANSLIT = {
   а: 'a', б: 'b', в: 'v', г: 'h', ґ: 'g', д: 'd', е: 'e', є: 'e', ж: 'zh', з: 'z', и: 'i', і: 'i', ї: 'i', й: 'i',
   к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'h', ц: 'ts', ч: 'ch',
@@ -132,10 +132,10 @@ export function findNames(text, rows, lang) {
       const p = prepared.find((x) => keys.some((k) => x.keys.has(k)));
       if (!p) continue;
       // A name written as more or fewer words than its form counts only when every word has at least three
-      // letters, so "a bank" is never read as a spelling of "A-Bank".
+      // letters, so "a pay slip" is never read as a spelling of "A-Pay".
       if (!p.sizes.includes(n) && run.some((w) => [...w.w].length < 3)) continue;
-      // A name written in capitals only (CLICK, PUMB) counts only with two capitals or more, so the word "click"
-      // or "Click" at the start of a sentence is never read as a spelling of it.
+      // A name written in capitals only (TAP, KVB) counts only with two capitals or more, so the word "tap"
+      // or "Tap" at the start of a sentence is never read as a spelling of it.
       if (p.capsOnly && !/\p{Lu}.*\p{Lu}/u.test(str)) continue;
       hit = { p, n, str };
     }
