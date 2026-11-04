@@ -54,60 +54,57 @@ export async function runRecord(s, { selectors = [], candidate = null, unverifie
   }
   const given = unverifiedFile ? await readJson(path.resolve(unverifiedFile)) : [];
   if (!Array.isArray(given)) throw new CliError(`${unverifiedFile} must contain a JSON array of UA spans (or { span, reason } objects).`, { code: 2 });
-  const iso = date ?? today();
-
   const results = [];
-  for (const page of pages) {
-    for (const locale of targets) {
-      const c = await checkTranslation(s, page, locale, { candidate, unverified: given });
-      if (!c.ok) {
-        results.push({ page: page.ref, locale, recorded: false, failures: c.failures, note: 'The state was not advanced and no file was written.' });
-        continue;
-      }
-
-      // The recorded `unverified` list: this run's entries plus earlier ones, minus spans that left the page or now verify.
-      const expectedFor = (span) => {
-        const decision = c.state.spans[span];
-        return decision?.startsWith('label:') ? c.labels?.[locale]?.[decision.slice(6)] : undefined;
-      };
-      let present;
-      let verified;
-      let assetFallbacks = [];
-      if (page.kind === 'category') {
-        // The category's messages go into the locale's current.json; nothing else in that file is touched.
-        if (!dryRun && candidate) await applyCategoryMessages(s, c.category);
-        present = new Set(c.category.parsed.fields.map((f) => f.ua));
-        verified = (span) => c.category.target.entries.some((e) => e.field === 'label' && e.ua === span && expectedFor(span) !== undefined && c.category.messages.get(e.entryKey) === expectedFor(span));
-      } else {
-        // Finalize the file: last_update.date goes into the translation only.
-        const finalText = setLastUpdate(c.targetText, formatLike(c.uaText, iso));
-        if (!dryRun && (candidate || finalText !== c.targetText)) await writeFileAtomic(abs(s, c.file), finalText);
-        present = new Set(boldSpans(splitCode(c.uaText).prose));
-        const prose = splitCode(finalText).prose.join('\n');
-        verified = (span) => expectedFor(span) !== undefined && prose.includes(`**${expectedFor(span)}**`);
-        assetFallbacks = await currentFallbacks(s, page, locale, c.uaText);
-      }
-      const merged = new Map();
-      for (const u of [...(c.state.locales[locale]?.unverified ?? []), ...given]) merged.set(spanOf(u), u);
-      for (const [span] of merged) if (!present.has(span) || verified(span)) merged.delete(span);
-
-      const entry = {
-        sourceBlob: page.blob,
-        labelSnapshot: c.store?.meta.commit ?? null,
-        translatedAt: iso,
-        unverified: [...merged.values()],
-        assetFallbacks,
-      };
-      // Re-read under the lock: the workers of other locales record this page's state file in parallel.
-      if (!dryRun) {
-        const file = statePath(page);
-        await withLock(file, async () => {
-          const fresh = await readState(page);
-          await writeJson(file, { ...fresh, locales: { ...fresh.locales, [locale]: entry } });
-        });
-      }
-      results.push({ page: page.ref, locale, recorded: true, dryRun, file: c.file, state: path.relative(s.root, statePath(page)), entry, warnings: c.warnings });
-    }
-  }
+  for (const page of pages) for (const locale of targets) results.push(await recordUnit(s, page, locale, { candidate, given, date, dryRun }));
   return { results };
+}
+
+// Checks one unit in one locale and, only if every check passes, installs the candidate (if any) and advances the state.
+export async function recordUnit(s, page, locale, { candidate = null, given = [], date = null, dryRun = false } = {}) {
+  const iso = date ?? today();
+  const c = await checkTranslation(s, page, locale, { candidate, unverified: given });
+  if (!c.ok) return { page: page.ref, locale, recorded: false, failures: c.failures, note: 'The state was not advanced and no file was written.' };
+
+  // The recorded `unverified` list: this run's entries plus earlier ones, minus spans that left the page or now verify.
+  const expectedFor = (span) => {
+    const decision = c.state.spans[span];
+    return decision?.startsWith('label:') ? c.labels?.[locale]?.[decision.slice(6)] : undefined;
+  };
+  let present;
+  let verified;
+  let assetFallbacks = [];
+  if (page.kind === 'category') {
+    // The category's messages go into the locale's current.json; nothing else in that file is touched.
+    if (!dryRun && candidate) await applyCategoryMessages(s, c.category);
+    present = new Set(c.category.parsed.fields.map((f) => f.ua));
+    verified = (span) => c.category.target.entries.some((e) => e.field === 'label' && e.ua === span && expectedFor(span) !== undefined && c.category.messages.get(e.entryKey) === expectedFor(span));
+  } else {
+    // Finalize the file: last_update.date goes into the translation only.
+    const finalText = setLastUpdate(c.targetText, formatLike(c.uaText, iso));
+    if (!dryRun && (candidate || finalText !== c.targetText)) await writeFileAtomic(abs(s, c.file), finalText);
+    present = new Set(boldSpans(splitCode(c.uaText).prose));
+    const prose = splitCode(finalText).prose.join('\n');
+    verified = (span) => expectedFor(span) !== undefined && prose.includes(`**${expectedFor(span)}**`);
+    assetFallbacks = await currentFallbacks(s, page, locale, c.uaText);
+  }
+  const merged = new Map();
+  for (const u of [...(c.state.locales[locale]?.unverified ?? []), ...given]) merged.set(spanOf(u), u);
+  for (const [span] of merged) if (!present.has(span) || verified(span)) merged.delete(span);
+
+  const entry = {
+    sourceBlob: page.blob,
+    labelSnapshot: c.store?.meta.commit ?? null,
+    translatedAt: iso,
+    unverified: [...merged.values()],
+    assetFallbacks,
+  };
+  // Re-read under the lock: the workers of other locales record this page's state file in parallel.
+  if (!dryRun) {
+    const file = statePath(page);
+    await withLock(file, async () => {
+      const fresh = await readState(page);
+      await writeJson(file, { ...fresh, locales: { ...fresh.locales, [locale]: entry } });
+    });
+  }
+  return { page: page.ref, locale, recorded: true, dryRun, file: c.file, state: path.relative(s.root, statePath(page)), entry, warnings: c.warnings };
 }

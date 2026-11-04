@@ -38,6 +38,16 @@ Then apply two escalations:
 
 Two changed spans in one block count once. Blocks are identified by heading path + first words, e.g. `Поля заявки › "Реквізити — номер картки …"`.
 
+## Heading ids and link fragments
+
+A heading's `{/* #id */}` comment added or changed, and a link fragment rewritten to it, change no text: they are the id-only change and the splice that `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/heading-anchors.md` defines ("Id-only changes"). Such a difference is **not expanded**: a heading that only gained or changed its comment is not a changed section, and a block whose only difference is a rewritten fragment is not a changed paragraph, row or item. It doesn't count toward the more-than-half escalation either.
+
+- **Review and fix** (`doc-style-reviewer`, `doc-style-fixer`): nothing to review in it.
+- **EN sync** (`doc-translator --sync`): nothing to re-translate. The id is the EN heading's anchor (`heading-anchors.md`, "Who adds a missing id"), and the EN link already uses it; the alignment check confirms both (`HEADING-ID-MISMATCH` when they differ).
+- **Further locales** (`locale-sync`): the script splices the comment onto the translated heading and the fragment into the translated link, with no translator (`${CLAUDE_PLUGIN_ROOT}/scripts/locale-sync/README.md`, "Id-only changes").
+
+A heading whose text changed with its comment is a changed heading as above: its whole section.
+
 ## Page-wide consistency pass (terms only)
 
 For every term introduced or renamed in the changed blocks, scan the **whole page** for the old term, a different form, or a different spelling, and report each location. This is the only page-wide check a scoped pass performs; nothing else outside the changed blocks is reviewed, fixed or re-translated.

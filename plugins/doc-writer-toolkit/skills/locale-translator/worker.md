@@ -26,6 +26,7 @@ Run `LS blocks <id>` and read `results[0]`. A unit given as `<id> (page, redo <l
 - `mode: "error"` (a redo of a page that isn't current) → result `failed` with the `error`. Next unit.
 - `mode: "skipped"` → result `skipped` with its `note`. Next unit.
 - `noop: true` → only formatting changed in UA: run `LS record <id>` (no candidate, nothing to translate), result `synced`. Next unit.
+- `spliceOnly: true` → only heading ids and the link fragments rewritten to them changed in UA: run `LS splice <id>` (nothing to translate), result `synced` when it recorded, else `failed` with its `failures`. Next unit.
 - `undecided` is not empty → result `failed`, note "spans not bound: …". Don't guess a decision. Next unit.
 - `problem` is set → result `skipped` with the problem. Next unit.
 - A category (`kind: "category"`) → go to "Sidebar categories" below.
@@ -35,7 +36,7 @@ Run `LS blocks <id>` and read `results[0]`. A unit given as `<id> (page, redo <l
 Apply `locale-translation.md` to every block. What `blocks` gives you:
 
 - **`mode: "full"`:** translate the whole page in `ua.text`.
-- **`mode: "incremental"`:** translate the `ua.text` of each `replace` and `add` change in `changes`, one block for one block. Use `headingPath` as context. A `frontmatter` change is one `key: value` line: translate the value only. A `verbatim` change is copied, so leave it out. A `remove` change needs nothing. Never write an `unmapped` change: list it in the result.
+- **`mode: "incremental"`:** translate the `ua.text` of each `replace` and `add` change in `changes`, one block for one block. Use `headingPath` as context. A `frontmatter` change is one `key: value` line: translate the value only. A `verbatim` change is copied, so leave it out. A `remove` change needs nothing. Never write an `unmapped` change: list it in the result. The `spliced` changes (heading anchor comments, link fragments) are the script's: `apply` writes them, so leave them out of your blocks file.
 - **`mode: "redo"`:** the same as incremental, every change a `replace`. Each `target.text` is the current translation of that block: rewrite it from `ua.text` so it follows the term rows, the label rows and the link rows, and keep everything else it says. `skipped` and `unmapped` lines need nothing from you; list `unmapped` in the result.
 - **`labels`:** one row per bold or Cyrillic inline-code span in that text, with its decision.
   - `label:<key>` with `write`: write exactly `write` in bold (or in backticks for `kind: "code"`), verbatim (L1, L2).

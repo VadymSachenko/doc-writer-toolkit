@@ -1,6 +1,6 @@
 # locale-sync
 
-Finds which Ukrainian (UA) pages are stale in each target locale, hands the translator exactly the blocks to write, links the screenshots, and checks the result. Node, no dependencies. No AI is involved: the model only translates. It reuses the `ui-labels` config reader, label store and page-state layout (`../ui-labels/lib/`), so the two scripts must stay in the same plugin.
+Finds which Ukrainian (UA) pages are stale in each target locale, hands the translator exactly the blocks to write, links the screenshots, and checks the result. Node, no dependencies. No AI is involved: the model only translates. It reuses the `ui-labels` config reader, label store and page-state layout (`../ui-labels/lib/`) and the heading slugger of `doc-align` (`../doc-align/lib/headings.mjs`), so the three scripts must stay in the same plugin.
 
 ```
 node ${CLAUDE_PLUGIN_ROOT}/scripts/locale-sync/locale-sync.mjs <command> [<page|folder>…] [options]
@@ -14,7 +14,8 @@ Run it from the docs repo root (or pass `--root`). Needs Node 18.3+ and `git`. T
 |---|---|
 | `status [<page>…]` | Stale pages and sidebar categories per locale, from one `git ls-tree` call and the per-unit state files. Adds the size estimate and the 10-page confirmation flag. |
 | `blocks <page>…` | The UA blocks to translate (blob A → B), each with its heading path and the matching translated block, plus the label strings, term-memory rows and link titles for those blocks. For a category: the `current.json` entries to write. `--redo <lines\|all>` picks blocks of a current page instead (a term correction). |
-| `apply <page>` | Writes a candidate file from the translations of the blocks that `blocks` returned. One page, one locale. Takes the same `--redo`. |
+| `apply <page>` | Writes a candidate file from the translations of the blocks that `blocks` returned, with the heading anchors and link fragments the script splices itself. One page, one locale. Takes the same `--redo`. |
+| `splice [<page>…]` | Carries the id-only changes of the UA pages (heading anchor comments, link fragments rewritten to them) into every locale with no translator, and records each page that passes its checks. See [Id-only changes](#id-only-changes-splice). |
 | `bind [<page>…]` | The binding pass: records the span decisions the script can make and lists the rest (`ask`) for the model. `bind --decisions <file>` records the model's answers. |
 | `terms <UA term>…` | Per locale, the recorded translation and the UI string of each term, and which terms still need a translation. `terms --add <file> --locales <locale>` appends entries (`--replace` corrects them), `terms --drop <UA term>…` removes them, `terms --usage <old translation>…` finds the blocks that still use a translation. |
 | `link-assets <page>…` | Relative per-file symlinks from each locale's `.assets/` to the EN screenshots. Pages only. |
@@ -29,7 +30,7 @@ Output is JSON on stdout and logs on stderr. A failure prints `{"error": …}`.
 
 **Exit codes:** `0` ok · `1` something failed (a check, a record, a build, a missing asset) · `2` configuration or input problem (ask the user).
 
-The flow of a run: `status` → `bind` (once for all locales) → `terms` / `terms --add` (the terminology pass) → per page and locale:
+The flow of a run: `status` → `splice` (the cells whose only changes are heading ids, with no translator) → `bind` (once for all locales) → `terms` / `terms --add` (the terminology pass) → per page and locale:
 
 ```
 blocks → (translate the blocks) → apply → link-assets → check --candidate → record --candidate
@@ -105,7 +106,7 @@ For every page and locale, one cell:
 
 Only **committed** content counts. Uncommitted changes to a UA page are reported in `warnings`.
 
-The `summary` carries what the skill needs for the confirmation: `stalePages`, `languages`, `pageTranslations`, `words`, `bootstrap`, `needsConfirmation` (`stalePages > threshold`, default 10, `--threshold`) and a ready `message` ("24 pages × 8 languages = 192 page translations, about 113,600 words"). Each stale cell has a `words` estimate: the whole page for `full`, the changed blocks only for `incremental`.
+The `summary` carries what the skill needs for the confirmation: `stalePages`, `languages`, `pageTranslations`, `words`, `bootstrap`, `needsConfirmation` (`stalePages > threshold`, default 10, `--threshold`) and a ready `message` ("24 pages × 8 languages = 192 page translations, about 113,600 words"). Each stale cell has a `words` estimate: the whole page for `full`, the changed blocks only for `incremental` (a heading anchor or link fragment the script splices counts no words).
 
 `orphaned` lists state files and locale files whose UA page no longer exists. `moved` lists the same, when a current UA page with no state has the recorded blob. Nothing is deleted or moved (moving is Phase 2). Each pair is checked against its own state folder and locale roots.
 
@@ -118,7 +119,7 @@ With more than one root pair declared, the output also has `pairs[]` (`id`, `nam
 Per page and locale, one result:
 
 - `mode: "none"` (current), `"skipped"` (manual bootstrap), `"full"` (the whole UA text is in `ua.text`, with `bold`, the bold spans), `"incremental"` or `"redo"` (below, `--redo`).
-- `incremental`: `source: { kind: "blob-diff", from: A, to: B }`, then `changes[]`, `unmapped[]`, `introducedBold[]` (bold spans the old page never used: terms to keep consistent) and `summary`. `noop: true` means the blob changed but no block did (formatting, `last_update`): `record` it without translating.
+- `incremental`: `source: { kind: "blob-diff", from: A, to: B }`, then `changes[]` (for the translator), `spliced[]` (written by the script, below), `unmapped[]`, `introducedBold[]` (bold spans the old page never used: terms to keep consistent) and `summary` (`replace`, `add`, `remove`, `spliced`, `unmapped`, `words`). `noop: true` means the blob changed but no block did (formatting, `last_update`): `record` it without translating. `spliceOnly: true` means the only changes are splices: `splice` carries them, no translator is needed.
 
 A change:
 
@@ -138,6 +139,17 @@ A change:
 
 Lines are 1-based. Everything not listed stays untouched.
 
+A splice (`spliced[]`, ids `s1`…) is a change the script writes itself, never a translator ([Id-only changes](#id-only-changes-splice)):
+
+| Field | Meaning |
+|---|---|
+| `id`, `op` | `s1`…, always `replace`. |
+| `kind` | `anchor`: a heading's anchor comment, with `anchor: { from, to }` (`from` is `null` when the heading had none). `link`: a block whose only change is its link fragments, with `block` (the block's kind) and `fragments[]` (`{ from, to }`, each `<path>#<fragment>`). |
+| `headingPath`, `anchorPath` | As for a change. |
+| `ua` | The new UA text: the heading line, or the block. |
+| `target` | The translated heading line or block as it is now. |
+| `write` | The text that replaces `target`: the translated heading with the new comment, or the translated block with the new fragments. Nothing else in it differs from `target`. |
+
 Every `full` and `incremental` result (and every category) also carries what the translator needs for the spans and terms in the text it writes (the whole page, or the changed blocks), for that locale only:
 
 | Field | Meaning |
@@ -149,7 +161,7 @@ Every `full` and `incremental` result (and every category) also carries what the
 | `termConflicts[]` | A matched term recorded twice with different translations. The first line is used. |
 | `links[]` | Links whose UA text names the target page by its title, in any grammatical form (same words, each one matched without its last two letters): `{ text, url, page, title }`. `title` is the target page's title in this locale, which the link text uses, inflected as the sentence needs; `null` while the target has no translation. Routes resolve as Docusaurus does (see `report`), and relative `.md` links by path. A link reaches the pages of every declared root pair: each pair's routes carry its own URL prefix. |
 
-**How blocks are found.** Both pages are parsed into a tree of sections and blocks (`lib/parse.mjs`), the trees are diffed, and the changed units are expanded as `context/changed-blocks.md` says: a changed sentence → its paragraph, a list item → the item with its sub-items, a table cell → the row (header → the whole table), a heading → its whole section with its subsections, an admonition or MDX component → its whole body, frontmatter → the value. More than half of a section's blocks changed → its whole body (heading and subsections excluded). This is the unit set that expanding `git diff A B` hunks produces, found on parsed blocks instead of line numbers.
+**How blocks are found.** Both pages are parsed into a tree of sections and blocks (`lib/parse.mjs`), the trees are diffed, and the changed units are expanded as `context/changed-blocks.md` says: a changed sentence → its paragraph, a list item → the item with its sub-items, a table cell → the row (header → the whole table), a heading → its whole section with its subsections, an admonition or MDX component → its whole body, frontmatter → the value. More than half of a section's blocks changed → its whole body (heading and subsections excluded). This is the unit set that expanding `git diff A B` hunks produces, found on parsed blocks instead of line numbers. Two exceptions, the splices: a heading whose level and text are the same and whose anchor comment was added or changed pairs with its old self, so only its line is a change and its section is looked into as usual; a block whose only difference is the fragments of its links pairs with its old self too, and doesn't count toward the more-than-half rule.
 
 **How blocks are mapped.** The translation was made from A, so the A tree is aligned with the translation's tree position by position (heading anchors must agree). If a container's children don't line up one to one, nothing below it is mapped: those changes go to `unmapped[]` with the UA text quoted and a reason. The translator never guesses a place. `check` rejects pages that do not mirror UA, so a recorded page always maps.
 
@@ -157,13 +169,38 @@ Every `full` and `incremental` result (and every category) also carries what the
 
 ## Writing the candidate (`apply`)
 
-`apply <page> --locales <locale> --translations <file.json> --out <candidate>` takes the translator's text and does the splicing, so no model edits a file by line numbers:
+`apply <page> --locales <locale> [--translations <file.json>] --out <candidate>` takes the translator's text and does the splicing, so no model edits a file by line numbers:
 
-- **`incremental`:** `{ "c1": "<translated block>", … }`, one entry per `replace` and `add` change id from `blocks` (a `verbatim` change may be left out: its UA text is copied). A replaced block takes the place of its `target` lines. An added block goes after its anchor (`insertAfter`, the previous addition for `insertAfterChange`, or the start of the file), preceded by as many blank lines as UA has before it. A removed block goes with the blank lines before it. Every other line of the translation is copied unchanged.
+- **`incremental`:** `{ "c1": "<translated block>", … }`, one entry per `replace` and `add` change id from `blocks` (a `verbatim` change may be left out: its UA text is copied). Every splice of `spliced[]` goes in as its `write`, with no entry: an entry for an `s…` id is an input error. A page with nothing to translate (`spliceOnly`) needs no `--translations` at all. A replaced block takes the place of its `target` lines. An added block goes after its anchor (`insertAfter`, the previous addition for `insertAfterChange`, or the start of the file), preceded by as many blank lines as UA has before it. A removed block goes with the blank lines before it. Every other line of the translation is copied unchanged.
 - **`full`:** `{ "full": "<translated page>" }`.
 - **`redo`:** as `incremental`, with the same `--redo` value given to `blocks`: every change is a `replace`.
 
 The file is JSON, or text with `@@@ <id>` lines (`@@@ c1`, `@@@ full`) each followed by that block's translation, which needs no escaping. The ids follow the current files, so run `blocks` and `apply` without changing anything in between. A missing or unknown id, or the wrong form for the mode, is an input error (exit `2`). `unmapped` changes are not applied; they are returned again for the report. The candidate is then checked and recorded as usual.
+
+## Id-only changes (`splice`)
+
+Further locales copy a heading's `{/* #id */}` comment verbatim and every link target byte for byte (`context/locale-translation.md`, S3), so a UA change that only adds or changes ids needs no translator. What the script splices is defined once, in `context/doc-rules/project-rules/heading-anchors.md` ("Id-only changes"). Per stale page and locale, `blocks` finds those changes as `spliced[]`:
+
+- **`anchor`:** a heading whose level and text are unchanged and whose anchor comment was added or changed. The comment goes onto the translated heading at the aligned position, its text untouched: `## İşlemler` → `## İşlemler {/* #operations */}`. Only the heading line changes, not its section or subsections.
+- **`link`:** a block whose only difference is the fragments of its links, each rewritten from a heading's old fragment to its new id. The fragments go into the translated block's links; its sentence is untouched. A fragment on the same page (`#…`, or a link to the page's own route) counts when a heading of the same change got that id, its old fragment being the old comment or the slug Docusaurus made of its text. A link to another page counts when that page, as committed now, has a heading with that id whose text slugs to the old fragment (`-1`, `-2`, … for a text the page has that often). A changed comment on another page can't be told from the page as it is now, so that rewrite goes to the translator. So does every rewrite the script can't vouch for, and a block whose translated links don't hold the old fragment as often as the UA block did: as before, the block is a change.
+
+**Guard.** The translated heading's comment must equal the old UA one (none, when an id was added). When it doesn't, the translation is not what the last run recorded: that heading and every other splice of the page go to `unmapped`, with the reason, and nothing is spliced on the page. A candidate then fails `headings` and `record` refuses it.
+
+`splice [<page|folder>…]` (default: every page in scope) takes the cells whose only changes are splices (`spliceOnly`), writes the spliced translation and records it through the same checks as `record --candidate`. A cell that fails them is not written and its state doesn't move. `--dry-run` writes nothing; `--date` as for `record`. Every other stale cell is left for the translator: its splices go in with its translated blocks (`apply`). Exit `1` when a record failed.
+
+```json
+{
+  "ok": true,
+  "results": [
+    { "page": "filters/filters", "locale": "tr", "recorded": true, "file": "i18n/tr/…/filters/filters.md", "entry": { "sourceBlob": "…" },
+      "spliced": [{ "id": "s1", "kind": "anchor", "line": 22, "anchor": { "from": null, "to": "operations" } },
+                  { "id": "s2", "kind": "link", "line": 17, "fragments": [{ "from": "#робота-з-записами", "to": "#operations" }] }] }
+  ],
+  "toTranslate": [{ "page": "other/other", "locale": "tr", "mode": "incremental", "noop": false, "changes": 1, "spliced": 0, "unmapped": 0 }]
+}
+```
+
+`results[]` holds what `record` returns for each spliced cell (`recorded`, `failures` when it refused), plus `spliced[]` with each splice's target `line`. `toTranslate[]` lists the other stale cells (`mode`, and for an incremental one the counts), for the workers.
 
 ## Binding pass (`bind`)
 

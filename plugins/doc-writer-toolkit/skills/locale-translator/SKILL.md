@@ -82,6 +82,8 @@ With `--dry-run`, run `UL check` only and report whether an import and sync are 
 
 The units of the run are every page and category row with at least one `new` or `stale` cell. Each locale's queue is its own `new` / `stale` cells, in the order `status` lists them.
 
+6. **Id-only changes, with no worker.** Run `LS splice` (with the run's pages and locales) and save the output. It carries every cell whose only UA changes are heading ids and the link fragments rewritten to them (`${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/heading-anchors.md`, "What locale-sync splices") into the locale file, and records it when its checks pass. This is the one place the run writes and records pages without a worker. Append one line per result to `<run>/<locale>/results.jsonl`: `{"unit":"<id>","kind":"page","status":"synced","mode":"splice","blocks":<spliced count>,"failures":[]}`, or `"status":"failed"` with the `failures` when `recorded` is false. Those cells leave the queues; the queues are the `toTranslate` cells. A cell with splices and other changes stays in its queue: the worker's `apply` writes its splices with its translated blocks.
+
 ### Step 3 — Binding pass (once for all locales)
 
 1. Run `LS bind` (with the run's pages / locales / `--overwrite`) and save the output. The script records every decision it can make itself (`resolved`) and lists the rest in `ask`.
