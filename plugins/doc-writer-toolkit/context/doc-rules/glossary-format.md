@@ -1,6 +1,6 @@
 ---
 name: glossary-format
-description: How to read a product kit glossary — the Term, Render, Code entity and Definition columns, the values of Render, and the names table (UA form, EN form, Source). Read with a kit glossary, in drafting and in review. The rules behind the Render column are Ж1, Ж3 and Ж4 in formatting-conventions.md.
+description: How to read a product kit glossary — the Term, Render, Code entity and Definition columns, the values of Render, and the names table (UA form, EN form, UI forms, API values, Source). Read with a kit glossary, in drafting and in review. The rules behind the Render column are Ж1, Ж3 and Ж4 in formatting-conventions.md.
 ---
 
 # Glossary format
@@ -35,20 +35,22 @@ Each glossary holds its terms in one table, under `## Terms` (`## Терміни
 
 ## Names
 
-Names of organizations and products (banks, payment systems, companies) have a table of their own, under `## Names` in `glossary-en.md` and `## Назви` in `glossary-ua.md`, after the terms. Both glossaries hold the same rows in the same order: a skill that loads only one of them still finds every name. When you add or change a row, do it in both. The rule that decides a name's form is Ж10 in `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md`.
+Names of organizations and products (banks, payment systems, companies) have a table of their own, under `## Names` in `glossary-en.md` and `## Назви` in `glossary-ua.md`, after the terms. Both glossaries hold the same rows in the same order: a skill that loads only one of them still finds every name. When you add or change a row, do it in both. The rule that decides which form a text uses is Ж10 in `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md`: it depends on what the text refers to.
 
-The table has three columns, in this order in both files.
+The table has five columns, in this order in both files.
 
 | `glossary-en.md` | `glossary-ua.md` | What the column holds |
 |---|---|---|
-| UA form | Форма UA | The name as Ukrainian pages write it, character for character |
-| EN form | Форма EN | The name as English pages write it, character for character |
-| Source | Джерело | Where each form comes from |
+| UA form | Форма UA | The organization's own name in Ukrainian, as its site writes it; Latin when it has no Ukrainian form (Ж10, items 3 and 4). Prose on Ukrainian pages uses it |
+| EN form | Форма EN | The organization's own name in English, the same way. Prose on English pages uses it |
+| UI forms | Форми в UI | How each app shows the name: the form, then the app and the key or screen in brackets (`LUNOBANK (admin, bank list)`). Empty when no app shows it |
+| API values | Значення API | The values the API takes or returns for this organization, in code font, with the field (`` `LUNO` `` (`bank`)) |
+| Source | Джерело | Where each form comes from, one source per form |
 
 - **One row per organization or product.** The UA form and the EN form may differ (Лунобанк, Lunobank): the row pairs them, so the alignment check doesn't report them as a mismatch. When the two are the same, write it in both cells.
-- **The forms are plain text.** No bold, no code font, no quotes: the render comes from where the name stands (Ж1, Ж4 and Ж10). A Cyrillic UA form is the nominative; pages inflect it.
-- **Source** names the source of each form, in Ж10's order: `app: <key or screen>` for the app's string, `code: <repo>@<commit>:<path>` for a value in the code, `site: <URL>` for the organization's official site, one per language when they differ (`site: https://example.ua/ (UA), https://example.ua/en/ (EN)`). A form with no source is not approved: mark it `NEEDS CONFIRMATION` in the cell.
-- **A name used only in API pages** takes the code's form (Ж10, step 1); its source is `code:`.
+- **The first two cells are plain text**, with no bold, code font or quotes. A Cyrillic UA form is the nominative; pages inflect it. Several UI forms or API values are separated by semicolons.
+- **The alignment check compares prose with the first two cells only.** A UI form is bold and an API value is in code font on a page, and those are never compared with the table.
+- **Source** names the source of each form: `site: <URL>` for the organization's own site, one per language when they differ; `app: <repo>@<commit> <key or file>` for an app's string; `data: <where>` for a value from the system's data (a bank list), with how it was read; `code: <repo>@<commit>:<path>` for a value in the code. A form with no source is not approved: write `NEEDS CONFIRMATION` in its cell instead of guessing (Ж10, item 5).
 
 ## A term that isn't there
 

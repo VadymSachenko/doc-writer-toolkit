@@ -18,7 +18,7 @@ description: Канонічна термінологія для україном
 
 Назви банків, платіжних систем та інших організацій: ті самі рядки, що в `glossary-en.md`, у тому самому порядку. Як заповнити рядок — `glossary-format.md`, «Names». Два рядки нижче — зразки: замініть їх назвами, які вживають ваші сторінки.
 
-| Форма UA | Форма EN | Джерело |
-|---|---|---|
-| Лунобанк | Lunobank | app: `banks.lunobank` (UA, EN) |
-| Банк Світанок | Svitanok Bank | site: https://svitanok.example/ (UA), https://svitanok.example/en/ (EN) |
+| Форма UA | Форма EN | Форми в UI | Значення API | Джерело |
+|---|---|---|---|---|
+| Лунобанк | Lunobank | LUNOBANK (admin, bank list) | `LUNO` (`bank`) | site: https://lunobank.example/ (UA), https://lunobank.example/en/ (EN); data: the admin bank list; code: `payments-api`@1a2b3c4:`banks.go` |
+| Банк Світанок | Svitanok Bank | | | site: https://svitanok.example/ (UA), https://svitanok.example/en/ (EN) |

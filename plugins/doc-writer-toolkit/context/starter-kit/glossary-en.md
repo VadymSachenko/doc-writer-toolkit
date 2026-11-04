@@ -18,7 +18,7 @@ them with your product's terms.
 
 Names of banks, payment systems and other organizations: the same rows as in `glossary-ua.md`, in the same order. How to fill a row: `glossary-format.md`, "Names". The two rows below are samples: replace them with the names your pages use.
 
-| UA form | EN form | Source |
-|---|---|---|
-| Лунобанк | Lunobank | app: `banks.lunobank` (UA, EN) |
-| Банк Світанок | Svitanok Bank | site: https://svitanok.example/ (UA), https://svitanok.example/en/ (EN) |
+| UA form | EN form | UI forms | API values | Source |
+|---|---|---|---|---|
+| Лунобанк | Lunobank | LUNOBANK (admin, bank list) | `LUNO` (`bank`) | site: https://lunobank.example/ (UA), https://lunobank.example/en/ (EN); data: the admin bank list; code: `payments-api`@1a2b3c4:`banks.go` |
+| Банк Світанок | Svitanok Bank | | | site: https://svitanok.example/ (UA), https://svitanok.example/en/ (EN) |
