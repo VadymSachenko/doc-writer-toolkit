@@ -184,15 +184,30 @@ Write a pattern inside one backtick span: the scripts read only the first backti
 
 ## Ticket flow settings
 
-These fields are read by the `tracker` script (`${CLAUDE_PLUGIN_ROOT}/scripts/tracker/`), which speaks to the host's ticket tracker in statuses and transitions, and by the `forge` script (`${CLAUDE_PLUGIN_ROOT}/scripts/forge/`), which speaks to the host's pull requests. No skill reads them yet. A project that doesn't use the script declares none. The flag of the script overrides the field.
+These fields are read by the `tracker` script (`${CLAUDE_PLUGIN_ROOT}/scripts/tracker/`), which speaks to the host's ticket tracker in statuses and transitions, by the `forge` script (`${CLAUDE_PLUGIN_ROOT}/scripts/forge/`), which speaks to the host's pull requests, and by the `ticket-state` scripts (`${CLAUDE_PLUGIN_ROOT}/scripts/ticket-state/`), which keep each ticket's ledger and run the day; the `ticket-flow` skill reads them through `ticket-state config`. A project that doesn't use the scripts declares none. The flag of the script overrides the field.
 
 | Field | Required | Value | If absent |
 |---|---|---|---|
-| `Ticket flow settings:` | no | The host's ticket flow settings file, relative to the repo root. Its `tracker` object holds the board, the statuses with the lists they map to, the transitions, the labels and the names of the environment variables that hold the credentials; its `forge` object and `targets` list hold the repositories, the people and the stage labels the forge script may touch; a file named `<name>.local.json` next to it overrides it key by key. Each script's README lists the keys | `.claude/ticket-flow.json` |
+| `Ticket flow settings:` | no | The host's ticket flow settings file, relative to the repo root. Its `tracker` object holds the board, the statuses with the lists they map to, the transitions, the labels and the names of the environment variables that hold the credentials; its `forge` object and `targets` list hold the repositories, the people and the stage labels the forge script may touch; a file named `<name>.local.json` next to it overrides it key by key, at any depth. Each script's README lists the keys | `.claude/ticket-flow.json` |
 
 ```md
 - **Ticket flow settings:** `.claude/ticket-flow.json`
 ```
+
+The keys the `ticket-state` scripts add to that file. The shared file is committed in the host; the local one is the owner's and git-ignored. `${CLAUDE_PLUGIN_ROOT}/scripts/ticket-state/README.md` has every key with its default.
+
+| Key | File | Value | If absent |
+|---|---|---|---|
+| `state` | shared | The git-ignored folder for the ledgers, locks, reports and run logs, relative to the repo root | `<Toolkit state root>/ticket-flow/` |
+| `tracker.docLabels`, `tracker.quietHours`, `tracker.triageMarker`, `tracker.priority` | shared | The labels that confirm docs are needed; the quiet hours before triage; the triage comment's header; the priority labels | none, `2`, none, `high` and `low` |
+| `targets[].appLabel`, `.path`, `.uaRoot`, `.base` | shared | A target's app label, its repo's path from the host root, its UA content root, its base branch | `uaRoot` is required; `base` is `main` |
+| `hostRules`, `hostJobs` | shared | The host's rule files for the role sessions; the host's jobs and the lists they watch | none |
+| `mode` | local | `off`, `observe` or `on` | `observe` |
+| `limits` | local | `inProgress`, `waiting`, `parallel`, `dailyPercent`, `maxWeekPercent`, `estimates`, `lockLeaseMinutes`, `sessionPercent`, `triageBatch`, `stepsPerTicket` | `3`, `5`, `3`, `10`, none, none, `120`, `80`, `10`, `12` |
+| `schedule`, `roles`, `modelLadder`, `video` | local | The watcher's times; each role's model, effort and tool rules; the retry ladder; the video gate | see the README |
+| `cleanup.mode` | local | What the close step does with a merged ticket's recorded work files: `trash` (into the Trash) or `delete` | `trash` |
+| `cleanup.keep` | local | Globs, from the host root, of work files the cleanup never removes | `["**/sme-interview.md", "**/app-notes.md"]` |
+| `cleanup.trashDir` | local | The Trash folder | `~/.Trash` |
 
 ## Visual review pack
 
