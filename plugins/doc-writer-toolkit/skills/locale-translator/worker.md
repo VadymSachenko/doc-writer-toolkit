@@ -1,6 +1,6 @@
 # locale-translator — translation worker
 
-You translate a queue of UA pages and sidebar categories into **one** locale, for a `locale-translator` run. Your prompt gives the plugin root, the docs repo root, the locale, its register, your run folder and the units in order. Nobody reviews your output: the scripts check structure, and you check language.
+You translate a queue of UA pages and sidebar categories into **one** locale, for a `locale-translator` run. Your prompt gives the plugin root, the docs repo root, the locale, its register, your run folder and the units in order. Nobody reviews your output: the scripts check structure, and you check language. Nobody decides after you either: you follow the rules, and what you doubt you flag in your result for the coordinator, who decides it. Never leave a choice open for a person.
 
 `LS` means `node <plugin root>/scripts/locale-sync/locale-sync.mjs`, run from the docs repo root with `--locales <locale>` on every call.
 
@@ -44,7 +44,7 @@ Apply `locale-translation.md` to every block. What `blocks` gives you:
   - `term`: translate it through the term rows (T1, T2). With `parts`, keep the markup and write each listed part as its `write` string (L5).
   - `emphasis`: translate it as prose, keep the bold (L3), and list it as a Ж1 hint.
   - Two or more rows for one `span`: the span is a different app string in different parts of the page. A row with `scope` applies under that heading (a title, or `#anchor`), and the row without `scope` everywhere else. `lines` (UA lines) or `changes` (change ids) say which occurrence takes which row.
-- **`terms`:** the term-memory rows for that text. Use each `target` (inflected as the sentence needs, T1, T2). A row with `source: "ui"` is the app's string. A row with `where: "table"` is a table's first cell that names an app column or field: write `target` in that cell exactly. If a recorded translation looks wrong, use it anyway and note it. A domain term with no row: translate it once, use that translation on every later page, and add it to your new terms.
+- **`terms`:** the term-memory rows for that text. Use each `target` (inflected as the sentence needs, T1, T2). A row with `source: "ui"` is the app's string. A row with `where: "table"` is a table's first cell that names an app column or field: write `target` in that cell exactly. If a recorded translation looks wrong, use it anyway and flag it in `termFlags` (step 8): reason `another-concept` when it is the app's word for something else (T5), `meaning` otherwise. When the current translation of a block you rewrite (`target.text`) uses another word for a term that has a row, write the row's word and flag the other one (reason `other-word`, with `word`): other blocks and pages may still use it. A domain term with no row: translate it once, use that translation on every later page, and add it to your new terms.
 - **`links`:** a link whose UA text names the target page by its title. Write that page's `title` as the link text, inflected as the sentence needs, never another word for the page (P9). `title: null`: the target isn't translated yet, so translate the UA title in your locale's title form (P7).
 
 Then write the candidate:
@@ -77,6 +77,8 @@ Write `<id>.unverified.json`: a JSON array of `{ "span": "<UA span>", "reason": 
 
 Exit `1` lists `failures`, each with its `check` name. Fix the cause as in step 3 and re-check, at most twice. The usual causes: a block split or merged (`structure`, `counts`), a label not verbatim or with something attached (`labels`), Ukrainian letters left (`ukrainian-letters`), a changed link, code span or attribute (`links`, `inline-code`, `tags`), a missing marker (`markers`), a frontmatter value that needs quotes (`frontmatter`: quote it in single quotes). A `link-form` failure is in the UA page, not the translation: result `failed`, naming the link. If it still fails, result `failed` with the check names and one line on why. Don't record it: the locale keeps its previous file and state.
 
+The `linkTitles` warning lists link texts that name a page differently from its title. A line you translated: rewrite the link text with the page's title from its `links` row (P9) and check again. A line outside your blocks: leave it, and list it in the result's `linkTitles` (`line`, `text`, `url`, `title`, as the warning gives them) for the coordinator. A warning never blocks recording.
+
 ### 6. Record
 
 `LS record <id> --candidate <run folder>/<id>.candidate.md --unverified-file <run folder>/<id>.unverified.json`
@@ -85,17 +87,17 @@ It re-runs the checks, writes the translation, sets `last_update` and advances t
 
 ### 7. New terms
 
-If you translated domain terms that had no row, write them to `<run folder>/<id>.terms.json` as `{ "<UA term>": "<translation>" }`, both in dictionary form (nominative singular), and run `LS terms --add <run folder>/<id>.terms.json`. A `conflict` means the term was recorded meanwhile: use the recorded translation from now on and note it.
+If you translated domain terms that had no row, write them to `<run folder>/<id>.terms.json` as `{ "<UA term>": "<translation>" }`, both in dictionary form (nominative singular), and run `LS terms --add <run folder>/<id>.terms.json`. A `conflict` means the term was recorded meanwhile: use the recorded translation from now on, and flag the term with reason `other-word` and your translation as `word`, so the coordinator aligns the units you already wrote.
 
 ### 8. Result line
 
 Append one JSON line to `<run folder>/results.jsonl` (never rewrite the file):
 
 ```json
-{"unit":"<id>","kind":"page","status":"translated","mode":"incremental","source":{"from":"<blob A>","to":"<blob B>"},"blocks":3,"unmapped":[],"unverified":[{"span":"…","reason":"no-match"}],"assetFallbacks":0,"newTerms":["…"],"emphasis":["…"],"failures":[],"notes":["…"]}
+{"unit":"<id>","kind":"page","status":"translated","mode":"incremental","source":{"from":"<blob A>","to":"<blob B>"},"blocks":3,"unmapped":[],"unverified":[{"span":"…","reason":"no-match"}],"assetFallbacks":0,"newTerms":["…"],"emphasis":["…"],"termFlags":[{"ua":"…","recorded":"…","reason":"other-word","word":"…"}],"linkTitles":[],"failures":[],"notes":["…"]}
 ```
 
-`status` is `translated`, `synced`, `skipped` or `failed`. `mode` is `full`, `incremental` or `redo`. `source` is `{"full": true}` for a full page, `{"redo": "<lines>"}` for a redo. `notes` holds anything a writer should see: a suspected error in the UA source (P6), a term whose recorded translation looks wrong, an unmapped block with its UA text, a locale with no register row (R3).
+`status` is `translated`, `synced`, `skipped` or `failed`. `mode` is `full`, `incremental` or `redo`. `source` is `{"full": true}` for a full page, `{"redo": "<lines>"}` for a redo. `termFlags` and `linkTitles` are for the coordinator to decide (`[]` when empty). `notes` holds what the report states: a suspected error in the UA source (P6), an unmapped block with its UA text, a locale with no register or title-form row (R3, P7), an app string that looks wrong (L1).
 
 ## Sidebar categories
 
@@ -108,6 +110,7 @@ Append one JSON line to `<run folder>/results.jsonl` (never rewrite the file):
 
 - Modify the UA page, the EN page, a state file, the label store, a term file (except through `terms --add`) or another locale's files.
 - Record a page that failed its checks, or record without `--candidate` after you translated.
+- Write a word other than the app's string or the recorded translation for a term that has one, even where another reads better: flag it instead.
 - Delete or move a file.
 - Commit, stash or push.
 
