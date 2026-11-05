@@ -8,7 +8,7 @@ import { makeClients } from '../lib/world.mjs';
 import { runRecord } from '../lib/record.mjs';
 import { lockOf } from '../lib/locks.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
-import { ROLE_DIR, agentsFile, briefFor, collectSteps, commandFor, nextModelUp, proposeRoles, readRole, runDaily } from '../lib/runner.mjs';
+import { PUSH_DENIED, ROLE_DIR, agentsFile, briefFor, collectSteps, commandFor, nextModelUp, proposeRoles, readRole, runDaily } from '../lib/runner.mjs';
 import { localDate } from '../lib/report.mjs';
 
 // The daily run: finishing first, the morning triage, starts within the limits; one `claude -p` session per model
@@ -192,6 +192,7 @@ test('the roles: every role file has its frontmatter and allows no compound shel
   for (const [name, a] of Object.entries(agents)) {
     assert.ok(a.description.length > 40, name);
     assert.match(a.prompt, /One command per Bash call/);
+    assert.match(a.prompt, /A rejected push means someone else pushed/);
   }
   for (const role of ['triage', 'writer', 'reviewer', 'translator']) {
     const r = readRole(role, ROLE_DIR);
@@ -207,6 +208,10 @@ test('the command line follows the role settings; the retry takes the next model
   const cmd = commandFor({ stage: 'uaReview', role: 'reviewer', keys: ['502'], group: '502' }, w.settings, { agentsPath: '/x/agents.json' });
   assert.deepEqual([flag(cmd, '--model'), flag(cmd, '--effort'), flag(cmd, '--max-turns'), flag(cmd, '--max-budget-usd'), flag(cmd, '--agent')], ['claude-haiku-5-5', 'low', '30', '2', 'ticket-reviewer']);
   assert.ok(cmd.args.slice(cmd.args.indexOf('--disallowedTools')).includes('WebFetch'));
+  for (const role of ['triage', 'writer', 'reviewer', 'translator']) {
+    const denied = commandFor({ stage: 'x', role, keys: ['502'], group: '502' }, w.settings, { agentsPath: '/x/agents.json' }).args;
+    for (const rule of PUSH_DENIED) assert.ok(denied.slice(denied.indexOf('--disallowedTools')).includes(rule), `${role} denies ${rule}`);
+  }
   assert.equal(cmd.cwd, w.root);
   const ladder = w.settings.modelLadder;
   assert.deepEqual([nextModelUp('claude-haiku-5-5', ladder), nextModelUp('claude-sonnet-5-5', ladder), nextModelUp('claude-opus-5-5', ladder)], ['claude-sonnet-5-5', 'claude-opus-5-5', null]);

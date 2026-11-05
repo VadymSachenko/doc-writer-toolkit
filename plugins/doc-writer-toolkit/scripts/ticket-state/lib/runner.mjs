@@ -24,6 +24,10 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const PLUGIN_ROOT = path.resolve(HERE, '../../..');
 const SCRIPT = path.join(PLUGIN_ROOT, 'scripts', 'ticket-state', 'ticket-state.mjs');
 export const ROLE_DIR = path.join(PLUGIN_ROOT, 'context', 'ticket-roles');
+// Denied in every role, whatever its file says: a push that could drop someone else's commits (the owner pushes to the
+// same branches by hand), skip the hooks, or delete a branch. The rules match by prefix, so `unattended.md` says the
+// same in words for the spellings they miss.
+export const PUSH_DENIED = ['Bash(git push --force:*)', 'Bash(git push -f:*)', 'Bash(git push --force-with-lease:*)', 'Bash(git push --force-if-includes:*)', 'Bash(git push --no-verify:*)', 'Bash(git push --mirror:*)', 'Bash(git push --delete:*)', 'Bash(git push -d:*)'];
 
 // ------------------------------------------------------------------ roles
 
@@ -108,7 +112,7 @@ export function commandFor(step, settings, { model, agentsPath, claude = 'claude
   const role = settings.roles[step.role];
   const def = readRole(step.role, roleDir);
   const allowed = [...new Set([...def.allowedTools, ...(role.allowedTools ?? [])])];
-  const disallowed = [...new Set([...def.disallowedTools, ...(role.disallowedTools ?? [])])];
+  const disallowed = [...new Set([...def.disallowedTools, ...(role.disallowedTools ?? []), ...PUSH_DENIED])];
   const dirs = [...new Set(settings.targets.map((t) => (t.path ? path.resolve(settings.root, t.path) : null)).filter((d) => d && d !== settings.root))];
   const args = [
     '-p',
