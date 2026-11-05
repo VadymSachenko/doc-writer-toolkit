@@ -11,20 +11,28 @@ export function notify({ title, text, urgent = false }, io = {}) {
   return r.status === 0 ? { sent: true } : { sent: false, why: String(r.stderr ?? r.error?.message ?? 'osascript failed').trim().slice(0, 200) };
 }
 
+// A guard stop as a notification: no usage reading is its own reason (a sign-in or `/usage` problem, not a spent
+// allowance), so the owner doesn't wait for an allowance that isn't the cause.
+const NO_READING = /^no usage reading/;
+const guardNote = (reason, what, today) =>
+  NO_READING.test(reason)
+    ? { key: `noUsage:${today}`, urgent: true, title: 'Ticket flow: no usage reading', text: `${what} stopped: /usage gave no reading. Check the sign-in (schedule.tokenFile) and run claude -p /usage.` }
+    : { key: `limit:${today}`, urgent: true, title: 'Ticket flow: limit reached', text: `${what} stopped: ${reason}.` };
+
 // What to tell the owner after a check: one urgent notification per reason a day, and the morning counts once a day.
 // `runs` are runner results; `jobs` the host jobs' outcomes. Returns [{ key, title, text, urgent }].
 export function notificationsOf({ morning, run, jobs = [], today }) {
   const out = [];
   for (const r of [morning, run].filter(Boolean)) {
-    const guard = (r.guard ?? []).find((g) => g.kind === 'guard');
-    if (guard) out.push({ key: `limit:${today}`, urgent: true, title: 'Ticket flow: limit reached', text: `Scheduled steps stopped: ${guard.reason}.` });
-    for (const s of r.ran ?? []) {
+    for (const g of (r.guard ?? []).filter((x) => x.kind === 'guard')) out.push(guardNote(g.reason, 'Scheduled steps', today));
+    // The morning triage is a step too: its result is in `triage`, not in `ran`.
+    for (const s of [...(r.ran ?? []), ...(r.triage?.outcome ? [r.triage] : [])]) {
       if (s.note === 'failed twice') out.push({ key: `failed:${today}:${s.group}:${s.stage}`, urgent: true, title: 'Ticket flow: a step failed twice', text: `${s.stage} of ${(s.keys ?? []).join(', ')} failed twice. See /ticket-report.` });
     }
   }
   for (const j of jobs) {
     if (j.note === 'failed twice') out.push({ key: `job:${today}:${j.name}`, urgent: true, title: 'Ticket flow: a host job failed twice', text: `${j.name} failed twice. See /ticket-report.` });
-    if (j.held) out.push({ key: `limit:${today}`, urgent: true, title: 'Ticket flow: limit reached', text: `${j.name} waits: ${j.held}.` });
+    if (j.held) out.push(guardNote(j.held, `The host job ${j.name}`, today));
   }
   if (morning && !morning.stopped) {
     const done = (morning.ran ?? []).filter((s) => s.outcome === 'done').length;

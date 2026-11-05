@@ -144,4 +144,8 @@ test('the notification: the text goes to osascript as an argument, never into th
   assert.deepEqual(plain.map((n) => n.urgent), [false]);
   const urgent = notificationsOf({ run: { ran: [{ stage: 'write', keys: ['1'], group: '1', outcome: 'failed', note: 'failed; no model above to retry with' }], guard: [] }, today });
   assert.deepEqual(urgent, [], 'one failure is not urgent');
+  const triage = notificationsOf({ morning: { mode: 'on', ran: [], starts: [], guard: [], triage: { stage: 'triage', keys: ['5', '6'], group: null, outcome: 'failed', note: 'failed twice' } }, today });
+  assert.deepEqual(triage.filter((n) => n.urgent).map((n) => n.text), ['triage of 5, 6 failed twice. See /ticket-report.'], 'a triage that failed twice is urgent too');
+  const noReading = notificationsOf({ run: { ran: [], guard: [{ kind: 'guard', reason: 'no usage reading: no scheduled start' }] }, jobs: [{ name: 'notes', held: 'no usage reading: no scheduled start' }], today });
+  assert.deepEqual(noReading.map((n) => n.title), ['Ticket flow: no usage reading'], 'not a limit reached, and once a day');
 });
