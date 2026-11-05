@@ -315,6 +315,9 @@ test('AC-3, AC-7: with the owner\'s and the hub\'s layers loaded, every plain-sp
     const anyNode = [...wide, 'Bash(node:*)', 'Bash(node *)'];
     for (const c of ['node -e "1"', 'node -p "1"', 'node --eval "1"', 'node --print "1"', 'node', 'node -', `node -r /tmp/x.js ${R}/scripts/tracker/tracker.mjs`, `node --require /tmp/x.js ${R}/scripts/tracker/tracker.mjs`, `node --import /tmp/x.mjs ${R}/scripts/tracker/tracker.mjs`, `NODE_OPTIONS=--require=/tmp/x.js node ${R}/scripts/tracker/tracker.mjs`]) assert.equal(verdict(c, anyNode, denied), 'denied', `${role} with node allowed: ${c}`);
     for (const c of OWN[role].filter((x) => x.startsWith('node '))) assert.equal(verdict(c, anyNode, denied), 'allowed', `${role} with node allowed runs ${c}`);
+    // A layer that allows `git -C *` (none does today) reopens other folders, but not a branch change on the worktree,
+    // an abbreviation or combined flags included.
+    if (role !== 'triage') for (const c of [`git -C ${WT} branch --del other2`, `git -C ${WT} branch -rD other`, `git -C ${WT} branch new-one`]) assert.equal(verdict(c, [...wide, 'Bash(git -C *)'], denied), 'denied', `${role} with git -C * allowed: ${c}`);
   }
   // A step with no worktree changes no repo: no plain add or commit; it reads the target clones (its --add-dir).
   const plan = rulesOf('writer', w, []);
