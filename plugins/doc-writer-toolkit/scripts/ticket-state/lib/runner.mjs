@@ -14,6 +14,7 @@ import { CARD_STATUS_OF, LABEL_OF, PR_STAGE_OF_STATUS, PRIORITY_RANK, finishRank
 import { appendRunLog, localDate, readRunLog, renderReport, writeReport } from './report.mjs';
 import { ROLES } from './settings.mjs';
 import { cleanupTicket } from './cleanup.mjs';
+import { childEnv } from './env.mjs';
 
 // The daily run (design §7): finish first, then triage the quiet intake cards (mornings), then start ready groups while
 // the limits and the day's allowance allow. A script decides; each step that needs a model is one `claude -p` session
@@ -133,9 +134,10 @@ export function commandFor(step, settings, { model, agentsPath, claude = 'claude
 }
 
 // Runs one session; resolves { code, stdout, stderr }.
-export function spawnClaude({ bin, args, cwd }, { timeoutMs = 4 * 3600 * 1000 } = {}) {
+// The child gets no API key or auth token (`lib/env.mjs`), so the plan pays.
+export function spawnClaude({ bin, args, cwd }, { timeoutMs = 4 * 3600 * 1000, env = process.env } = {}) {
   return new Promise((resolve) => {
-    const child = spawn(bin, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(bin, args, { cwd, env: childEnv(env), stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => child.kill('SIGTERM'), timeoutMs);
@@ -172,8 +174,8 @@ export function parseResult(stdout) {
   }
 }
 
-export function readUsageFromClaude(claude = 'claude') {
-  const run = spawnSync(claude, ['-p', '/usage'], { cwd: os.tmpdir(), encoding: 'utf8', timeout: 60 * 1000 });
+export function readUsageFromClaude(claude = 'claude', env = process.env) {
+  const run = spawnSync(claude, ['-p', '/usage'], { cwd: os.tmpdir(), env: childEnv(env), encoding: 'utf8', timeout: 60 * 1000 });
   const usage = parseUsage(`${run.stdout ?? ''}${run.stderr ?? ''}`);
   return usage.week || usage.session ? usage : null;
 }
@@ -182,11 +184,13 @@ export function readUsageFromClaude(claude = 'claude') {
 
 // The runnable steps of a status, one per group: tickets of a group with the same next stage run as one session.
 // Finishing first (merged, ready for merge, final review, review comments, answers in, writing), and within a kind the
-// higher priority, then the older card.
-export function collectSteps(st, { named = [], includeStart = false } = {}) {
+// higher priority, then the older card. A step whose last session failed, with no person's action since, waits for
+// the morning run or a manual one (`retryWaiting`).
+export function collectSteps(st, { named = [], includeStart = false, retryWaiting = false } = {}) {
   const groups = new Map();
   for (const t of st.tickets) {
     if (!t.next || t.locked || t.hand) continue;
+    if (t.next.waits && !retryWaiting) continue;
     if (named.length && !named.includes(t.key)) continue;
     if (t.next.stage === 'start' && !includeStart && !t.next.byHand) continue;
     const g = t.group ?? t.key;
@@ -347,9 +351,13 @@ export function proposeRoles(ledgers, settings, now = Date.now()) {
 // ------------------------------------------------------------------ the run
 
 export async function runDaily({ settings, clients, io = {}, options = {} }) {
-  const { dryRun = false, morning = false, trigger = 'schedule', named = [], claude = 'claude' } = options;
+  // `progress.begun` turns true once the run starts its first step: a caller can tell a run that failed before doing
+  // anything (safe to start again) from one that failed part way.
+  const { dryRun = false, morning = false, trigger = 'schedule', named = [], claude = 'claude', progress = {} } = options;
   const clock = io.now ?? Date.now;
   const manual = trigger === 'manual';
+  // A failed step that waits for a person runs again once at the next morning run, or when the owner runs it by hand.
+  const retryWaiting = manual || morning;
   const observe = settings.mode === 'observe' && !dryRun;
   const planOnly = dryRun || observe;
   const date = localDate(clock());
@@ -361,7 +369,7 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
     return out;
   }
 
-  const readUsage = io.readUsage ?? (() => readUsageFromClaude(claude));
+  const readUsage = io.readUsage ?? (() => readUsageFromClaude(claude, io.claudeEnv));
   let usage = await readUsage();
   out.usage = usage;
   // Why a scheduled model step may not start now, or null.
@@ -411,7 +419,7 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
     return { ...pick(step), runs: `claude -p as ${agentName(step.role)}`, model: cmd.model, effort: cmd.effort, ...(held ? { guard: `a live run would not start it: ${held}` } : {}), command: [cmd.bin, ...cmd.args] };
   };
 
-  const finishing = collectSteps(st, { named, includeStart: manual && named.length > 0 });
+  const finishing = collectSteps(st, { named, includeStart: manual && named.length > 0, retryWaiting });
   if (planOnly) {
     out.planned.push(...finishing.map(describe));
   } else {
@@ -426,6 +434,7 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
       const step = { stage: 'triage', role: 'triage', keys: due.map((c) => c.key), group: null, cards: due.map((c) => ({ key: c.key, url: c.card.url, shortLink: c.card.shortLink, priority: c.priority })) };
       if (planOnly) out.triage = describe(step);
       else if (guard('triage')) {
+        progress.begun = true;
         out.triage = await runModelStep(step, { lockGroups: step.keys });
         st = await status();
       }
@@ -434,7 +443,8 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
 
   // Start ready groups while the limits and the allowance allow: the highest priority first, the oldest within a level.
   const cardsOf = (keys) => keys.map((k) => st.tickets.find((t) => t.key === k)).filter(Boolean).map((t) => ({ key: t.key, url: t.card?.url, shortLink: t.card?.shortLink, priority: t.priority }));
-  if (!manual) {
+  // The watcher's run finishes the tickets it names; it starts no ready group (the morning run does).
+  if (trigger === 'schedule') {
     if (planOnly) {
       out.starts = st.startable.map((g) => describe({ stage: 'start', role: 'writer', group: g.group, keys: g.keys, priority: g.priority, startedBy: 'schedule', cards: cardsOf(g.keys) }));
     } else {
@@ -448,7 +458,7 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
         st = await status();
       }
     }
-  } else if (named.length) {
+  } else if (manual && named.length) {
     for (const g of st.groups.filter((x) => x.keys.some((k) => named.includes(k)))) {
       const step = { stage: 'start', role: 'writer', group: g.group, keys: g.keys, priority: g.priority, startedBy: 'manual', cards: cardsOf(g.keys) };
       out.starts.push(planOnly ? describe(step) : await advance(step));
@@ -491,6 +501,7 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
 
   // Runs a group's steps one after another, as far as it goes: a scripted step, or one session per step.
   async function advance(first) {
+    progress.begun = true;
     const kind = manual ? 'manual' : 'schedule';
     const group = first.group ?? first.keys[0];
     const taken = takeLock(settings.state, { group, kind, stage: first.stage, leaseMinutes: settings.limits.lockLeaseMinutes, now: clock() });
@@ -511,7 +522,7 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
         ran(r);
         if (r.outcome !== 'done') break;
         const now = await computeStatus({ settings, clients, usage, now: clock(), only: step.keys, ignoreLocks: own });
-        const next = collectSteps(now, { named: step.keys, includeStart: false })[0] ?? null;
+        const next = collectSteps(now, { named: step.keys, includeStart: false, retryWaiting })[0] ?? null;
         step = next ? { ...next, keys: next.keys.filter((k) => step.keys.includes(k)) } : null;
       }
     } finally {
@@ -550,6 +561,9 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
       fs.mkdirSync(path.dirname(agentsPath), { recursive: true });
       fs.writeFileSync(agentsPath, JSON.stringify(agentsFile(io.roleDir), null, 2) + '\n');
       let model = settings.roles[step.role].model;
+      // Failed sessions of this step in a row with no person's action between them: two hold the ticket for the owner.
+      let failures = step.prior ?? 0;
+      const ledgered = step.keys.some((k) => readLedger(settings.state, k));
       for (let attempt = 0; attempt < 2; attempt++) {
         const seqBefore = new Map(step.keys.map((k) => [k, readLedger(settings.state, k)?.seq ?? 0]));
         const before = usage?.week?.percent ?? null;
@@ -560,7 +574,7 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
         }, 5 * 60000);
         let res;
         try {
-          res = await (io.spawnClaude ?? spawnClaude)(cmd);
+          res = await (io.spawnClaude ?? spawnClaude)(cmd, io.claudeEnv ? { env: io.claudeEnv } : {});
         } finally {
           clearInterval(renew);
         }
@@ -568,21 +582,43 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
         const r = parseResult(res.stdout) ?? {};
         const after = usage?.week?.percent ?? null;
         const outcome = await gateOf(step, seqBefore);
-        const run = { stage: step.stage, role: step.role, model, effort: cmd.effort, trigger: manual ? 'manual' : trigger, start, durationMs: r.durationMs, turns: r.turns, costUsd: r.costUsd, tokens: r.tokens, weekPercent: { before, after }, session: r.session, outcome, share: Number((1 / step.keys.length).toFixed(4)), ...(attempt ? { retryOf: settings.roles[step.role].model } : {}), ...(r.denials ? { denials: r.denials } : {}) };
-        for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, run: JSON.stringify(run), pr: step.pr, now: clock() }).catch(() => {});
-        say({ kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, role: step.role, model, outcome, exit: res.code, ...(r.denials ? { denials: r.denials } : {}) });
-        if (outcome === 'done') return { ...pick(step), model, outcome };
+        if (outcome !== 'done') failures += 1;
+        // What the ticket looks like now the session is over, so its own unrecorded writes never count as a person's.
+        const marks = outcome === 'done' || !ledgered ? {} : await marksOf(step);
+        const run = { stage: step.stage, role: step.role, model, effort: cmd.effort, trigger: manual ? 'manual' : trigger, start, durationMs: r.durationMs, turns: r.turns, costUsd: r.costUsd, tokens: r.tokens, weekPercent: { before, after }, session: r.session, outcome, share: Number((1 / step.keys.length).toFixed(4)), ...(attempt ? { retryOf: settings.roles[step.role].model } : {}), ...(r.denials ? { denials: r.denials } : {}), ...(outcome === 'done' ? {} : { failures }) };
+        for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, run: JSON.stringify({ ...run, ...(marks[k] ? { after: marks[k] } : {}) }), pr: step.pr, now: clock() }).catch(() => {});
+        const entry = { kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, role: step.role, model, exit: res.code, ...(r.denials ? { denials: r.denials } : {}) };
+        if (outcome === 'done') {
+          say({ ...entry, outcome });
+          return { ...pick(step), model, outcome };
+        }
         const up = nextModelUp(model, settings.modelLadder);
-        if (attempt === 0 && up && guard(`${step.stage} retry`, step.group)) {
+        if (failures < 2 && attempt === 0 && up && guard(`${step.stage} retry`, step.group)) {
           say({ kind: 'retry', group: step.group, stage: step.stage, from: model, to: up });
           model = up;
           continue;
         }
-        return { ...pick(step), model, outcome: 'failed', note: up ? 'failed twice' : 'failed; no model above to retry with' };
+        // One line a pair in the report's failures: a first failure only waits (for a person, or the next morning run).
+        const twice = failures >= 2;
+        const why = twice ? 'failed twice' : !up ? 'failed; no model above to retry with' : 'failed; the guard held the retry';
+        const waits = ledgered && !twice;
+        say({ ...entry, outcome: waits ? 'waits' : 'failed', note: twice && ledgered ? 'failed twice: held for the owner until a person acts on the ticket or `ticket-state set retry` re-arms it' : waits ? `${why}: runs again after a person acts on the ticket, or once at the next morning run` : why });
+        return { ...pick(step), model, outcome: 'failed', note: why };
       }
       return { ...pick(step), outcome: 'failed' };
     } finally {
       for (const g of held) releaseLock(settings.state, g);
+    }
+  }
+
+  // The mark of each ticket of a step right after its session failed (`markOf` in lib/rule.mjs). If the world can't be
+  // read now, a bare mark: then only `ticket-state set retry` or the morning run gives the step another try.
+  async function marksOf(step) {
+    try {
+      const now = await computeStatus({ settings, clients, usage, now: clock(), only: step.keys, ignoreLocks: own, marks: step.keys });
+      return Object.fromEntries(now.tickets.filter((t) => t.mark).map((t) => [t.key, t.mark]));
+    } catch {
+      return Object.fromEntries(step.keys.map((k) => [k, { at: new Date(clock()).toISOString(), list: null, comments: null, prs: {} }]));
     }
   }
 

@@ -130,12 +130,12 @@ test('the folder names no real id: every 24-character id in it is an invented on
 
 test('the README documents every command, flag, exit code, setting and the id-only definition', () => {
   const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
-  for (const file of [CLI, RUNNER]) {
+  for (const file of [CLI, RUNNER, path.join(ROOT, 'watcher.mjs'), path.join(ROOT, 'launchd.mjs')]) {
     const source = fs.readFileSync(file, 'utf8');
     for (const m of source.matchAll(/^\s{2}'?([a-z-]+)'?: \{ type/gm)) if (m[1] !== 'help') assert.ok(readme.includes(`--${m[1]}`), `README lacks --${m[1]}`);
   }
-  for (const c of ['status', 'record', 'handover', 'lock', 'unlock', 'config', 'intake', 'report']) assert.ok(readme.includes(`\`${c}`), `README lacks ${c}`);
-  for (const w of ['inProgress', 'waiting', 'dailyPercent', 'maxWeekPercent', 'estimates', 'priority', 'roles', 'modelLadder', 'cleanup.keep', 'cleanup.mode', 'trashDir', 'quietHours', 'refused', 'Exit codes', 'files']) assert.ok(readme.includes(w), `README lacks ${w}`);
+  for (const c of ['status', 'record', 'handover', 'lock', 'unlock', 'config', 'intake', 'report', 'set', 'print', 'install', 'uninstall']) assert.ok(readme.includes(`\`${c}`), `README lacks ${c}`);
+  for (const w of ['inProgress', 'waiting', 'dailyPercent', 'maxWeekPercent', 'estimates', 'priority', 'roles', 'modelLadder', 'cleanup.keep', 'cleanup.mode', 'trashDir', 'quietHours', 'refused', 'Exit codes', 'files', 'hostJobs', 'every', 'tokenFile', 'watchMinutes', 'feed.json', 'ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'DOC_TOOLKIT_JOB']) assert.ok(readme.includes(w), `README lacks ${w}`);
   const definition = 'A UA change is id-only when its only differences from the approved version are (1) `{/* #id */}` comments added to headings that had none, and (2) link fragments rewritten from such a heading\'s old fragment to its new id. Anything else makes it a real change: a changed or removed id, a changed heading text, or any other edit.';
   assert.ok(readme.replace(/\s+/g, ' ').includes(definition), 'the README gives the id-only definition word for word');
 });

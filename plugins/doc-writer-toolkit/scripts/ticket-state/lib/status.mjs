@@ -8,6 +8,7 @@ import { intakeList, labelCheck, byPriorityThenAge } from './intake.mjs';
 import { estimatesOf, groupsOf, related, startable } from './limits.mjs';
 import { allowanceOf } from './allowance.mjs';
 import { fileHash } from './record.mjs';
+import { readRearm, rearmedAt } from './setlocal.mjs';
 
 // `status`: every ticket's state, next step, open gate and mismatches, the intake, the WIP counts and the groups a
 // scheduled run may start now. It reads the ledgers, the tracker, the forge and git, and writes nothing.
@@ -15,7 +16,7 @@ import { fileHash } from './record.mjs';
 const bare = (t) => String(t ?? '').replace(/‌/g, '').trim();
 const OPEN_STATES = new Set(['ready', 'needsInfo', 'new', 'closed', 'outside', 'merged']);
 
-export async function computeStatus({ settings, clients, now = Date.now(), only = null, usage = null, git = makeGit(settings), ignoreLocks = null }) {
+export async function computeStatus({ settings, clients, now = Date.now(), only = null, usage = null, git = makeGit(settings), ignoreLocks = null, marks = null }) {
   const ledgers = readAllLedgers(settings.state);
   const ledgersByCard = new Map(ledgers.filter((l) => l.card?.id).map((l) => [l.card.id, l]));
   const { cards, byStatus } = await readCards({ settings, tracker: clients.tracker, ledgers });
@@ -26,9 +27,28 @@ export async function computeStatus({ settings, clients, now = Date.now(), only 
   const fileExists = (rel) => fs.existsSync(path.resolve(settings.root, rel));
   const hashOf = (rel) => fileHash(settings.root, rel);
 
+  // The card's comments, only where a failed step needs them: a ticket whose last session failed (did a person comment
+  // since?), and the tickets whose mark the runner takes right after a failed session (`marks`). A card that can't be
+  // read (moved to a list never read, say) gives none: its move is seen on its own.
+  const rearm = readRearm(settings.state);
+  const cardComments = new Map();
+  const cardMoves = new Map();
+  for (const l of ledgers) {
+    const last = (l.runs ?? []).at(-1);
+    const card = l.card?.id ? cards.get(l.card.id) : null;
+    if (!card || (only && !only.includes(l.key)) || !(marks?.includes(l.key) || (last?.outcome === 'failed' && last.after?.comments))) continue;
+    try {
+      const detail = await clients.tracker.readCard({ card: card.id });
+      cardComments.set(l.key, detail.comments ?? []);
+      cardMoves.set(l.key, detail.moves ?? []);
+    } catch {
+      /* no comments: the other signs still count */
+    }
+  }
+
   // Tickets with a ledger.
   const tickets = ledgers.map((l) =>
-    deriveTicket(l, { now, card: l.card?.id && cards.has(l.card.id) ? cards.get(l.card.id) : l.stages?.close?.status === 'done' ? undefined : null, lock: locks.get(l.group) ?? null, prWorld, git, settings, fileExists, fileHash: hashOf }),
+    deriveTicket(l, { now, card: l.card?.id && cards.has(l.card.id) ? cards.get(l.card.id) : l.stages?.close?.status === 'done' ? undefined : null, lock: locks.get(l.group) ?? null, prWorld, git, settings, fileExists, fileHash: hashOf, cardComments: cardComments.get(l.key) ?? null, cardMoves: cardMoves.get(l.key) ?? null, rearmedAt: rearmedAt(rearm, l.key), mark: Boolean(marks?.includes(l.key)) }),
   );
 
   // Cards with no ledger: the intake, ready tickets the pipeline hasn't started, tickets whose ledger is missing, and

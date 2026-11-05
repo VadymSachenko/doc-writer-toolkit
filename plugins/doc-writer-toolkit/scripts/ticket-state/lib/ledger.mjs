@@ -53,18 +53,32 @@ export function readLedger(state, key) {
   return ledger;
 }
 
-export function readAllLedgers(state) {
-  let names;
+const ledgerKeys = (state) => {
   try {
-    names = fs.readdirSync(ticketsDir(state));
+    return fs.readdirSync(ticketsDir(state)).filter((n) => n.endsWith('.json') && !n.startsWith('.')).sort().map((n) => n.slice(0, -'.json'.length));
   } catch (e) {
     if (e.code === 'ENOENT') return [];
     throw e;
   }
-  return names
-    .filter((n) => n.endsWith('.json') && !n.startsWith('.'))
-    .sort()
-    .map((n) => readLedger(state, n.slice(0, -'.json'.length)));
+};
+
+export function readAllLedgers(state) {
+  return ledgerKeys(state).map((k) => readLedger(state, k));
+}
+
+// Every ledger that reads, and the keys of those that don't, each with its reason (for the watcher: one bad file
+// must not cost the events of the others).
+export function readLedgersApart(state) {
+  const ledgers = [];
+  const bad = [];
+  for (const k of ledgerKeys(state)) {
+    try {
+      ledgers.push(readLedger(state, k));
+    } catch (e) {
+      bad.push({ key: k, error: String(e.message ?? e).split('\n')[0] });
+    }
+  }
+  return { ledgers, bad };
 }
 
 export function writeLedger(state, ledger) {

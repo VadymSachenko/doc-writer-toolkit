@@ -25,7 +25,8 @@ Canonical list of what the plugin ships. One line per skill; the invocation phra
 | `doc-alignment-checker` | Checks a UA page and its EN counterpart for structural alignment | "check-doc-alignment balance/balance" |
 | `cleanup-unused-screenshots` | Moves candidate screenshots a page never referenced into `_unused/` (never deletes) | "cleanup-unused-screenshots for docs/routing" |
 | `identify-ui-icon` | Finds the picture for an icon-only control in the project's `Icon rendering:` form: an Iconify id (evidence first, then the Iconify API), its SVG, or a screenshot crop; falls back to a crop or a marker, never guesses an id and never names the control. The writers call it by name | "identify-ui-icon: the trash button in docs/payments/.assets/payments-page.png" |
-| `ticket-flow` | The manual entry point of the ticket flow: each docs ticket's state, next step and open gate from `ticket-state status`, the runner's plan (`--dry-run`), a manual run of the named tickets after the user confirms, and `handover`. The runner decides every step; the skill records nothing itself | "ticket-flow status", "use ticket-flow to run ticket 1234" |
+| `ticket-flow` | The manual entry point of the ticket flow: each docs ticket's state, next step and open gate from `ticket-state status`, the runner's plan (`--dry-run`), a manual run of the named tickets after the user confirms, `handover`, and a mode or limit change asked in plain words (`ticket-state set`). The runner decides every step; the skill records nothing itself | "ticket-flow status", "use ticket-flow to run ticket 1234", "ticket-flow settings: one at a time" |
+| `ticket-report` | Reads the ticket flow's report of a date (today by default) from the host's state folder: what waits for the owner first, then the report as written. Writes nothing | "/ticket-report", "ticket-report 2026-11-10" |
 
 ## Commands (15)
 
@@ -46,5 +47,6 @@ Canonical list of what the plugin ships. One line per skill; the invocation phra
 | `/check-doc-alignment` | `doc-alignment-checker` |
 | `/translate-locales` | `locale-translator` |
 | `/identify-icon` | `identify-ui-icon` |
+| `/ticket-report` | `ticket-report` |
 
 Commands are thin wrappers: they bind arguments to paths and hand off to the skill's workflow. Shared procedures every skill points to instead of copying: `context/project-paths.md` (content roots, language, the host's product kit), `context/style-guide-registry.md` (guide tokens and routed loading), `context/changed-blocks.md` (what "the changed part of a page" means), `context/ui-labels.md` (the UI label check at the start of a docs task), `context/locale-translation.md` (rules for translating into the further locales), `context/doc-rules/project-rules/screenshot-locales.md` (which locales a screenshot is captured in, and when a new set replaces the old one), `context/section-state.md` (the `document-section` ledger). The scripts the locale pipeline runs, `scripts/ui-labels/` and `scripts/locale-sync/`, the one `doc-alignment-checker` runs, `scripts/doc-align/`, the one the screenshot captures run, `scripts/screenshot-locales/`, and the one `document-section` runs, `scripts/section-state/`, each have a README.

@@ -201,10 +201,11 @@ The keys the `ticket-state` scripts add to that file. The shared file is committ
 | `state` | shared | The git-ignored folder for the ledgers, locks, reports and run logs, relative to the repo root | `<Toolkit state root>/ticket-flow/` |
 | `tracker.docLabels`, `tracker.quietHours`, `tracker.triageMarker`, `tracker.priority` | shared | The labels that confirm docs are needed; the quiet hours before triage; the triage comment's header; the priority labels | none, `2`, none, `high` and `low` |
 | `targets[].appLabel`, `.path`, `.uaRoot`, `.base` | shared | A target's app label, its repo's path from the host root, its UA content root, its base branch | `uaRoot` is required; `base` is `main` |
-| `hostRules`, `hostJobs` | shared | The host's rule files for the role sessions; the host's jobs and the lists they watch | none |
+| `hostRules`, `hostJobs` | shared | The host's rule files for the role sessions; the host's jobs the watcher starts (a watched list quiet for `quietHours`, or `every` minutes; a `script` or a `skill`) | none |
 | `mode` | local | `off`, `observe` or `on` | `observe` |
-| `limits` | local | `inProgress`, `waiting`, `parallel`, `dailyPercent`, `maxWeekPercent`, `estimates`, `lockLeaseMinutes`, `sessionPercent`, `triageBatch`, `stepsPerTicket` | `3`, `5`, `3`, `10`, none, none, `120`, `80`, `10`, `12` |
-| `schedule`, `roles`, `modelLadder`, `video` | local | The watcher's times; each role's model, effort and tool rules; the retry ladder; the video gate | see the README |
+| `limits` | local | `inProgress`, `waiting`, `parallel`, `dailyPercent`, `maxWeekPercent`, `estimates`, `lockLeaseMinutes`, `sessionPercent`, `triageBatch`, `stepsPerTicket`, `sessionsPerStageDay` | `3`, `5`, `3`, `10`, none, none, `120`, `80`, `10`, `12`, `3` |
+| `schedule` | local | `morning` (the morning run starts at the watcher's first check after it), `watchMinutes` (the watcher's interval), `tokenFile` (a `chmod 600` file with the long-lived sign-in token for unattended runs) | `07:00`, `5`, none |
+| `roles`, `modelLadder`, `video` | local | Each role's model, effort and tool rules; the retry ladder; the video gate | see the README |
 | `cleanup.mode` | local | What the close step does with a merged ticket's recorded work files: `trash` (into the Trash) or `delete` | `trash` |
 | `cleanup.keep` | local | Globs, from the host root, of work files the cleanup never removes | `["**/sme-interview.md", "**/app-notes.md"]` |
 | `cleanup.trashDir` | local | The Trash folder | `~/.Trash` |

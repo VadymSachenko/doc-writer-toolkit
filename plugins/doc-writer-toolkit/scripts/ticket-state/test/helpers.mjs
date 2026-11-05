@@ -7,11 +7,11 @@ import { LISTS, NOW, forgeAdapter, quietGit, settingsFor, tmp, trackerAdapter } 
 
 // A world for one test: a host folder, its settings, the fake tracker and forge, and helpers to write ledgers the way
 // records would leave them.
-export function world({ cards = [], prs = [], activity = {}, comments = {}, release = [], extra = {}, git = quietGit } = {}) {
+export function world({ cards = [], prs = [], activity = {}, comments = {}, release = [], actions = {}, changed = {}, events = {}, fail = {}, extra = {}, git = quietGit } = {}) {
   const root = tmp();
   const settings = settingsFor(root, extra);
-  const tracker = trackerAdapter({ cards, comments, release });
-  const forge = forgeAdapter({ prs, activity });
+  const tracker = trackerAdapter({ cards, comments, release, actions });
+  const forge = forgeAdapter({ prs, activity, changed, events, fail });
   const clients = () => makeClients({ settings, io: { trackerAdapter: tracker, forgeAdapter: forge } });
   const status = (opts = {}) => computeStatus({ settings, clients: clients(), now: NOW, git, ...opts });
   const one = async (key, opts) => (await status(opts)).tickets.find((t) => t.key === key);

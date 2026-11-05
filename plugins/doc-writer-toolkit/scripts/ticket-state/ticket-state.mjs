@@ -13,6 +13,7 @@ import { readAllLedgers } from './lib/ledger.mjs';
 import { parseUsage } from './lib/allowance.mjs';
 import { localDate, readRunLog, renderReport, writeReport } from './lib/report.mjs';
 import { readUsageFromClaude } from './lib/runner.mjs';
+import { setLocal } from './lib/setlocal.mjs';
 
 const USAGE = `ticket-state <command> [<key>] [options]
 
@@ -32,6 +33,9 @@ Commands
   config                    The merged settings (shared file + local file + defaults), as the skills read them.
   intake                    The intake cards: due for triage (quiet for the quiet hours) and still waiting.
   report                    Writes the morning report <state>/reports/<date>.md (--print: to stdout instead).
+  set <key> <value>         Sets one key of the owner's local settings file (mode, limits.*, schedule.*, roles.*,
+                            modelLadder, video.*, cleanup.*), checked before it is written; --unset drops it.
+                            'set retry <key|all>' gives a held or waiting step one more try (no setting does).
 
 Options
   --root <dir>              the host repo (default: cwd)
@@ -45,6 +49,7 @@ Options
   --started-by <schedule|manual>                              record
   --group <g>, --kind <schedule|manual>, --stale              lock, unlock
   --date <yyyy-mm-dd>, --print                                report
+  --unset                                                     set
   --origin <url>            the tracker's API origin (tests)
   -h, --help                this text
 `;
@@ -71,11 +76,12 @@ const OPTIONS = {
   stale: { type: 'boolean' },
   date: { type: 'string' },
   print: { type: 'boolean' },
+  unset: { type: 'boolean' },
   origin: { type: 'string' },
   help: { type: 'boolean', short: 'h' },
 };
 
-const COMMANDS = ['status', 'record', 'handover', 'lock', 'unlock', 'config', 'intake', 'report'];
+const COMMANDS = ['status', 'record', 'handover', 'lock', 'unlock', 'config', 'intake', 'report', 'set'];
 const TAKES_KEY = ['record', 'handover'];
 
 export function usageOf(values, io = {}) {
@@ -121,6 +127,14 @@ export async function main(argv, io = {}) {
   }
   if (!COMMANDS.includes(command)) throw new CliError(`unknown command '${command}'.\n\n${USAGE}`, { code: 2 });
   if (TAKES_KEY.includes(command) && !key) throw new CliError(`${command} needs the ticket key.\n\n${USAGE}`, { code: 2 });
+  if (command === 'set') {
+    if (!key) throw new CliError(`set needs the key.\n\n${USAGE}`, { code: 2 });
+    if (rest.length > 1) throw new CliError(`unexpected argument '${rest[1]}'`, { code: 2 });
+    const root = path.resolve(values.root ?? process.cwd());
+    const settings = await loadSettings({ root, settings: values.settings });
+    stdout.write(JSON.stringify({ ok: true, command, ...setLocal({ settings, key, value: rest[0], unset: Boolean(values.unset) }) }, null, 2) + '\n');
+    return 0;
+  }
   if (!TAKES_KEY.includes(command) && !['lock', 'unlock'].includes(command) && key) throw new CliError(`unexpected argument '${key}'`, { code: 2 });
   if (rest.length) throw new CliError(`unexpected argument '${rest[0]}'`, { code: 2 });
 

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { readAllLedgers } from './ledger.mjs';
+import { readFeed } from './feed.mjs';
 
 // The morning report (design §7): a local file `<state>/reports/<date>.md`, written with no model call. Nothing goes to
 // the tracker or the forge. A separate skill reads it on demand.
@@ -58,7 +59,7 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
   out.push(a ? `Allowance: day ${a.day} of the week window, ${a.used}% of the week used of ${a.cap}% allowed by now, ${a.remaining}% left today; finishing the tickets in work needs about ${a.inWork}%${a.inWorkUnknown?.length ? ` plus ${a.inWorkUnknown.length} ticket(s) with no estimate yet` : ''}.` : 'Allowance: no usage reading.');
   out.push('');
 
-  const waitingOwner = st.tickets.filter((t) => ['questions', 'planGate', 'ownerBlock', 'paused', 'reworkWait'].includes(t.state));
+  const waitingOwner = st.tickets.filter((t) => t.held || ['questions', 'planGate', 'ownerBlock', 'paused', 'reworkWait'].includes(t.state));
   out.push('## Waiting for you', '', list(waitingOwner.map((t) => `${link(t)}${cardName(t)}: ${t.state}${t.gate?.why ? `, ${t.gate.why}` : ''}`)), '');
 
   const places = [];
@@ -92,9 +93,29 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
 
   for (const w of watched) out.push(`## Cards left in ${w.list}`, '', list(w.cards.map((c) => `[${c.name}](${c.url}), last activity ${c.lastActivity}`)), '');
 
+  // The watcher: when it last read each source, what fails, and the host jobs waiting for their quiet hours.
+  let feed = null;
+  try {
+    feed = readFeed(settings.state);
+  } catch {
+    /* unreadable: left out */
+  }
+  if (feed && Object.keys(feed.sources).length) {
+    const checks = Object.values(feed.sources).map((x) => x.lastCheck).filter(Boolean).sort();
+    const failing = Object.entries(feed.sources).filter(([, x]) => x.failingSince).map(([n, x]) => `${n} failing since ${x.failingSince}: ${x.lastError ?? 'error'}`);
+    const jobs = (settings.hostJobs ?? []).map((j) => {
+      const js = feed.jobs?.[j.name] ?? {};
+      // A job that fails is tried at each check; after an hour of failing it is disarmed (`lastFailure`).
+      const failing = js.failingSince ? `, failing since ${js.failingSince} (${js.failures ?? 0} tries)` : '';
+      if (j.watch && js.armed) return `${j.name}: new cards in ${j.watch.list} since ${js.firstChange}; runs ${j.quietHours} h after the last change (${js.lastChange})${failing}${js.heldUntil ? `, held by the guard until ${js.heldUntil}` : ''}`;
+      return `${j.name}: ${js.lastRun ? `last run ${js.lastRun}` : 'not run yet'}${failing}${js.lastFailure ? `, disarmed after an hour of failing at ${js.lastFailure}` : ''}${js.heldUntil ? `, held until ${js.heldUntil}` : ''}`;
+    });
+    out.push('## The watcher', '', `Last check ${checks.at(-1) ?? 'never'}; the morning run ${feed.morning?.lastDate === date ? `ran at ${feed.morning.at ?? date}` : 'has not run on this date'}.`, '', list([...failing, ...jobs], 'no source failing, no host job'), '');
+  }
+
   out.push('## Starting and finishing', '');
   const steps = st.tickets.filter((t) => t.next);
-  out.push(list(steps.map((t) => `${link(t)}: next ${t.next.stage}${t.next.pr ? ` on ${t.next.pr}` : ''}${t.next.role ? ` (${t.next.role})` : ' (no model)'}`), 'nothing to finish'));
+  out.push(list(steps.map((t) => `${link(t)}: next ${t.next.stage}${t.next.pr ? ` on ${t.next.pr}` : ''}${t.next.role ? ` (${t.next.role})` : ' (no model)'}${t.next.waits ? `; failed at ${t.failed.at}, waits for ${t.next.waits}` : ''}`), 'nothing to finish'));
   out.push('', list(st.startable.map((g) => `start ${g.group} (${g.priority}${g.estimate !== null ? `, about ${g.estimate}%` : ', no estimate yet'})`), 'no group can start'));
   if (st.notStarted.length) out.push('', list(st.notStarted.map((g) => `${g.group} (${g.priority}) didn't start: ${g.reasons.join('; ')}`)));
   out.push('');
@@ -117,7 +138,7 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
   out.push('## Work files removed after the merge', '', list(removedLines), ...(freed ? ['', `Space freed today: ${mb(freed)}.`] : []), '');
 
   const failures = runLog.filter((e) => e.outcome === 'failed' || e.kind === 'guard');
-  out.push('## Failures and guard stops', '', list(failures.map((e) => `${e.at} ${[e.key ?? e.group ?? (e.keys ?? []).join(', '), e.stage ?? e.what].filter(Boolean).join(' ')}: ${e.note ?? e.reason ?? e.outcome}`)), '');
+  out.push('## Failures and guard stops', '', list(failures.map((e) => `${e.at} ${[e.key ?? e.group ?? (e.keys ?? []).join(', '), e.stage ?? e.what ?? (e.job ? `job ${e.job}` : null)].filter(Boolean).join(' ')}: ${e.note ?? e.reason ?? e.outcome}`)), '');
 
   const today = ledgers.flatMap((l) => (l.runs ?? []).filter((r) => onDate(r.start)).map((r) => ({ ...r, key: l.key })));
   const cost = today.reduce((s, r) => s + (typeof r.costUsd === 'number' ? r.costUsd * (r.share ?? 1) : 0), 0);

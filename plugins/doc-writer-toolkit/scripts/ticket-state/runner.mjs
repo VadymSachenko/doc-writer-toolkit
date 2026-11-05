@@ -21,6 +21,8 @@ Options
   --morning                 also triage the intake cards that are due
   --manual                  a manual run: its tickets stay out of the limits for their whole life; it starts only the
                             ready tickets named with --ticket, ignoring the limits
+  --watcher                 the watcher's run: finish only the tickets named with --ticket (guarded and counted like
+                            a scheduled run); no triage, no start of a ready group
   --ticket <key>            only these tickets (repeatable)
   --usage-file <file|->     the text of 'claude -p /usage' (default: the runner reads it)
   --claude <bin>            the claude command (default: claude)
@@ -34,6 +36,7 @@ const OPTIONS = {
   'dry-run': { type: 'boolean' },
   morning: { type: 'boolean' },
   manual: { type: 'boolean' },
+  watcher: { type: 'boolean' },
   ticket: { type: 'string', multiple: true },
   'usage-file': { type: 'string' },
   claude: { type: 'string' },
@@ -51,7 +54,10 @@ export async function main(argv, io = {}) {
     return 0;
   }
   if (positionals.length) throw new CliError(`unexpected argument '${positionals[0]}'.\n\n${USAGE}`, { code: 2 });
-  if (values.ticket?.length && !values.manual) throw new CliError('--ticket goes with --manual: a scheduled run takes every ticket', { code: 2 });
+  if (values.manual && values.watcher) throw new CliError('--manual and --watcher are two kinds of run: give one', { code: 2 });
+  if (values.ticket?.length && !values.manual && !values.watcher) throw new CliError('--ticket goes with --manual or --watcher: a scheduled run takes every ticket', { code: 2 });
+  if (values.watcher && !values.ticket?.length) throw new CliError('--watcher needs the tickets it finishes (--ticket)', { code: 2 });
+  if (values.watcher && values.morning) throw new CliError('--watcher runs no morning triage', { code: 2 });
   const root = path.resolve(values.root ?? process.cwd());
   const settings = await loadSettings({ root, settings: values.settings });
   const dryRun = Boolean(values['dry-run']);
@@ -61,7 +67,7 @@ export async function main(argv, io = {}) {
     settings,
     clients,
     io: { ...io, ...(fixed !== undefined ? { readUsage: () => fixed } : {}) },
-    options: { dryRun, morning: Boolean(values.morning), trigger: values.manual ? 'manual' : 'schedule', named: values.ticket ?? [], claude: values.claude ?? 'claude' },
+    options: { dryRun, morning: Boolean(values.morning), trigger: values.manual ? 'manual' : values.watcher ? 'watcher' : 'schedule', named: values.ticket ?? [], claude: values.claude ?? 'claude' },
   });
   const out = { ok: true, command: 'run', ...result, requests: clients.requests(), caught: clients.caught() };
   stdout.write(JSON.stringify(out, null, 2) + '\n');
