@@ -1,6 +1,6 @@
 ---
 name: ticket-flow
-description: The contract of the ticket flow — the tracker statuses it reads, the ticket states, the next-step rule, the ledger <state>/tickets/<key>.json and its fields, when a record is accepted, the locks, the limits and priority, the cleanup after the merge and the morning report. The scripts/ticket-state scripts hold it in code; the ticket-flow skill and the role sessions read it. Referenced, never copied.
+description: The contract of the ticket flow — the tracker statuses it reads, the ticket states, the next-step rule, the ledger <state>/tickets/<key>.json and its fields, when a record is accepted, the locks, the limits and priority, the cleanup after the merge, the morning report and the watcher with its host jobs. The scripts/ticket-state scripts hold it in code; the ticket-flow skill and the role sessions read it. Referenced, never copied.
 ---
 
 # Ticket flow
@@ -98,6 +98,16 @@ Only tickets a scheduled run started, in `mode pipeline`, count. A scheduled run
 
 The close step of a ticket whose PRs are all merged moves the work files in `files` into the Trash (`cleanup.mode`), except a path git tracks, a path outside the host repo and the state root, and a path `cleanup.keep` names (default `**/sme-interview.md`, `**/app-notes.md`). A path the ledger didn't record is never touched. While a PR is open or was closed unmerged, nothing is removed. The close record keeps what went and the space freed.
 
+## The watcher
+
+`watcher.mjs` runs every `schedule.watchMinutes`, started by a LaunchAgent (`launchd.mjs install`), with no model call of its own. It reads what changed since its cursor: the boards' actions, the PRs that changed and the PR events. It maps each event to a ticket through the ledgers, and asks `status` what each changed ticket does next. The runner finishes those with a next step, each once, guarded and counted like a scheduled run, and starts no ready group. A check that finds nothing ends there: no status, no runner, no `claude`.
+
+- **The cursor:** a window from 10 minutes before the last check, seen ids dropped. The cursor moves only after every event was handed on. A source that fails keeps its place for up to 24 hours, then the gap is reported.
+- **The morning run:** once a day, at the first check after `schedule.morning`.
+- **Host jobs (`hostJobs`):** "when list X gets new cards and stays quiet for N hours, run job Y", or "every N minutes"; Y is a host script or a skill. A change in the list restarts the wait. A skill job is guarded like a scheduled step.
+
+`mode` (`off`, `observe`, `on`) and the limits are in the owner's local file. `ticket-state set` edits one key of it, the way a request in plain words is carried out. No `claude` the flow starts gets an API key or an auth token, so the plan pays. A macOS notification gives the morning counts. It is urgent only for a limit reached or a step that failed twice.
+
 ## The report
 
-`<state>/reports/<date>.md`, written by the runner (or `ticket-state report`) with no model call and sent nowhere: what waits for the owner, PRs with places, PRs with the check label, videos waiting for transcripts, ready for merge, cards left in the host jobs' watched lists, what finished and started and why the rest didn't, mismatches and tickets in the owner's hands, the work files removed, failures and guard stops, the day's cost, and once a week the proposed changes to the roles.
+`<state>/reports/<date>.md`, written by the runner (or `ticket-state report`) with no model call and sent nowhere: what waits for the owner, PRs with places, PRs with the check label, videos waiting for transcripts, ready for merge, cards left in the host jobs' watched lists, what finished and started and why the rest didn't, mismatches and tickets in the owner's hands, the work files removed, the watcher (its last check, failing sources, host jobs waiting), failures and guard stops, the day's cost, and once a week the proposed changes to the roles. `/ticket-report [date]` reads it on demand.

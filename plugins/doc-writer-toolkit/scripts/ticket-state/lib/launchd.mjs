@@ -60,7 +60,8 @@ const defaultWhich = (name) => {
 // nothing and exits), under its own label, for an install and uninstall check.
 export function agentFor(settings, { noop = false, io = {} } = {}) {
   const which = io.which ?? defaultWhich;
-  const node = io.node ?? process.execPath;
+  // The node on the PATH (a stable link) before this process's own path, which a version upgrade may move.
+  const node = io.node ?? which('node') ?? process.execPath;
   const found = Object.fromEntries(NEEDED.map((n) => [n, which(n)]));
   const missing = NEEDED.filter((n) => !found[n]);
   const dirs = [path.dirname(node), ...NEEDED.map((n) => found[n] && path.dirname(found[n])).filter(Boolean), '/usr/bin', '/bin', '/usr/sbin', '/sbin'];

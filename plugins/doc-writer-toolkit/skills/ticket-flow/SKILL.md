@@ -1,6 +1,6 @@
 ---
 name: ticket-flow
-description: 'The manual entry point of the ticket flow: shows each docs ticket''s state, next step and open gate from the ticket-state script, prints the runner''s plan, and, after the user confirms, runs the next steps of the named tickets as a manual run (outside the WIP limits) or hands a ticket to the pipeline or back. The runner decides every step; this skill never records a stage, edits a ledger, moves a card or writes a page itself. Explicit invocation only: use explicitly ("ticket-flow status", "use ticket-flow to run ticket 1234"); never on a loose question about a card or a PR.'
+description: 'The manual entry point of the ticket flow: shows each docs ticket''s state, next step and open gate from the ticket-state script, prints the runner''s plan, and, after the user confirms, runs the next steps of the named tickets as a manual run (outside the WIP limits), hands a ticket to the pipeline or back, or changes the mode or a limit asked in plain words. The runner decides every step; this skill never records a stage, edits a ledger, moves a card or writes a page itself. Explicit invocation only: use explicitly ("ticket-flow status", "use ticket-flow to run ticket 1234"); never on a loose question about a card or a PR.'
 ---
 
 # ticket-flow
@@ -9,12 +9,12 @@ You are the person's way into the ticket flow from a conversation. The scheduled
 
 ## Scope
 
-- **In scope:** `ticket-state status` read back in plain words; the runner's dry run, shown as a plan; a manual run of the named tickets after the user confirms it; `handover` of a ticket to the pipeline or back to the owner; the stale-lock release the runner offers.
-- **Out of scope:** the stages' own work (triage, planning, writing, the review chain), which the role sessions do inside the run; the morning report's reading, which the report skill owns; the watcher that starts scheduled runs; changing the settings (`mode`, the limits, the roles), which the person does in the local settings file. The section chain is `document-section`; a single page update is `doc-page-updater`.
+- **In scope:** `ticket-state status` read back in plain words; the runner's dry run, shown as a plan; a manual run of the named tickets after the user confirms it; `handover` of a ticket to the pipeline or back to the owner; the stale-lock release the runner offers; a change to the owner's local settings asked in plain words ("one at a time", "pause the pipeline", "start at 6:30"), through `ticket-state set`.
+- **Out of scope:** the stages' own work (triage, planning, writing, the review chain), which the role sessions do inside the run; the morning report's reading, which the `ticket-report` skill owns; installing the watcher (`launchd.mjs`, in the script's README); the shared settings file (board, lists, targets, host jobs), which the host commits. The section chain is `document-section`; a single page update is `doc-page-updater`.
 
 ## Arguments
 
-`status` (the default) · `plan` (the dry run) · `run <key> [<key> …]` (a manual run of those tickets) · `handover <key> [--to hand]`.
+`status` (the default) · `plan` (the dry run) · `run <key> [<key> …]` (a manual run of those tickets) · `handover <key> [--to hand]` · `settings <what to change, in plain words>`.
 
 ## Sources to load
 
@@ -48,10 +48,25 @@ Only for `run`, and only after the user says yes to the plan of Step 3. `runner.
 
 For `handover`: `ticket-state.mjs handover <key> --root <host>` (add `--to hand` to take a ticket back). A ticket with no ledger is rebuilt from its card and PRs; show what was rebuilt (its PRs and their stages) and ask the user to check it before the next run.
 
+### Step 5a — Settings in plain words
+
+For `settings`: turn the request into `ticket-state.mjs set <key> <value> --root <host>` calls, one key per call, using the keys of the README's "Settings" table. Examples:
+
+| Request | Call |
+|---|---|
+| "one at a time" | `set limits.inProgress 1` |
+| "pause the pipeline" / "switch it back on" | `set mode off` / `set mode on` |
+| "only watch, don't act" | `set mode observe` |
+| "start the morning run at 6:30" | `set schedule.morning 06:30` |
+| "10% a day again", "no weekly cap" | `set limits.dailyPercent 10`, `set limits.maxWeekPercent null` |
+| "the writer on Sonnet" | `set roles.writer.model claude-sonnet-5-5` |
+
+Show the calls before running them, and run them only after the user says yes. A request that maps to no local key (a list, a board, a target, a host job) is the shared file's: say so and change nothing. Report each call's `before` and `after`. A refused value (exit 2) is reported with the script's reason, and nothing is retried with another value.
+
 ### Step 6 — Self-review before finishing
 
 - Every number you reported comes from the scripts' JSON of this run, not from memory or the board.
-- No ledger, lock, report or card was written by you: the only writers were `runner.mjs` (Step 4) and `handover` (Step 5), and only after the user asked for them.
+- No ledger, lock, report or card was written by you: the only writers were `runner.mjs` (Step 4), `handover` (Step 5) and `set` (Step 5a), and only after the user asked for them.
 - A refused record or a failed step is reported with the script's own reason; nothing was retried by hand.
 - Exit codes read right: `1` is a refusal or a failed call, `2` is bad usage or settings.
 
@@ -65,3 +80,4 @@ The states and counts (Step 2), the plan (Step 3), and for a run what ran: each 
 - "use ticket-flow to show the plan"
 - "ticket-flow run 1234"
 - "use ticket-flow to hand ticket 1234 to the pipeline"
+- "ticket-flow settings: one at a time"
