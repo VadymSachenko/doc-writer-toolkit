@@ -61,7 +61,7 @@ A pure function of the ledger and the world. First match wins:
 
 ## The ledger
 
-`<state>/tickets/<key>.json`, in the host's git-ignored state folder (`state` in the settings, default `<Toolkit state root>/ticket-flow/`). Written only by `record` and `handover`, to a temp file and renamed. `key` is the card's team number, else its short link.
+`<state>/tickets/<key>.json`, in the host's git-ignored state folder (`state` in the settings, default `<Toolkit state root>/ticket-flow/`). Written only by `record`, `handover` and `import`, to a temp file and renamed. `key` is the card's team number, else its short link.
 
 | Field | |
 |---|---|
@@ -82,7 +82,9 @@ A pure function of the ledger and the world. First match wins:
 | `files` | The work files outside git the stages created or downloaded: `path`, `kind`, `bytes`, `stage`, `at`. |
 | `runs` | Each session: role, model, effort, start, turns, the CLI's cost estimate, tokens, the week bar before and after, outcome, `retryOf`, the share of a group session; a failed one also `failures` (failed sessions in a row) and `after` (what the ticket looked like when it ended). |
 | `log` | Append-only: `seq`, `at`, `stage`, `pr`, `outcome`, `note`. |
-| `legacy` | Set when the ledger was rebuilt at handover. |
+| `legacy` | Set when the ledger was rebuilt at handover, or imported from a Markdown ledger: then it holds every line of that Markdown with its number (`mapped`, the lines that also filled a field; `fields`, the rest), the file's hash, the old last stage and what the import couldn't map (`misses`). |
+
+**The import.** `ticket-state import` turns a host's Markdown ledgers from before the JSON ones into JSON ledgers. A closed ticket (no PR open; the card done, out of scope, archived or gone) gets `mode hand` and its close; a ready one (the card in the ready status, no PR, only triaged) gets `mode pipeline`; any other open one gets `mode hand` until `handover`. A closed ticket's Markdown is removed only once the JSON is checked to rebuild it byte for byte; the morning run repeats that for tickets that closed since. An open ticket's Markdown stays. The details are in `scripts/ticket-state/README.md`, "The import".
 
 ## When a record is accepted
 
@@ -94,7 +96,7 @@ One lock per group, `<state>/locks/<group>/owner.json`, taken with `mkdir` so tw
 
 ## Limits and priority
 
-Only tickets a scheduled run started, in `mode pipeline`, count. A scheduled run starts a ready group only if: tickets in progress + the group's size ≤ `limits.inProgress` (a group larger than that only when nothing is in progress); tickets waiting < `limits.waiting`; and the group's estimated cost plus what the tickets in work still need fits what is left of the day's allowance (`limits.dailyPercent` of the week per day of the week window, from `/usage`). Estimates are per size, measured on finished tickets, else `limits.estimates`; with none yet, one ticket at a time. Priority is the card's label (`tracker.priority`): high first, then medium (no label), then low, the oldest card first within a level. A group held back by the limits holds back every lower level; within a level, a younger group that fits may start. Finishing comes before starting, and a higher priority first within each kind of finishing.
+Only tickets a scheduled run started, in `mode pipeline`, count. A scheduled run starts a ready group only if: tickets in progress + the group's size ≤ `limits.inProgress` (a group larger than that only when nothing is in progress); tickets waiting < `limits.waiting`; and the group's estimated cost plus what the tickets in work still need fits what is left of the day's allowance (`limits.dailyPercent` of the week per day of the week window, from `/usage`). Estimates are per size, measured on finished tickets, else `limits.estimates`; with none yet, one ticket at a time. With `limits.open` set, the tickets a scheduled run started and not merged yet (planning to final review) + the group's size ≤ it (a larger group only when none is open). Priority is the card's label (`tracker.priority`): high first, then medium (no label), then low, the oldest card first within a level. The start order is `limits.startOrder`: `priority` (by priority, then the oldest; a group held back by the limits holds back every lower level, and within a level a younger group that fits may start) or `easiest` (the smallest triage size first, a size not known yet last; then fewer repos; then fewer pages; then priority and age; a group held back by the limits holds back every harder one). Finishing comes before starting, and a higher priority first within each kind of finishing.
 
 ## Cleanup after the merge
 

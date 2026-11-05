@@ -31,6 +31,8 @@ The shared file (committed in the host) holds `state`, `tracker`, `forge`, `targ
 | `hostJobs` | `[]` | The host's own jobs, started by the watcher (see "Host jobs"). Each has a `name`, a trigger (`watch: { board, list }` with `quietHours`, or `every` minutes), a `run` (`script` inside the host repo, or `skill`) and `timeoutMinutes` (120). The report lists the cards left in each watched list. |
 | `mode` | `observe` | `off` runs nothing; `observe` plans and writes only the report; `on` runs. |
 | `limits.inProgress` / `limits.waiting` | `3` / `5` | The WIP ceilings for scheduled starts. |
+| `limits.open` | none | The most tickets a scheduled run started that may be unmerged at once, SME review and final review included (a gentler first week: say `2`, then `ticket-state set limits.open --unset`). None: no such limit. |
+| `limits.startOrder` | `priority` | Which ready group a scheduled run starts first: `priority` (high first, then the oldest) or `easiest` (the smallest triage size first, a size not known yet counting as the hardest; then fewer repos; then fewer pages; then priority and age). |
 | `limits.parallel` | `3` | Groups advanced at once (1 once the session bar reaches `limits.sessionPercent`, default `80`). |
 | `limits.dailyPercent`, `limits.maxWeekPercent` | `10`, none | The day's allowance: `dailyPercent` × the day of the week window, capped by `maxWeekPercent`. |
 | `limits.estimates` | `{}` | Percent of the week per size (`edit`, `newPage`, `newSection`) until finished tickets give measured ones. |
@@ -59,6 +61,7 @@ Role defaults: triage `claude-sonnet-5-5` medium, writer `claude-opus-5-5` high,
 | `config` | The merged settings as the skills read them; credentials by variable name only. |
 | `intake` | The intake cards: `due` (quiet for `quietHours`, highest priority first, then the oldest) and `waiting` (with `quietAt`). |
 | `report` | Writes the report `<state>/reports/<date>.md` (`--print`: to stdout instead). |
+| `import` | Brings in a host's Markdown ledgers from before the JSON ones (`<from>/<key>.md`, one `name: value` line per fact, default `--from` the state folder): each becomes `<state>/tickets/<key>.json` holding every line (see "The import"). Closed tickets' Markdown is removed after the check; open ones stay. `--dry-run` lists it all and writes nothing. |
 | `set <key> <value>` | Sets one key of the owner's local file: `mode`, `limits.*`, `schedule.*`, `roles.<role>.*`, `modelLadder`, `video.*`, `cleanup.*`. The value is read as JSON when it parses (`1`, `null`, `["a"]`), else as text (`on`, `06:30`). The merged settings are checked before the file is written (to a temp file, then renamed); a bad value or a key of the shared file writes nothing (exit 2). `--unset` drops the key, so the default applies. Prints `before`, `after` and `changed`. This is what a request in plain words ("one at a time", "pause the pipeline") turns into. No setting re-arms a held step. `set retry <key>` (or `set retry all`) does, and only that: it gives a held or waiting step of that ticket (or of every ticket) one more try, and lifts the day's session cap; its time goes to `<state>/rearmed.json`, the settings files stay as they are. A key with no ledger is refused (exit 2). |
 
 The runner takes no command.
@@ -86,6 +89,9 @@ The runner takes no command.
 | `--group <g>`, `--kind <k>`, `--stale` | `lock`, `unlock`. |
 | `--date <yyyy-mm-dd>`, `--print` | `report`. |
 | `--unset` | `set`: drop the key. |
+| `--from <dir>` | `import`: the folder of the Markdown ledgers (default: the state folder). |
+| `--size <word>=<size>` | `import`: what a size word of the Markdown ledgers means (`edit`, `newPage` or `newSection`); repeatable. A word with none is listed in `misses`. |
+| `--dry-run` | `import`: lists what it would import and remove; writes and moves nothing. |
 | `--origin <url>` | The tracker's API origin (tests). |
 
 `runner.mjs`:
@@ -171,7 +177,8 @@ A recorded folder goes whole, or file by file when it holds a tracked or kept fi
 1. `mode off`: nothing. Stale locks are moved aside and their running stages recorded failed.
 2. **Finishing**, every group with a next step, in this order: close the merged, ready for merge and the re-sync, the chain and moves to final review, review comments and moves, answers in and gates passed, writing. Within a kind, higher priority first, then the older card. Up to `limits.parallel` groups at once.
 3. **Morning** (`--morning`): one triage session for the due intake cards.
-4. **Starts**: while `startable` has a group and the guard allows, the highest priority first, the oldest within a level.
+4. **Starts**: while `startable` has a group and the guard allows, in `limits.startOrder` (the highest priority first, the oldest within a level; or the easiest first).
+5. **Morning** (`--morning`): the Markdown ledgers from before the JSON ones whose ticket closed since the import are removed, each after the import's check (see "The import"). No model; a dry run or `observe` lists them (`legacyMarkdown`), and the report lists what went under "Work files removed after the merge".
 
 Each group is locked (kind `schedule`, or `manual` for a manual run) while it advances, step by step as far as it goes, up to `limits.stepsPerTicket`. A step with no role (`move`, `follow`, `close`, `readyForMerge`, `planApproval`, `videoTry`, `videoBlock`) runs in the script. A step with a role is one session:
 
@@ -194,7 +201,18 @@ Right after a failed session the runner reads the ticket once more and keeps tha
 
 **The guard.** A scheduled start or model step runs only while the week's use is below the day's allowance (`/usage` read before and after each session). No reading, no scheduled start. A manual run is not guarded.
 
-**The limits.** Only tickets a scheduled run started, in `mode pipeline`, count: `inProgress` (planning, writing) and `waiting` (questions, plan gate, video gate, places, the owner's block, rework). A group starts only if `inProgress` + its size ≤ the ceiling (a group larger than the ceiling only when nothing is in progress), `waiting` is below its limit, and its estimate plus what the tickets in work still need fits what is left today. With no estimate for a size yet, one ticket at a time. A group held back by these holds back every lower priority; within a level, a younger group that fits may start.
+**The limits.** Only tickets a scheduled run started, in `mode pipeline`, count: `inProgress` (planning, writing) and `waiting` (questions, plan gate, video gate, places, the owner's block, rework). A group starts only if `inProgress` + its size ≤ the ceiling (a group larger than the ceiling only when nothing is in progress), `waiting` is below its limit, and its estimate plus what the tickets in work still need fits what is left today. With no estimate for a size yet, one ticket at a time. With `limits.open` set, a group starts only if the open tickets (a scheduled run started them, and they are not merged yet: planning to final review) + its size ≤ it (a larger group only when none is open). In `priority` order a group held back by these holds back every lower priority; within a level, a younger group that fits may start. In `easiest` order a group held back by them holds back every harder one.
+
+## The import
+
+`ticket-state import` turns a host's Markdown ledgers from before the JSON ones into JSON ledgers, once, at the switch. The Markdown has one `name: value` line per fact, appended as the ticket went on; a name may repeat (`stage`), and a per-repo name has three forms (`branch[R]: x`, `branch.R: x`, `branch: R=x`).
+
+- Every line goes into the JSON as it is, with its number: `legacy.mapped` for a line that also filled a field (`to` names it), `legacy.fields` for the rest. The JSON holds the whole Markdown, so the Markdown can go.
+- Fields it fills: the card and the original card (by URL), the group, the triage (`verdict`, `targets` by each target's `appLabel`, `size` through `--size`, `relations`, `pages`, `triaged_at`), and a PR entry per PR link with its branch. The old `stage` lines go into the log; the stages are the ones `handover` rebuilds.
+- Then the tracker and the forge say where each ticket is. **Closed** (no PR open, and the card done, out of scope, archived or gone): `mode hand` with its close recorded. **Ready** (the card in the ready status, no PR, the last stage `triaged`): `mode pipeline`, a ready ticket a scheduled run may start, as a triaged ready card with no ledger already is. **Any other**: `mode hand`, the owner's until `handover`.
+- The removal: a closed ticket's Markdown goes (to `cleanup.trashDir`, or deleted with `cleanup.mode: delete`) only after a check that the JSON rebuilds it byte for byte: every line once, in order, and the final newline. A Markdown that fails the check stays, with the reason. The morning run repeats the removal for tickets that closed since; it is the script's own step, never a session's command.
+- Run again, it imports a Markdown that changed since, if nothing was recorded into its JSON since; it never overwrites a ledger that didn't come from an import, or one recorded into since, and then keeps its Markdown.
+- `imported[]` gives each ticket's `state` (`closed`, `ready`, `open`), `mode`, `stage`, `lastStage`, PRs, triage, how many lines filled a field and how many were kept as they are, and `misses`: what it couldn't map (a size word with no `--size`, a target label no target has, a branch with no PR link, an unknown stage word, no card URL). Then `skipped`, `removed` and `kept`, each with its reason.
 
 **The report**, `<state>/reports/<date>.md`, written with no model call: the mode, WIP and allowance; what waits for the owner; PRs with places; PRs labelled with the check label; videos waiting for transcripts (the parts to upload today); ready for merge (and PRs that went on to the final review alone); the cards left in each watched list; what finished and started, and why each other group didn't; mismatches and tickets in the owner's hands; cards that are not tickets; the work files removed after the merge and the space freed; failures and guard stops; the day's cost. Once a week it adds proposed changes to the roles (a role whose steps often needed the retry: the next model; many clean steps at high effort: medium), kept in `<state>/roles-proposal.json`; nothing changes on its own.
 
@@ -245,7 +263,7 @@ The plist holds absolute paths (node, the watcher in the plugin's folder as inst
 
 ## `status` output
 
-`tickets[]`: `key`, `group`, `ledger` (`present` or `absent`), `priority`, `createdAt`, `mode`, `startedBy`, `stage` (the last recorded), `card`, `state`, `next` (the first of `steps`, or null; with `waits` and `prior` after a failed session), `steps`, `gate` (`who`, `why`), `mismatch`, `notes`, `prs` (each with `id`, `stage`, `state`, `labels`, `head`, `next`, and `approvalStale`, the UA pages changed after the approval), `counts` (`inProgress`, `waiting` or null), `counted`, `locked` (with `derivedState`), `hand`, and after a failed session `failed` (`stage`, `pr`, `at`, `sessions`, and `acted` or `held`) and `held`; at the daily session cap `capped` (`stage`, `pr`, `sessions`) and `held`. Then `intake`, `groups`, `wip` (`inProgress`, `waiting`, `limits`, `manual`), `allowance` (`day`, `cap`, `used`, `remaining`, `inWork`, `inWorkUnknown`), `estimates`, `startable`, `notStarted` (with `reasons`), `notTickets`, `locks`, and `requests` (what was sent to the tracker and the forge, by method; `writes` is empty).
+`tickets[]`: `key`, `group`, `ledger` (`present` or `absent`), `priority`, `createdAt`, `mode`, `startedBy`, `stage` (the last recorded), `card`, `state`, `next` (the first of `steps`, or null; with `waits` and `prior` after a failed session), `steps`, `gate` (`who`, `why`), `mismatch`, `notes`, `prs` (each with `id`, `stage`, `state`, `labels`, `head`, `next`, and `approvalStale`, the UA pages changed after the approval), `counts` (`inProgress`, `waiting` or null), `counted`, `locked` (with `derivedState`), `hand`, and after a failed session `failed` (`stage`, `pr`, `at`, `sessions`, and `acted` or `held`) and `held`; at the daily session cap `capped` (`stage`, `pr`, `sessions`) and `held`. Then `intake`, `groups`, `wip` (`inProgress`, `waiting`, `open`, `limits`, `manual`), `allowance` (`day`, `cap`, `used`, `remaining`, `inWork`, `inWorkUnknown`), `estimates`, `startable` (in `easiest` order with `sizeRank`, `repoCount` and `pageCount`), `notStarted` (with `reasons`), `notTickets`, `locks`, and `requests` (what was sent to the tracker and the forge, by method; `writes` is empty).
 
 ## Exit codes
 
@@ -258,7 +276,7 @@ The plist holds absolute paths (node, the watcher in the plugin's folder as inst
 | `ticket-state.mjs`, `runner.mjs`, `watcher.mjs`, `launchd.mjs` | The four CLIs. |
 | `lib/rule.mjs` | The next-step rule: one ticket's state, steps, gate and mismatches. |
 | `lib/status.mjs`, `lib/world.mjs` | The snapshot: ledgers, the tracker, the forge, git (read only). |
-| `lib/record.mjs`, `lib/handover.mjs` | The only writers of a ledger. |
+| `lib/record.mjs`, `lib/handover.mjs`, `lib/import.mjs` | The only writers of a ledger (`import`: the Markdown ledgers, and their removal). |
 | `lib/limits.mjs`, `lib/allowance.mjs`, `lib/intake.mjs` | The limits and estimates, the day's allowance, the intake. |
 | `lib/ids.mjs`, `lib/cleanup.mjs` | The id-only predicate; the cleanup after the merge. |
 | `lib/runner.mjs`, `lib/report.mjs`, `lib/locks.mjs` | The daily run, the report, the locks. |

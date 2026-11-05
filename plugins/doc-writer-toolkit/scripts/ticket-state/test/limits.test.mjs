@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { LISTS, NOW, ago, card, host, rawSettings, settingsFor, tmp } from './fakes.mjs';
+import { LISTS, NOW, ago, card, host, pr, rawSettings, settingsFor, tmp } from './fakes.mjs';
 import { ledger, world } from './helpers.mjs';
 import { parseUsage, allowanceOf, parseReset } from '../lib/allowance.mjs';
 import { loadSettings, validateSettings } from '../lib/settings.mjs';
@@ -28,11 +28,18 @@ const waiting = (w, n) => {
     ledger(w, c, { stages: { triage: 'done', start: 'done', plan: 'done', questions: 'done' }, triage: { verdict: 'docs', targets: ['guide'], size: 'edit' } });
   }
 };
-const ready = (w, number, { labels = [], createdAt = ago(72), size = 'edit', relations = [], targets = ['guide'] } = {}) => {
+const ready = (w, number, { labels = [], createdAt = ago(72), size = 'edit', relations = [], targets = ['guide'], pages = [] } = {}) => {
   const c = card({ number, status: 'ready', labels, createdAt });
   w.tracker.cards.push(c);
-  ledger(w, c, { stages: { triage: 'done' }, priority: null, triage: { verdict: 'docs', targets, size, relations } });
+  ledger(w, c, { stages: { triage: 'done' }, priority: null, triage: { verdict: 'docs', targets, size, relations, pages } });
   return c;
+};
+// A ticket in SME review: its PR open, counted as neither in progress nor waiting.
+const inReview = (w, number, { startedBy = 'schedule', mode = 'pipeline' } = {}) => {
+  const c = card({ number, status: 'smeReview' });
+  w.tracker.cards.push(c);
+  w.forge.prs.push(pr({ repo: 'guide-docs', number, labels: ['in expert review'] }));
+  ledger(w, c, { stages: { triage: 'done', start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' }, startedBy, mode, prs: [{ repo: 'guide-docs', number, targets: ['guide'], review: 'sme', stage: 'smeReview' }], triage: { verdict: 'docs', targets: ['guide'], size: 'edit' } });
 };
 
 test('AC-2: three tickets in progress start nothing; the reason says why', async () => {
@@ -138,6 +145,90 @@ test('D-071: high first, then the oldest within a level; a lower level waits whi
   assert.deepEqual(st.tickets.map((t) => [t.key, t.priority]), [['801', 'high'], ['802', 'medium']]);
 });
 
+test('open: tickets a schedule started and not merged count, review included; manual and hand ones do not', async () => {
+  const w = world({ extra: { limits: { ...estimates.limits, open: 2 } } });
+  inProgress(w, 1);
+  inReview(w, 801);
+  inReview(w, 802, { startedBy: 'manual' });
+  inReview(w, 803, { mode: 'hand' });
+  ready(w, 501);
+  let st = await w.status({ usage: usage(5) });
+  assert.equal(st.wip.inProgress, 1, 'the review is not in progress');
+  assert.equal(st.wip.open, 2);
+  assert.equal(st.wip.limits.open, 2);
+  assert.deepEqual(st.startable, []);
+  assert.ok(st.notStarted[0].reasons.includes('2 open + 1 > 2 (open: started by a schedule, not merged yet)'), st.notStarted[0].reasons.join('; '));
+  // The review's PR merged: one open, the ready ticket starts.
+  w.forge.prs.find((p) => p.number === 801).state = 'merged';
+  st = await w.status({ usage: usage(5) });
+  assert.equal(st.wip.open, 1);
+  assert.deepEqual(st.startable.map((g) => g.group), ['501']);
+});
+
+test('open: no limit by default; a group larger than the limit starts only when none is open', async () => {
+  let w = world({ extra: estimates });
+  inReview(w, 801);
+  inReview(w, 802);
+  ready(w, 501);
+  let st = await w.status({ usage: usage(5) });
+  assert.equal(st.wip.limits.open, null);
+  assert.deepEqual(st.startable.map((g) => g.group), ['501']);
+  w = world({ extra: { limits: { ...estimates.limits, open: 1, inProgress: 5 } } });
+  ready(w, 601, { relations: ['602'] });
+  ready(w, 602);
+  st = await w.status({ usage: usage(5) });
+  assert.deepEqual(st.startable.map((g) => [g.group, g.size]), [['601-602', 2]]);
+  inReview(w, 801);
+  st = await w.status({ usage: usage(5) });
+  assert.deepEqual(st.startable, []);
+  assert.ok(st.notStarted[0].reasons.some((r) => /^1 open \+ 2 > 1/.test(r)));
+});
+
+test('open: two starts in one run fill the limit, the third waits', async () => {
+  const w = world({ extra: { limits: { ...estimates.limits, open: 2, inProgress: 5 } } });
+  ready(w, 501, { createdAt: ago(90) });
+  ready(w, 502, { createdAt: ago(80) });
+  ready(w, 503, { createdAt: ago(70) });
+  const st = await w.status({ usage: usage(5) });
+  assert.deepEqual(st.startable.map((g) => g.group), ['501', '502']);
+  assert.deepEqual(st.notStarted.map((g) => g.group), ['503']);
+  assert.ok(st.notStarted[0].reasons.includes('2 open + 1 > 2 (open: started by a schedule, not merged yet)'));
+});
+
+test('startOrder easiest: the smallest size first, then fewer repos, then fewer pages, then priority; priority order unchanged', async () => {
+  const make = (startOrder) => {
+    const w = world({ extra: { limits: { ...estimates.limits, estimates: { edit: 4, newPage: 8, newSection: 20 }, inProgress: 5, startOrder } } });
+    ready(w, 501, { labels: ['high'], size: 'newSection', createdAt: ago(90) });
+    ready(w, 502, { labels: ['low'], size: 'edit', targets: ['guide', 'api'], createdAt: ago(80) });
+    ready(w, 503, { size: 'edit', pages: [{ repo: 'guide-docs', path: 'docs/a.md' }, { repo: 'guide-docs', path: 'docs/b.md' }], createdAt: ago(70) });
+    ready(w, 504, { size: 'edit', pages: [{ repo: 'guide-docs', path: 'docs/c.md' }], createdAt: ago(60) });
+    ready(w, 505, { size: 'newPage', createdAt: ago(50) });
+    ready(w, 506, { labels: ['high'], size: null, createdAt: ago(40) });
+    return w;
+  };
+  let st = await make('easiest').status({ usage: usage(5) });
+  assert.deepEqual(st.groups.map((g) => g.group), ['504', '503', '502', '505', '501', '506']);
+  assert.deepEqual(st.startable.map((g) => [g.group, g.sizeRank, g.repoCount, g.pageCount]), [['504', 0, 1, 1], ['503', 0, 1, 2], ['502', 0, 2, 0], ['505', 1, 1, 0]]);
+  // The new section no longer fits today's allowance; the ticket with no size yet (the hardest) waits behind it.
+  assert.deepEqual(st.notStarted.map((g) => g.group), ['501', '506']);
+  assert.ok(st.notStarted[1].reasons.includes('waits behind the easier group 501'), st.notStarted[1].reasons.join('; '));
+  st = await make('priority').status({ usage: usage(5) });
+  assert.deepEqual(st.groups.map((g) => g.group), ['501', '506', '503', '504', '505', '502']);
+  assert.equal(st.startable[0].sizeRank, undefined, 'priority order adds no difficulty fields');
+});
+
+test('startOrder easiest: an easier group held back by the limits holds back every harder one, whatever its priority', async () => {
+  const w = world({ extra: { limits: { ...estimates.limits, inProgress: 5, startOrder: 'easiest' } } });
+  ready(w, 501, { labels: ['high'], size: 'edit' });
+  ready(w, 502, { labels: ['low'], size: 'newPage' });
+  // 2% of the week left today: the edit (4%) does not fit; the new page waits behind it, as the easier group only.
+  const st = await w.status({ usage: usage(38) });
+  assert.deepEqual(st.startable, []);
+  assert.deepEqual(st.notStarted.map((g) => g.group), ['501', '502']);
+  assert.ok(st.notStarted[1].reasons.includes('waits behind the easier group 501'), st.notStarted[1].reasons.join('; '));
+  assert.ok(!st.notStarted[1].reasons.some((r) => /priority group/.test(r)));
+});
+
 test('D-067: the allowance reading', () => {
   const u = usage(22);
   assert.deepEqual(u.week, { percent: 22, resets: 'Nov 14 at 6am (UTC)' });
@@ -198,6 +289,10 @@ test('settings: bad values stop with the key named', () => {
   bad({ cleanup: { mode: 'shred' } }, /cleanup.mode/);
   bad({ cleanup: { keep: 'all' } }, /cleanup.keep/);
   bad({ roles: { writer: { model: '' } } }, /roles.writer.model/);
+  bad({ limits: { open: 0 } }, /limits.open/);
+  bad({ limits: { startOrder: 'random' } }, /limits.startOrder must be one of priority, easiest/);
+  const d = settingsFor(root);
+  assert.deepEqual([d.limits.open, d.limits.startOrder], [null, 'priority']);
   const s = settingsFor(root, { cleanup: { trashDir: 'trash-here' } });
   assert.equal(s.cleanup.trashDir, path.join(root, 'trash-here'));
   assert.ok(fs.existsSync(root));

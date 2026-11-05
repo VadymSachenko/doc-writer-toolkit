@@ -10,7 +10,11 @@ import { SIZES } from './settings.mjs';
 //     larger than the ceiling starts only when nothing is in progress;
 //   - and only if its estimated cost, added to the remaining cost of every ticket in work, fits the day's remaining
 //     allowance. With no estimate for a size yet, one ticket at a time;
-//   - the highest priority first, the oldest first within a level; a lower level never starts while a higher one waits.
+//   - `open` (when set) counts the tickets a scheduled run started that are not merged yet, SME review and final review
+//     included: a group starts only if open + its size ≤ it (a larger group only when none is open);
+//   - the order (`startOrder`): `priority`, the highest first, the oldest first within a level, a lower level never
+//     starting while a higher one waits; or `easiest`, the smallest triage size first, then fewer repos, then fewer
+//     pages, then priority and age, a harder group never starting while an easier one waits on the limits.
 
 // What a ticket has cost so far, in percent of the week: the sum of its runs' measured use.
 export function spentOf(l) {
@@ -71,11 +75,23 @@ export function groupsOf(ready, settings) {
     const keys = members.map((t) => t.key);
     const priority = members.map((t) => t.priority ?? 'medium').sort((x, y) => PRIORITY_RANK[x] - PRIORITY_RANK[y])[0];
     const oldest = members.map((t) => t.createdAt).filter(Boolean).sort()[0] ?? null;
-    return { group: groupId(keys), keys: sortKeys(keys), size: members.length, priority, oldest, members };
-  }).sort(byGroupOrder);
+    return { group: groupId(keys), keys: sortKeys(keys), size: members.length, priority, oldest, members, ...difficultyOf(members, repos) };
+  }).sort(settings.limits?.startOrder === 'easiest' ? byEasiest : byGroupOrder);
 }
 
 export const byGroupOrder = (a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority] || String(a.oldest ?? '9').localeCompare(String(b.oldest ?? '9')) || a.group.localeCompare(b.group);
+
+// How hard a group is: its largest triage size (a size not known yet counts as the hardest), the repos its targets
+// are in, and the pages its triage found.
+const SIZE_RANK = { edit: 0, newPage: 1, newSection: 2 };
+export function difficultyOf(members, repos) {
+  const sizeRank = Math.max(...members.map((m) => SIZE_RANK[m.size] ?? 3));
+  const repoSet = new Set(members.flatMap((m) => [...repos(m)]));
+  const pages = new Set(members.flatMap((m) => (m.pages ?? []).map((p) => `${p.repo ?? ''}:${p.path ?? p}`)));
+  return { sizeRank, repoCount: repoSet.size, pageCount: pages.size };
+}
+
+export const byEasiest = (a, b) => a.sizeRank - b.sizeRank || a.repoCount - b.repoCount || a.pageCount - b.pageCount || byGroupOrder(a, b);
 
 export function related(a, b, repos) {
   const ra = repos(a);
@@ -89,12 +105,18 @@ export function related(a, b, repos) {
 }
 
 // The WIP counts and the groups a scheduled run may start now, with the reason each other group doesn't.
+// A ticket a scheduled run started and the forge hasn't merged yet: every state from planning to ready for merge.
+const NOT_OPEN = new Set(['ready', 'needsInfo', 'new', 'merged', 'closed']);
+export const isOpen = (t) => t.ledger === 'present' && t.mode === 'pipeline' && t.startedBy === 'schedule' && !NOT_OPEN.has(t.state === 'locked' ? t.derivedState : t.state);
+
 export function startable({ tickets, groups, settings, allowance, estimates, inWork, locked }) {
   const { limits } = settings;
   const counted = tickets.filter((t) => t.counted);
   let inProgress = counted.filter((t) => t.counts === 'inProgress').length;
   const waiting = counted.filter((t) => t.counts === 'waiting').length;
-  const wip = { inProgress, waiting, limits: { inProgress: limits.inProgress, waiting: limits.waiting }, manual: tickets.filter((t) => t.counts && !t.counted && t.startedBy === 'manual').length };
+  let open = tickets.filter(isOpen).length;
+  const wip = { inProgress, waiting, open, limits: { inProgress: limits.inProgress, waiting: limits.waiting, open: limits.open }, manual: tickets.filter((t) => t.counts && !t.counted && t.startedBy === 'manual').length };
+  const easiest = limits.startOrder === 'easiest';
 
   // The remaining cost of every ticket in work, scheduled or not: they all spend the same allowance.
   const unknown = inWork.filter((l) => remainingOf(l, estimates) === null).map((l) => l.key);
@@ -103,14 +125,17 @@ export function startable({ tickets, groups, settings, allowance, estimates, inW
 
   const out = [];
   const notStarted = [];
-  let blockedLevel = null; // a higher priority that waits holds back every lower one
+  let blockedLevel = null; // priority order: a higher priority that waits holds back every lower one
+  let blockedBy = null; // easiest order: an easier group that waits holds back every harder one
   for (const g of groups) {
     const why = [];
     if (settings.mode === 'off') why.push('mode off');
-    if (blockedLevel !== null && PRIORITY_RANK[g.priority] > blockedLevel) why.push(`waits behind a ${['high', 'medium', 'low'][blockedLevel]} priority group`);
+    if (!easiest && blockedLevel !== null && PRIORITY_RANK[g.priority] > blockedLevel) why.push(`waits behind a ${['high', 'medium', 'low'][blockedLevel]} priority group`);
+    if (easiest && blockedBy !== null) why.push(`waits behind the easier group ${blockedBy}`);
     if (g.keys.some((k) => locked.has(k))) why.push('locked by a run');
     if (g.waitsFor?.length) why.push(`related to ${g.waitsFor.join(', ')}, still in work`);
     if (waiting >= limits.waiting) why.push(`${waiting} waiting (limit ${limits.waiting})`);
+    if (limits.open !== null && open + g.size > limits.open && !(g.size > limits.open && open === 0)) why.push(`${open} open + ${g.size} > ${limits.open} (open: started by a schedule, not merged yet)`);
     if (inProgress + g.size > limits.inProgress && !(g.size > limits.inProgress && inProgress === 0)) {
       why.push(`${inProgress} in progress + ${g.size} > ${limits.inProgress}`);
     }
@@ -126,11 +151,15 @@ export function startable({ tickets, groups, settings, allowance, estimates, inW
     if (why.length) {
       notStarted.push({ group: g.group, keys: g.keys, priority: g.priority, estimate, reasons: why });
       // A group held back by the limits holds back the lower levels; one held back by its own relation or lock doesn't.
-      if (!why.every((r) => /^locked|^related/.test(r)) && blockedLevel === null) blockedLevel = PRIORITY_RANK[g.priority];
+      if (!why.every((r) => /^locked|^related/.test(r))) {
+        if (blockedLevel === null) blockedLevel = PRIORITY_RANK[g.priority];
+        if (blockedBy === null) blockedBy = g.group;
+      }
       continue;
     }
-    out.push({ group: g.group, keys: g.keys, size: g.size, priority: g.priority, oldest: g.oldest, estimate });
+    out.push({ group: g.group, keys: g.keys, size: g.size, priority: g.priority, oldest: g.oldest, estimate, ...(easiest ? { sizeRank: g.sizeRank, repoCount: g.repoCount, pageCount: g.pageCount } : {}) });
     inProgress += g.size;
+    open += g.size;
     committed = round(committed + (estimate ?? 0));
     if (estimate === null) inWork = [...inWork, { key: g.group }];
   }

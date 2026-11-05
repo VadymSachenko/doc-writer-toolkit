@@ -134,6 +134,7 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
     return [`${l.key}: ${c.removed.length} path(s), ${mb(c.freedBytes)} ${c.mode === 'delete' ? 'deleted' : 'moved to the Trash'}${c.removed.length ? ` (${c.removed.map((r) => `\`${r.path}\``).join(', ')})` : ''}${c.kept.length ? `; kept ${c.kept.map((k) => `\`${k.path}\` (${k.reason})`).join(', ')}` : ''}`];
   });
   const unmerged = st.tickets.filter((t) => t.state === 'outside' && (t.notes ?? []).some((n) => /closed unmerged/.test(n)) && (byKey.get(t.key)?.files ?? []).length);
+  for (const e of runLog.filter((x) => x.kind === 'legacyMarkdown' && x.outcome === 'removed')) removedLines.push(`${e.key}: the Markdown ledger \`${e.file}\` (closed; its JSON holds every line) ${e.to === 'deleted' ? 'deleted' : 'moved to the Trash'}`);
   for (const t of unmerged) removedLines.push(`${t.key}: a PR was closed unmerged, so its ${byKey.get(t.key).files.length} work file(s) stay (${mb(byKey.get(t.key).files.reduce((s, f) => s + (f.bytes ?? 0), 0))})`);
   out.push('## Work files removed after the merge', '', list(removedLines), ...(freed ? ['', `Space freed today: ${mb(freed)}.`] : []), '');
 

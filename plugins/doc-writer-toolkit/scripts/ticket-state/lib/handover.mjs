@@ -7,7 +7,7 @@ import { prLinks } from './world.mjs';
 // `handover <key>`: the owner hands a ticket to the pipeline (mode hand -> pipeline), or takes it back (--to hand).
 // A ticket with no ledger (lost, or from before the ledgers) is rebuilt from the tracker and the forge first.
 
-const PR_STAGE_FROM_CARD = { inProgress: 'reworkWait', blocked: 'questions', smeReview: 'smeReview', finalReview: 'finalReview' };
+export const PR_STAGE_FROM_CARD = { inProgress: 'reworkWait', blocked: 'questions', smeReview: 'smeReview', finalReview: 'finalReview' };
 
 export async function runHandover({ settings, clients, key: keyIn, to = 'pipeline', now = Date.now() }) {
   const key = checkKey(keyIn);

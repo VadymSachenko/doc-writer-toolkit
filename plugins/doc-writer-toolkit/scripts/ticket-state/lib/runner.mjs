@@ -14,6 +14,7 @@ import { CARD_STATUS_OF, LABEL_OF, PR_STAGE_OF_STATUS, PRIORITY_RANK, finishRank
 import { appendRunLog, localDate, readRunLog, renderReport, writeReport } from './report.mjs';
 import { ROLES } from './settings.mjs';
 import { cleanupTicket } from './cleanup.mjs';
+import { removeClosedMarkdown } from './import.mjs';
 import { childEnv } from './env.mjs';
 
 // The daily run (design §7): finish first, then triage the quiet intake cards (mornings), then start ready groups while
@@ -462,6 +463,18 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
     for (const g of st.groups.filter((x) => x.keys.some((k) => named.includes(k)))) {
       const step = { stage: 'start', role: 'writer', group: g.group, keys: g.keys, priority: g.priority, startedBy: 'manual', cards: cardsOf(g.keys) };
       out.starts.push(planOnly ? describe(step) : await advance(step));
+    }
+  }
+
+  // Mornings: the Markdown ledgers from before the JSON ones (`ticket-state import`) whose ticket closed since are
+  // removed, each once the check shows its JSON holds every line. No model; a dry run or observe lists them.
+  if (morning) {
+    try {
+      const r = await removeClosedMarkdown({ settings, clients, dryRun: planOnly, trashDir: trashOf(settings, io) });
+      out.legacyMarkdown = { removed: r.removed, kept: r.kept };
+      if (!planOnly) for (const x of r.removed) say({ kind: 'legacyMarkdown', key: x.key, file: x.file, outcome: 'removed', to: x.to });
+    } catch (e) {
+      out.notes.push(`the Markdown ledgers' removal: ${e.message}`);
     }
   }
 
