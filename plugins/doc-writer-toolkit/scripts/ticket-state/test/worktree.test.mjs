@@ -262,7 +262,7 @@ async function closeWith(make) {
   const p = { repo: 'guide-docs', targets: ['guide'], branch: 'ticket-71', base: 'main' };
   ensureWorktree(w.settings, p);
   const wt = worktreePath(w.settings, p);
-  make(wt);
+  make(wt, fx);
   ledger(w, c, { stages: { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' }, prs: [{ ...p, number: 71, review: 'sme', stage: 'readyForMerge', pipelineCommits: [fx.h1], readyForMerge: [{ head: fx.h1, at: ago(2) }] }] });
   const trash = path.join(tmp('fake-trash-'), '.Trash');
   const out = await runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: usage, trashDir: trash, now: () => NOW, spawnClaude: () => assert.fail('no model step') }, options: {} });
@@ -290,6 +290,16 @@ test('AC-5: the close step keeps a worktree with a tracked change, and the repor
   assert.equal(tree.removed, false);
   assert.match(tree.kept, /1 tracked file\(s\) changed and not committed/);
   assert.match(report, /worktree\(s\) kept, with work no remote has: .*tracked file\(s\) changed/);
+});
+
+test('AC-5: a worktree at a head the pipeline pushed goes, although the forge deleted the branch after a squash merge', async () => {
+  const { fx, wt, tree } = await closeWith((wt, f) => {
+    execFileSync('git', ['-C', f.bare, 'branch', '-q', '-D', 'ticket-71']);
+    f.clone.g('fetch', '-q', '--prune', 'origin');
+  });
+  assert.deepEqual(listWorktrees(fx.clone.dir).map((x) => canon(x.path)), [canon(fx.clone.dir)]);
+  assert.deepEqual([tree.removed, tree.kept], [true, undefined]);
+  assert.equal(fs.existsSync(wt), false);
 });
 
 test('AC-5: a recorded folder that is a repository of its own is kept whole, never split', async () => {
