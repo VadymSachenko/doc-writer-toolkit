@@ -16,7 +16,6 @@ allowedTools:
   - Bash(git log:*)
   - Bash(git show:*)
   - Bash(git ls-tree:*)
-  - Bash(git grep:*)
   - Bash(git worktree list:*)
   - Bash(git add:*)
   - Bash(git commit:*)

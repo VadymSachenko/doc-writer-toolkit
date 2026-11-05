@@ -242,7 +242,7 @@ test('AC-2: every role allows its stage\'s git commands in both spellings, git -
   const { w } = busyWorld();
   // What each role's stages run on the ticket worktree (triage reads the target repos and has no worktree).
   const NEEDS = {
-    triage: ['log', 'show', 'ls-tree', 'grep'],
+    triage: ['log', 'show', 'ls-tree'],
     writer: ['status', 'diff', 'log', 'show', 'worktree list', 'add', 'commit'],
     reviewer: ['status', 'diff', 'log', 'show', 'worktree list', 'add', 'commit'],
     translator: ['status', 'diff', 'log', 'show', 'worktree list', 'add', 'commit'],
@@ -252,7 +252,8 @@ test('AC-2: every role allows its stage\'s git commands in both spellings, git -
     const tree = role === 'triage' ? [] : [TREE];
     const { allowed, denied } = rulesOf(role, w);
     for (const sub of subs) {
-      assert.equal(verdict(`git ${sub} -q`, allowed, denied), 'allowed', `${role}: git ${sub}`);
+      // A plain change would land in the folder the session is in, the hub's checkout to begin with: reads only.
+      assert.equal(verdict(`git ${sub} -q`, allowed, denied), ['add', 'commit'].includes(sub) ? 'denied' : 'allowed', `${role}: git ${sub}`);
       assert.equal(verdict(`git -C ${WT} ${sub} -q`, allowed, denied) === 'allowed', tree.length > 0, `${role}: git -C <worktree> ${sub}`);
     }
     // No wildcard folder in an allow rule, and no push but the brief's, on the worktree.
@@ -261,7 +262,7 @@ test('AC-2: every role allows its stage\'s git commands in both spellings, git -
     // A fetch: `git -C <worktree> fetch origin`, or the worktree's branch and base by name; never plain, never a refspec.
     for (const f of [`git -C ${WT} fetch origin`, `git -C ${WT} fetch origin ticket-71`, `git -C ${WT} fetch origin main`]) assert.equal(verdict(f, allowed, denied) === 'allowed', tree.length > 0, `${role}: ${f}`);
     // A commit message may name any flag: the `-C` denials name the worktree, so the word after it is the subcommand.
-    if (tree.length) for (const msg of [`git -C ${WT} commit -m "Document the git branch -D option"`, `git -C ${WT} commit -m "Add the branch list" -m "Second paragraph"`, `git -C ${WT} commit -m "Say why git push --force is denied"`, 'git commit -m "Add the branch list" -m "Second paragraph"']) assert.equal(verdict(msg, allowed, denied), 'allowed', `${role}: ${msg}`);
+    if (tree.length) for (const msg of [`git -C ${WT} commit -m "Document the git branch -D option"`, `git -C ${WT} commit -m "Add the branch list" -m "Second paragraph"`, `git -C ${WT} commit -m "Say why git push --force is denied"`]) assert.equal(verdict(msg, allowed, denied), 'allowed', `${role}: ${msg}`);
     // The reviewer's probes: another subcommand with an allowed word later in the command, another folder, a force
     // push or a deletion in any place, another branch, a fetch refspec.
     for (const bad of [
@@ -269,6 +270,9 @@ test('AC-2: every role allows its stage\'s git commands in both spellings, git -
       `git -C ${WT} push origin +HEAD:refs/heads/ticket-71`, `git -C ${WT} push origin --force HEAD:refs/heads/ticket-71`, `git -C ${WT} push origin -f HEAD:refs/heads/ticket-71`,
       `git -C ${WT} push origin --force-with-lease HEAD:refs/heads/ticket-71`, `git -C ${WT} push origin --delete ticket-71`, `git -C ${WT} push origin :refs/heads/ticket-71`,
       `git -C ${WT} push origin HEAD:refs/heads/main`, `git -C ${WT} fetch origin +refs/heads/main:refs/heads/other`, `git -C ${WT} fetch origin main:other`, 'git fetch --all',
+      // git grep runs a command; --output writes a file past the Edit denials.
+      'git grep -Osh x', 'git grep --open-files-in-pager=sh x', `git -C ${WT} grep -Osh x`, `git -C ${WT} grep --open=sh x`,
+      `git -C ${WT} log --output=/home/.claude/settings.json`, `git -C ${WT} diff --output /hub/.git/info/attributes`, 'git show HEAD --output=/x', 'git log -1 --output /x',
     ]) assert.notEqual(verdict(bad, allowed, denied), 'allowed', `${role}: ${bad}`);
     for (const rule of [...PLAIN, 'Bash(npm ci:*)', 'Bash(npm install:*)', 'Bash(ln:*)']) assert.ok(denied.includes(rule), `${role} denies ${rule}`);
     assert.ok(!denied.some((r) => r.includes('git -C *')), `${role}: no wildcard folder in a deny rule either`);
@@ -284,9 +288,9 @@ test('AC-3, AC-7: with the owner\'s and the hub\'s layers loaded, every plain-sp
   const script = (s, args = '') => `node ${R}/scripts/${s}${args}`;
   // Each stage's own commands, by role (the scripts from both roots: the runner's and the installed plugin's).
   const OWN = {
-    triage: [`node ${ROOTS[0]}/scripts/tracker/tracker.mjs read-card abc`, `node ${ROOTS[0]}/scripts/ticket-state/ticket-state.mjs record 502 --stage triage`, 'git log -1', 'ls docs'],
+    triage: [`node ${ROOTS[0]}/scripts/tracker/tracker.mjs read-card abc`, `node ${ROOTS[0]}/scripts/ticket-state/ticket-state.mjs record 502 --stage triage`, `node ${ROOTS[0]}/scripts/ticket-state/ticket-state.mjs status --root /hub --ticket 502`, `node ${R}/scripts/ticket-state/ticket-state.mjs config --root /hub`, 'git log -1', 'ls docs'],
     writer: [script('tracker/tracker.mjs', ' move abc --to inProgress'), script('forge/forge.mjs', ' open-pr --repo guide-docs'), script('ui-labels/ui-labels.mjs', ' check'), script('section-state/section-state.mjs', ' status docs/x'), script('ticket-state/ticket-state.mjs', ' record 502 --stage write'), `git -C ${WT} add -A`, `git -C ${WT} commit -m "Write the page"`, `git -C ${WT} push origin HEAD:refs/heads/ticket-71`, `git -C ${WT} fetch origin`, 'npx playwright test scenario.spec.ts', 'mkdir -p docs/x/.assets'],
-    reviewer: [script('doc-align/doc-align.mjs', ' a.md b.md'), script('visual-pack/visual-pack.mjs', ' --base main'), `git -C ${WT} diff origin/main`, `git -C ${WT} commit -m "Fix the style"`, `git -C ${WT} push origin HEAD:refs/heads/ticket-71`],
+    reviewer: [script('doc-align/doc-align.mjs', ' a.md b.md'), script('visual-pack/visual-pack.mjs', ' --base main'), script('ui-labels/ui-labels.mjs', ' check --root /hub'), `git -C ${WT} diff origin/main`, `git -C ${WT} commit -m "Fix the style"`, `git -C ${WT} push origin HEAD:refs/heads/ticket-71`],
     translator: [script('locale-sync/locale-sync.mjs', ' status'), script('screenshot-locales/screenshot-locales.mjs', ` pairs --root ${WT} --base origin/main`), 'npm run build', 'npx docusaurus build', `git -C ${WT} add -A`, `git -C ${WT} push origin HEAD:refs/heads/ticket-71`],
   };
   const BAD = [
@@ -299,16 +303,34 @@ test('AC-3, AC-7: with the owner\'s and the hub\'s layers loaded, every plain-sp
     `NODE_OPTIONS=--require=/tmp/x.js node ${R}/scripts/tracker/tracker.mjs`, "python3 -c 'print(1)'", 'python3 rebuild_catalog.py', 'sh -c "id"', 'bash -c "id"', 'zsh -c "id"', "perl -e 'print 1'", 'osascript -e "beep"',
     'npx some-package', 'node_modules/.bin/playwright test x.spec.ts', 'CORPUS=/corpus node -e "1"', 'CORPUS=/corpus touch /tmp/x', 'find . -exec touch /tmp/x {} ;', 'find . -name x -delete', 'xargs -I{} sh -c {}', 'env node -e 1',
     'gh pr merge 71', 'gh api -X DELETE repos/o/r/git/refs/heads/x', 'gh repo delete o/r', 'curl -X DELETE https://api.example.com',
+    // Plain add and commit: a session starts in the hub, an owner's checkout.
+    'git add -A', 'git add docs/x.md', 'git commit -m x', 'git commit --amend --no-edit',
+    // The owner's commands of ticket-state (`set` would widen the next session's rules), from either root.
+    script('ticket-state/ticket-state.mjs', ' set roles.writer.allowedTools \'["Bash(node:*)"]\''), script('ticket-state/ticket-state.mjs', ' set mode on'), script('ticket-state/ticket-state.mjs', ' set retry all'),
+    `node ${ROOTS[0]}/scripts/ticket-state/ticket-state.mjs set cleanup.mode delete`, script('ticket-state/ticket-state.mjs', ' handover 502'), script('ticket-state/ticket-state.mjs', ' unlock --stale'), script('ticket-state/ticket-state.mjs', ' import'), script('ticket-state/ticket-state.mjs', ' report'),
+    // Script flags that run code.
+    script('ui-labels/ui-labels.mjs', " import --source 'command sh -c id'"), script('ui-labels/ui-labels.mjs', " --source='command id' import"), script('ui-labels/ui-labels.mjs', " check --root /hub --source 'command id'"), script('ui-labels/ui-labels.mjs', ' --source=x'),
+    script('visual-pack/visual-pack.mjs', ' --base main --playwright-from /tmp/pw'), script('visual-pack/visual-pack.mjs', ' --playwright-from=/tmp/pw --base main'), `node ${ROOTS[0]}/scripts/visual-pack/visual-pack.mjs --playwright-from /tmp/pw`,
   ];
   for (const role of ['triage', 'writer', 'reviewer', 'translator']) {
     const { allowed, denied } = rulesOf(role, w);
     const wide = [...allowed, ...LAYERS];
     for (const c of OWN[role]) assert.equal(verdict(c, wide, denied), 'allowed', `${role} runs ${c}`);
     for (const c of BAD) assert.notEqual(verdict(c, wide, denied), 'allowed', `${role}: ${c}`);
+    // Playwright only where the role file allows it (a hub allows `npx playwright:*` to every session).
+    assert.equal(verdict('npx playwright test x.spec.ts', wide, denied), role === 'writer' ? 'allowed' : 'denied', `${role}: npx playwright`);
     // The tracker's MCP tools are denied as a whole server.
     assert.ok(['mcp__claude_ai_Trello', 'mcp__trello', 'mcp__playwright'].every((m) => denied.includes(m)), role);
     // A file that widens the session's rules, runs code at the next git command, or is the flow's own state.
-    for (const e of ['Edit(~/.claude/**)', 'Edit(~/.claude.json)', 'Edit(//**/.claude/**)', 'Edit(//**/.git/**)', 'Edit(//**/.git)', 'Edit(//**/package.json)', `Edit(//${ROOTS[0].slice(1)}/**)`, `Edit(//${ROOTS[1].slice(1)}/**)`, `Edit(//${path.join(w.settings.state, 'tickets').slice(1)}/**)`]) assert.ok(denied.includes(e), `${role} denies ${e}`);
+    const st = (f) => `//${path.join(w.settings.state, f).slice(1)}`;
+    for (const e of [
+      'Edit(~/.claude/**)', 'Edit(~/.claude.json)', 'Edit(//**/.claude/**)', 'Edit(//**/.git/**)', 'Edit(//**/.git)', 'Edit(//**/package.json)', `Edit(//${ROOTS[0].slice(1)}/**)`, `Edit(//${ROOTS[1].slice(1)}/**)`,
+      ...['tickets', 'locks', 'roles', 'watch', 'jobs', 'runs', 'reports'].map((d) => `Edit(${st(d)}/**)`), `Edit(${st('rearmed.json')})`, `Edit(${st('roles-proposal.json')})`,
+      // What runs code later, and the flow's settings wherever they are.
+      'Edit(//**/.github/**)', 'Edit(//**/CLAUDE*.md)', 'Edit(//**/node_modules/**)', 'Edit(//**/.npmrc)', 'Edit(~/.gitconfig)', 'Edit(~/.config/git/**)', 'Edit(~/.ssh/**)', 'Edit(~/.zshrc)', 'Edit(~/.bash_profile)',
+      `Edit(//${path.resolve(w.settings.root, w.settings.file).slice(1)})`, `Edit(//${path.resolve(w.settings.root, w.settings.file).replace(/\.json$/, '.local.json').slice(1)})`,
+      'Read(//**/.env)', 'Read(//**/.env.*)',
+    ]) assert.ok(denied.includes(e), `${role} denies ${e}`);
     assert.ok(!denied.some((e) => e.includes(`${path.join(w.settings.state, 'tmp')}`)), `${role}: the session's own files in <state>/tmp stay writable`);
     // A layer that allows `node` itself (no layer does today): code from a string, standard input or a preload stays
     // denied, and the stage's scripts still run.
@@ -316,8 +338,8 @@ test('AC-3, AC-7: with the owner\'s and the hub\'s layers loaded, every plain-sp
     for (const c of ['node -e "1"', 'node -p "1"', 'node --eval "1"', 'node --print "1"', 'node', 'node -', `node -r /tmp/x.js ${R}/scripts/tracker/tracker.mjs`, `node --require /tmp/x.js ${R}/scripts/tracker/tracker.mjs`, `node --import /tmp/x.mjs ${R}/scripts/tracker/tracker.mjs`, `NODE_OPTIONS=--require=/tmp/x.js node ${R}/scripts/tracker/tracker.mjs`]) assert.equal(verdict(c, anyNode, denied), 'denied', `${role} with node allowed: ${c}`);
     for (const c of OWN[role].filter((x) => x.startsWith('node '))) assert.equal(verdict(c, anyNode, denied), 'allowed', `${role} with node allowed runs ${c}`);
     // A layer that allows `git -C *` (none does today) reopens other folders, but not a branch change on the worktree,
-    // an abbreviation or combined flags included.
-    if (role !== 'triage') for (const c of [`git -C ${WT} branch --del other2`, `git -C ${WT} branch -rD other`, `git -C ${WT} branch new-one`]) assert.equal(verdict(c, [...wide, 'Bash(git -C *)'], denied), 'denied', `${role} with git -C * allowed: ${c}`);
+    // an abbreviation or combined flags included, or a `git grep`, which runs a command.
+    if (role !== 'triage') for (const c of [`git -C ${WT} branch --del other2`, `git -C ${WT} branch -rD other`, `git -C ${WT} branch new-one`, `git -C ${WT} grep -Osh x`, `git -C ${WT} grep --open=sh x`]) assert.equal(verdict(c, [...wide, 'Bash(git -C *)'], denied), 'denied', `${role} with git -C * allowed: ${c}`);
   }
   // A step with no worktree changes no repo: no plain add or commit; it reads the target clones (its --add-dir).
   const plan = rulesOf('writer', w, []);
@@ -343,20 +365,27 @@ test('the toolkit roots a session may run scripts from: the runner\'s, and each 
   assert.deepEqual(scriptRoots(w.settings, { home: tmp('nohome-'), env: {} }), [PLUGIN_ROOT], 'no list: the runner\'s own root');
   // Each root gives each script by its literal path, as a prefix rule: never a wildcard that `../` could walk out of.
   const rules = scriptRulesFor(['/c/doc-writer-toolkit/u1']);
-  assert.ok(rules.includes('Bash(node /c/doc-writer-toolkit/u1/scripts/ticket-state/ticket-state.mjs:*)'));
+  for (const sub of ['record', 'status', 'config']) assert.ok(rules.includes(`Bash(node /c/doc-writer-toolkit/u1/scripts/ticket-state/ticket-state.mjs ${sub}:*)`), sub);
+  for (const c of ['set mode on', 'set roles.writer.allowedTools x', 'handover 502', 'lock 502', 'import', '']) assert.equal(verdict(`node /c/doc-writer-toolkit/u1/scripts/ticket-state/ticket-state.mjs ${c}`.trim(), rules, []), 'not allowed', `ticket-state ${c}`);
   assert.ok(rules.every((r) => !r.slice(0, -3).includes('*')));
   assert.equal(verdict('node /c/doc-writer-toolkit/u1/scripts/../../../../tmp/x.mjs', rules, []), 'not allowed');
 });
 
-test('AC-5: a host job can\'t change a branch or fetch, in either spelling, whatever its own allow list', () => {
+test('AC-5: a host job can\'t push, change a branch or fetch, in either spelling, whatever its own allow list', () => {
   const w = world({ extra: { hostJobs: [{ name: 'notes', every: 60, run: { skill: 'notes-writer', allowedTools: ['Bash(git:*)', 'Bash(git *)', 'Bash(git -C *)'] } }] } });
   const { args } = jobCommand(w.settings.hostJobs[0], { settings: w.settings });
   const allowed = args.slice(args.indexOf('--allowedTools') + 1, args.indexOf('--disallowedTools'));
   const denied = args.slice(args.indexOf('--disallowedTools') + 1);
-  for (const c of ['git branch -D other', 'git branch -m own own2', 'git -C /any branch -D other', 'git -C /any branch -m own own2', 'git fetch origin +refs/heads/main:refs/heads/other', 'git fetch origin main:other', 'git -C /any fetch origin main:other', 'git -C /any fetch', 'git push --force origin x', 'git -C /any push -f origin x']) {
+  for (const c of ['git branch -D other', 'git branch -m own own2', 'git -C /any branch -D other', 'git -C /any branch -m own own2', 'git fetch origin +refs/heads/main:refs/heads/other', 'git fetch origin main:other', 'git -C /any fetch origin main:other', 'git -C /any fetch', 'git push --force origin x', 'git -C /any push -f origin x',
+    // No push at all: a `:<branch>` push deletes a remote branch, and no rule tells it from another push.
+    'git push origin :refs/heads/victim', 'git push origin HEAD:refs/heads/x', 'git push', 'git -C /any push origin :x', 'git -C /any push',
+    // The roles' git, code and file denials.
+    'git add -A', 'git commit -m x', 'git grep -Osh x', 'git log --output=/x', 'git stash', 'git mv a b']) {
     assert.equal(verdict(c, allowed, denied), 'denied', c);
   }
   assert.equal(verdict('git status', allowed, denied), 'allowed', 'its own reads still run');
+  for (const e of ['Bash(node -e:*)', 'Bash(python3:*)', 'Bash(sh:*)', 'Edit(//**/.git/**)', 'Edit(//**/.github/**)', 'Edit(//**/.claude/**)', 'Edit(//**/CLAUDE*.md)']) assert.ok(denied.includes(e), `a job denies ${e}`);
+  assert.ok(!denied.some((r) => r.startsWith('mcp__')), 'a job may use its tracker through MCP');
   assert.ok(!denied.some((r) => /^Bash\(.*\*.*:\*\)$/.test(r) && !/^Bash\([^*]*:\*\)$/.test(r)), 'no rule the CLI never matches');
 });
 
