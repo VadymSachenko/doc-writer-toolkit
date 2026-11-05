@@ -60,6 +60,10 @@ For `settings`: turn the request into `ticket-state.mjs set <key> <value> --root
 | "start the morning run at 6:30" | `set schedule.morning 06:30` |
 | "10% a day again", "no weekly cap" | `set limits.dailyPercent 10`, `set limits.maxWeekPercent null` |
 | "the writer on Sonnet" | `set roles.writer.model claude-sonnet-5-5` |
+| "give 1234 one more try", "retry 1234" | `set retry 1234` |
+| "retry everything" | `set retry all` |
+
+`set retry` is the only call that re-arms a held ticket (two failed sessions with no one acting, or the day's session cap); no other setting does. Until then a manual run (`run <key>`) does nothing with a held ticket: `status` gives it no next step. A hold after two failures also lifts when a person acts on the ticket (a comment, a review, a commit, a move of the card), and a capped ticket the next day.
 
 Show the calls before running them, and run them only after the user says yes. A request that maps to no local key (a list, a board, a target, a host job) is the shared file's: say so and change nothing. Report each call's `before` and `after`. A refused value (exit 2) is reported with the script's reason, and nothing is retried with another value.
 

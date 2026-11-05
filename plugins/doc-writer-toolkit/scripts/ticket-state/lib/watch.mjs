@@ -7,12 +7,13 @@ import { runDaily, readUsageFromClaude, parseResult } from './runner.mjs';
 import { allowanceOf } from './allowance.mjs';
 import { appendRunLog, localDate } from './report.mjs';
 import { latestRearm, readRearm } from './setlocal.mjs';
-import { HOLD_MS, WINDOW_MS, advance, readFeed, readSource, sourcesOf, ticketsOf, watchDir, writeFeed } from './feed.mjs';
+import { ALERT_MS, HOLD_MS, WINDOW_MS, advance, pauseMs, readFeed, readSource, sourcesOf, ticketsOf, watchDir, writeFeed } from './feed.mjs';
 import { jobCommand, jobDue, jobEnv, listChanges, listMatcher, spawnJob, updateWatchState, writeJobLog } from './jobs.mjs';
 import { notificationsOf, notify } from './notify.mjs';
 
 // One check of the watcher (design §5, D-048), started by launchd every few minutes. No model call of its own:
 //   1. read every source since its cursor; a check that finds nothing ends here, with no status, no runner, no claude;
+//      a source failing for ALERT_MS of the watcher's awake time is a failed part (one per client), and so is its gap;
 //   2. map the new events to the host jobs' watched lists, and 3. to tickets through the ledgers;
 //   4. once a day after `schedule.morning`, the morning run (triage, finishing, starts) instead of step 5;
 //   5. `ticket-state status` for the tickets that changed; the runner finishes those that have a next step, each once;
@@ -76,6 +77,16 @@ export function nextMorning(ms, hhmm) {
 }
 
 const errorText = (e) => String(e?.message ?? e).split('\n')[0].slice(0, 300);
+const HOUR = 3600 * 1000;
+
+// A source failure that lasts is told per client, not per board or repo: a token that is gone fails them all. The
+// client's own error is cut short, so the notification (240 characters) keeps both the error and what to check.
+const CLIENTS = {
+  tracker: { part: 'the tracker', check: 'its token and key (tracker.credentials) and the network' },
+  forge: { part: 'the forge', check: 'its sign-in and the network' },
+};
+const clientOf = (name) => (name.startsWith('board:') ? CLIENTS.tracker : CLIENTS.forge);
+const short = (s, n = 90) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 export async function runCheck({ settings, clients, io = {}, options = {} }) {
   const { dryRun = false, claude = 'claude' } = options;
@@ -99,12 +110,18 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
   try {
     const feed = readFeed(settings.state);
     const next = structuredClone(feed);
+    // The watcher's awake time: a check that comes more than a pause after the last one ended (the Mac asleep, the
+    // agent off) starts it again, so a failure counts only from the first check after a wake.
+    const sinceLast = checkStart - Date.parse(feed.checkedAt ?? '');
+    const awakeSince = feed.awakeSince && sinceLast <= pauseMs(settings) ? Date.parse(feed.awakeSince) : checkStart;
+    next.awakeSince = iso(awakeSince);
+    const afterMorning = localMinutes(checkStart) >= minutesOf(settings.schedule.morning);
 
     // 1. The sources. One that fails keeps its cursor; after HOLD_MS of failing the gap is reported and it starts again.
     const failSource = (src, cur, error) => {
       const from = iso(Date.parse(cur.lastCheck) - WINDOW_MS);
       if (checkStart - Date.parse(cur.lastCheck) > HOLD_MS) {
-        next.sources[src.name] = { lastCheck: iso(checkStart), seen: {} };
+        next.sources[src.name] = { lastCheck: iso(checkStart), seen: {}, failingSince: cur.failingSince ?? iso(checkStart), lastError: error };
         say({ kind: 'feed', what: src.name, outcome: 'failed', note: `a gap: nothing read from ${cur.lastCheck} to ${iso(checkStart)} (failing: ${error}); the morning run reconciles every open ticket` });
         return { name: src.name, outcome: 'gap', from, error };
       }
@@ -129,6 +146,25 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
       } catch (e) {
         out.sources.push(failSource(src, cur, errorText(e)));
       }
+    }
+
+    // A read that has failed for ALERT_MS of awake time is a failed part, so the once-a-day urgent notification tells the
+    // owner: one per client, after `schedule.morning` (the board's failure keeps the morning run waiting meanwhile).
+    // Its 24-hour gap is one more, at the gap; a gap that is mostly a sleep is only logged. Taken from the reads alone:
+    // a watched list that can't be matched (step 2) is already its job's failed part.
+    const lasting = new Map();
+    for (const s of out.sources.filter((x) => x.outcome === 'failed' || x.outcome === 'gap')) {
+      const since = Date.parse(next.sources[s.name].failingSince ?? iso(checkStart));
+      if (checkStart - Math.max(since, awakeSince) < ALERT_MS) continue;
+      const client = clientOf(s.name);
+      const l = lasting.get(client) ?? { since, error: s.error, gap: false };
+      if (since < l.since) Object.assign(l, { since, error: s.error });
+      lasting.set(client, { ...l, gap: l.gap || s.outcome === 'gap' });
+    }
+    for (const [client, l] of lasting) {
+      const why = `(${short(l.error)}). Check ${client.check}.`;
+      if (afterMorning) failed(client.part, `unreadable for ${Math.floor((checkStart - l.since) / HOUR)} h ${why}`);
+      if (l.gap) failed(`${client.part}'s events`, `a 24-hour gap, nothing read ${why}`);
     }
 
     // 2. The host jobs' watched lists. A list that can't be matched (renamed, or its board's lists unreadable) fails
@@ -182,7 +218,7 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
     // Not in a check whose own board couldn't be read (a Mac just awake, its network not up yet): the next check runs it.
     const board = out.sources.find((x) => x.name === `board:${settings.tracker.board}`);
     const offline = board && (board.outcome === 'failed' || board.outcome === 'gap');
-    const morningDue = next.morning?.lastDate !== today && localMinutes(checkStart) >= minutesOf(settings.schedule.morning);
+    const morningDue = next.morning?.lastDate !== today && afterMorning;
     if (morningDue && offline) out.notes.push(`the morning run waits: the board can't be read in this check (${board.error})`);
     next.pending = [];
     if (morningDue && !offline) {
@@ -263,6 +299,8 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
         if (n.error) say({ kind: 'watch', what: n.error.part, outcome: 'failed', note: n.error.error });
         if (n.capped) say({ kind: 'step', key: n.capped.key, stage: n.capped.stage, pr: n.capped.pr ?? null, outcome: 'failed', note: n.capped.why });
       }
+      // When this check ended: a long run or job inside it is not a pause.
+      next.checkedAt = iso(clock());
       writeFeed(settings.state, next);
       appendRunLog(settings.state, today, log);
     }

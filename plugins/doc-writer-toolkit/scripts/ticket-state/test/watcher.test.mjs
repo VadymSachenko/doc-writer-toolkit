@@ -421,6 +421,83 @@ test('the morning run waits for a check that can read the board: a Mac awake bef
   assert.equal(readFeed(w.settings.state).morning.lastDate, '2026-11-10');
 });
 
+// A world whose boards can't be read while `down(at)` holds (the tracker answers 401, as for a token that is gone),
+// checked at the given times with the real runner; the morning runs and the urgent notifications are kept.
+function deadBoard({ lastCheck, down }) {
+  const w = world({ actions: { [BOARD]: [] } });
+  seed(w, lastCheck, { morning: localDay(lastCheck) });
+  let clock = lastCheck;
+  const places = w.tracker.places;
+  w.tracker.places = async (b) => {
+    if (down(clock)) throw new Error('GET /1/boards/x/lists: HTTP 401 invalid token');
+    return places(b);
+  };
+  const mornings = [];
+  const urgent = [];
+  const check = (at) => {
+    clock = at;
+    return runCheck({ settings: w.settings, clients: w.clients(), io: { now: () => at, git: quietGit, runner: { now: () => at, readUsage: () => usageAt(5) }, runDaily: async (a) => (mornings.push(iso(at)), runDaily(a)), notify: (m) => (m.urgent && urgent.push([iso(at), m.text]), { sent: true }) }, options: {} });
+  };
+  const checks = async (from, to, step) => {
+    for (let at = from; at < to; at += step) await check(at);
+  };
+  return { w, mornings, urgent, checks };
+}
+const localDay = (ms) => iso(ms).slice(0, 10);
+
+test('a board that can never be read (a token gone): urgent once a day after schedule.morning, naming the error and what to check, and at each 24-hour gap', async () => {
+  const t = deadBoard({ lastCheck: NOW - 5 * MIN, down: () => true });
+  await t.checks(NOW, NOW + 50 * HOUR, 30 * MIN);
+  assert.deepEqual(t.mornings, [], 'the morning run waits for a board that reads');
+  const unreadable = (h) => `the tracker: unreadable for ${h} h (GET /1/boards/x/lists: HTTP 401 invalid token). Check its token and key (tracker.credentials) and the network.`;
+  const gap = "the tracker's events: a 24-hour gap, nothing read (GET /1/boards/x/lists: HTTP 401 invalid token). Check its token and key (tracker.credentials) and the network.";
+  // An hour after the first failure; then each day at the first check after 07:00, not at midnight; and at each gap
+  // (24 hours after the board was last read). Both boards fail on the one token: one notification, not one a board.
+  assert.deepEqual(t.urgent, [
+    ['2026-11-10T10:00:00.000Z', unreadable(1)],
+    ['2026-11-11T07:00:00.000Z', unreadable(22)],
+    ['2026-11-11T09:00:00.000Z', gap],
+    ['2026-11-12T07:00:00.000Z', unreadable(46)],
+    ['2026-11-12T09:30:00.000Z', gap],
+  ]);
+  for (const day of ['2026-11-10', '2026-11-11', '2026-11-12']) {
+    const log = readRunLog(t.w.settings.state, day);
+    assert.equal(log.filter((e) => e.kind === 'watch' && e.what === 'the tracker').length, 1, `${day}: one line in the run log for the report`);
+    assert.ok(!JSON.stringify(log).includes('TEST_TOKEN') && !JSON.stringify(log).includes('TEST_KEY'));
+  }
+  assert.equal(readFeed(t.w.settings.state).sources[`board:${BOARD}`].failingSince, iso(NOW), 'still failing since the first failure, across the gaps');
+});
+
+test('PRs that can never be read (the forge sign-in gone): one urgent notification for every repo and source, after an hour', async () => {
+  const bad = 'HTTP 401 Bad credentials';
+  const w = world({ fail: { 'guide-docs': bad, 'api-docs': bad, 'portal-docs': bad } });
+  seed(w, NOW - 5 * MIN);
+  const { check, calls } = checker(w);
+  for (let at = NOW; at <= NOW + 70 * MIN; at += 5 * MIN) await check(at);
+  assert.deepEqual(calls.notes.map((m) => [m.urgent, m.text]), [[true, `the forge: unreadable for 1 h (${bad}). Check its sign-in and the network.`]]);
+  assert.equal(calls.runs.length, 0);
+});
+
+test('a board that fails for under an hour after a wake: no urgent notification, and one morning run once it reads', async () => {
+  const outage = (from) => (at) => at >= from && at < from + 55 * MIN;
+  // Asleep overnight; the board fails from 09:00 to 09:50 and reads at 09:55.
+  const plain = deadBoard({ lastCheck: NOW - 12 * HOUR, down: outage(NOW) });
+  await plain.checks(NOW, NOW + 2 * HOUR, 5 * MIN);
+  // The same, but it was failing for 50 minutes when the Mac went to sleep: the sleep is not failing time.
+  const evening = NOW - 13 * HOUR;
+  const before = deadBoard({ lastCheck: evening - 5 * MIN, down: (at) => outage(evening)(at) || outage(NOW)(at) });
+  await before.checks(evening, evening + 55 * MIN, 5 * MIN);
+  await before.checks(NOW, NOW + 2 * HOUR, 5 * MIN);
+  // Asleep over a weekend: the first check after the wake is already a 24-hour gap; it is logged, not notified.
+  const weekend = deadBoard({ lastCheck: NOW - 60 * HOUR, down: outage(NOW) });
+  await weekend.checks(NOW, NOW + 2 * HOUR, 5 * MIN);
+  assert.ok(readRunLog(weekend.w.settings.state, '2026-11-10').some((e) => e.kind === 'feed' && /a gap/.test(e.note)));
+  for (const t of [plain, before, weekend]) {
+    assert.deepEqual(t.urgent, []);
+    assert.deepEqual(t.mornings, [iso(NOW + 55 * MIN)], 'once, at 09:55');
+  }
+});
+
 test('a morning run that throws before its first step runs again at the next check; one that throws part way counts as the day', async () => {
   for (const [begun, expected] of [[false, 2], [true, 1]]) {
     const w = world();
@@ -442,7 +519,7 @@ test('a morning run that throws before its first step runs again at the next che
   }
 });
 
-test('a ledger file that does not read: reported, its ticket kept in pending; the other events are still mapped', async () => {
+test('a ledger file that does not read: reported; nothing is handed on (status reads every ledger), and the tickets wait in pending until it reads', async () => {
   const actions = { [BOARD]: [] };
   const w = world({ actions });
   const a = answered(w, 401);
@@ -453,6 +530,7 @@ test('a ledger file that does not read: reported, its ticket kept in pending; th
   const { check, calls } = checker(w);
   const out = await check(NOW);
   assert.ok(out.errors.some((e) => e.part === 'the ledger 402' && /cannot parse/.test(e.error)));
+  assert.ok(out.errors.some((e) => e.part === 'status' && /cannot parse/.test(e.error)), 'status fails on it too');
   const feed = readFeed(w.settings.state);
   assert.ok(feed.pending.includes('402') && feed.pending.includes('401'), 'kept for the next check (status reads every ledger, so it waits too)');
   assert.equal(feed.sources[`board:${BOARD}`].lastCheck, iso(NOW));

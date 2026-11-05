@@ -7,12 +7,22 @@ import { prId } from './ledger.mjs';
 // cursor per source in `<state>/watch/feed.json`:
 //   - the window starts WINDOW_MS before `lastCheck`; ids already in `seen` are dropped, so the overlap costs nothing;
 //   - `lastCheck` moves to the start of this check only after every event of the window was handed on;
-//   - a source that failed keeps its `lastCheck` for up to HOLD_MS, then the gap is reported and it starts again;
+//   - a source that failed keeps its `lastCheck` for up to HOLD_MS, then the gap is reported and it starts again
+//     (its `failingSince` stays, since it still fails);
 //   - a source with no cursor starts from now (the morning run reconciles everything earlier);
+//   - `checkedAt` is when the last check ended, and `awakeSince` the first check after a pause longer than
+//     pauseMs (the Mac asleep, the agent off). A source's failure counts from the later of its `failingSince` and
+//     `awakeSince`: after ALERT_MS of that it is urgent;
 //   - the file is written to a temp file and renamed.
 
 export const WINDOW_MS = 10 * 60 * 1000;
 export const HOLD_MS = 24 * 3600 * 1000;
+// An hour: twelve failed checks at the default 5 minutes. Long enough for a network still coming up after a wake, a
+// VPN or a short outage of the tracker or the forge; short enough that a token gone at night is told the same morning,
+// while the morning run waits for the board.
+export const ALERT_MS = 3600 * 1000;
+// A pause in the checks, as the watcher sees it: longer than ALERT_MS and three intervals.
+export const pauseMs = (settings) => Math.max(ALERT_MS, 3 * settings.schedule.watchMinutes * 60000);
 export const FEED_VERSION = 1;
 
 export const watchDir = (state) => path.join(state, 'watch');

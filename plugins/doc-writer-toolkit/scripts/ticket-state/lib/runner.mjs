@@ -602,7 +602,7 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
         const twice = failures >= 2;
         const why = twice ? 'failed twice' : !up ? 'failed; no model above to retry with' : 'failed; the guard held the retry';
         const waits = ledgered && !twice;
-        say({ ...entry, outcome: waits ? 'waits' : 'failed', note: twice && ledgered ? 'failed twice: held for the owner until a person acts on the ticket or `ticket-state set` re-arms it' : waits ? `${why}: runs again after a person acts on the ticket, or once at the next morning run` : why });
+        say({ ...entry, outcome: waits ? 'waits' : 'failed', note: twice && ledgered ? 'failed twice: held for the owner until a person acts on the ticket or `ticket-state set retry` re-arms it' : waits ? `${why}: runs again after a person acts on the ticket, or once at the next morning run` : why });
         return { ...pick(step), model, outcome: 'failed', note: why };
       }
       return { ...pick(step), outcome: 'failed' };
@@ -612,7 +612,7 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
   }
 
   // The mark of each ticket of a step right after its session failed (`markOf` in lib/rule.mjs). If the world can't be
-  // read now, a bare mark: then only `ticket-state set` or the morning run gives the step another try.
+  // read now, a bare mark: then only `ticket-state set retry` or the morning run gives the step another try.
   async function marksOf(step) {
     try {
       const now = await computeStatus({ settings, clients, usage, now: clock(), only: step.keys, ignoreLocks: own, marks: step.keys });
