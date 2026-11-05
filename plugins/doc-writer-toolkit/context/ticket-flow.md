@@ -108,7 +108,7 @@ The close step of a ticket whose PRs are all merged moves the work files in `fil
 - **The morning run:** once a day, at the first check after `schedule.morning` whose board reads.
 - **Host jobs (`hostJobs`):** "when list X gets new cards and stays quiet for N hours, run job Y", or "every N minutes"; Y is a host script or a skill. A change in the list restarts the wait. A skill job is guarded like a scheduled step.
 
-`mode` (`off`, `observe`, `on`) and the limits are in the owner's local file. `ticket-state set` edits one key of it, the way a request in plain words is carried out. No `claude` the flow starts gets an API key or an auth token, so the plan pays. A macOS notification gives the morning counts. It is urgent only for a limit reached, a step or a host job that failed twice, a step at its daily session cap, or a part of a check that failed (the rest of the check goes on). The sign-in token goes to the `claude` processes only, never to a host script, `git` or `gh`.
+`mode` (`off`, `observe`, `on`) and the limits are in the owner's local file. `ticket-state set` edits one key of it, the way a request in plain words is carried out. No `claude` the flow starts gets an API key or an auth token, so the plan pays. A macOS notification gives the morning counts. It is urgent only for a limit reached, a step that failed twice or hit its daily session cap, a host job that failed at each try for an hour while the Mac was awake (a shorter failure is tried again at the next check, quietly), or a part of a check that failed (the rest of the check goes on). The sign-in token goes to the `claude` processes only, never to a host script, `git` or `gh`.
 
 ## The report
 

@@ -105,8 +105,10 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
     const failing = Object.entries(feed.sources).filter(([, x]) => x.failingSince).map(([n, x]) => `${n} failing since ${x.failingSince}: ${x.lastError ?? 'error'}`);
     const jobs = (settings.hostJobs ?? []).map((j) => {
       const js = feed.jobs?.[j.name] ?? {};
-      if (j.watch && js.armed) return `${j.name}: new cards in ${j.watch.list} since ${js.firstChange}; runs ${j.quietHours} h after the last change (${js.lastChange})${js.heldUntil ? `, held by the guard until ${js.heldUntil}` : ''}`;
-      return `${j.name}: ${js.lastRun ? `last run ${js.lastRun}` : 'not run yet'}${js.lastFailure ? `, failed twice at ${js.lastFailure}` : ''}${js.heldUntil ? `, held until ${js.heldUntil}` : ''}`;
+      // A job that fails is tried at each check; after an hour of failing it is disarmed (`lastFailure`).
+      const failing = js.failingSince ? `, failing since ${js.failingSince} (${js.failures ?? 0} tries)` : '';
+      if (j.watch && js.armed) return `${j.name}: new cards in ${j.watch.list} since ${js.firstChange}; runs ${j.quietHours} h after the last change (${js.lastChange})${failing}${js.heldUntil ? `, held by the guard until ${js.heldUntil}` : ''}`;
+      return `${j.name}: ${js.lastRun ? `last run ${js.lastRun}` : 'not run yet'}${failing}${js.lastFailure ? `, disarmed after an hour of failing at ${js.lastFailure}` : ''}${js.heldUntil ? `, held until ${js.heldUntil}` : ''}`;
     });
     out.push('## The watcher', '', `Last check ${checks.at(-1) ?? 'never'}; the morning run ${feed.morning?.lastDate === date ? `ran at ${feed.morning.at ?? date}` : 'has not run on this date'}.`, '', list([...failing, ...jobs], 'no source failing, no host job'), '');
   }
@@ -136,7 +138,7 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
   out.push('## Work files removed after the merge', '', list(removedLines), ...(freed ? ['', `Space freed today: ${mb(freed)}.`] : []), '');
 
   const failures = runLog.filter((e) => e.outcome === 'failed' || e.kind === 'guard');
-  out.push('## Failures and guard stops', '', list(failures.map((e) => `${e.at} ${[e.key ?? e.group ?? (e.keys ?? []).join(', '), e.stage ?? e.what].filter(Boolean).join(' ')}: ${e.note ?? e.reason ?? e.outcome}`)), '');
+  out.push('## Failures and guard stops', '', list(failures.map((e) => `${e.at} ${[e.key ?? e.group ?? (e.keys ?? []).join(', '), e.stage ?? e.what ?? (e.job ? `job ${e.job}` : null)].filter(Boolean).join(' ')}: ${e.note ?? e.reason ?? e.outcome}`)), '');
 
   const today = ledgers.flatMap((l) => (l.runs ?? []).filter((r) => onDate(r.start)).map((r) => ({ ...r, key: l.key })));
   const cost = today.reduce((s, r) => s + (typeof r.costUsd === 'number' ? r.costUsd * (r.share ?? 1) : 0), 0);

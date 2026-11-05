@@ -312,7 +312,7 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
     async function runJob(job, state) {
       const cmd = jobCommand(job, { settings, state, claude });
       const shown = [cmd.bin, ...cmd.args];
-      const done = { ...state, armed: false, firstChange: null, lastRun: iso(checkStart), failures: 0, heldUntil: null };
+      const done = { ...state, armed: false, firstChange: null, lastRun: iso(checkStart), failures: 0, failingSince: null, heldUntil: null };
       if (dryRun || settings.mode !== 'on') {
         if (!dryRun) {
           next.jobs[job.name] = done;
@@ -337,14 +337,18 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
       const file = writeJobLog(settings.state, job.name, iso(started), res);
       const result = cmd.model ? parseResult(res.stdout) : null;
       const ok = res.code === 0 && !(result && result.isError);
+      // A failed try runs again at the next check, quietly: the job stays armed (a watch job) or keeps its last run (an
+      // `every` job). One that has failed at each try for ALERT_MS of awake time, as a source, is disarmed with one
+      // urgent notification: a watch job until its next new card, an `every` job until the next morning run. A network
+      // drop of a few minutes costs a few tries, not the day, and a sleep is not failing time.
       const failures = ok ? 0 : (state.failures ?? 0) + 1;
-      const twice = failures >= 2;
-      // Failed twice in a row: disarmed. A watch job waits for its next new card; an `every` job for the next morning run.
-      const until = twice && job.every !== undefined ? iso(nextMorning(checkStart, settings.schedule.morning)) : null;
-      next.jobs[job.name] = ok || twice ? { ...done, ...(twice ? { lastFailure: iso(started), heldUntil: until } : {}) } : { ...state, failures };
-      const entry = { kind: 'job', job: job.name, outcome: ok ? 'done' : 'failed', exit: res.code, durationMs: clock() - started, log: path.relative(settings.root, file), ...(result?.costUsd !== undefined && result?.costUsd !== null ? { costUsd: result.costUsd } : {}), ...(twice ? { note: `failed twice; disarmed until ${until ?? 'its next new card'}` } : !ok ? { note: 'failed; tried again on the next check' } : {}) };
+      const failingSince = ok ? null : state.failingSince ?? iso(checkStart);
+      const lasting = !ok && checkStart - Math.max(Date.parse(failingSince), awakeSince) >= ALERT_MS;
+      const until = lasting ? (job.every !== undefined ? iso(nextMorning(checkStart, settings.schedule.morning)) : 'its next new card') : null;
+      next.jobs[job.name] = ok ? done : lasting ? { ...done, lastFailure: iso(started), heldUntil: job.every !== undefined ? until : null } : { ...state, failures, failingSince };
+      const entry = { kind: 'job', job: job.name, outcome: ok ? 'done' : 'failed', exit: res.code, durationMs: clock() - started, log: path.relative(settings.root, file), ...(result?.costUsd !== undefined && result?.costUsd !== null ? { costUsd: result.costUsd } : {}), ...(lasting ? { note: `failed at each try for an hour (${failures} tries); disarmed until ${until}` } : !ok ? { note: 'failed; tried again at the next check' } : {}) };
       say(entry);
-      return { name: job.name, due: true, outcome: entry.outcome, exit: res.code, log: entry.log, ...(twice ? { note: 'failed twice', until: until ?? 'its next new card' } : entry.note ? { note: entry.note } : {}) };
+      return { name: job.name, due: true, outcome: entry.outcome, exit: res.code, log: entry.log, ...(lasting ? { disarmed: true, failures, until } : entry.note ? { note: entry.note } : {}) };
     }
   } finally {
     lock.release();

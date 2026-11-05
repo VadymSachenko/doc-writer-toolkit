@@ -10,7 +10,7 @@ import { takeLock, releaseLock } from '../lib/locks.mjs';
 import { WINDOW_MS, emptyFeed, readFeed, sourcesOf, ticketsOf, writeFeed, feedPath } from '../lib/feed.mjs';
 import { runCheck, takeWatchLock } from '../lib/watch.mjs';
 import { jobCommand, listChanges, updateWatchState, jobDue } from '../lib/jobs.mjs';
-import { readRunLog } from '../lib/report.mjs';
+import { readRunLog, renderReport } from '../lib/report.mjs';
 import { PUSH_DENIED, runDaily } from '../lib/runner.mjs';
 import { notificationsOf } from '../lib/notify.mjs';
 import { setLocal } from '../lib/setlocal.mjs';
@@ -687,7 +687,7 @@ test('AC-5: a change inside the wait, seen only after a sleep, still restarts it
   assert.equal(calls.jobs.length, 1);
 });
 
-test('AC-5 and AC-2: a skill job waits at the limit; observe plans it; a script job runs every N minutes; a job that fails twice is urgent', async () => {
+test('AC-5 and AC-2: a skill job waits at the limit; observe plans it; a script job runs every N minutes; a job that fails for an hour is urgent', async () => {
   // The guard: at the allowance, the skill job is held for an hour and the owner is told once.
   const held = releaseWorld();
   const h = checker(held.w, { readUsage: () => usageAt(45) });
@@ -715,16 +715,93 @@ test('AC-5 and AC-2: a skill job waits at the limit; observe plans it; a script 
   await s.check(every.t0);
   assert.deepEqual([s.calls.jobs[0].cmd.bin, s.calls.jobs[0].cmd.args], [process.execPath, [path.join(every.w.root, 'scripts/copy.mjs'), '--quiet']]);
   assert.equal(s.calls.usage, 0);
-  // It failed: tried again on the next check; failed twice: urgent, and disarmed until the next morning run.
+  // It failed: tried again at each check, quietly. Failing at each try for an hour (01:00 to 02:06): urgent, and
+  // disarmed until the next morning run.
   await s.check(every.t0 + MIN);
   assert.equal(s.calls.jobs.length, 2);
-  assert.deepEqual(s.calls.notes.map((x) => [x.title, x.text]), [['Ticket flow: a host job failed twice', 'copy failed twice; disarmed until 2026-11-10T07:00:00.000Z. See /ticket-report.']]);
-  assert.equal(readFeed(every.w.settings.state).jobs.copy.heldUntil, '2026-11-10T07:00:00.000Z');
+  assert.deepEqual(s.calls.notes, [], 'a failure shorter than an hour is quiet');
   for (let at = every.t0 + 6 * MIN; at < Date.parse('2026-11-10T07:00:00Z'); at += 30 * MIN) await s.check(at);
-  assert.equal(s.calls.jobs.length, 2, 'not before the next morning run');
+  assert.equal(s.calls.jobs.length, 5, 'at 01:00, 01:01, 01:06, 01:36 and 02:06; not after, before the next morning run');
+  assert.deepEqual(s.calls.notes.map((x) => [x.title, x.text]), [['Ticket flow: a host job keeps failing', 'copy failed at each try for an hour (5 tries, last exit 1); disarmed until 2026-11-10T07:00:00.000Z. See /ticket-report.']]);
+  assert.deepEqual(readRunLog(every.w.settings.state, '2026-11-10').filter((e) => e.kind === 'job' && /disarmed/.test(e.note ?? '')).map((e) => e.at), ['2026-11-10T02:06:00.000Z']);
+  assert.equal(readFeed(every.w.settings.state).jobs.copy.heldUntil, '2026-11-10T07:00:00.000Z');
   const morning = await s.check(Date.parse('2026-11-10T07:00:00Z'));
-  assert.equal(s.calls.jobs.length, 3);
+  assert.equal(s.calls.jobs.length, 6);
   assert.deepEqual(morning.jobs.map((j) => [j.name, j.outcome]), [['copy', 'failed']]);
+});
+
+// An `every 5` script job that reads the board itself (a card copy): it exits 1 while `fails(at)`, and the board's
+// own reads fail while `down(at)` (the network). Checks every 5 minutes; the job's tries are kept with their exit.
+function everyJob({ from, down = () => false, fails = down }) {
+  const w = world({ actions: { [BOARD]: [] }, extra: { hostJobs: [{ name: 'copy', every: 5, run: { script: 'scripts/copy.mjs' } }] } });
+  seed(w, from - 5 * MIN);
+  let clock = from;
+  const places = w.tracker.places;
+  w.tracker.places = async (b) => {
+    if (down(clock)) throw new Error('fetch failed: getaddrinfo ENOTFOUND tracker.example');
+    return places(b);
+  };
+  const runs = [];
+  const { check, calls } = checker(w, { spawnJob: () => (runs.push([iso(clock), fails(clock) ? 1 : 0]), fails(clock) ? { code: 1, stdout: '', stderr: 'fetch failed' } : { code: 0, stdout: '', stderr: '' }) });
+  const checks = async (start, end) => {
+    for (clock = start; clock < end; clock += 5 * MIN) await check(clock);
+  };
+  return { w, runs, checks, urgent: () => calls.notes.filter((m) => m.urgent), state: () => readFeed(w.settings.state).jobs.copy };
+}
+
+test('a host job through a 10-minute network drop: tried again at each check, quietly; it runs at the first check after, and is never disarmed', async () => {
+  const noon = Date.parse('2026-11-10T12:00:00Z');
+  const t = everyJob({ from: noon - HOUR, down: (at) => at >= noon && at < noon + 10 * MIN });
+  await t.checks(noon - HOUR, noon + 2 * HOUR);
+  assert.deepEqual(t.urgent(), []);
+  assert.deepEqual(t.runs.filter(([at]) => at >= '2026-11-10T11:55' && at <= '2026-11-10T12:15:00.000Z').map(([at, code]) => [at.slice(11, 16), code]), [['11:55', 0], ['12:00', 1], ['12:05', 1], ['12:10', 0], ['12:15', 0]]);
+  assert.equal(t.runs.length, 36, 'at every check: never disarmed');
+  assert.deepEqual([t.state().heldUntil, t.state().failingSince, t.state().failures, t.state().lastFailure], [null, null, 0, undefined]);
+});
+
+test('a host job that fails at each try for an hour of awake time: one urgent notification, then disarmed until the next morning run', async () => {
+  const noon = Date.parse('2026-11-10T12:00:00Z');
+  const t = everyJob({ from: noon, fails: (at) => at >= noon });
+  // The report, as the day's run writes it: the job failing, then disarmed; each failed try names the job.
+  const report = async () => renderReport({ settings: t.w.settings, st: await t.w.status(), date: '2026-11-10', runLog: readRunLog(t.w.settings.state, '2026-11-10') });
+  await t.checks(noon, noon + 35 * MIN);
+  assert.deepEqual(t.urgent(), []);
+  assert.match(await report(), /\n- copy: not run yet, failing since 2026-11-10T12:00:00\.000Z \(7 tries\)\n/);
+  await t.checks(noon + 35 * MIN, noon + 6 * HOUR);
+  assert.deepEqual(t.urgent().map((m) => [m.title, m.text]), [['Ticket flow: a host job keeps failing', 'copy failed at each try for an hour (13 tries, last exit 1); disarmed until 2026-11-11T07:00:00.000Z. See /ticket-report.']]);
+  assert.deepEqual([t.runs.length, t.runs.at(-1)[0]], [13, '2026-11-10T13:00:00.000Z'], 'tried at each check from 12:00 to 13:00, then not again that day');
+  assert.equal(t.state().heldUntil, '2026-11-11T07:00:00.000Z');
+  const text = await report();
+  assert.match(text, /\n- copy: last run 2026-11-10T13:00:00\.000Z, disarmed after an hour of failing at 2026-11-10T13:00:00\.000Z, held until 2026-11-11T07:00:00\.000Z\n/);
+  const failures = text.split('## Failures and guard stops')[1].split('##')[0];
+  assert.match(failures, /- 2026-11-10T12:00:00\.000Z job copy: failed; tried again at the next check\n/);
+  assert.match(failures, /- 2026-11-10T13:00:00\.000Z job copy: failed at each try for an hour \(13 tries\); disarmed until 2026-11-11T07:00:00\.000Z/);
+});
+
+test('a watch job that fails at two checks runs again at the next one, not only at its next new card', async () => {
+  const { w, t0, arrive } = releaseWorld({ hostJobs: [{ name: 'notes', watch: { board: WATCH, list: 'Shipping' }, quietHours: 3, run: { script: 'scripts/notes.mjs' } }] });
+  let tries = 0;
+  const { check, calls } = checker(w, { spawnJob: () => (tries++ < 2 ? { code: 1, stdout: '', stderr: 'HTTP 502' } : { code: 0, stdout: '', stderr: '' }) });
+  arrive(t0);
+  await check(t0 + 5 * MIN);
+  for (const m of [0, 5, 10, 15]) await check(t0 + 3 * HOUR + m * MIN);
+  assert.equal(calls.jobs.length, 3, 'failed at 04:00 and 04:05, done at 04:10, then not again');
+  assert.deepEqual(calls.notes, []);
+  const s = readFeed(w.settings.state).jobs.notes;
+  assert.deepEqual([s.armed, s.failingSince, s.failures, s.lastRun], [false, null, 0, '2026-11-10T04:10:00.000Z']);
+});
+
+test('a sleep is not failing time for a host job: failing as the Mac went to sleep and at the first check after the wake, then it runs', async () => {
+  const evening = Date.parse('2026-11-10T17:30:00Z');
+  const wake = Date.parse('2026-11-11T08:00:00Z');
+  const t = everyJob({ from: evening - 3 * HOUR, down: (at) => (at >= evening && at < evening + HOUR) || (at >= wake && at < wake + 5 * MIN) });
+  // Awake until 17:55, failing from 17:30; asleep until 08:00, with no network at the first check.
+  await t.checks(evening - 3 * HOUR, evening + 30 * MIN);
+  await t.checks(wake, wake + HOUR);
+  assert.deepEqual(t.urgent(), []);
+  assert.deepEqual(t.runs.filter(([, code]) => code).map(([at]) => at.slice(5, 16)), ['11-10T17:30', '11-10T17:35', '11-10T17:40', '11-10T17:45', '11-10T17:50', '11-10T17:55', '11-11T08:00']);
+  assert.deepEqual(t.runs.find(([at]) => at === '2026-11-11T08:05:00.000Z'), ['2026-11-11T08:05:00.000Z', 0], 'it runs at 08:05');
+  assert.deepEqual([t.state().heldUntil, t.state().failingSince, t.state().lastFailure], [null, null, undefined]);
 });
 
 test('a watched list that is gone: its board fails for this check with the reason; the morning run, the hand-off and the other cursors go on', async () => {

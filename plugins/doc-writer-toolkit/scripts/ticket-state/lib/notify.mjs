@@ -1,8 +1,9 @@
 import { spawnSync } from 'node:child_process';
 
 // A macOS notification (design §7): the morning run's counts, and an urgent one only for a limit reached, a
-// step or a job that failed twice, or a part of a check that failed. The text goes to osascript as an argument, never inside the script, so a card name with
-// quotes can't change what runs. Elsewhere than macOS nothing is sent.
+// step that failed twice or hit its daily cap, a host job that failed for an hour, or a part of a check that failed.
+// The text goes to osascript as an argument, never inside the script, so a card name with quotes can't change what
+// runs. Elsewhere than macOS nothing is sent.
 export function notify({ title, text, urgent = false }, io = {}) {
   const bin = io.osascript ?? (process.platform === 'darwin' ? '/usr/bin/osascript' : null);
   if (!bin) return { sent: false, why: 'not macOS' };
@@ -31,7 +32,7 @@ export function notificationsOf({ morning, run, jobs = [], errors = [], capped =
     }
   }
   for (const j of jobs) {
-    if (j.note === 'failed twice') out.push({ key: `job:${today}:${j.name}`, urgent: true, title: 'Ticket flow: a host job failed twice', text: `${j.name} failed twice; disarmed until ${j.until ?? 'its next trigger'}. See /ticket-report.` });
+    if (j.disarmed) out.push({ key: `job:${today}:${j.name}`, urgent: true, title: 'Ticket flow: a host job keeps failing', text: `${j.name} failed at each try for an hour (${j.failures} tries, last exit ${j.exit}); disarmed until ${j.until}. See /ticket-report.` });
     if (j.held) out.push(guardNote(j.held, `The host job ${j.name}`, today));
   }
   // A part of a check that failed (a watched list, the status, a run, a job): the rest of the check went on.
