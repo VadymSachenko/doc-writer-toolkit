@@ -16,7 +16,9 @@ import { readRearm, rearmedAt } from './setlocal.mjs';
 const bare = (t) => String(t ?? '').replace(/‌/g, '').trim();
 const OPEN_STATES = new Set(['ready', 'needsInfo', 'new', 'closed', 'outside', 'merged']);
 
-export async function computeStatus({ settings, clients, now = Date.now(), only = null, usage = null, git = makeGit(settings), ignoreLocks = null, marks = null }) {
+// `tried` and `retryWaiting` come from a run (lib/runner.mjs): the tickets it already started or tried, and whether it may
+// give a waiting failed start its one more try (`startable` in lib/limits.mjs).
+export async function computeStatus({ settings, clients, now = Date.now(), only = null, usage = null, git = makeGit(settings), ignoreLocks = null, marks = null, tried = new Set(), retryWaiting = false }) {
   const ledgers = readAllLedgers(settings.state);
   const ledgersByCard = new Map(ledgers.filter((l) => l.card?.id).map((l) => [l.card.id, l]));
   const { cards, byStatus } = await readCards({ settings, tracker: clients.tracker, ledgers });
@@ -116,7 +118,7 @@ export async function computeStatus({ settings, clients, now = Date.now(), only 
   const estimates = estimatesOf(ledgers, settings.limits);
   const inWork = ledgers.filter((l) => l.mode === 'pipeline' && inWorkTickets.some((t) => t.key === l.key));
   const lockedGroup = (g) => Boolean(locks.get(g.group)?.live) || g.keys.some((k) => tickets.find((t) => t.key === k)?.locked);
-  const plan = startable({ tickets, groups, settings, allowance, estimates, inWork, locked: { has: (k) => lockedGroup(groups.find((g) => g.keys.includes(k)) ?? { group: k, keys: [k] }) } });
+  const plan = startable({ tickets, groups, settings, allowance, estimates, inWork, locked: { has: (k) => lockedGroup(groups.find((g) => g.keys.includes(k)) ?? { group: k, keys: [k] }) }, tried, retryWaiting });
 
   const intakeCards = byStatus.intake ?? [];
   const intake = intakeList({ cards: intakeCards, ledgersByCard, settings, now, pagesOf: git.pagesOf });
@@ -129,7 +131,7 @@ export async function computeStatus({ settings, clients, now = Date.now(), only 
     state: settings.stateRel,
     tickets: shown.sort(order).map(({ number, desc, ...t }) => t),
     intake,
-    groups: groups.map(({ members, ...g }) => g),
+    groups: groups.map(({ members, failedStart, ...g }) => ({ ...g, ...(failedStart ? { failedStart } : {}) })),
     wip: plan.wip,
     allowance: plan.budget,
     estimates,

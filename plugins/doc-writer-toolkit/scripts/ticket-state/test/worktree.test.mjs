@@ -8,7 +8,8 @@ import { ledger, read, world } from './helpers.mjs';
 import { runDaily } from '../lib/runner.mjs';
 import { runRecord } from '../lib/record.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
-import { ensureWorktree, listWorktrees, canon, worktreePath } from '../lib/worktree.mjs';
+import { ensureWorktree, listWorktrees, canon, prsForStep, worktreePath } from '../lib/worktree.mjs';
+import { spentOf } from '../lib/limits.mjs';
 import { localDate, renderReport } from '../lib/report.mjs';
 
 // The ticket worktree (lib/worktree.mjs): the runner makes it, with the clone's node_modules linked and excluded, so
@@ -222,8 +223,17 @@ test('AC-1: a stuck worktree starts no session; the stage is recorded failed wit
   assert.equal(l.prs[0].chain.build.status, 'failed');
   assert.match(l.prs[0].chain.build.note, /the worktree: .*never had .*"A stuck worktree"/);
   assert.equal(execFileSync('git', ['-C', t.wt, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), mine, 'the work is left as it is');
+  // The failed-step rules read it as they read a failed session (and a failed start): one failure, waiting for a person.
+  // With no `start` it counts toward no session cap or cost, even at a cap of one session a day.
+  t.w.settings.limits.sessionsPerStageDay = 1;
   const tk = await t.w.one('1501');
   assert.match(tk.next.waits, /a person acting on the ticket/);
+  assert.deepEqual([tk.failed.sessions, tk.capped, tk.held], [1, undefined, undefined]);
+  const entry = l.runs.at(-1);
+  assert.deepEqual([entry.outcome, entry.session, entry.failures, 'start' in entry, 'weekPercent' in entry], ['failed', null, 1, false, false]);
+  assert.equal(spentOf(l), null);
+  // A start never has a worktree, so a failed start and a stuck worktree can't fall on the same step.
+  assert.deepEqual(prsForStep({ stage: 'start', keys: ['1501'] }, [l]), []);
   // A failed step: the next run doesn't try it again until a person acts.
   const again = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW + 60000, spawnClaude: () => assert.fail('no retry without a person\'s action') }, options: { trigger: 'watcher', named: ['1501'] } });
   assert.deepEqual(again.ran.filter((r) => r.stage === 'build'), []);

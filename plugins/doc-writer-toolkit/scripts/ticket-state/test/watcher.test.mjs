@@ -125,6 +125,32 @@ test('AC-1: events on tickets with no next step call status, and start no runner
   assert.deepEqual([calls.runs, calls.usage], [[], 0]);
 });
 
+test('a start whose session moved the card and failed waits; a person acting hands it on as the start it was, a hand move as a hand start', async () => {
+  const actions = { [BOARD]: [] };
+  const comments = {};
+  const moved = card({ number: 311, status: 'inProgress' });
+  const byHand = card({ number: 312, status: 'inProgress' });
+  const w = world({ cards: [moved, byHand], actions, comments });
+  const at = iso(NOW - 30 * MIN);
+  // 311: the runner recorded the scheduled start; its session moved the card, then failed (its mark has the card in work).
+  ledger(w, moved, { stages: { triage: 'done', start: { status: 'failed', note: 'the session ended without recording the stage' } }, left: 'ready', startedBy: 'schedule', runs: [{ seq: 9, stage: 'start', role: 'writer', outcome: 'failed', failures: 1, start: at, after: { at, list: moved.placeId, comments: [], prs: {} } }] });
+  // 312: only triaged; a person moved its card into work.
+  ledger(w, byHand, { stages: { triage: 'done' }, left: 'ready' });
+  seed(w, NOW - 5 * MIN);
+  const { check, calls } = checker(w);
+  actions[BOARD].push(act(moved, NOW - 2 * MIN), act(byHand, NOW - 2 * MIN, { type: 'updateCard', from: LISTS.ready, to: LISTS.inProgress }));
+  let out = await check(NOW);
+  assert.deepEqual(out.tickets.map((t) => [t.key, t.next, Boolean(t.waits)]), [['311', 'start', true], ['312', 'start', false]]);
+  assert.deepEqual(calls.runs.map((r) => r.named), [['312']], 'the failed start waits; the hand start runs');
+  // A person comments on 311's card: one more try, handed on as the scheduled start it was.
+  (comments[moved.id] ??= []).push({ id: 'person-1', author: 'owner-login', time: iso(NOW + MIN), text: 'the attachment is back', edited: null });
+  actions[BOARD].push({ ...act(moved, NOW + MIN), id: 'person-1' });
+  out = await check(NOW + 5 * MIN);
+  assert.deepEqual(calls.runs.map((r) => r.named), [['312'], ['311']], 'only the ticket with a new event is looked at');
+  const st = await w.status();
+  assert.deepEqual(st.tickets.map((t) => [t.key, t.next.startedBy, Boolean(t.next.again), Boolean(t.next.byHand)]), [['311', 'schedule', true, false], ['312', 'manual', false, true]]);
+});
+
 test('AC-1: the first check of a new source starts from now and reads nothing', async () => {
   const w = world();
   writeFeed(w.settings.state, { ...emptyFeed(), morning: { lastDate: '2026-11-10' } });

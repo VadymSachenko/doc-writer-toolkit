@@ -14,6 +14,7 @@ import { parseUsage } from './lib/allowance.mjs';
 import { localDate, readRunLog, renderReport, writeReport } from './lib/report.mjs';
 import { readUsageFromClaude } from './lib/runner.mjs';
 import { setLocal } from './lib/setlocal.mjs';
+import { runImport } from './lib/import.mjs';
 
 const USAGE = `ticket-state <command> [<key>] [options]
 
@@ -37,6 +38,9 @@ Commands
                             modelLadder, video.*, cleanup.*), checked before it is written; --unset drops it.
                             'set retry <key|all>' gives a held or waiting step one more try (no setting does);
                             'set retry job <name>' re-arms a host job the watcher disarmed.
+  import                    The Markdown ledgers from before the JSON ones (<from>/<key>.md, default the state
+                            folder), each into a JSON ledger holding every line; closed tickets' Markdown removed
+                            once checked (to the Trash, or deleted with cleanup.mode delete); open ones kept.
 
 Options
   --root <dir>              the host repo (default: cwd)
@@ -51,6 +55,7 @@ Options
   --group <g>, --kind <schedule|manual>, --stale              lock, unlock
   --date <yyyy-mm-dd>, --print                                report
   --unset                                                     set
+  --from <dir>, --size <word>=<edit|newPage|newSection> (repeatable), --dry-run   import
   --origin <url>            the tracker's API origin (tests)
   -h, --help                this text
 `;
@@ -78,12 +83,17 @@ const OPTIONS = {
   date: { type: 'string' },
   print: { type: 'boolean' },
   unset: { type: 'boolean' },
+  from: { type: 'string' },
+  size: { type: 'string', multiple: true },
+  'dry-run': { type: 'boolean' },
   origin: { type: 'string' },
   help: { type: 'boolean', short: 'h' },
 };
 
-const COMMANDS = ['status', 'record', 'handover', 'lock', 'unlock', 'config', 'intake', 'report', 'set'];
+const COMMANDS = ['status', 'record', 'handover', 'lock', 'unlock', 'config', 'intake', 'report', 'set', 'import'];
 const TAKES_KEY = ['record', 'handover'];
+// Options of one command only: refused on any other (exit 2), so `set mode off --dry-run` writes nothing.
+const ONLY = { from: ['import'], size: ['import'], 'dry-run': ['import'] };
 
 export function usageOf(values, io = {}) {
   if (values['usage-file'] !== undefined) {
@@ -127,6 +137,9 @@ export async function main(argv, io = {}) {
     return 0;
   }
   if (!COMMANDS.includes(command)) throw new CliError(`unknown command '${command}'.\n\n${USAGE}`, { code: 2 });
+  for (const [option, commands] of Object.entries(ONLY)) {
+    if (values[option] !== undefined && !commands.includes(command)) throw new CliError(`--${option} is an option of ${commands.join(', ')} only, not of ${command}`, { code: 2 });
+  }
   if (TAKES_KEY.includes(command) && !key) throw new CliError(`${command} needs the ticket key.\n\n${USAGE}`, { code: 2 });
   if (command === 'set') {
     if (!key) throw new CliError(`set needs the key.\n\n${USAGE}`, { code: 2 });
@@ -180,6 +193,16 @@ export async function main(argv, io = {}) {
         now,
       });
       break;
+    case 'import': {
+      const sizes = {};
+      for (const pair of values.size ?? []) {
+        const at = pair.lastIndexOf('=');
+        if (at < 1) throw new CliError(`--size '${pair}': give <word>=<size>`, { code: 2 });
+        sizes[pair.slice(0, at).trim()] = pair.slice(at + 1).trim();
+      }
+      result = await runImport({ settings, clients, from: values.from ?? null, sizes, dryRun: Boolean(values['dry-run']), now, ...(io.trashDir ? { trashDir: io.trashDir } : {}) });
+      break;
+    }
     case 'handover':
       result = await runHandover({ settings, clients, key, to: values.to ?? 'pipeline', now });
       break;

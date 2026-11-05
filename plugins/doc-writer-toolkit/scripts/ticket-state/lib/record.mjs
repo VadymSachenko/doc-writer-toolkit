@@ -69,6 +69,12 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
     const card = await cardNow(cardRef);
     if (keyOf(card) !== key) throw new CliError(`the card's key is ${keyOf(card)}, not ${key}`, { code: 2 });
     ledger = newLedger({ key, card, now: at });
+    // The runner's record of a start before its session, for a ready card with no ledger: where the card was (row 6
+    // compares it), and the triage `status` read for it (`result.triage`), as a triage record would have left them.
+    if (stage === 'start' && status !== 'done') {
+      ledger.left = { ...brief(card), at };
+      if (result.triage && typeof result.triage === 'object') ledger.triage = { ...result.triage, at };
+    }
   }
   const l = structuredClone(ledger);
   const pr = prRef ? findPr(l, prRef) : null;
@@ -110,6 +116,9 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
   if (pr && Array.isArray(result.commits)) addAll(pr.pipelineCommits, result.commits);
   for (const f of result.files ?? []) addFile(f.path, f.kind, stage, f.bytes);
   if (startedBy && stage === 'start') l.startedBy = startedBy;
+  // The group a start runs with, whatever its status: the runner's record before the session puts the ticket under the
+  // group's lock at once.
+  if (stage === 'start' && result.group) l.group = String(result.group);
 
   const file = writeLedger(settings.state, l);
   const lock = renewLock(settings.state, l.group, { leaseMinutes: settings.limits.lockLeaseMinutes, stage: status === 'running' ? stage : undefined, now });
@@ -137,10 +146,9 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         const card = await needCard('inProgress');
         if (!l.triage) l.triage = { verdict: result.verdict ?? 'owner-card', targets: result.targets ?? [], size: result.size ?? null, at };
         if (!startedBy) {
-          const lock = lockOf(settings.state, l.group, now);
+          const lock = lockOf(settings.state, result.group ? String(result.group) : l.group, now);
           l.startedBy = lock?.live ? lock.kind : 'manual';
         }
-        if (result.group) l.group = String(result.group);
         l.left = { ...brief(card), at };
         return;
       }
