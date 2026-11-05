@@ -358,4 +358,11 @@ test('a failed step waits until a person acts after it: a move, a comment, a PR 
   const again = Object.fromEntries((await w.status()).tickets.map((t) => [t.key, t]));
   assert.deepEqual([next(again['954']), again['954'].failed.acted], ['answers', 'the owner re-armed it with `ticket-state set`']);
   assert.equal(again['951'].next.waits, undefined);
+
+  // A held card moved to a list never read: its comments can't be read, and status still answers for every ticket.
+  c.held.placeId = LISTS.drafts.id;
+  fs.rmSync(path.join(w.settings.state, 'rearmed.json'));
+  const parked = Object.fromEntries((await w.status()).tickets.map((t) => [t.key, t]));
+  assert.deepEqual([parked['954'].held, next(parked['954'])], [undefined, 'follow -> drafts'], 'the move is a person\'s: the ticket follows it');
+  assert.deepEqual([next(parked['951']), parked['951'].next.waits !== undefined], ['answers', true]);
 });

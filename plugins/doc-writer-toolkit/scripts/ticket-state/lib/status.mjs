@@ -28,14 +28,19 @@ export async function computeStatus({ settings, clients, now = Date.now(), only 
   const hashOf = (rel) => fileHash(settings.root, rel);
 
   // The card's comments, only where a failed step needs them: a ticket whose last session failed (did a person comment
-  // since?), and the tickets whose mark the runner takes right after a failed session (`marks`).
+  // since?), and the tickets whose mark the runner takes right after a failed session (`marks`). A card that can't be
+  // read (moved to a list never read, say) gives none: its move is seen on its own.
   const rearmedAt = readRearm(settings.state);
   const cardComments = new Map();
   for (const l of ledgers) {
     const last = (l.runs ?? []).at(-1);
     const card = l.card?.id ? cards.get(l.card.id) : null;
-    if (!card || !(marks?.includes(l.key) || (last?.outcome === 'failed' && last.after?.comments))) continue;
-    cardComments.set(l.key, (await clients.tracker.readCard({ card: card.id })).comments ?? []);
+    if (!card || (only && !only.includes(l.key)) || !(marks?.includes(l.key) || (last?.outcome === 'failed' && last.after?.comments))) continue;
+    try {
+      cardComments.set(l.key, (await clients.tracker.readCard({ card: card.id })).comments ?? []);
+    } catch {
+      /* no comments: the other signs still count */
+    }
   }
 
   // Tickets with a ledger.
