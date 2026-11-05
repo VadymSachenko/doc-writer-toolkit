@@ -136,12 +136,20 @@ export function ensureWorktree(settings, pr) {
       throw new Error(`${prId(pr)}: git worktree add failed: ${gitError(e)}`);
     }
   } else if (remoteBranch) {
-    // Up to date with the branch: a fast-forward only, never over the session's own unpushed commits or changes.
-    const dirty = tryRun(wt, ['status', '--porcelain']);
+    // Up to date with the branch: a fast-forward only, never over the session's own unpushed commits or changes to
+    // tracked files. Untracked files (a session's notes, a pack's output) don't stop it; one git would overwrite does,
+    // and the brief says so.
+    const dirty = tryRun(wt, ['status', '--porcelain', '--untracked-files=no']);
     const head = tryRun(wt, ['rev-parse', 'HEAD']);
     if (dirty) notes.push('the worktree has uncommitted changes from an earlier session: left as they are');
     else if (head && tryRun(wt, ['merge-base', '--is-ancestor', head, remoteBranch]) !== null) {
-      if (head !== tryRun(wt, ['rev-parse', remoteBranch])) run(wt, ['checkout', '-q', '--detach', remoteBranch]);
+      if (head !== tryRun(wt, ['rev-parse', remoteBranch])) {
+        try {
+          run(wt, ['checkout', '-q', '--detach', remoteBranch]);
+        } catch (e) {
+          notes.push(`could not move the worktree to origin/${pr.branch}: ${gitError(e)}`);
+        }
+      }
     } else notes.push(`the worktree has commits that are not on origin/${pr.branch}: push them, or record the stage failed`);
   }
   const { linked, missing } = link(clone, wt, target?.links ?? DEFAULT_LINKS);

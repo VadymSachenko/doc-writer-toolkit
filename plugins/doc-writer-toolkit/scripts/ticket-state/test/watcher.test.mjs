@@ -923,7 +923,7 @@ test('E3: a 65-minute drop at noon on an awake Mac: one job alert, and the copy 
   const t = everyJob({ from: Date.parse('2026-11-10T08:00:00Z'), down: (at) => at >= noon && at < noon + 65 * MIN });
   await t.checks(Date.parse('2026-11-10T08:00:00Z'), noon + HOUR + 5 * MIN);
   // Disarmed at 13:00, with the boards failing too: one urgent job alert, now (it is day).
-  assert.deepEqual(jobAlerts(t).map((m) => m.text), ['copy failed at each try for an hour (13 tries, last exit 1); disarmed until 2026-11-11T07:00:00.000Z. See /ticket-report.']);
+  assert.deepEqual(jobAlerts(t).map((m) => m.text), ['copy failed at each try for an hour (13 tries, last exit 1); disarmed until the 2 reads that failed with it read again, 2026-11-11T07:00:00.000Z at the latest. See /ticket-report.']);
   assert.deepEqual(t.state().disarmed.downWith, [`board:${BOARD}`, `board:${WATCH}`]);
   await t.checks(noon + HOUR + 5 * MIN, Date.parse('2026-11-10T18:00:00Z'));
   // 13:05: the boards read again, so the job re-arms and runs in the same check, then every 5 minutes.

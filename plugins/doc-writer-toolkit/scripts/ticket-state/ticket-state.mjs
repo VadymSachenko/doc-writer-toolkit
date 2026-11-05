@@ -130,7 +130,9 @@ export async function main(argv, io = {}) {
   if (TAKES_KEY.includes(command) && !key) throw new CliError(`${command} needs the ticket key.\n\n${USAGE}`, { code: 2 });
   if (command === 'set') {
     if (!key) throw new CliError(`set needs the key.\n\n${USAGE}`, { code: 2 });
-    if (rest.length > 1) throw new CliError(`unexpected argument '${rest[1]}'`, { code: 2 });
+    // `set retry job <name>` is the one form with a third word.
+    const extra = key === 'retry' && rest[0] === 'job' ? 2 : 1;
+    if (rest.length > extra) throw new CliError(`unexpected argument '${rest[extra]}'`, { code: 2 });
     const root = path.resolve(values.root ?? process.cwd());
     const settings = await loadSettings({ root, settings: values.settings });
     stdout.write(JSON.stringify({ ok: true, command, ...setLocal({ settings, key, value: rest[0], name: rest[1], unset: Boolean(values.unset) }) }, null, 2) + '\n');

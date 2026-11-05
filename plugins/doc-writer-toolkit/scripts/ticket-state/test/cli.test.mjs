@@ -139,3 +139,17 @@ test('the README documents every command, flag, exit code, setting and the id-on
   const definition = 'A UA change is id-only when its only differences from the approved version are (1) `{/* #id */}` comments added to headings that had none, and (2) link fragments rewritten from such a heading\'s old fragment to its new id. Anything else makes it a real change: a changed or removed id, a changed heading text, or any other edit.';
   assert.ok(readme.replace(/\s+/g, ' ').includes(definition), 'the README gives the id-only definition word for word');
 });
+
+test('set retry job <name>: the CLI writes the job\'s re-arm time to rearmed.json; an unknown job or no name is exit 2', () => {
+  const root = host();
+  const r = run(CLI, ['set', 'retry', 'job', 'notes', '--root', root]);
+  assert.equal(r.code, 0, r.err);
+  assert.deepEqual([r.json.ok, r.json.key, r.json.job, r.json.changed], [true, 'retry', 'notes', true]);
+  const file = JSON.parse(fs.readFileSync(path.join(root, '.flow', 'rearmed.json'), 'utf8'));
+  assert.equal(file.jobs.notes, r.json.at);
+  assert.deepEqual(file.tickets, {});
+  const bad = run(CLI, ['set', 'retry', 'job', 'nope', '--root', root]);
+  assert.equal(bad.code, 2);
+  assert.match(bad.json.error, /'nope' is not a host job \(hostJobs: notes\)/);
+  assert.equal(run(CLI, ['set', 'retry', 'job', '--root', root]).code, 2);
+});

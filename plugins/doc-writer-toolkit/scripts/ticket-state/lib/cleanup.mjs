@@ -56,9 +56,9 @@ function sizeOf(abs) {
   return sum;
 }
 
-// The files under a path, never a `.git` entry, and nothing inside a folder in `skip` (a checkout kept whole).
+// The files under a path, and nothing inside a folder in `skip` (a checkout, handled whole before the walk).
 function walk(abs, skip = new Set()) {
-  if (skip.has(abs) || path.basename(abs) === '.git') return [];
+  if (skip.has(abs)) return [];
   const st = fs.lstatSync(abs);
   if (!st.isDirectory()) return [abs];
   return fs.readdirSync(abs).flatMap((e) => walk(path.join(abs, e), skip));

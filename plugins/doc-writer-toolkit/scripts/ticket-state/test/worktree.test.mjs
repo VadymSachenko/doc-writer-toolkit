@@ -135,6 +135,26 @@ test('AC-1: .env too when the target names it; a clone without node_modules is s
   assert.match(fresh.notes.join(' '), /node_modules: not in the clone/);
 });
 
+test('AC-1: an existing worktree follows the owner\'s push although a session left untracked files in it; never over uncommitted changes', async () => {
+  const t = finalReviewTicket();
+  const p = { repo: 'guide-docs', targets: ['guide'], branch: 'ticket-71', base: 'main' };
+  ensureWorktree(t.w.settings, p);
+  fs.mkdirSync(path.join(t.wt, 'docs', 'x', '.sources'), { recursive: true });
+  fs.writeFileSync(path.join(t.wt, 'docs', 'x', '.sources', 'run-notes.md'), 'a session left this');
+  const h2 = t.handEdit({ 'docs/x/index.md': '# Сторінка\n\nРучна правка.\n' });
+  const tree = ensureWorktree(t.w.settings, p);
+  assert.equal(tree.head, h2);
+  assert.deepEqual(tree.notes, []);
+  assert.equal(fs.existsSync(path.join(t.wt, 'docs', 'x', '.sources', 'run-notes.md')), true);
+  // A change to a tracked file is a session's work: the worktree stays where it is, and the brief says why.
+  fs.writeFileSync(path.join(t.wt, 'docs', 'x', 'index.md'), 'unsaved work');
+  const h3 = t.handEdit({ 'docs/x/index.md': '# Сторінка\n\nЩе одна правка.\n' });
+  const kept = ensureWorktree(t.w.settings, p);
+  assert.equal(kept.head, h2);
+  assert.notEqual(kept.head, h3);
+  assert.match(kept.notes.join(' '), /uncommitted changes/);
+});
+
 test('AC-1: a worktree that can not be made starts no session; the stage is recorded failed with the reason', async () => {
   const t = finalReviewTicket();
   fs.mkdirSync(t.wt, { recursive: true });
