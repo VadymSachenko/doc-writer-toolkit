@@ -53,6 +53,8 @@ A pure function of the ledger and the world. First match wins:
 
 **A person's move (row 6).** Ready → In progress: a manual start. Blocked → In progress: the answers (the question's PR only, if it was a PR's), the plan approved (or a new gate if the plan file changed), the video import (or on without the video). To Blocked or back to ready: the owner's block or a pause, nothing runs. To review, final review or done: the PRs at the card's stage follow, with their stage label; done closes the ticket.
 
+**A failed step** runs again only after a person acts on the ticket later than the failure (a move, a comment, a review, a hand commit), after the owner changes a setting with `ticket-state set`, or once at the next morning run. The pipeline's own writes never count. Two failed sessions with no person's action between them hold the ticket for the owner: no next step, one notification, one line in the report.
+
 **Two PRs** (one repo per review kind, or two repos). Each PR moves on its own; the card stands where the least advanced PR is. An approved `sme` PR goes on to the final review by itself while the slower one waits, and the report lists it. A question on one PR stops only that PR.
 
 **The chain** of a PR in the final review: `translate`, `enReview`, `locales`, `align`, `labelSync`, `build`, `visualPack`. Each stage keeps the head it saw; a UA page changed after that head makes it and every later stage stale, unless the change is id-only (`scripts/ticket-state/README.md`, "The id-only change"). The approval (the move to the final review) keeps its head the same way: a later word change in UA is reported as a mismatch, not undone.
@@ -78,7 +80,7 @@ A pure function of the ledger and the world. First match wins:
 | `places` | Each place: `repo`, `pr`, `page`, `line`, `claim`, `why`, `state`. |
 | `reviewComments`, `summaries`, `posted` | Review comments handled (by id and edit time); the summary comments; the ids of every comment the pipeline posted, so it never answers itself. |
 | `files` | The work files outside git the stages created or downloaded: `path`, `kind`, `bytes`, `stage`, `at`. |
-| `runs` | Each session: role, model, effort, start, turns, the CLI's cost estimate, tokens, the week bar before and after, outcome, `retryOf`, the share of a group session. |
+| `runs` | Each session: role, model, effort, start, turns, the CLI's cost estimate, tokens, the week bar before and after, outcome, `retryOf`, the share of a group session; a failed one also `failures` (failed sessions in a row) and `after` (what the ticket looked like when it ended). |
 | `log` | Append-only: `seq`, `at`, `stage`, `pr`, `outcome`, `note`. |
 | `legacy` | Set when the ledger was rebuilt at handover. |
 
@@ -106,7 +108,7 @@ The close step of a ticket whose PRs are all merged moves the work files in `fil
 - **The morning run:** once a day, at the first check after `schedule.morning`.
 - **Host jobs (`hostJobs`):** "when list X gets new cards and stays quiet for N hours, run job Y", or "every N minutes"; Y is a host script or a skill. A change in the list restarts the wait. A skill job is guarded like a scheduled step.
 
-`mode` (`off`, `observe`, `on`) and the limits are in the owner's local file. `ticket-state set` edits one key of it, the way a request in plain words is carried out. No `claude` the flow starts gets an API key or an auth token, so the plan pays. A macOS notification gives the morning counts. It is urgent only for a limit reached or a step that failed twice.
+`mode` (`off`, `observe`, `on`) and the limits are in the owner's local file. `ticket-state set` edits one key of it, the way a request in plain words is carried out. No `claude` the flow starts gets an API key or an auth token, so the plan pays. A macOS notification gives the morning counts. It is urgent only for a limit reached, a step or a host job that failed twice, or a part of a check that failed (the rest of the check goes on). The sign-in token goes to the `claude` processes only, never to a host script, `git` or `gh`.
 
 ## The report
 

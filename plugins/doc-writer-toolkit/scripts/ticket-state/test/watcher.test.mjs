@@ -2,14 +2,17 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { BOARD, LISTS, NOW, RELEASE, WATCH, card, quietGit } from './fakes.mjs';
-import { ledger, snapshot, world } from './helpers.mjs';
+import { BOARD, LISTS, NOW, RELEASE, WATCH, card, quietGit, rawSettings } from './fakes.mjs';
+import { ledger, read, snapshot, world } from './helpers.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
 import { takeLock, releaseLock } from '../lib/locks.mjs';
 import { WINDOW_MS, emptyFeed, readFeed, sourcesOf, ticketsOf, writeFeed, feedPath } from '../lib/feed.mjs';
 import { runCheck, takeWatchLock } from '../lib/watch.mjs';
-import { listChanges, updateWatchState, jobDue } from '../lib/jobs.mjs';
+import { jobCommand, listChanges, updateWatchState, jobDue } from '../lib/jobs.mjs';
 import { readRunLog } from '../lib/report.mjs';
+import { PUSH_DENIED, runDaily } from '../lib/runner.mjs';
+import { notificationsOf } from '../lib/notify.mjs';
+import { setLocal } from '../lib/setlocal.mjs';
 
 // The watcher (design §5, D-048, D-054): one check reads every event since its cursor and makes no model call when it
 // finds nothing (AC-1); after a sleep the first check reads every event since the last one and each changed ticket
@@ -219,7 +222,7 @@ test('AC-4: a ticket a run holds now is looked at again on the next check, and r
   assert.equal(after.quiet, true, 'handed on once, then forgotten');
 });
 
-test('AC-4: one check at a time; a hand-off that fails leaves the cursors where they were', async () => {
+test('AC-4: one check at a time; a hand-off that fails keeps its tickets pending and the rest of the check goes on', async () => {
   const actions = { [BOARD]: [] };
   const w = world({ actions });
   const a = answered(w, 701);
@@ -238,11 +241,18 @@ test('AC-4: one check at a time; a hand-off that fails leaves the cursors where 
       throw new Error('the runner crashed');
     },
   });
-  await assert.rejects(failing.check(NOW), /the runner crashed/);
-  assert.equal(fs.readFileSync(feedPath(w.settings.state), 'utf8'), before, 'nothing handed on: the same window is read again');
+  const crashed = await failing.check(NOW);
+  assert.deepEqual(crashed.errors, [{ part: 'the run', error: 'the runner crashed' }]);
+  assert.deepEqual(readFeed(w.settings.state).pending, ['701'], 'not handed on: the ticket is looked at again on the next check');
+  assert.equal(readFeed(w.settings.state).sources[`board:${BOARD}`].lastCheck, iso(NOW), 'the cursors move: the ticket is pending');
+  assert.deepEqual(failing.calls.notes.map((x) => [x.urgent, x.title, x.text]), [[true, 'Ticket flow: a part of a check failed', 'the run: the runner crashed']]);
+  assert.deepEqual(readRunLog(w.settings.state, '2026-11-10').filter((e) => e.outcome === 'failed').map((e) => [e.what, e.note]), [['the run', 'the runner crashed']]);
+  await failing.check(NOW + MIN);
+  assert.equal(failing.calls.notes.length, 1, 'once a day per reason');
   const ok = checker(w);
-  await ok.check(NOW + MIN);
+  await ok.check(NOW + 2 * MIN);
   assert.deepEqual(ok.calls.runs.map((r) => r.named), [['701']]);
+  assert.deepEqual(readFeed(w.settings.state).pending, []);
   assert.equal(calls.runs.length, 0);
   // A lock left by a process that is gone is taken over.
   fs.mkdirSync(path.join(w.settings.state, 'watch', 'active'), { recursive: true });
@@ -284,6 +294,100 @@ test('notifications: urgent only for a limit reached or a step that failed twice
   actions[BOARD].push(act(a, NOW + 2 * MIN));
   await check(NOW + 5 * MIN);
   assert.equal(calls.notes.length, 2, 'not again the same day');
+});
+
+// ------------------------------------------------------------------ a step that fails every time (the real runner)
+
+const FAILED = JSON.stringify({ type: 'result', subtype: 'error_max_turns', is_error: true, num_turns: 200, total_cost_usd: 3, session_id: 's' });
+
+// One owner move, then a step whose session fails every time after writing on its card: a comment through the tracker
+// and its action on the board, as a real session would leave them. The real runner, real status, real ledger; only
+// `claude` is a stand-in. Checks every 5 minutes from `from` to `to`.
+function failingTicket(extra = {}) {
+  const actions = { [BOARD]: [] };
+  const comments = {};
+  const w = world({ actions, comments, extra });
+  const c = answered(w, 401);
+  seed(w, NOW - 5 * MIN);
+  const ref = { id: c.id, shortLink: c.shortLink, name: c.name };
+  let clock = NOW;
+  let k = 0;
+  const sessions = [];
+  const notes = [];
+  actions[BOARD].push({ ...act(c, NOW - MIN, { type: 'updateCard', from: { id: LISTS.blocked.id, name: 'Blocked' }, to: { id: LISTS.inProgress.id, name: 'Doing' } }) });
+  const runner = {
+    now: () => clock,
+    readUsage: () => usageAt(5),
+    spawnClaude: async (cmd) => {
+      sessions.push({ at: iso(clock), model: cmd.args[cmd.args.indexOf('--model') + 1] });
+      const posted = await w.tracker.comment(c.id, `a question, session ${sessions.length}`);
+      actions[BOARD].push({ ...act(c, clock + MIN), id: `session-${posted.id}` });
+      return { code: 1, stdout: FAILED, stderr: '' };
+    },
+  };
+  const checkAt = (at) => {
+    clock = at;
+    return runCheck({ settings: w.settings, clients: w.clients(), io: { now: () => clock, git: quietGit, runner, notify: (m) => (notes.push(m), { sent: true }) }, options: {} });
+  };
+  const day = async (from, to) => {
+    for (let at = from; at < to; at += 5 * MIN) await checkAt(at);
+  };
+  // A person writes on the card: the comment in the tracker and its action on the board.
+  const personComments = (at) => {
+    const id = `person-${++k}`;
+    (comments[c.id] ??= []).push({ id, author: 'owner-login', time: iso(at), text: 'here is the answer', edited: null });
+    actions[BOARD].push({ ...act(c, at), id });
+  };
+  const failedTwice = () => notes.filter((m) => m.title === 'Ticket flow: a step failed twice');
+  return { w, c, sessions, notes, day, personComments, failedTwice };
+}
+
+test('a step that fails every time: at most two sessions a day and one notification; a person acting gives one more try', async () => {
+  const t = failingTicket();
+  // The day after the owner's move, the next morning run included (07:00).
+  await t.day(NOW, NOW + 24 * HOUR);
+  assert.deepEqual(t.sessions.map((x) => x.at), [iso(NOW), '2026-11-11T07:00:00.000Z'], 'one at the move, one at the next morning run');
+  assert.ok(t.sessions.every((x) => x.model === 'claude-opus-5-5'));
+  assert.equal(t.failedTwice().length, 1);
+  const l = read(t.w, '401');
+  assert.deepEqual(l.runs.map((r) => [r.outcome, r.failures]), [['failed', 1], ['failed', 2]]);
+  const st = await t.w.one('401');
+  assert.deepEqual([st.next, st.held, st.gate.who], [null, true, 'owner']);
+  const report = fs.readFileSync(path.join(t.w.settings.state, 'reports', '2026-11-11.md'), 'utf8');
+  const failures = report.split('## Failures and guard stops')[1].split('##')[0];
+  assert.equal(failures.match(/401 answers/g)?.length, 1, 'one line in the failures for the two sessions');
+  assert.match(report, /## Waiting for you\n\n- \[401\][^\n]*answers failed in 2 sessions/);
+
+  // A person's comment after the hold: one more session, then it waits again; nothing more that day.
+  t.personComments(NOW + 24 * HOUR + 2 * MIN);
+  await t.day(NOW + 24 * HOUR + 5 * MIN, NOW + 46 * HOUR);
+  assert.equal(t.sessions.length, 3);
+  assert.equal(t.sessions[2].at, iso(NOW + 24 * HOUR + 5 * MIN));
+  assert.equal(t.failedTwice().length, 1, 'once a day per reason');
+});
+
+test('a step that fails at a lower model: the retry is the second session and holds the ticket at once; a guard-held retry is not "failed twice"', async () => {
+  const t = failingTicket({ roles: { writer: { model: 'claude-sonnet-5-5' } } });
+  await t.day(NOW, NOW + 24 * HOUR);
+  assert.deepEqual(t.sessions.map((x) => [x.at, x.model]), [[iso(NOW), 'claude-sonnet-5-5'], [iso(NOW), 'claude-opus-5-5']]);
+  assert.equal(t.failedTwice().length, 1);
+  assert.equal((await t.w.one('401')).held, true, 'the morning run does not try it again');
+
+  // The owner raises the turns with `set`: the next check looks at the held ticket, with no event, and tries it once.
+  fs.mkdirSync(path.dirname(t.w.settings.file), { recursive: true });
+  fs.writeFileSync(t.w.settings.file, JSON.stringify(rawSettings({ roles: { writer: { model: 'claude-sonnet-5-5' } } })));
+  setLocal({ settings: t.w.settings, key: 'roles.writer.maxTurns', value: '300', now: NOW + 24 * HOUR + MIN });
+  await t.day(NOW + 24 * HOUR + 5 * MIN, NOW + 25 * HOUR);
+  assert.deepEqual(t.sessions.slice(2).map((x) => [x.at, x.model]), [[iso(NOW + 24 * HOUR + 5 * MIN), 'claude-sonnet-5-5'], [iso(NOW + 24 * HOUR + 5 * MIN), 'claude-opus-5-5']], 'one more try, with its retry up the ladder');
+  assert.equal((await t.w.one('401')).held, true);
+
+  // The guard holds the retry: one failed session, with its own note and no urgent notification.
+  const g = failingTicket({ roles: { writer: { model: 'claude-sonnet-5-5' } } });
+  let reads = 0;
+  const out = await runDaily({ settings: g.w.settings, clients: g.w.clients(), io: { now: () => NOW, readUsage: () => usageAt(reads++ ? 45 : 5), spawnClaude: async () => ({ code: 1, stdout: FAILED, stderr: '' }) }, options: { trigger: 'watcher', named: ['401'] } });
+  const step = out.ran.find((x) => x.stage === 'answers');
+  assert.deepEqual([step.outcome, step.note], ['failed', 'failed; the guard held the retry']);
+  assert.deepEqual(notificationsOf({ run: out, today: '2026-11-10' }).filter((n) => /failed twice/.test(n.title)), []);
 });
 
 test('mode off: nothing is read and the cursors stay', async () => {
@@ -426,14 +530,81 @@ test('AC-5 and AC-2: a skill job waits at the limit; observe plans it; a script 
   await s.check(every.t0);
   assert.deepEqual([s.calls.jobs[0].cmd.bin, s.calls.jobs[0].cmd.args], [process.execPath, [path.join(every.w.root, 'scripts/copy.mjs'), '--quiet']]);
   assert.equal(s.calls.usage, 0);
-  // It failed: tried again on the next check; failed twice: urgent, and it waits its interval.
+  // It failed: tried again on the next check; failed twice: urgent, and disarmed until the next morning run.
   await s.check(every.t0 + MIN);
   assert.equal(s.calls.jobs.length, 2);
-  assert.deepEqual(s.calls.notes.map((x) => x.title), ['Ticket flow: a host job failed twice']);
-  await s.check(every.t0 + 3 * MIN);
-  assert.equal(s.calls.jobs.length, 2);
-  await s.check(every.t0 + 6 * MIN);
+  assert.deepEqual(s.calls.notes.map((x) => [x.title, x.text]), [['Ticket flow: a host job failed twice', 'copy failed twice; disarmed until 2026-11-10T07:00:00.000Z. See /ticket-report.']]);
+  assert.equal(readFeed(every.w.settings.state).jobs.copy.heldUntil, '2026-11-10T07:00:00.000Z');
+  for (let at = every.t0 + 6 * MIN; at < Date.parse('2026-11-10T07:00:00Z'); at += 30 * MIN) await s.check(at);
+  assert.equal(s.calls.jobs.length, 2, 'not before the next morning run');
+  const morning = await s.check(Date.parse('2026-11-10T07:00:00Z'));
   assert.equal(s.calls.jobs.length, 3);
+  assert.deepEqual(morning.jobs.map((j) => [j.name, j.outcome]), [['copy', 'failed']]);
+});
+
+test('a watched list that is gone: its board fails for this check with the reason; the morning run, the hand-off and the other cursors go on', async () => {
+  const actions = { [BOARD]: [], [WATCH]: [] };
+  const w = world({ actions, extra: { hostJobs: [{ name: 'notes', watch: { board: WATCH, list: 'Renamed list' }, quietHours: 3, run: { script: 'x.mjs' } }] } });
+  const a = answered(w, 401);
+  seed(w, NOW - 5 * MIN, { morning: '2026-11-09' });
+  actions[BOARD].push(act(a, NOW - MIN, { type: 'updateCard', from: { id: LISTS.blocked.id, name: 'Blocked' }, to: { id: LISTS.inProgress.id, name: 'Doing' } }));
+  const other = card({ number: null, name: 'Release item', list: RELEASE, board: WATCH });
+  actions[WATCH].push(act(other, NOW - 2 * MIN, { type: 'createCard', list: shipping }));
+  const { check, calls } = checker(w);
+  const out = await check(NOW);
+  assert.deepEqual(out.errors, [{ part: 'job notes', error: `no list 'Renamed list' on board ${WATCH}` }]);
+  assert.deepEqual(calls.runs.map((r) => [r.morning, r.trigger]), [[true, 'schedule']], 'the morning run is due, and runs');
+  const feed = readFeed(w.settings.state);
+  assert.equal(feed.sources[`board:${BOARD}`].lastCheck, iso(NOW), 'the other cursors move');
+  assert.equal(feed.sources[`board:${WATCH}`].lastCheck, iso(NOW - 5 * MIN), 'the failed board keeps its cursor, under the 24-hour hold');
+  assert.match(feed.sources[`board:${WATCH}`].lastError, /job notes: no list 'Renamed list'/);
+  assert.deepEqual(out.jobs, [{ name: 'notes', due: false, why: `its board can't be read in this check: job notes: no list 'Renamed list' on board ${WATCH}` }]);
+  assert.deepEqual(calls.notes.filter((x) => x.urgent).map((x) => x.text), [`job notes: no list 'Renamed list' on board ${WATCH}`]);
+
+  // The next check: the same reason is not notified again, and the ticket's own events go on being handed.
+  actions[BOARD].push(act(a, NOW + 3 * MIN));
+  const again = await check(NOW + 5 * MIN);
+  assert.deepEqual(again.errors.map((e) => e.part), ['job notes']);
+  assert.deepEqual(calls.runs.at(-1).named, ['401']);
+  assert.equal(calls.notes.filter((x) => x.urgent).length, 1);
+});
+
+test('a watch job neither runs nor re-arms while its board can not be read; after the board is back it runs once', async () => {
+  const actions = { [WATCH]: [] };
+  const w = world({ actions });
+  const t0 = Date.parse('2026-11-10T01:00:00Z');
+  seed(w, t0 - 5 * MIN);
+  const { check, calls } = checker(w, { readUsage: () => usageAt(5) });
+  const arrive = (time) => actions[WATCH].push(act(card({ number: null, name: 'Release item', list: RELEASE, board: WATCH }), time, { type: 'createCard', list: shipping }));
+  arrive(t0);
+  await check(t0 + 5 * MIN);
+  // The board fails from 01:30; a card arrives at 03:00 during the outage. 04:05 is 3 hours after the last change the
+  // job saw, but not after the one it couldn't see.
+  actions.fail = { [WATCH]: 'HTTP 503' };
+  arrive(t0 + 2 * HOUR);
+  for (const at of [t0 + HOUR + 5 * MIN, t0 + 2 * HOUR + 5 * MIN, t0 + 3 * HOUR + 5 * MIN, t0 + 3 * HOUR + 11 * MIN]) {
+    const out = await check(at);
+    assert.deepEqual(out.jobs, [{ name: 'notes', due: false, why: "its board can't be read in this check: HTTP 503" }]);
+  }
+  assert.equal(calls.jobs.length, 0, 'no run at 04:05');
+  assert.deepEqual(readFeed(w.settings.state).jobs.notes, { firstChange: iso(t0), armed: true, lastChange: iso(t0) }, 'its state is untouched');
+  delete actions.fail;
+  const back = await check(t0 + 3 * HOUR + 17 * MIN);
+  assert.deepEqual(back.jobs.map((j) => [j.due, j.at]), [[false, '2026-11-10T06:00:00.000Z']], 'the 03:00 card restarts the wait');
+  const ran = await check(t0 + 6 * HOUR + 17 * MIN);
+  assert.deepEqual(ran.jobs.map((j) => [j.due, j.outcome]), [[true, 'done']]);
+  assert.deepEqual(calls.jobs.map((j) => j.opts.extra.DOC_TOOLKIT_JOB_LAST_CHANGE), ['2026-11-10T03:00:00.000Z'], 'once, at 07:17, for the batch with the 03:00 card');
+  await check(t0 + 6 * HOUR + 22 * MIN);
+  assert.equal(calls.jobs.length, 1, 'not armed again');
+});
+
+test('a skill job carries every push denial the roles carry, whatever its own allow list', () => {
+  const w = world({ extra: { hostJobs: [{ name: 'notes', every: 60, run: { skill: 'notes-writer', allowedTools: ['Bash(git push:*)', 'Bash(git:*)'] } }, { name: 'plain', every: 60, run: { skill: 'notes-writer' } }] } });
+  for (const job of w.settings.hostJobs) {
+    const { args } = jobCommand(job, { settings: w.settings });
+    const denied = args.slice(args.indexOf('--disallowedTools') + 1);
+    for (const rule of PUSH_DENIED) assert.ok(denied.includes(rule), `${job.name} denies ${rule}`);
+  }
 });
 
 test('AC-5: the job rules on their own: arrivals arm, any change restarts, due after the quiet hours', () => {

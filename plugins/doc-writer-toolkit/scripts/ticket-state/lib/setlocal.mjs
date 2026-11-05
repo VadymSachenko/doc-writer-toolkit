@@ -29,7 +29,19 @@ export function parseValue(text) {
   }
 }
 
-export function setLocal({ settings, key, value, unset = false }) {
+// When the owner last changed a key with `set`: a step held after failing, or waiting for the morning run, gets one more
+// try after it (lib/rule.mjs). In the state folder, never in the settings files.
+export const rearmPath = (state) => path.join(state, 'rearmed.json');
+export function readRearm(state) {
+  try {
+    const at = Date.parse(JSON.parse(fs.readFileSync(rearmPath(state), 'utf8')).at);
+    return Number.isFinite(at) ? at : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setLocal({ settings, key, value, unset = false, now = Date.now() }) {
   if (!SETTABLE.test(String(key ?? ''))) throw new CliError(`'${key}' is not a key of the local settings file: mode, limits.*, schedule.*, roles.<role>.*, modelLadder, video.*, cleanup.*`, { code: 2 });
   if (unset === (value !== undefined)) throw new CliError('set needs a value, or --unset to drop the key and take the default', { code: 2 });
   const localFile = localSettingsPath(settings.file);
@@ -45,6 +57,10 @@ export function setLocal({ settings, key, value, unset = false }) {
     const tmp = `${localFile}.tmp-${process.pid}-${crypto.randomBytes(3).toString('hex')}`;
     fs.writeFileSync(tmp, JSON.stringify(next, null, 2) + '\n');
     fs.renameSync(tmp, localFile);
+    fs.mkdirSync(settings.state, { recursive: true });
+    const stamp = `${rearmPath(settings.state)}.tmp-${process.pid}-${crypto.randomBytes(3).toString('hex')}`;
+    fs.writeFileSync(stamp, JSON.stringify({ at: new Date(now).toISOString(), key }) + '\n');
+    fs.renameSync(stamp, rearmPath(settings.state));
   }
   return { file: path.relative(settings.root, localFile), key, before, after, changed };
 }

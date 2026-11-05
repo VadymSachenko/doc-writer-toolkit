@@ -2,13 +2,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { NOW, card, tmp } from './fakes.mjs';
+import { NOW, card, forgeAdapter, host, tmp, trackerAdapter } from './fakes.mjs';
 import { ledger, read, world } from './helpers.mjs';
 import { runRecord } from '../lib/record.mjs';
 import { allowanceOf, parseUsage } from '../lib/allowance.mjs';
 import { runDaily, spawnClaude, readUsageFromClaude } from '../lib/runner.mjs';
 import { childEnv, prepareEnv, readTokenFile, TOKEN_VARIABLE } from '../lib/env.mjs';
 import { notify, notificationsOf } from '../lib/notify.mjs';
+import { main as watcherMain } from '../watcher.mjs';
 
 // AC-2: the guard stops scheduled work at the day's allowance of the week (D-066), capped by maxWeekPercent (D-085),
 // for the morning run, the watcher's runs and the skill jobs alike; a manual run is not guarded. Parallel steps only
@@ -118,16 +119,48 @@ test('the plan pays: no API key or auth token reaches a claude; the sign-in toke
   const file = path.join(root, 'token');
   fs.writeFileSync(file, 'sk-ant-oat-secret-value\n', { mode: 0o600 });
   const settings = { root, schedule: { tokenFile: 'token' } };
-  const target = { ANTHROPIC_API_KEY: 'sk-test' };
-  const notes = prepareEnv(settings, target);
-  assert.equal(target[TOKEN_VARIABLE], 'sk-ant-oat-secret-value');
-  assert.equal(target.ANTHROPIC_API_KEY, undefined);
+  const target = { ANTHROPIC_API_KEY: 'sk-test', KEEP: '1' };
+  const { notes, claudeEnv } = prepareEnv(settings, target);
+  assert.equal(claudeEnv[TOKEN_VARIABLE], 'sk-ant-oat-secret-value', 'the claude sessions get the token');
+  assert.equal(claudeEnv.KEEP, '1');
+  assert.deepEqual(target, { KEEP: '1' }, 'the run own environment: no key, and never the token');
   assert.ok(!JSON.stringify(notes).includes('secret-value') && !JSON.stringify(notes).includes('sk-test'));
   fs.chmodSync(file, 0o644);
   assert.match(readTokenFile('token', root).refused, /readable by others .* chmod 600/);
   const loose = {};
-  assert.match(prepareEnv(settings, loose).join(' '), /the sign-in token was not used/);
-  assert.equal(loose[TOKEN_VARIABLE], undefined);
+  const refused = prepareEnv(settings, loose);
+  assert.match(refused.notes.join(' '), /the sign-in token was not used/);
+  assert.equal(refused.claudeEnv[TOKEN_VARIABLE], undefined);
+});
+
+test('the sign-in token reaches only the claude a check starts: never a host script, its job log, the output or the environment', async () => {
+  const TOKEN = 'sk-ant-oat-fake-token-5f00000000';
+  const root = host({
+    shared: { hostJobs: [{ name: 'printenv', every: 5, run: { script: 'scripts/env.mjs' } }, { name: 'notes', every: 5, run: { skill: 'notes-writer' } }] },
+    local: { schedule: { tokenFile: 'secret/token', morning: '23:59' } },
+  });
+  fs.mkdirSync(path.join(root, 'secret'));
+  fs.writeFileSync(path.join(root, 'secret', 'token'), `${TOKEN}\n`, { mode: 0o600 });
+  fs.mkdirSync(path.join(root, 'scripts'));
+  fs.writeFileSync(path.join(root, 'scripts', 'env.mjs'), 'process.stdout.write(JSON.stringify(process.env));\n');
+  // A stand-in claude: /usage answers a low week; a session answers success. Each notes whether it had the token.
+  const seen = path.join(root, 'seen');
+  const fake = path.join(root, 'claude');
+  fs.writeFileSync(fake, `#!/bin/sh\n[ "$CLAUDE_CODE_OAUTH_TOKEN" = "${TOKEN}" ] && echo "$2" | head -c 6 >> "${seen}" && echo >> "${seen}"\nif [ "$2" = "/usage" ]; then echo "Current week (all models): 1% used · resets Nov 14 at 6am (UTC)"; else echo '${RESULT}'; fi\n`, { mode: 0o755 });
+  const env = { PATH: process.env.PATH, HOME: process.env.HOME, ANTHROPIC_API_KEY: 'sk-test-should-not-pass' };
+  let printed = '';
+  await watcherMain(['--root', root, '--claude', fake], { env, stdout: { write: (x) => (printed += x) }, trackerAdapter: trackerAdapter(), forgeAdapter: forgeAdapter(), now: () => NOW });
+  const out = JSON.parse(printed);
+  assert.deepEqual(out.jobs.map((j) => [j.name, j.outcome]), [['printenv', 'done'], ['notes', 'done']]);
+  assert.deepEqual(fs.readFileSync(seen, 'utf8').trim().split('\n'), ['/usage', '/notes'], 'the claude sessions had the token');
+  const logs = fs.readdirSync(path.join(root, '.flow', 'watch', 'jobs')).map((f) => fs.readFileSync(path.join(root, '.flow', 'watch', 'jobs', f), 'utf8'));
+  const scriptLog = logs.find((x) => x.includes('"PATH"'));
+  assert.ok(scriptLog && !scriptLog.includes(TOKEN) && !scriptLog.includes(TOKEN_VARIABLE), 'the host script never had it');
+  assert.ok(!logs.some((x) => x.includes(TOKEN)), 'no job log holds it');
+  assert.ok(!printed.includes(TOKEN));
+  assert.equal(env[TOKEN_VARIABLE], undefined);
+  assert.equal(process.env[TOKEN_VARIABLE], undefined);
+  assert.equal(env.ANTHROPIC_API_KEY, undefined);
 });
 
 test('the notification: the text goes to osascript as an argument, never into the script; urgent only for its two reasons', () => {

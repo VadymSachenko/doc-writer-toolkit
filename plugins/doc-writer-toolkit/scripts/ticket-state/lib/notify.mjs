@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 
-// A macOS notification (design §7, D-060): the morning run's counts, and an urgent one only for a limit reached or a
-// step that failed twice. The text goes to osascript as an argument, never inside the script, so a card name with
+// A macOS notification (design §7): the morning run's counts, and an urgent one only for a limit reached, a
+// step or a job that failed twice, or a part of a check that failed. The text goes to osascript as an argument, never inside the script, so a card name with
 // quotes can't change what runs. Elsewhere than macOS nothing is sent.
 export function notify({ title, text, urgent = false }, io = {}) {
   const bin = io.osascript ?? (process.platform === 'darwin' ? '/usr/bin/osascript' : null);
@@ -21,7 +21,7 @@ const guardNote = (reason, what, today) =>
 
 // What to tell the owner after a check: one urgent notification per reason a day, and the morning counts once a day.
 // `runs` are runner results; `jobs` the host jobs' outcomes. Returns [{ key, title, text, urgent }].
-export function notificationsOf({ morning, run, jobs = [], today }) {
+export function notificationsOf({ morning, run, jobs = [], errors = [], today }) {
   const out = [];
   for (const r of [morning, run].filter(Boolean)) {
     for (const g of (r.guard ?? []).filter((x) => x.kind === 'guard')) out.push(guardNote(g.reason, 'Scheduled steps', today));
@@ -31,9 +31,11 @@ export function notificationsOf({ morning, run, jobs = [], today }) {
     }
   }
   for (const j of jobs) {
-    if (j.note === 'failed twice') out.push({ key: `job:${today}:${j.name}`, urgent: true, title: 'Ticket flow: a host job failed twice', text: `${j.name} failed twice. See /ticket-report.` });
+    if (j.note === 'failed twice') out.push({ key: `job:${today}:${j.name}`, urgent: true, title: 'Ticket flow: a host job failed twice', text: `${j.name} failed twice; disarmed until ${j.until ?? 'its next trigger'}. See /ticket-report.` });
     if (j.held) out.push(guardNote(j.held, `The host job ${j.name}`, today));
   }
+  // A part of a check that failed (a watched list, the status, a run, a job): the rest of the check went on.
+  for (const e of errors) out.push({ key: `error:${today}:${e.part}`, urgent: true, title: 'Ticket flow: a part of a check failed', text: `${e.part}: ${e.error}`, error: e });
   if (morning && !morning.stopped) {
     const done = (morning.ran ?? []).filter((s) => s.outcome === 'done').length;
     const failed = (morning.ran ?? []).filter((s) => s.outcome === 'failed').length;

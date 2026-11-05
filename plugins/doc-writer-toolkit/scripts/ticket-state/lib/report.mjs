@@ -59,7 +59,7 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
   out.push(a ? `Allowance: day ${a.day} of the week window, ${a.used}% of the week used of ${a.cap}% allowed by now, ${a.remaining}% left today; finishing the tickets in work needs about ${a.inWork}%${a.inWorkUnknown?.length ? ` plus ${a.inWorkUnknown.length} ticket(s) with no estimate yet` : ''}.` : 'Allowance: no usage reading.');
   out.push('');
 
-  const waitingOwner = st.tickets.filter((t) => ['questions', 'planGate', 'ownerBlock', 'paused', 'reworkWait'].includes(t.state));
+  const waitingOwner = st.tickets.filter((t) => t.held || ['questions', 'planGate', 'ownerBlock', 'paused', 'reworkWait'].includes(t.state));
   out.push('## Waiting for you', '', list(waitingOwner.map((t) => `${link(t)}${cardName(t)}: ${t.state}${t.gate?.why ? `, ${t.gate.why}` : ''}`)), '');
 
   const places = [];
@@ -106,14 +106,14 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
     const jobs = (settings.hostJobs ?? []).map((j) => {
       const js = feed.jobs?.[j.name] ?? {};
       if (j.watch && js.armed) return `${j.name}: new cards in ${j.watch.list} since ${js.firstChange}; runs ${j.quietHours} h after the last change (${js.lastChange})${js.heldUntil ? `, held by the guard until ${js.heldUntil}` : ''}`;
-      return `${j.name}: ${js.lastRun ? `last run ${js.lastRun}` : 'not run yet'}${js.lastFailure ? `, failed twice at ${js.lastFailure}` : ''}`;
+      return `${j.name}: ${js.lastRun ? `last run ${js.lastRun}` : 'not run yet'}${js.lastFailure ? `, failed twice at ${js.lastFailure}` : ''}${js.heldUntil ? `, held until ${js.heldUntil}` : ''}`;
     });
     out.push('## The watcher', '', `Last check ${checks.at(-1) ?? 'never'}; the morning run ${feed.morning?.lastDate === date ? `ran at ${feed.morning.at ?? date}` : 'has not run on this date'}.`, '', list([...failing, ...jobs], 'no source failing, no host job'), '');
   }
 
   out.push('## Starting and finishing', '');
   const steps = st.tickets.filter((t) => t.next);
-  out.push(list(steps.map((t) => `${link(t)}: next ${t.next.stage}${t.next.pr ? ` on ${t.next.pr}` : ''}${t.next.role ? ` (${t.next.role})` : ' (no model)'}`), 'nothing to finish'));
+  out.push(list(steps.map((t) => `${link(t)}: next ${t.next.stage}${t.next.pr ? ` on ${t.next.pr}` : ''}${t.next.role ? ` (${t.next.role})` : ' (no model)'}${t.next.waits ? `; failed at ${t.failed.at}, waits for ${t.next.waits}` : ''}`), 'nothing to finish'));
   out.push('', list(st.startable.map((g) => `start ${g.group} (${g.priority}${g.estimate !== null ? `, about ${g.estimate}%` : ', no estimate yet'})`), 'no group can start'));
   if (st.notStarted.length) out.push('', list(st.notStarted.map((g) => `${g.group} (${g.priority}) didn't start: ${g.reasons.join('; ')}`)));
   out.push('');

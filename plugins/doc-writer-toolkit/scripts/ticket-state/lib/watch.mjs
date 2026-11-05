@@ -6,16 +6,18 @@ import { readAllLedgers } from './ledger.mjs';
 import { runDaily, readUsageFromClaude, parseResult } from './runner.mjs';
 import { allowanceOf } from './allowance.mjs';
 import { appendRunLog, localDate } from './report.mjs';
+import { readRearm } from './setlocal.mjs';
 import { HOLD_MS, WINDOW_MS, advance, readFeed, readSource, sourcesOf, ticketsOf, watchDir, writeFeed } from './feed.mjs';
 import { jobCommand, jobDue, jobEnv, listChanges, listMatcher, spawnJob, updateWatchState, writeJobLog } from './jobs.mjs';
 import { notificationsOf, notify } from './notify.mjs';
 
 // One check of the watcher (design §5, D-048), started by launchd every few minutes. No model call of its own:
 //   1. read every source since its cursor; a check that finds nothing ends here, with no status, no runner, no claude;
-//   2. map the new events to tickets through the ledgers, and to the host jobs' watched lists;
-//   3. once a day after `schedule.morning`, the morning run (triage, finishing, starts) instead of step 4;
-//   4. `ticket-state status` for the tickets that changed; the runner finishes those that have a next step, each once;
-//   5. the host jobs that are due; 6. the cursors, written only after the hand-off; 7. the notifications.
+//   2. map the new events to the host jobs' watched lists, and 3. to tickets through the ledgers;
+//   4. once a day after `schedule.morning`, the morning run (triage, finishing, starts) instead of step 5;
+//   5. `ticket-state status` for the tickets that changed; the runner finishes those that have a next step, each once;
+//   then the cursors, written after the hand-off; 6. the host jobs that are due; 7. the notifications.
+// An error in one part is caught there, reported and notified, and the rest of the check goes on.
 // One check at a time: a lock in `<state>/watch/active/`, freed when its process is gone.
 
 const iso = (ms) => new Date(ms).toISOString();
@@ -64,12 +66,23 @@ const localMinutes = (ms) => {
   return d.getHours() * 60 + d.getMinutes();
 };
 
+// The next time the morning run is due after `ms`: today's `schedule.morning` if it is still ahead, else tomorrow's.
+export function nextMorning(ms, hhmm) {
+  const [h, m] = hhmm.split(':').map(Number);
+  const d = new Date(ms);
+  d.setHours(h, m, 0, 0);
+  if (d.getTime() <= ms) d.setDate(d.getDate() + 1);
+  return d.getTime();
+}
+
+const errorText = (e) => String(e?.message ?? e).split('\n')[0].slice(0, 300);
+
 export async function runCheck({ settings, clients, io = {}, options = {} }) {
   const { dryRun = false, claude = 'claude' } = options;
   const clock = io.now ?? Date.now;
   const checkStart = clock();
   const today = localDate(checkStart);
-  const out = { mode: settings.mode, dryRun, at: iso(checkStart), sources: [], events: 0, unmapped: 0, tickets: [], handed: [], pending: [], morning: null, run: null, jobs: [], notified: [], notes: [...(options.notes ?? [])] };
+  const out = { mode: settings.mode, dryRun, at: iso(checkStart), sources: [], events: 0, unmapped: 0, tickets: [], handed: [], pending: [], morning: null, run: null, jobs: [], errors: [], notified: [], notes: [...(options.notes ?? [])] };
   if (settings.mode === 'off') {
     out.stopped = 'mode off: nothing runs';
     return out;
@@ -81,12 +94,24 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
   }
   const log = [];
   const say = (e) => log.push({ at: iso(clock()), ...e });
+  // An error in one part of the check is caught there: the rest goes on, and the reason is reported and notified.
+  const failed = (part, e) => out.errors.push({ part, error: errorText(e) });
   try {
     const feed = readFeed(settings.state);
     const next = structuredClone(feed);
 
-    // 1. The sources.
-    const fresh = [];
+    // 1. The sources. One that fails keeps its cursor; after HOLD_MS of failing the gap is reported and it starts again.
+    const failSource = (src, cur, error) => {
+      const from = iso(Date.parse(cur.lastCheck) - WINDOW_MS);
+      if (checkStart - Date.parse(cur.lastCheck) > HOLD_MS) {
+        next.sources[src.name] = { lastCheck: iso(checkStart), seen: {} };
+        say({ kind: 'feed', what: src.name, outcome: 'failed', note: `a gap: nothing read from ${cur.lastCheck} to ${iso(checkStart)} (failing: ${error}); the morning run reconciles every open ticket` });
+        return { name: src.name, outcome: 'gap', from, error };
+      }
+      next.sources[src.name] = { ...cur, failingSince: cur.failingSince ?? iso(checkStart), lastError: error };
+      return { name: src.name, outcome: 'failed', from, error, note: 'the cursor stays; the next check reads the same window' };
+    };
+    let fresh = [];
     for (const src of sourcesOf(settings)) {
       const cur = feed.sources[src.name];
       if (!cur?.lastCheck) {
@@ -102,82 +127,131 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
         next.sources[src.name] = advance(cur, { checkStart, events });
         out.sources.push({ name: src.name, outcome: 'read', from, events: events.length, new: neu.length });
       } catch (e) {
-        const error = String(e.message ?? e).split('\n')[0].slice(0, 300);
-        if (checkStart - Date.parse(cur.lastCheck) > HOLD_MS) {
-          next.sources[src.name] = { lastCheck: iso(checkStart), seen: {} };
-          say({ kind: 'feed', what: src.name, outcome: 'failed', note: `a gap: nothing read from ${cur.lastCheck} to ${iso(checkStart)} (failing: ${error}); the morning run reconciles every open ticket` });
-          out.sources.push({ name: src.name, outcome: 'gap', from, error });
-        } else {
-          next.sources[src.name] = { ...cur, failingSince: cur.failingSince ?? iso(checkStart), lastError: error };
-          out.sources.push({ name: src.name, outcome: 'failed', from, error, note: 'the cursor stays; the next check reads the same window' });
-        }
+        out.sources.push(failSource(src, cur, errorText(e)));
       }
     }
-    out.events = fresh.length;
 
-    // 2. Tickets and watched lists.
-    const { keys, unmapped } = ticketsOf(fresh, readAllLedgers(settings.state));
-    out.unmapped = unmapped.length;
-    const wanted = [...new Set([...keys.keys(), ...(feed.pending ?? [])])];
+    // 2. The host jobs' watched lists. A list that can't be matched (renamed, or its board's lists unreadable) fails
+    // its board's source for this check, as a failed read would: the cursor stays, and none of its events is used.
     for (const job of settings.hostJobs) {
       if (!job.watch) continue;
       const events = fresh.filter((e) => e.board === job.watch.board);
       if (!events.length) continue;
-      const inList = await listMatcher(job, { settings, clients });
-      next.jobs[job.name] = updateWatchState(next.jobs[job.name], listChanges(events, inList));
+      try {
+        const inList = await listMatcher(job, { settings, clients });
+        next.jobs[job.name] = updateWatchState(next.jobs[job.name], listChanges(events, inList));
+      } catch (e) {
+        const name = `board:${job.watch.board}`;
+        failed(`job ${job.name}`, e);
+        const i = out.sources.findIndex((x) => x.name === name);
+        out.sources[i] = failSource({ name }, feed.sources[name], `job ${job.name}: ${errorText(e)}`);
+        fresh = fresh.filter((x) => x.board !== job.watch.board);
+        for (const other of settings.hostJobs) if (other.watch?.board === job.watch.board && other !== job) next.jobs[other.name] = feed.jobs?.[other.name] ?? next.jobs[other.name];
+      }
+    }
+    out.events = fresh.length;
+
+    // 3. Tickets. Ledgers that can't be read leave the events unmapped: the morning run reconciles them.
+    let keys = new Map();
+    const wanted = [...(feed.pending ?? [])];
+    try {
+      const ledgers = readAllLedgers(settings.state);
+      const mapped = ticketsOf(fresh, ledgers);
+      keys = mapped.keys;
+      out.unmapped = mapped.unmapped.length;
+      for (const k of keys.keys()) if (!wanted.includes(k)) wanted.push(k);
+      // A `set` since the last check re-arms the failed steps: their tickets are looked at now.
+      const rearmed = readRearm(settings.state);
+      if (rearmed && rearmed > (feed.rearmSeen ? Date.parse(feed.rearmSeen) : 0)) {
+        for (const l of ledgers) if ((l.runs ?? []).at(-1)?.outcome === 'failed' && !wanted.includes(l.key)) wanted.push(l.key);
+        next.rearmSeen = iso(rearmed);
+      }
+    } catch (e) {
+      failed('the ledgers', e);
     }
 
-    // 3 and 4. The morning run, or the tickets that changed.
+    // 4 and 5. The morning run, or the tickets that changed. What could not be handed on stays in `pending`.
     const run = io.runDaily ?? runDaily;
-    const runnerIo = io.runner ?? {};
+    const runnerIo = { ...(io.runner ?? {}), ...(io.claudeEnv ? { claudeEnv: io.claudeEnv } : {}) };
     const morningDue = next.morning?.lastDate !== today && localMinutes(checkStart) >= minutesOf(settings.schedule.morning);
+    next.pending = [];
     if (morningDue) {
-      out.morning = await run({ settings, clients, io: runnerIo, options: { dryRun, morning: true, trigger: 'schedule', claude } });
-      next.morning = { lastDate: today, at: iso(clock()) };
-      next.pending = [];
-      out.handed = wanted;
-    } else if (wanted.length) {
-      const st = await computeStatus({ settings, clients, now: checkStart, only: wanted, git: io.git ?? makeGit(settings) });
-      out.tickets = st.tickets.map((t) => ({ key: t.key, state: t.state, next: t.next ? t.next.stage : null, locked: Boolean(t.locked), hand: Boolean(t.hand), events: (keys.get(t.key) ?? []).length }));
-      const runnable = st.tickets.filter((t) => t.next && !t.locked && !t.hand && (t.next.stage !== 'start' || t.next.byHand)).map((t) => t.key);
-      // A ticket a run holds now is looked at again on the next check, so a change made during that run isn't lost.
-      next.pending = st.tickets.filter((t) => t.locked).map((t) => t.key);
-      out.pending = next.pending;
-      out.handed = wanted;
-      if (runnable.length) {
-        say({ kind: 'watch', keys: runnable, outcome: 'handed', note: `${fresh.length} new event(s); the runner finishes ${runnable.join(', ')}` });
-        out.run = await run({ settings, clients, io: runnerIo, options: { dryRun, trigger: 'watcher', named: runnable, claude } });
+      try {
+        out.morning = await run({ settings, clients, io: runnerIo, options: { dryRun, morning: true, trigger: 'schedule', claude } });
+        out.handed = wanted;
+      } catch (e) {
+        // Once a day all the same: a morning run that fails is not started again at every check.
+        failed('the morning run', e);
+        next.pending = wanted;
       }
-    } else next.pending = [];
+      next.morning = { lastDate: today, at: iso(clock()), ...(out.errors.some((x) => x.part === 'the morning run') ? { error: out.errors.at(-1).error } : {}) };
+    } else if (wanted.length) {
+      let st = null;
+      try {
+        st = await computeStatus({ settings, clients, now: checkStart, only: wanted, git: io.git ?? makeGit(settings) });
+      } catch (e) {
+        failed('status', e);
+        next.pending = wanted;
+      }
+      if (st) {
+        out.tickets = st.tickets.map((t) => ({ key: t.key, state: t.state, next: t.next ? t.next.stage : null, locked: Boolean(t.locked), hand: Boolean(t.hand), events: (keys.get(t.key) ?? []).length, ...(t.next?.waits ? { waits: t.next.waits } : {}), ...(t.held ? { held: t.gate.why } : {}) }));
+        // A failed step that waits for a person is not handed on: the runner would read /usage for nothing.
+        const runnable = st.tickets.filter((t) => t.next && !t.locked && !t.hand && !t.next.waits && (t.next.stage !== 'start' || t.next.byHand)).map((t) => t.key);
+        // A ticket a run holds now is looked at again on the next check, so a change made during that run isn't lost.
+        next.pending = st.tickets.filter((t) => t.locked).map((t) => t.key);
+        out.handed = wanted;
+        if (runnable.length) {
+          say({ kind: 'watch', keys: runnable, outcome: 'handed', note: `${fresh.length} new event(s); the runner finishes ${runnable.join(', ')}` });
+          try {
+            out.run = await run({ settings, clients, io: runnerIo, options: { dryRun, trigger: 'watcher', named: runnable, claude } });
+          } catch (e) {
+            failed('the run', e);
+            next.pending = [...new Set([...next.pending, ...runnable])];
+          }
+        }
+      }
+    }
+    out.pending = next.pending;
 
-    // 6 (first half). Every event is handed on: the cursors move.
+    // The cursors move: every event was handed on, or its ticket is in `pending`.
     if (!dryRun) writeFeed(settings.state, next);
 
-    // 5. Host jobs.
+    // 6. Host jobs. A watch job whose board wasn't read in this check neither runs nor changes: it hasn't seen the list.
     for (const job of settings.hostJobs) {
       const state = next.jobs[job.name] ?? {};
+      const src = job.watch ? out.sources.find((x) => x.name === `board:${job.watch.board}`) : null;
+      if (src && (src.outcome === 'failed' || src.outcome === 'gap')) {
+        out.jobs.push({ name: job.name, due: false, why: `its board can't be read in this check: ${src.error}` });
+        continue;
+      }
       const due = jobDue(job, state, checkStart);
       if (!due.due) {
         out.jobs.push({ name: job.name, due: false, ...(due.at ? { at: due.at } : {}), ...(due.why ? { why: due.why } : {}) });
         continue;
       }
-      out.jobs.push(await runJob(job, state));
+      try {
+        out.jobs.push(await runJob(job, state));
+      } catch (e) {
+        failed(`job ${job.name}`, e);
+        out.jobs.push({ name: job.name, due: true, outcome: 'failed', note: errorText(e) });
+      }
     }
 
-    // 7. Notifications, once a day per reason.
+    // 7. Notifications, once a day per reason; a caught error goes to the run log once a day too.
     if (!dryRun) {
       for (const k of Object.keys(next.notified ?? {})) if (!k.includes(today)) delete next.notified[k];
-      for (const n of notificationsOf({ morning: out.morning, run: out.run, jobs: out.jobs, today })) {
+      for (const n of notificationsOf({ morning: out.morning, run: out.run, jobs: out.jobs, errors: out.errors, today })) {
         if (next.notified?.[n.key]) continue;
         const r = (io.notify ?? notify)(n, io.notifyIo ?? {});
         (next.notified ??= {})[n.key] = iso(clock());
         out.notified.push({ title: n.title, text: n.text, urgent: n.urgent, ...r });
+        if (n.error) say({ kind: 'watch', what: n.error.part, outcome: 'failed', note: n.error.error });
       }
       writeFeed(settings.state, next);
       appendRunLog(settings.state, today, log);
     }
     out.log = log;
-    out.quiet = !fresh.length && !wanted.length && !out.morning && !out.jobs.some((j) => j.due !== false) && out.sources.every((s) => s.outcome !== 'failed' && s.outcome !== 'gap');
+    out.quiet = !fresh.length && !wanted.length && !out.morning && !out.errors.length && !out.jobs.some((j) => j.due !== false) && out.sources.every((s) => s.outcome !== 'failed' && s.outcome !== 'gap');
     return out;
 
     // A due host job: run in mode on only; a skill job is a model call, so the guard holds it like a scheduled step.
@@ -193,7 +267,7 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
         return { name: job.name, due: true, planned: true, command: shown };
       }
       if (cmd.model) {
-        const usage = await (io.readUsage ?? (() => readUsageFromClaude(claude)))();
+        const usage = await (io.readUsage ?? (() => readUsageFromClaude(claude, io.claudeEnv)))();
         const a = allowanceOf(usage, settings.limits, new Date(clock()));
         const held = !a ? 'no usage reading: no scheduled start' : a.remaining <= 0 ? `the week is at ${a.used}%, the allowance by now is ${a.cap}%` : null;
         if (held) {
@@ -203,16 +277,20 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
         }
       }
       const started = clock();
-      const res = await (io.spawnJob ?? spawnJob)(cmd, { cwd: settings.root, env: io.env ?? process.env, timeoutMs: job.timeoutMinutes * 60000, extra: jobEnv(job, state) });
+      // A skill job gets the claude environment (the sign-in token); a script never does.
+      const env = cmd.model ? io.claudeEnv ?? io.env ?? process.env : io.env ?? process.env;
+      const res = await (io.spawnJob ?? spawnJob)(cmd, { cwd: settings.root, env, timeoutMs: job.timeoutMinutes * 60000, extra: jobEnv(job, state) });
       const file = writeJobLog(settings.state, job.name, iso(started), res);
       const result = cmd.model ? parseResult(res.stdout) : null;
       const ok = res.code === 0 && !(result && result.isError);
       const failures = ok ? 0 : (state.failures ?? 0) + 1;
       const twice = failures >= 2;
-      next.jobs[job.name] = ok || twice ? { ...done, ...(twice ? { lastFailure: iso(started) } : {}) } : { ...state, failures };
-      const entry = { kind: 'job', job: job.name, outcome: ok ? 'done' : 'failed', exit: res.code, durationMs: clock() - started, log: path.relative(settings.root, file), ...(result?.costUsd !== undefined && result?.costUsd !== null ? { costUsd: result.costUsd } : {}), ...(twice ? { note: 'failed twice' } : !ok ? { note: 'failed; tried again on the next check' } : {}) };
+      // Failed twice in a row: disarmed. A watch job waits for its next new card; an `every` job for the next morning run.
+      const until = twice && job.every !== undefined ? iso(nextMorning(checkStart, settings.schedule.morning)) : null;
+      next.jobs[job.name] = ok || twice ? { ...done, ...(twice ? { lastFailure: iso(started), heldUntil: until } : {}) } : { ...state, failures };
+      const entry = { kind: 'job', job: job.name, outcome: ok ? 'done' : 'failed', exit: res.code, durationMs: clock() - started, log: path.relative(settings.root, file), ...(result?.costUsd !== undefined && result?.costUsd !== null ? { costUsd: result.costUsd } : {}), ...(twice ? { note: `failed twice; disarmed until ${until ?? 'its next new card'}` } : !ok ? { note: 'failed; tried again on the next check' } : {}) };
       say(entry);
-      return { name: job.name, due: true, outcome: entry.outcome, exit: res.code, log: entry.log, ...(entry.note ? { note: entry.note } : {}) };
+      return { name: job.name, due: true, outcome: entry.outcome, exit: res.code, log: entry.log, ...(twice ? { note: 'failed twice', until: until ?? 'its next new card' } : entry.note ? { note: entry.note } : {}) };
     }
   } finally {
     lock.release();

@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { CliError } from './errors.mjs';
-import { childEnv } from './env.mjs';
+import { childEnv, scriptEnv } from './env.mjs';
+import { PUSH_DENIED } from './runner.mjs';
 
 // Host jobs (D-054): the host declares "when list X gets new cards and stays quiet for N hours, run job Y", or "run job
 // Y every N minutes"; Y is a script or a skill. The watcher knows nothing about what a job does. A job:
@@ -118,14 +119,17 @@ export function jobCommand(job, { settings, state = {}, claude = 'claude', node 
     ...(job.run.effort ? ['--effort', job.run.effort] : []),
     ...(job.run.maxTurns ? ['--max-turns', String(job.run.maxTurns)] : []),
     ...(job.run.allowedTools?.length ? ['--allowedTools', ...job.run.allowedTools] : []),
+    // Whatever the job allows, no force push and no branch deletion, as in every role.
+    '--disallowedTools', ...PUSH_DENIED,
   ];
   return { bin: claude, args, model: true };
 }
 
-// Runs one job to its end; resolves { code, stdout, stderr }. Its environment holds no API key, plus the job's facts.
-export function spawnJob({ bin, args }, { cwd, env = process.env, timeoutMs, extra = {} }) {
+// Runs one job to its end; resolves { code, stdout, stderr }. Its environment holds no API key, plus the job's facts;
+// a script's holds no sign-in token either (only a skill job's `claude` gets it, through `env`).
+export function spawnJob({ bin, args, model }, { cwd, env = process.env, timeoutMs, extra = {} }) {
   return new Promise((resolve) => {
-    const child = spawn(bin, args, { cwd, env: childEnv(env, extra), stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(bin, args, { cwd, env: model ? childEnv(env, extra) : scriptEnv(env, extra), stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => child.kill('SIGTERM'), timeoutMs);

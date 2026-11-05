@@ -37,18 +37,24 @@ export function readTokenFile(file, root) {
   return { token };
 }
 
-// Prepares the environment of an unattended run in place: removes the billed variables, and puts the token from
-// `schedule.tokenFile` in, so every `claude` the run starts uses the plan. Returns notes naming what changed (never a
-// value).
+// Prepares the environment of an unattended run: removes the billed variables from `env` in place, and builds the
+// environment of every `claude` the run starts, with the token from `schedule.tokenFile`, so they use the plan. The
+// token goes into that copy only: never into `env`, so host scripts, git and gh never see it. Returns the notes naming
+// what changed (never a value) and that environment.
 export function prepareEnv(settings, env = process.env) {
   const notes = [];
   const billed = billedIn(env);
   for (const k of BILLED_VARIABLES) delete env[k];
   if (billed.length) notes.push(`removed ${billed.join(' and ')} from the environment: the plan pays, not an API account`);
   const t = readTokenFile(settings.schedule?.tokenFile, settings.root);
-  if (t.token) {
-    env[TOKEN_VARIABLE] = t.token;
-    notes.push(`${TOKEN_VARIABLE} set from schedule.tokenFile`);
-  } else if (t.refused) notes.push(`the sign-in token was not used: ${t.refused}`);
-  return notes;
+  if (t.token) notes.push(`${TOKEN_VARIABLE} set from schedule.tokenFile for the claude sessions only`);
+  else if (t.refused) notes.push(`the sign-in token was not used: ${t.refused}`);
+  return { notes, claudeEnv: childEnv(env, t.token ? { [TOKEN_VARIABLE]: t.token } : {}) };
+}
+
+// The environment of a host script: no billed variable and no sign-in token.
+export function scriptEnv(env = process.env, extra = {}) {
+  const out = childEnv(env, extra);
+  delete out[TOKEN_VARIABLE];
+  return out;
 }

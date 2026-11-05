@@ -127,6 +127,12 @@ test('set: one key of the local file, checked before it is written; the shared f
   await assert.rejects(run('schedule.morning', '7am'), /schedule.morning must be a time/);
   await assert.rejects(run('tracker.board', 'x'), /not a key of the local settings file/);
   assert.equal(fs.readFileSync(path.join(root, '.claude', 'ticket-flow.local.json'), 'utf8'), before);
+  // A change is a re-arm of the failed steps: its time and key in the state folder; no change, no new stamp.
+  const stamp = path.join(root, '.flow', 'rearmed.json');
+  assert.equal(JSON.parse(fs.readFileSync(stamp, 'utf8')).key, 'limits.maxWeekPercent');
+  const stamped = fs.readFileSync(stamp, 'utf8');
+  assert.equal((await run('mode', 'on')).changed, false);
+  assert.equal(fs.readFileSync(stamp, 'utf8'), stamped);
   // --unset drops the key: the default comes back.
   assert.deepEqual((await run('limits.inProgress', '--unset')).after, 3);
 });

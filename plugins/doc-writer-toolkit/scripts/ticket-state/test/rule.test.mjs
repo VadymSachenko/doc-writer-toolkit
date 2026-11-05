@@ -300,3 +300,62 @@ test('a person moved the card into review or final review: the PRs at the card s
   assert.equal(back.state, 'reworkWait');
   assert.equal(next(back), 'follow -> inProgress');
 });
+
+test('a failed step waits until a person acts after it: a move, a comment, a PR comment or a hand commit; the pipeline own writes never count', async () => {
+  const at = new Date(NOW - 30 * 60000).toISOString();
+  const head = '9'.repeat(40);
+  const c = {
+    waits: card({ number: 951, status: 'inProgress' }),
+    commented: card({ number: 952, status: 'inProgress' }),
+    posted: card({ number: 953, status: 'inProgress' }),
+    held: card({ number: 954, status: 'inProgress' }),
+    moved: card({ number: 955, status: 'inProgress' }),
+    prComment: card({ number: 956, status: 'smeReview' }),
+    prOwn: card({ number: 957, status: 'smeReview' }),
+    committed: card({ number: 958, status: 'finalReview' }),
+  };
+  const comments = Object.fromEntries(Object.values(c).map((x) => [x.id, [{ id: `own-${x.number}`, text: 'the failed session wrote this' }]]));
+  comments[c.commented.id].push({ id: 'person-1', text: 'see the second screen' });
+  comments[c.posted.id].push({ id: 'posted-1', text: 'recorded by a later session' });
+  const activity = {
+    'guide-docs#71': { comments: [{ id: 7101, author: 'owner-login', body: 'the failed session replied', createdAt: at, updatedAt: at }, { id: 7102, author: 'expert-one', body: 'one more thing', createdAt: ago(0.1), updatedAt: ago(0.1) }] },
+    'guide-docs#72': { comments: [{ id: 7201, author: 'owner-login', body: 'the failed session replied', createdAt: at, updatedAt: at }] },
+  };
+  const git = { branchCommits: (t, h) => (h === head ? ['e'.repeat(40), 'f'.repeat(40)] : []), changedUnder: () => [], pagesOf: () => [] };
+  const w = world({ cards: Object.values(c), comments, activity, git, prs: [pr({ repo: 'guide-docs', number: 71 }), pr({ repo: 'guide-docs', number: 72 }), pr({ repo: 'guide-docs', number: 73, headCommit: head })] });
+  const mark = (x, extra = {}) => ({ at, list: x.placeId, comments: [`own-${x.number}`], prs: {}, ...extra });
+  const failedRun = (x, extra = {}, after = mark(x)) => ({ runs: [{ seq: 9, stage: 'answers', outcome: 'failed', failures: 1, start: at, after, ...extra }] });
+  const answers = { stages: { start: 'done', plan: 'done', questions: 'done' }, left: 'blocked' };
+  ledger(w, c.waits, { ...answers, ...failedRun(c.waits) });
+  ledger(w, c.commented, { ...answers, ...failedRun(c.commented) });
+  ledger(w, c.posted, { ...answers, ...failedRun(c.posted), posted: { card: ['posted-1'], pr: [] } });
+  ledger(w, c.held, { ...answers, ...failedRun(c.held, { failures: 2 }) });
+  // The card left in Blocked by the failed session's own move would be in the mark; here a person moved it on since.
+  ledger(w, c.moved, { ...answers, ...failedRun(c.moved, {}, mark(c.moved, { list: LISTS.blocked.id })) });
+  const base = { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' };
+  const prMark = (x, n, ids) => mark(x, { prs: { [`guide-docs#${n}`]: { head: 'a'.repeat(40), hand: [], comments: ids } } });
+  ledger(w, c.prComment, { stages: base, prs: [{ repo: 'guide-docs', number: 71, targets: ['guide'], review: 'sme', stage: 'smeReview' }], runs: [{ seq: 9, stage: 'answerComments', pr: 'guide-docs#71', outcome: 'failed', failures: 1, start: at, after: prMark(c.prComment, 71, ['7101']) }] });
+  ledger(w, c.prOwn, { stages: base, prs: [{ repo: 'guide-docs', number: 72, targets: ['guide'], review: 'sme', stage: 'smeReview' }], runs: [{ seq: 9, stage: 'answerComments', pr: 'guide-docs#72', outcome: 'failed', failures: 1, start: at, after: prMark(c.prOwn, 72, ['7201']) }] });
+  // The failed session pushed e…e without recording it: in the mark. f…f came after: a hand commit.
+  ledger(w, c.committed, { stages: base, prs: [{ repo: 'guide-docs', number: 73, targets: ['guide'], review: 'sme', stage: 'finalReview' }], runs: [{ seq: 9, stage: 'translate', pr: 'guide-docs#73', outcome: 'failed', failures: 1, start: at, after: mark(c.committed, { prs: { 'guide-docs#73': { head, hand: ['e'.repeat(40)], comments: [] } } }) }] });
+  const st = await w.status();
+  const by = Object.fromEntries(st.tickets.map((t) => [t.key, t]));
+  const waits = (k) => [next(by[k]), Boolean(by[k].next?.waits), by[k].failed?.acted ?? null];
+  assert.deepEqual(waits('951'), ['answers', true, null], 'its own comment is in the mark: it waits for the morning run');
+  assert.equal(by['951'].next.prior, 1);
+  assert.deepEqual(waits('952'), ['answers', false, 'a person commented on the card']);
+  assert.deepEqual(waits('953'), ['answers', true, null], 'a comment in posted is the pipeline own');
+  assert.deepEqual([by['954'].next, by['954'].held, by['954'].gate.who], [null, true, 'owner'], 'two failed sessions in a row: held for the owner');
+  assert.match(by['954'].gate.why, /answers failed in 2 sessions .* gives it one more try/);
+  assert.deepEqual(waits('955'), ['answers', false, 'a person moved the card']);
+  assert.deepEqual(waits('956'), ['answerComments guide-docs#71', false, 'a comment or review on guide-docs#71']);
+  assert.deepEqual(waits('957'), ['answerComments guide-docs#72', true, null], 'the failed session own reply is in the mark');
+  assert.deepEqual(waits('958'), ['translate guide-docs#73', false, 'a commit on guide-docs#73']);
+
+  // `ticket-state set` after the failure re-arms the held ticket and the waiting one.
+  fs.mkdirSync(w.settings.state, { recursive: true });
+  fs.writeFileSync(path.join(w.settings.state, 'rearmed.json'), JSON.stringify({ at: new Date(NOW - 60000).toISOString(), key: 'roles.writer.maxTurns' }));
+  const again = Object.fromEntries((await w.status()).tickets.map((t) => [t.key, t]));
+  assert.deepEqual([next(again['954']), again['954'].failed.acted], ['answers', 'the owner re-armed it with `ticket-state set`']);
+  assert.equal(again['951'].next.waits, undefined);
+});

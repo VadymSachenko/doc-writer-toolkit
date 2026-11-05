@@ -45,6 +45,7 @@ export function oneLine(out) {
   const failed = out.sources.filter((s) => s.outcome === 'failed' || s.outcome === 'gap');
   if (failed.length) bits.push(`${failed.length} source(s) failing`);
   if (out.morning) bits.push('morning run');
+  if (out.errors?.length) bits.push(`${out.errors.length} part(s) failed: ${out.errors.map((e) => e.part).join(', ')}`);
   if (out.run) bits.push(`finished ${out.run.named.join(', ')}`);
   for (const j of out.jobs.filter((x) => x.due)) bits.push(`job ${j.name}: ${j.outcome ?? (j.held ? 'held' : 'planned')}`);
   if (out.notified.length) bits.push(`${out.notified.length} notification(s)`);
@@ -65,10 +66,10 @@ export async function main(argv, io = {}) {
   }
   const root = path.resolve(values.root ?? process.cwd());
   const settings = await loadSettings({ root, settings: values.settings });
-  const notes = prepareEnv(settings, env);
+  const { notes, claudeEnv } = prepareEnv(settings, env);
   const dryRun = Boolean(values['dry-run']);
   const clients = makeClients({ settings, env, dryRun, io: { ...io, ...(values.origin ? { trackerOrigin: values.origin } : {}) } });
-  const out = await runCheck({ settings, clients, io, options: { dryRun, claude: values.claude ?? 'claude', notes } });
+  const out = await runCheck({ settings, clients, io: { ...io, claudeEnv }, options: { dryRun, claude: values.claude ?? 'claude', notes } });
   if (values.quiet) {
     if (!out.quiet) stdout.write(oneLine(out) + '\n');
   } else stdout.write(JSON.stringify({ ok: true, command: 'watch', ...out, requests: clients.requests(), caught: clients.caught() }, null, 2) + '\n');

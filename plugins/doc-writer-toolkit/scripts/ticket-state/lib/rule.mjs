@@ -16,6 +16,10 @@ import { prId } from './ledger.mjs';
 //   13 videoGate                                      the automatic try, the fallback, or the import
 //   14 ready and a free slot                          start (the `startable` groups, see limits.mjs)
 //   15 otherwise                                      the state's own next step
+//
+// Over every row: a step whose last session failed runs again only after a person acted on the ticket (a move, a
+// comment, a review, a hand commit) or the owner re-armed it with `set`; until then it waits for the next morning run,
+// and after two failed sessions with no such action between them the ticket is held for the owner.
 
 export const step = (stage, extra = {}) => ({ stage, role: ROLE_OF[stage] ?? null, ...extra });
 
@@ -116,9 +120,77 @@ export function deriveTicket(l, w) {
     t.state = 'locked';
     t.steps = [];
   }
-  for (const p of t.prs) if (t.locked || t.hand) p.next = null;
+  // The failed step's gate, after every row (row 6 resumes the same move at every call, so no row can hold it alone).
+  const failed = failedStep(l, w, t.steps);
+  if (failed) {
+    t.failed = failed;
+    if (failed.held) {
+      t.steps = [];
+      t.gate = { who: 'owner', why: `${failed.stage}${failed.pr ? ` on ${failed.pr}` : ''} failed in ${failed.sessions} sessions with no one acting in between: a move, a comment, a review or a commit on the ticket, or \`ticket-state set\`, gives it one more try` };
+      t.held = true;
+    } else if (!failed.acted) t.steps[0] = { ...t.steps[0], prior: failed.sessions, waits: 'a person acting on the ticket, or the next morning run' };
+  }
+  if (w.mark) t.mark = markOf(l, w);
+  for (const p of t.prs) if (t.locked || t.hand || t.held) p.next = null;
   t.next = t.steps[0] ?? null;
   return t;
+}
+
+// ------------------------------------------------------------------ a failed step
+
+// What a person can change on a ticket, as the runner sees it right after a failed session: the card's list and
+// comments, and per PR its head, the commits the pipeline didn't make and the comments no record handled. Taken after
+// the session ended, so whatever that session wrote without recording it is part of the mark, not a person's action.
+export function markOf(l, w) {
+  const prs = {};
+  for (const pr of l.prs ?? []) {
+    const world = pr.number ? w.prWorld?.get(`${l.key}/${prId(pr)}`) : null;
+    if (!world) continue;
+    prs[prId(pr)] = { head: world.headCommit ?? null, hand: handCommits(pr, world.headCommit, w), comments: (world.newComments ?? []).map((c) => String(c.id)) };
+  }
+  return { at: new Date(w.now).toISOString(), list: w.card?.list?.id ?? null, comments: w.cardComments ? w.cardComments.map((c) => String(c.id)) : null, prs };
+}
+
+// What a person did on the ticket after a mark, or null. The pipeline's own writes never count: its recorded comments
+// are in `posted`, its recorded commits in `pipelineCommits`, and what a failed session wrote is in the mark.
+export function actedAfter(l, w, mark) {
+  if (w.rearmedAt && w.rearmedAt > Date.parse(mark.at)) return 'the owner re-armed it with `ticket-state set`';
+  if (mark.list && w.card?.list?.id && w.card.list.id !== mark.list) return 'a person moved the card';
+  if (mark.comments && w.cardComments) {
+    const posted = new Set((l.posted?.card ?? []).map(String));
+    if (w.cardComments.some((c) => !mark.comments.includes(String(c.id)) && !posted.has(String(c.id)))) return 'a person commented on the card';
+  }
+  for (const pr of l.prs ?? []) {
+    const m = mark.prs?.[prId(pr)];
+    const world = pr.number ? w.prWorld?.get(`${l.key}/${prId(pr)}`) : null;
+    if (!m || !world) continue;
+    if ((world.newComments ?? []).some((c) => !m.comments.includes(String(c.id)))) return `a comment or review on ${prId(pr)}`;
+    const hand = handCommits(pr, world.headCommit, w);
+    const committed = hand && m.hand ? hand.some((sha) => !m.hand.includes(sha)) : Boolean(world.headCommit && m.head && world.headCommit !== m.head);
+    if (committed) return `a commit on ${prId(pr)}`;
+  }
+  return null;
+}
+
+// The ticket's last session, when it failed at the stage the ticket would run now: how many sessions failed in a row,
+// and whether a person acted since the last of them.
+function failedStep(l, w, steps) {
+  const last = (l.runs ?? []).at(-1);
+  const s = steps[0];
+  if (!s || last?.outcome !== 'failed' || !last.after || last.stage !== s.stage || (last.pr ?? null) !== (s.pr ?? null)) return null;
+  const sessions = last.failures ?? 1;
+  const acted = actedAfter(l, w, last.after);
+  return { stage: last.stage, ...(last.pr ? { pr: last.pr } : {}), at: last.after.at, sessions, ...(acted ? { acted } : { held: sessions >= 2 }) };
+}
+
+// The commits on a PR's branch the pipeline didn't make (neither in pipelineCommits nor from the base), or null when
+// git here can't tell.
+function handCommits(pr, head, w) {
+  const target = w.settings.targets.find((t) => t.id === pr.targets?.[0]) ?? w.settings.targets.find((t) => t.repo === pr.repo);
+  const onBranch = w.git?.branchCommits(target, head, pr.base ?? target?.base ?? 'main') ?? null;
+  if (onBranch === null) return null;
+  const mine = (sha) => (pr.pipelineCommits ?? []).some((c) => c && sha.startsWith(String(c)));
+  return onBranch.filter((sha) => !mine(sha));
 }
 
 function derive(l, w) {
@@ -294,11 +366,9 @@ function prStep(l, p, w, out, prs) {
   const target = w.settings.targets.find((t) => t.id === pr.targets?.[0]) ?? w.settings.targets.find((t) => t.repo === pr.repo);
   const head = world.headCommit;
   // Row 8: commits the pipeline didn't make (neither in pipelineCommits nor from the base).
-  const onBranch = w.git?.branchCommits(target, head, pr.base ?? target?.base ?? 'main') ?? null;
-  if (onBranch === null) out.notes.push(`${id}: the head ${String(head ?? '').slice(0, 7)} is not fetched here: hand edits and stale chain stages are not checked`);
+  const hand = handCommits(pr, head, w);
+  if (hand === null) out.notes.push(`${id}: the head ${String(head ?? '').slice(0, 7)} is not fetched here: hand edits and stale chain stages are not checked`);
   else {
-    const mine = (sha) => (pr.pipelineCommits ?? []).some((c) => c && sha.startsWith(String(c)));
-    const hand = onBranch.filter((sha) => !mine(sha));
     if (hand.length) {
       if (pr.readyForMerge?.length) {
         const synced = pr.steps?.resync?.status === 'done' && pr.steps.resync.head === head;
