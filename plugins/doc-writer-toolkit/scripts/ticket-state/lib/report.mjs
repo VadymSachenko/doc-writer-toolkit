@@ -55,7 +55,9 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
   const byKey = new Map(ledgers.map((l) => [l.key, l]));
   out.push(`# Ticket flow, ${date}`, '');
   const a = st.allowance;
-  out.push(`Mode \`${st.mode}\`. In progress ${st.wip.inProgress} of ${st.wip.limits.inProgress}, waiting ${st.wip.waiting} of ${st.wip.limits.waiting}${st.wip.manual ? `, ${st.wip.manual} started by hand (not counted)` : ''}.`);
+  // With `limits.open`, the tickets that hold its slots, by name.
+  const open = typeof st.wip.limits.open === 'number' ? `, open ${st.wip.open} of ${st.wip.limits.open}${st.wip.openKeys?.length ? ` (${st.wip.openKeys.join(', ')})` : ''}` : '';
+  out.push(`Mode \`${st.mode}\`. In progress ${st.wip.inProgress} of ${st.wip.limits.inProgress}, waiting ${st.wip.waiting} of ${st.wip.limits.waiting}${open}${st.wip.manual ? `, ${st.wip.manual} started by hand (not counted)` : ''}.`);
   out.push(a ? `Allowance: day ${a.day} of the week window, ${a.used}% of the week used of ${a.cap}% allowed by now, ${a.remaining}% left today; finishing the tickets in work needs about ${a.inWork}%${a.inWorkUnknown?.length ? ` plus ${a.inWorkUnknown.length} ticket(s) with no estimate yet` : ''}.` : 'Allowance: no usage reading.');
   out.push('');
 

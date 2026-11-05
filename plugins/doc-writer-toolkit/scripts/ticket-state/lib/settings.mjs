@@ -32,7 +32,8 @@ export const LOCAL_DEFAULTS = {
     stepsPerTicket: 12,
     sessionsPerStageDay: 3,
     estimates: {},
-    // `open`: the most tickets a scheduled run started that may be unmerged at once, review included (none: no limit).
+    // `open`: the most open tickets a scheduled run started, from planning to the final review, ready for merge included
+    // (none: no limit).
     open: null,
     // `startOrder`: which ready group a scheduled run starts first: `priority` (then the oldest) or `easiest` (the
     // triage size, then fewer repos, then fewer pages, then priority).

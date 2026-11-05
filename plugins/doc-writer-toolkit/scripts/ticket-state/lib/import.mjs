@@ -43,6 +43,11 @@ export function parseMarkdown(text) {
 
 const lineText = (e) => (e.raw !== undefined ? e.raw : `${e.key}: ${e.value}`);
 
+// A Markdown with no card URL or no stage line is not a ledger (a README, a doc page in a mistyped `--from`): the
+// import lists it and leaves it, writing no JSON, and the removal never moves it.
+const NOT_A_LEDGER = /^(no card URL|no stage line)/;
+export const notALedger = (misses) => (misses ?? []).filter((m) => NOT_A_LEDGER.test(m));
+
 // Does the JSON's `legacy` rebuild this Markdown exactly? Every line once, in order, byte for byte.
 export function holdsEveryLine(legacy, text) {
   if (!legacy?.mapped || !legacy?.fields) return { ok: false, why: 'no legacy lines' };
@@ -371,6 +376,11 @@ export async function runImport({ settings, clients, from = null, sizes = {}, dr
       continue;
     }
     const l = fromMarkdown({ key, file: name, text, settings, sizes, now });
+    const not = notALedger(l.legacy.misses);
+    if (not.length) {
+      out.skipped.push({ key, file: name, why: `not a Markdown ledger (${not.join('; ')}): nothing written, the file kept` });
+      continue;
+    }
     const state = settle(l, await whereIs(l, clients), at);
     const check = holdsEveryLine(l.legacy, text);
     if (!check.ok) throw new Error(`import of ${name}: ${check.why}`); // a fault of this module: stop before writing
@@ -381,6 +391,7 @@ export async function runImport({ settings, clients, from = null, sizes = {}, dr
   const r = await removeClosedMarkdown({ settings, clients, from: dir, dryRun, trashDir, planned, now });
   out.removed = r.removed;
   out.kept = r.kept;
+  out.failed = r.failed;
   return out;
 }
 
@@ -388,48 +399,59 @@ export async function runImport({ settings, clients, from = null, sizes = {}, dr
 // `cleanup.mode: delete`) once its ticket is closed and the JSON rebuilds it exactly. The morning run repeats it.
 // An imported ticket that closed since, still the owner's and with nothing recorded into it, gets its close recorded
 // first, as the import records it for a ticket closed already. `planned`: in a dry run, what the import would have
-// written, by key.
+// written, by key. A file whose ticket can't be looked up now (the tracker or the forge failing, a ledger that doesn't
+// read) stays, in `failed` with the error, and the other files go on.
 export async function removeClosedMarkdown({ settings, clients, from = null, dryRun = false, trashDir = defaultTrash(settings), planned = new Map(), now = Date.now() }) {
   const dir = from ?? settings.state;
   const removed = [];
   const kept = [];
+  const failed = [];
   const at = new Date(now).toISOString();
   for (const name of mdFiles(dir)) {
     const key = name.slice(0, -'.md'.length);
-    let l = null;
     try {
-      l = readLedger(settings.state, checkKey(key));
+      checkKey(key);
     } catch {
-      continue;
+      continue; // not a ticket key: not a ledger's Markdown
     }
-    const plan = planned.get(key);
-    const legacy = plan?.legacy ?? l?.legacy;
-    if (!legacy?.mapped || legacy.from !== name) continue;
-    const abs = path.join(dir, name);
-    const closed = plan ? plan.state === 'closed' : l.stages?.close?.status === 'done' || (await whereIs(l, clients)).closed;
-    if (!closed) {
-      kept.push({ key, file: name, why: plan?.state === 'ready' ? 'open: ready, the pipeline may start it' : 'open' });
-      continue;
+    try {
+      const l = readLedger(settings.state, key);
+      const plan = planned.get(key);
+      const legacy = plan?.legacy ?? l?.legacy;
+      if (!legacy?.mapped || legacy.from !== name) continue;
+      const not = notALedger(legacy.misses);
+      if (not.length) {
+        kept.push({ key, file: name, why: `not a Markdown ledger (${not.join('; ')})` });
+        continue;
+      }
+      const abs = path.join(dir, name);
+      const closed = plan ? plan.state === 'closed' : l.stages?.close?.status === 'done' || (await whereIs(l, clients)).closed;
+      if (!closed) {
+        kept.push({ key, file: name, why: plan?.state === 'ready' ? 'open: ready, the pipeline may start it' : 'open' });
+        continue;
+      }
+      if (!plan && !dryRun && l.mode === 'hand' && l.stages?.close?.status !== 'done' && l.legacy.seq === l.seq) {
+        l.seq += 1;
+        l.stages.close = { status: 'done', seq: l.seq, at, note: 'closed after the import' };
+        l.stage = 'close';
+        l.log.push({ seq: l.seq, at, stage: 'close', outcome: 'done', note: 'imported ticket closed since: its card done or archived, no PR open' });
+        l.legacy.seq = l.seq;
+        l.updatedAt = at;
+        writeLedger(settings.state, l);
+      }
+      const check = holdsEveryLine(legacy, fs.readFileSync(abs, 'utf8'));
+      if (!check.ok) {
+        kept.push({ key, file: name, why: `closed, but ${check.why}: run the import again` });
+        continue;
+      }
+      if (dryRun) removed.push({ key, file: name, to: settings.cleanup.mode === 'delete' ? 'deleted' : 'the Trash', dryRun: true });
+      else if (settings.cleanup.mode === 'delete') {
+        fs.unlinkSync(abs);
+        removed.push({ key, file: name, to: 'deleted' });
+      } else removed.push({ key, file: name, to: moveToTrash(abs, trashDir) });
+    } catch (e) {
+      failed.push({ key, file: name, error: String(e?.message ?? e).split('\n')[0].slice(0, 300) });
     }
-    if (!plan && !dryRun && l.mode === 'hand' && l.stages?.close?.status !== 'done' && l.legacy.seq === l.seq) {
-      l.seq += 1;
-      l.stages.close = { status: 'done', seq: l.seq, at, note: 'closed after the import' };
-      l.stage = 'close';
-      l.log.push({ seq: l.seq, at, stage: 'close', outcome: 'done', note: 'imported ticket closed since: its card done or archived, no PR open' });
-      l.legacy.seq = l.seq;
-      l.updatedAt = at;
-      writeLedger(settings.state, l);
-    }
-    const check = holdsEveryLine(legacy, fs.readFileSync(abs, 'utf8'));
-    if (!check.ok) {
-      kept.push({ key, file: name, why: `closed, but ${check.why}: run the import again` });
-      continue;
-    }
-    if (dryRun) removed.push({ key, file: name, to: settings.cleanup.mode === 'delete' ? 'deleted' : 'the Trash', dryRun: true });
-    else if (settings.cleanup.mode === 'delete') {
-      fs.unlinkSync(abs);
-      removed.push({ key, file: name, to: 'deleted' });
-    } else removed.push({ key, file: name, to: moveToTrash(abs, trashDir) });
   }
-  return { removed, kept };
+  return { removed, kept, failed };
 }

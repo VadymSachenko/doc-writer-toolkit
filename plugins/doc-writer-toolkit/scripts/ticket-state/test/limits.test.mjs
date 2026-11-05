@@ -7,6 +7,8 @@ import { ledger, world } from './helpers.mjs';
 import { parseUsage, allowanceOf, parseReset } from '../lib/allowance.mjs';
 import { loadSettings, validateSettings } from '../lib/settings.mjs';
 import { estimatesOf, remainingOf } from '../lib/limits.mjs';
+import { takeLock } from '../lib/locks.mjs';
+import { renderReport } from '../lib/report.mjs';
 
 // AC-2 (the limits), D-067 (the allowance and the estimates), D-071 (priority), AC-5 (the intake), and the settings.
 
@@ -25,7 +27,7 @@ const waiting = (w, n) => {
   for (let i = 0; i < n; i++) {
     const c = card({ number: 400 + i, status: 'blocked' });
     w.tracker.cards.push(c);
-    ledger(w, c, { stages: { triage: 'done', start: 'done', plan: 'done', questions: 'done' }, triage: { verdict: 'docs', targets: ['guide'], size: 'edit' } });
+    ledger(w, c, { stages: { triage: 'done', start: 'done', plan: 'done', questions: 'done' }, startedBy: 'schedule', triage: { verdict: 'docs', targets: ['guide'], size: 'edit' } });
   }
 };
 const ready = (w, number, { labels = [], createdAt = ago(72), size = 'edit', relations = [], targets = ['guide'], pages = [] } = {}) => {
@@ -157,7 +159,7 @@ test('open: tickets a schedule started and not merged count, review included; ma
   assert.equal(st.wip.open, 2);
   assert.equal(st.wip.limits.open, 2);
   assert.deepEqual(st.startable, []);
-  assert.ok(st.notStarted[0].reasons.includes('2 open + 1 > 2 (open: started by a schedule, not merged yet)'), st.notStarted[0].reasons.join('; '));
+  assert.ok(st.notStarted[0].reasons.includes('2 open (300, 801) + 1 > 2'), st.notStarted[0].reasons.join('; '));
   // The review's PR merged: one open, the ready ticket starts.
   w.forge.prs.find((p) => p.number === 801).state = 'merged';
   st = await w.status({ usage: usage(5) });
@@ -181,7 +183,7 @@ test('open: no limit by default; a group larger than the limit starts only when 
   inReview(w, 801);
   st = await w.status({ usage: usage(5) });
   assert.deepEqual(st.startable, []);
-  assert.ok(st.notStarted[0].reasons.some((r) => /^1 open \+ 2 > 1/.test(r)));
+  assert.ok(st.notStarted[0].reasons.includes('1 open (801) + 2 > 1'), st.notStarted[0].reasons.join('; '));
 });
 
 test('open: two starts in one run fill the limit, the third waits', async () => {
@@ -192,7 +194,7 @@ test('open: two starts in one run fill the limit, the third waits', async () => 
   const st = await w.status({ usage: usage(5) });
   assert.deepEqual(st.startable.map((g) => g.group), ['501', '502']);
   assert.deepEqual(st.notStarted.map((g) => g.group), ['503']);
-  assert.ok(st.notStarted[0].reasons.includes('2 open + 1 > 2 (open: started by a schedule, not merged yet)'));
+  assert.ok(st.notStarted[0].reasons.includes('2 open (501 starting now, 502 starting now) + 1 > 2'), st.notStarted[0].reasons.join('; '));
 });
 
 test('startOrder easiest: the smallest size first, then fewer repos, then fewer pages, then priority; priority order unchanged', async () => {
@@ -215,6 +217,100 @@ test('startOrder easiest: the smallest size first, then fewer repos, then fewer 
   st = await make('priority').status({ usage: usage(5) });
   assert.deepEqual(st.groups.map((g) => g.group), ['501', '506', '503', '504', '505', '502']);
   assert.equal(st.startable[0].sizeRank, undefined, 'priority order adds no difficulty fields');
+});
+
+test('open: a ticket outside the flow (a PR closed unmerged, the card archived) or paused holds no slot; the report names the open ones', async () => {
+  const w = world({ extra: { limits: { ...estimates.limits, open: 2, inProgress: 5 } } });
+  inReview(w, 801);
+  inReview(w, 802);
+  w.forge.prs.find((p) => p.number === 802).state = 'closed';
+  inReview(w, 803);
+  w.tracker.cards.find((c) => c.number === 803).closed = true;
+  inReview(w, 804);
+  w.tracker.cards.find((c) => c.number === 804).placeId = LISTS.ready.id; // a person moved it back to the ready status
+  ready(w, 501);
+  let st = await w.status({ usage: usage(5) });
+  const by = Object.fromEntries(st.tickets.map((t) => [t.key, t.state]));
+  assert.deepEqual([by['801'], by['802'], by['803'], by['804']], ['smeReview', 'outside', 'outside', 'paused']);
+  assert.deepEqual([st.wip.open, st.wip.openKeys], [1, ['801']]);
+  assert.deepEqual(st.startable.map((g) => g.group), ['501'], 'one slot is free: neither the closed PR, the archived card nor the pause holds it');
+  assert.match(renderReport({ settings: w.settings, st, date: '2026-11-10', ledgers: [] }), /In progress 0 of 5, waiting 0 of 5, open 1 of 2 \(801\)\./);
+  // At the limit, the reason names the tickets that hold the slots.
+  w.settings.limits.open = 1;
+  st = await w.status({ usage: usage(5) });
+  assert.deepEqual(st.notStarted.map((g) => [g.group, g.reasons]), [['501', ['1 open (801) + 1 > 1']]]);
+  // Moving the card of the closed PR to done frees nothing more, and needs to free nothing.
+  w.tracker.cards.find((c) => c.number === 802).placeId = LISTS.done.id;
+  assert.deepEqual((await w.status({ usage: usage(5) })).wip.openKeys, ['801']);
+});
+
+test('open: a locked ticket counts as what it is doing', async () => {
+  const w = world({ extra: { limits: { ...estimates.limits, open: 2, inProgress: 5 } } });
+  inReview(w, 801);
+  const c = card({ number: 802, status: 'done' });
+  w.tracker.cards.push(c);
+  w.forge.prs.push(pr({ repo: 'guide-docs', number: 802, state: 'merged' }));
+  ledger(w, c, { stages: { triage: 'done', start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done', close: 'done' }, startedBy: 'schedule', prs: [{ repo: 'guide-docs', number: 802, targets: ['guide'], review: 'sme', stage: 'merged', merged: { at: ago(1) } }] });
+  for (const g of ['801', '802']) takeLock(w.settings.state, { group: g, kind: 'manual', stage: 'close', leaseMinutes: 120, now: NOW });
+  const st = await w.status({ usage: usage(5) });
+  const by = Object.fromEntries(st.tickets.map((t) => [t.key, [t.state, t.derivedState]]));
+  assert.deepEqual([by['801'], by['802']], [['locked', 'smeReview'], ['locked', 'closed']]);
+  assert.deepEqual([st.wip.open, st.wip.openKeys], [1, ['801']], 'the review is open while a run holds it; the closed ticket is not');
+});
+
+test('startOrder easiest: a group held back only by its lock or a relation holds back no harder group', async () => {
+  const limits = { ...estimates.limits, inProgress: 5, startOrder: 'easiest' };
+  const w = world({ extra: { limits } });
+  // Two related edits: their group's lock (a manual run on it) holds the group, not each ticket.
+  ready(w, 501, { size: 'edit', relations: ['502'] });
+  ready(w, 502, { size: 'edit' });
+  ready(w, 503, { size: 'newPage' });
+  takeLock(w.settings.state, { group: '501-502', kind: 'manual', stage: 'start', leaseMinutes: 120, now: NOW });
+  let st = await w.status({ usage: usage(5) });
+  assert.deepEqual(st.notStarted.map((g) => [g.group, g.reasons]), [['501-502', ['locked by a run']]]);
+  assert.deepEqual(st.startable.map((g) => g.group), ['503']);
+  const w2 = world({ extra: { limits } });
+  inProgress(w2, 1);
+  ready(w2, 503, { size: 'edit', relations: ['300'] });
+  ready(w2, 504, { size: 'newPage' });
+  st = await w2.status({ usage: usage(5) });
+  assert.deepEqual(st.notStarted.map((g) => [g.group, g.reasons]), [['503', ['related to 300, still in work']]]);
+  assert.deepEqual(st.startable.map((g) => g.group), ['504']);
+});
+
+test('a ready group whose start failed: it waits, holding no slot, until the next morning run; held after two failed sessions; a group the run tried holds no slot', async () => {
+  const at = ago(2);
+  const w = world({ extra: { limits: { ...estimates.limits, open: 1, startOrder: 'easiest' } } });
+  const a = ready(w, 501, { size: 'edit' });
+  ready(w, 502, { size: 'newPage' });
+  // 501's start session failed and left the card in the ready status: the runner had recorded the start running.
+  const failedStart = (failures) => ledger(w, a, { stages: { triage: 'done', start: { status: 'failed', note: 'the session ended without recording the stage' } }, startedBy: 'schedule', priority: null, triage: { verdict: 'docs', targets: ['guide'], size: 'edit' }, runs: [{ seq: 9, stage: 'start', role: 'writer', outcome: 'failed', failures, start: at, after: { at, list: LISTS.ready.id, comments: [], prs: {} } }] });
+  failedStart(1);
+  let st = await w.status({ usage: usage(5) });
+  const t = st.tickets.find((x) => x.key === '501');
+  assert.deepEqual([t.state, t.counted, t.failed.sessions, t.held ?? false], ['ready', false, 1, false]);
+  assert.deepEqual([st.wip.open, st.startable.map((g) => g.group)], [0, ['502']], 'the waiting start takes no slot: the next group starts');
+  assert.deepEqual(st.notStarted.map((g) => [g.group, g.reasons]), [['501', [`its start failed at ${at} (501): waits for a person acting on the ticket, or the next morning run`]]]);
+  // The morning run gives it its one more try, with its failed session so far.
+  st = await w.status({ usage: usage(5), retryWaiting: true });
+  assert.deepEqual(st.startable.map((g) => [g.group, g.prior]), [['501', 1]]);
+  assert.deepEqual(st.notStarted.map((g) => [g.group, g.reasons]), [['502', ['1 open (501 starting now) + 1 > 1']]]);
+  // Once the run tried it, it holds no slot in the run's later calculations.
+  st = await w.status({ usage: usage(5), retryWaiting: true, tried: new Set(['501']) });
+  assert.deepEqual(st.startable.map((g) => g.group), ['502']);
+  assert.match(st.notStarted[0].reasons[0], /^tried in this run already/);
+  // Two failed sessions: held for the owner, in the report's waiting list; not even the morning run tries it.
+  failedStart(2);
+  st = await w.status({ usage: usage(5), retryWaiting: true });
+  const held = st.tickets.find((x) => x.key === '501');
+  assert.deepEqual([held.held, held.gate.who, held.next], [true, 'owner', null]);
+  assert.match(st.notStarted.find((g) => g.group === '501').reasons[0], /^held for the owner: 501: start failed in 2 sessions .*`ticket-state set retry 501`/);
+  assert.deepEqual(st.startable.map((g) => g.group), ['502']);
+  assert.match(renderReport({ settings: w.settings, st, date: '2026-11-10', ledgers: [] }), /## Waiting for you\n\n- \[501\]\S+ #501 - Change 501: ready, start failed in 2 sessions/);
+  // `set retry 501` re-arms it: it may start again, its count of failures begun anew.
+  fs.writeFileSync(path.join(w.settings.state, 'rearmed.json'), JSON.stringify({ all: null, tickets: { 501: new Date(NOW - 60000).toISOString() } }));
+  st = await w.status({ usage: usage(5) });
+  assert.deepEqual(st.startable.map((g) => [g.group, g.prior ?? 0]), [['501', 0]]);
 });
 
 test('startOrder easiest: an easier group held back by the limits holds back every harder one, whatever its priority', async () => {

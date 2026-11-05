@@ -60,6 +60,18 @@ test('exit codes: 0 help, 2 bad usage (an unknown command too), 1 a refused reco
   assert.match(noSettings.json.error, /no settings file/);
 });
 
+test('--dry-run, --from and --size belong to import only: any other command refuses them (exit 2) and writes nothing', async () => {
+  const root = host();
+  const before = snapshot(root);
+  for (const argv of [['set', 'mode', 'off', '--dry-run'], ['set', 'limits.open', '1', '--from', 'x'], ['status', '--size', 'a=edit'], ['report', '--dry-run'], ['handover', '5', '--dry-run']]) {
+    const r = run(CLI, [...argv, '--root', root]);
+    assert.equal(r.code, 2, argv.join(' '));
+    assert.match(r.json.error, new RegExp(`^--(dry-run|from|size) is an option of import only, not of ${argv[0]}$`));
+  }
+  assert.deepEqual(snapshot(root), before, 'the local settings file was not written');
+  assert.equal(fs.existsSync(path.join(root, '.claude', 'ticket-flow.local.json')), false);
+});
+
 test('config prints the merged settings with no credential value', async () => {
   const root = host({ local: { mode: 'observe', limits: { inProgress: 2 } } });
   const r = await inProcess(stateMain, ['config', '--root', root], {});

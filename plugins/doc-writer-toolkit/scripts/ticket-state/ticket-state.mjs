@@ -91,6 +91,8 @@ const OPTIONS = {
 
 const COMMANDS = ['status', 'record', 'handover', 'lock', 'unlock', 'config', 'intake', 'report', 'set', 'import'];
 const TAKES_KEY = ['record', 'handover'];
+// Options of one command only: refused on any other (exit 2), so `set mode off --dry-run` writes nothing.
+const ONLY = { from: ['import'], size: ['import'], 'dry-run': ['import'] };
 
 export function usageOf(values, io = {}) {
   if (values['usage-file'] !== undefined) {
@@ -134,6 +136,9 @@ export async function main(argv, io = {}) {
     return 0;
   }
   if (!COMMANDS.includes(command)) throw new CliError(`unknown command '${command}'.\n\n${USAGE}`, { code: 2 });
+  for (const [option, commands] of Object.entries(ONLY)) {
+    if (values[option] !== undefined && !commands.includes(command)) throw new CliError(`--${option} is an option of ${commands.join(', ')} only, not of ${command}`, { code: 2 });
+  }
   if (TAKES_KEY.includes(command) && !key) throw new CliError(`${command} needs the ticket key.\n\n${USAGE}`, { code: 2 });
   if (command === 'set') {
     if (!key) throw new CliError(`set needs the key.\n\n${USAGE}`, { code: 2 });

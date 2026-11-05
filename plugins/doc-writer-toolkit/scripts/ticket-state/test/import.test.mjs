@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { NOW, card, pr, quietGit, rawSettings, tmp } from './fakes.mjs';
 import { ledger, read, snapshot, world } from './helpers.mjs';
-import { holdsEveryLine, parseMarkdown, removeClosedMarkdown, runImport } from '../lib/import.mjs';
+import { fromMarkdown, holdsEveryLine, parseMarkdown, removeClosedMarkdown, runImport } from '../lib/import.mjs';
 import { writeLedger } from '../lib/ledger.mjs';
 import { runDaily } from '../lib/runner.mjs';
 import { runHandover } from '../lib/handover.mjs';
@@ -241,6 +241,7 @@ test('the morning run repeats the removal: a dry run lists it, a live run moves 
   const dry = await runDaily({ settings: w.settings, clients, io, options: { dryRun: true, morning: true, trigger: 'manual' } });
   assert.deepEqual(dry.legacyMarkdown.removed.map((x) => [x.key, x.dryRun]), [['702', true]]);
   assert.deepEqual(snapshot(w.root), before);
+  assert.doesNotMatch(dry.report, /the Markdown ledger `702\.md`/, 'the dry run removed nothing, and its report says nothing went');
 
   const noon = await runDaily({ settings: w.settings, clients: w.clients(), io, options: { trigger: 'manual' } });
   assert.equal(noon.legacyMarkdown, undefined, 'only the morning run removes');
@@ -337,4 +338,70 @@ test('the removal records a close only for an imported ticket still the owner\'s
   const r = await removeClosedMarkdown({ settings: w.settings, clients: w.clients(), trashDir: trash, now: NOW });
   assert.deepEqual(r.removed.map((x) => x.key), ['702', '703']);
   assert.deepEqual([read(w, '702').mode, read(w, '702').stages.close, read(w, '703').mode, read(w, '703').stages.close], ['hand', undefined, 'pipeline', undefined]);
+});
+
+test('import: a Markdown with no card URL or no stage line is not a ledger: listed, no JSON written, never moved', async () => {
+  const w = world({ cards: [card({ number: 710, status: 'done', shortLink: 'Card0710' })], prs: [] });
+  const docs = path.join(w.root, 'docs');
+  fs.mkdirSync(docs, { recursive: true });
+  fs.writeFileSync(path.join(docs, 'intro.md'), '---\ntitle: Intro\n---\n\n# Intro\n\nSome text.\n');
+  fs.writeFileSync(path.join(docs, 'README.md'), 'notes: how this folder works\n');
+  fs.writeFileSync(path.join(docs, 'nostage.md'), 'key: nostage\ndocs_card: https://tracker.example/c/Card0710\n');
+  fs.writeFileSync(path.join(docs, '710.md'), 'key: 710\nstage: triaged\ndocs_card: https://tracker.example/c/Card0710\nstage: closed\n');
+  const trash = tmp();
+  const out = await runImport({ settings: w.settings, clients: w.clients(), from: 'docs', now: NOW, trashDir: trash });
+  assert.deepEqual(out.imported.map((x) => [x.key, x.state]), [['710', 'closed']]);
+  assert.deepEqual(out.skipped.map((x) => [x.key, x.why]), [
+    ['README', 'not a Markdown ledger (no stage line; no card URL (docs_card)): nothing written, the file kept'],
+    ['intro', 'not a Markdown ledger (no stage line; no card URL (docs_card)): nothing written, the file kept'],
+    ['nostage', 'not a Markdown ledger (no stage line): nothing written, the file kept'],
+  ]);
+  assert.deepEqual(out.removed.map((x) => x.key), ['710']);
+  assert.deepEqual(fs.readdirSync(docs).sort(), ['README.md', 'intro.md', 'nostage.md']);
+  assert.deepEqual(fs.readdirSync(path.join(w.settings.state, 'tickets')), ['710.json']);
+  // A JSON an earlier import made from such a file, closed: the removal still never moves the file.
+  const l = fromMarkdown({ key: 'README', file: 'README.md', text: fs.readFileSync(path.join(docs, 'README.md'), 'utf8'), settings: w.settings, now: NOW });
+  l.stages.close = { status: 'done', seq: 1, at: new Date(NOW).toISOString() };
+  writeLedger(w.settings.state, l);
+  const r = await removeClosedMarkdown({ settings: w.settings, clients: w.clients(), from: docs, trashDir: trash, now: NOW });
+  assert.deepEqual([r.removed, r.kept.map((x) => [x.key, x.why])], [[], [['README', 'not a Markdown ledger (no stage line; no card URL (docs_card))']]]);
+  assert.ok(fs.existsSync(path.join(docs, 'README.md')));
+});
+
+test('the morning removal: a lookup that fails is a failure in the report, and the other files still go', async () => {
+  const { w, cards, trash } = legacyWorld();
+  await runImport({ settings: w.settings, clients: w.clients(), sizes: SIZES, now: NOW, trashDir: trash });
+  // 703 closes (its card done). 702 stays open, in final review, and looking its card up fails: `status` reads it from
+  // its list, the removal by its link.
+  cards[703].placeId = card({ status: 'done' }).placeId;
+  const real = w.tracker.card;
+  w.tracker.card = async (ref) => {
+    if (ref === cards[702].id || ref === cards[702].shortLink) {
+      const e = new Error('tracker 500');
+      e.data = { status: 500 };
+      throw e;
+    }
+    return real(ref);
+  };
+  const out = await runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: () => usageAt(5), now: () => NOW, trashDir: trash, spawnClaude: () => assert.fail('no session'), git: quietGit }, options: { morning: true, trigger: 'manual' } });
+  assert.deepEqual(out.legacyMarkdown.failed.map((x) => [x.key, x.error]), [['702', 'tracker 500']]);
+  assert.deepEqual(out.legacyMarkdown.removed.map((x) => x.key), ['703'], 'the failed lookup stopped nothing else');
+  assert.deepEqual(mdIn(w), ['702.md']);
+  const report = fs.readFileSync(path.join(w.root, out.reportFile), 'utf8');
+  assert.match(report.slice(report.indexOf('## Failures and guard stops')), /702: 702\.md kept: tracker 500/);
+  assert.deepEqual(out.notes, []);
+});
+
+test('observe mode: the morning run lists the Markdown it would remove and removes nothing', async () => {
+  const { w, cards, trash } = legacyWorld({ extra: { mode: 'observe' } });
+  await runImport({ settings: w.settings, clients: w.clients(), sizes: SIZES, now: NOW, trashDir: trash });
+  const trashed = fs.readdirSync(trash);
+  cards[702].placeId = card({ status: 'done' }).placeId;
+  w.forge.prs.find((p) => p.number === 72).state = 'merged';
+  const out = await runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: () => usageAt(5), now: () => NOW, trashDir: trash, spawnClaude: () => assert.fail('observe starts no session'), git: quietGit }, options: { morning: true } });
+  assert.equal(out.observe, true);
+  assert.deepEqual(out.legacyMarkdown.removed.map((x) => [x.key, x.dryRun]), [['702', true]]);
+  assert.deepEqual(mdIn(w), ['702.md', '703.md']);
+  assert.deepEqual(fs.readdirSync(trash), trashed, 'only the import moved a file there');
+  assert.doesNotMatch(fs.readFileSync(path.join(w.root, out.reportFile), 'utf8'), /the Markdown ledger `702\.md`/);
 });

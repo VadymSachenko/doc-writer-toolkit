@@ -21,7 +21,8 @@ export function world({ cards = [], prs = [], activity = {}, comments = {}, rele
 const statusOfList = (listId) => Object.entries(LISTS).find(([, l]) => l.id === listId)?.[0];
 
 // A ledger as the records would have left it. `stages`: { name: status } or { name: { status, seq } }, in order.
-export function ledger(w, card, { key = String(card.number ?? card.shortLink), stages = {}, prs = [], left = 'same', mode = 'pipeline', startedBy = 'schedule', ...rest } = {}) {
+// `startedBy` is null, as in a new ledger: a test of the counts says who started the ticket.
+export function ledger(w, card, { key = String(card.number ?? card.shortLink), stages = {}, prs = [], left = 'same', mode = 'pipeline', startedBy = null, ...rest } = {}) {
   const l = newLedger({ key, card, now: new Date(NOW - 86400000).toISOString(), mode });
   l.startedBy = startedBy;
   let seq = 0;

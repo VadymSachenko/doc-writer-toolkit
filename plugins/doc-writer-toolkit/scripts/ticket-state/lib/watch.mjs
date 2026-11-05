@@ -246,8 +246,9 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
       if (st) {
         out.tickets = st.tickets.map((t) => ({ key: t.key, state: t.state, next: t.next ? t.next.stage : null, locked: Boolean(t.locked), hand: Boolean(t.hand), events: (keys.get(t.key) ?? []).length, ...(t.next?.waits ? { waits: t.next.waits } : {}), ...(t.held ? { held: t.gate.why } : {}) }));
         out.capped = st.tickets.filter((t) => t.capped).map((t) => ({ key: t.key, ...t.capped, why: t.gate.why }));
-        // A failed step that waits for a person is not handed on: the runner would read /usage for nothing.
-        const runnable = st.tickets.filter((t) => t.next && !t.locked && !t.hand && !t.next.waits && (t.next.stage !== 'start' || t.next.byHand)).map((t) => t.key);
+        // A failed step that waits for a person is not handed on: the runner would read /usage for nothing. A start is
+        // handed on only for a card already in work (a person's move, or a recorded start that goes on).
+        const runnable = st.tickets.filter((t) => t.next && !t.locked && !t.hand && !t.next.waits && (t.next.stage !== 'start' || t.next.byHand || t.next.again)).map((t) => t.key);
         // A ticket a run holds now is looked at again on the next check, so a change made during that run isn't lost.
         next.pending = st.tickets.filter((t) => t.locked).map((t) => t.key);
         out.handed = wanted;
