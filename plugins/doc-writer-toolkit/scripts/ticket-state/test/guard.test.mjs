@@ -152,13 +152,13 @@ test('the sign-in token reaches only the claude a check starts: never a host scr
   await watcherMain(['--root', root, '--claude', fake], { env, stdout: { write: (x) => (printed += x) }, trackerAdapter: trackerAdapter(), forgeAdapter: forgeAdapter(), now: () => NOW });
   const out = JSON.parse(printed);
   assert.deepEqual(out.jobs.map((j) => [j.name, j.outcome]), [['printenv', 'done'], ['notes', 'done']]);
-  assert.deepEqual(fs.readFileSync(seen, 'utf8').trim().split('\n'), ['/usage', '/notes'], 'the claude sessions had the token');
   const logs = fs.readdirSync(path.join(root, '.flow', 'watch', 'jobs')).map((f) => fs.readFileSync(path.join(root, '.flow', 'watch', 'jobs', f), 'utf8'));
   const scriptLog = logs.find((x) => x.includes('"PATH"'));
   assert.ok(scriptLog && !scriptLog.includes(TOKEN) && !scriptLog.includes(TOKEN_VARIABLE), 'the host script never had it');
   assert.ok(!logs.some((x) => x.includes(TOKEN)), 'no job log holds it');
   assert.ok(!printed.includes(TOKEN));
   assert.equal(env[TOKEN_VARIABLE], undefined);
+  assert.deepEqual(fs.readFileSync(seen, 'utf8').trim().split('\n'), ['/usage', '/notes'], 'the claude sessions had the token');
   assert.equal(process.env[TOKEN_VARIABLE], undefined);
   assert.equal(env.ANTHROPIC_API_KEY, undefined);
 });
