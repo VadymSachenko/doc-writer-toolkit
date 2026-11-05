@@ -9,6 +9,7 @@ import { runDaily } from '../lib/runner.mjs';
 import { runRecord } from '../lib/record.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
 import { ensureWorktree, listWorktrees, canon, worktreePath } from '../lib/worktree.mjs';
+import { localDate, renderReport } from '../lib/report.mjs';
 
 // The ticket worktree (lib/worktree.mjs): the runner makes it, with the clone's node_modules linked and excluded, so
 // the build needs no role action; the close step removes it with git and never moves a `.git` link alone. And the
@@ -72,7 +73,24 @@ function withClone(w, { declare = true } = {}) {
     clone.g('fetch', '-q', 'origin');
     return og('rev-parse', 'HEAD');
   };
-  return { clone, bare, h1, handEdit };
+  // The owner rewrites the branch (a rebase onto the base, then a force push), as after a squash of the drafts.
+  const rewrite = () => {
+    og('reset', '-q', '--hard', 'origin/main');
+    fs.writeFileSync(path.join(other, 'docs/x/index.md'), '# Сторінка\n\nПереписано.\n');
+    og('commit', '-q', '-am', 'Draft: page, rewritten');
+    og('push', '-q', '--force', 'origin', 'HEAD:ticket-71');
+    clone.g('fetch', '-q', 'origin');
+    return og('rev-parse', 'HEAD');
+  };
+  return { clone, bare, h1, handEdit, rewrite };
+}
+
+// A commit a session made in the worktree and never pushed.
+function commitIn(wt, rel, text) {
+  fs.writeFileSync(path.join(wt, rel), text);
+  const g = (...a) => execFileSync('git', ['-C', wt, ...a], { encoding: 'utf8' }).trim();
+  g('-c', 'user.email=s@example.com', '-c', 'user.name=Session', '-c', 'commit.gpgsign=false', 'commit', '-q', '-am', 'Session work');
+  return g('rev-parse', 'HEAD');
 }
 
 function finalReviewTicket({ done = CHAIN.slice(0, 5), stage = 'finalReview', extra = {}, declare } = {}) {
@@ -155,6 +173,33 @@ test('AC-1: an existing worktree follows the owner\'s push although a session le
   assert.match(kept.notes.join(' '), /uncommitted changes/);
 });
 
+test('AC-1: a rewritten branch: a clean worktree moves to the new head; one with work the branch never had, or tracked changes, stays and says why', async () => {
+  const p = { repo: 'guide-docs', targets: ['guide'], branch: 'ticket-71', base: 'main' };
+  // Clean: it was at an earlier head of origin/ticket-71, so it follows the rewrite.
+  const t = finalReviewTicket();
+  ensureWorktree(t.w.settings, p);
+  const h2 = t.rewrite();
+  const moved = ensureWorktree(t.w.settings, p);
+  assert.deepEqual([moved.head, moved.notes], [h2, []]);
+  // A session's commit that was never pushed: kept, with the note.
+  const u = finalReviewTicket();
+  ensureWorktree(u.w.settings, p);
+  const mine = commitIn(u.wt, 'docs/x/index.md', 'session work\n');
+  u.rewrite();
+  const kept = ensureWorktree(u.w.settings, p);
+  assert.equal(kept.head, mine);
+  assert.match(kept.notes.join(' '), /never had .*record the stage failed with this note \(see the ticket-state README, "A stuck worktree"\)/);
+  assert.doesNotMatch(kept.notes.join(' '), /push them/);
+  // Uncommitted changes to a tracked file: kept too.
+  const v = finalReviewTicket();
+  ensureWorktree(v.w.settings, p);
+  fs.writeFileSync(path.join(v.wt, 'docs/x/index.md'), 'unsaved\n');
+  v.rewrite();
+  const dirty = ensureWorktree(v.w.settings, p);
+  assert.equal(dirty.head, v.h1);
+  assert.match(dirty.notes.join(' '), /uncommitted changes/);
+});
+
 test('AC-1: a worktree that can not be made starts no session; the stage is recorded failed with the reason', async () => {
   const t = finalReviewTicket();
   fs.mkdirSync(t.wt, { recursive: true });
@@ -206,6 +251,45 @@ test('AC-5: the close step removes the ticket\'s worktrees with git, prunes, and
   assert.equal(fs.existsSync(path.join(fx.clone.dir, '.env')), true);
   const cleanup = read(w, '1502').stages.close.result.cleanup;
   assert.deepEqual(cleanup.worktrees.map((x) => [canon(x.path), x.removed]), [[canon(wt), true], [canon(legacy), true]]);
+});
+
+// A merged ticket whose worktree holds work no remote has: `make` leaves it so before the close.
+async function closeWith(make) {
+  const c = card({ number: 1504, status: 'finalReview' });
+  const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 71, head: 'ticket-71', state: 'merged' })] });
+  gitRepo(w.root).commit({ '.gitignore': '.flow/\nrepos/\n', 'docs/index.md': '# Host\n' });
+  const fx = withClone(w);
+  const p = { repo: 'guide-docs', targets: ['guide'], branch: 'ticket-71', base: 'main' };
+  ensureWorktree(w.settings, p);
+  const wt = worktreePath(w.settings, p);
+  make(wt);
+  ledger(w, c, { stages: { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' }, prs: [{ ...p, number: 71, review: 'sme', stage: 'readyForMerge', pipelineCommits: [fx.h1], readyForMerge: [{ head: fx.h1, at: ago(2) }] }] });
+  const trash = path.join(tmp('fake-trash-'), '.Trash');
+  const out = await runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: usage, trashDir: trash, now: () => NOW, spawnClaude: () => assert.fail('no model step') }, options: {} });
+  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['close', 'done']]);
+  const l = read(w, '1504');
+  const report = renderReport({ settings: w.settings, st: await w.status(), date: localDate(Date.parse(l.stages.close.at)), ledgers: [l] });
+  return { w, fx, wt, l, report, tree: l.stages.close.result.cleanup.worktrees.find((x) => canon(x.path) === canon(wt)) };
+}
+
+test('AC-5: the close step keeps a worktree with a commit no remote has, and the report says what to do', async () => {
+  let mine;
+  const { fx, wt, tree, report } = await closeWith((wt) => { mine = commitIn(wt, 'docs/x/index.md', 'never pushed\n'); });
+  assert.equal(fs.existsSync(wt), true);
+  assert.equal(execFileSync('git', ['-C', wt, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), mine, 'the commit is still there');
+  assert.ok(listWorktrees(fx.clone.dir).some((x) => canon(x.path) === canon(wt)), 'still the clone\'s worktree');
+  assert.equal(tree.removed, false);
+  assert.match(tree.kept, /1 commit\(s\) on no remote branch/);
+  assert.match(tree.todo, /push origin HEAD:refs\/heads\/ticket-71.*worktree remove --force/);
+  assert.match(report, /worktree\(s\) kept, with work no remote has: .*1 commit\(s\) on no remote branch.*worktree remove --force/);
+});
+
+test('AC-5: the close step keeps a worktree with a tracked change, and the report says what to do', async () => {
+  const { wt, tree, report } = await closeWith((wt) => fs.writeFileSync(path.join(wt, 'docs/x/index.md'), 'not committed\n'));
+  assert.equal(fs.readFileSync(path.join(wt, 'docs/x/index.md'), 'utf8'), 'not committed\n');
+  assert.equal(tree.removed, false);
+  assert.match(tree.kept, /1 tracked file\(s\) changed and not committed/);
+  assert.match(report, /worktree\(s\) kept, with work no remote has: .*tracked file\(s\) changed/);
 });
 
 test('AC-5: a recorded folder that is a repository of its own is kept whole, never split', async () => {
@@ -271,4 +355,22 @@ test('AC-3: record align is refused while a UA image changed without its EN coun
   ensureWorktree(t.w.settings, { repo: 'guide-docs', targets: ['guide'], branch: 'ticket-71', base: 'main' });
   await rec();
   assert.match(read(t.w, '1501').prs[0].chain.align.imagePairs, /1 UA image\(s\) checked against origin\/main/);
+});
+
+test('AC-3: a hand commit after ready for merge that changes only a UA image: the re-sync and the pack, then ready is refused, naming it', async () => {
+  const { out, l } = await afterReady({ [UK_IMG]: 'uk v2' });
+  assert.deepEqual(out.ran.map((r) => r.stage), ['resync', 'visualPack', 'readyForMerge']);
+  assert.equal(out.ran.at(-1).outcome, 'failed');
+  assert.equal(l.prs[0].readyForMerge.length, 1, 'not ready again');
+  assert.match(JSON.stringify(l), new RegExp(`${UK_IMG.replace(/\./g, '\\.')} changed without`));
+});
+
+test('AC-3: record align with no worktree on this machine is refused, never skipped', async () => {
+  const t = finalReviewTicket({ done: CHAIN.slice(0, 3) });
+  assert.equal(fs.existsSync(t.wt), false);
+  await assert.rejects(
+    runRecord({ settings: t.w.settings, clients: t.w.clients(), key: '1501', stage: 'align', pr: 'guide-docs#71', status: 'done', head: t.h1, result: { bugs: 0, warnings: 0 }, now: NOW }),
+    (e) => e.refused === 'imagePairs' && /no worktree of guide-docs ticket-71/.test(e.message),
+  );
+  assert.equal(read(t.w, '1501').prs[0].chain.align, undefined, 'nothing written');
 });

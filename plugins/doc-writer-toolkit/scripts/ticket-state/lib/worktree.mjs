@@ -141,16 +141,20 @@ export function ensureWorktree(settings, pr) {
     // and the brief says so.
     const dirty = tryRun(wt, ['status', '--porcelain', '--untracked-files=no']);
     const head = tryRun(wt, ['rev-parse', 'HEAD']);
-    if (dirty) notes.push('the worktree has uncommitted changes from an earlier session: left as they are');
-    else if (head && tryRun(wt, ['merge-base', '--is-ancestor', head, remoteBranch]) !== null) {
+    // The branch moved on (a fast-forward), or was rewritten (the owner rebased and force-pushed it): a clean worktree
+    // whose head the branch once had, by the remote-tracking ref's own log, follows it. A head the branch never had
+    // holds a session's unpushed work, and stays.
+    const wasBranch = head && (tryRun(wt, ['merge-base', '--is-ancestor', head, remoteBranch]) !== null || (tryRun(clone, ['reflog', 'show', '--format=%H', `refs/remotes/origin/${pr.branch}`]) ?? '').split('\n').includes(head));
+    if (dirty) notes.push(`the worktree has uncommitted changes to tracked files from an earlier session: left as they are, so it may not be at the branch's head; record the stage failed with this note (see the ticket-state README, "A stuck worktree")`);
+    else if (wasBranch) {
       if (head !== tryRun(wt, ['rev-parse', remoteBranch])) {
         try {
           run(wt, ['checkout', '-q', '--detach', remoteBranch]);
         } catch (e) {
-          notes.push(`could not move the worktree to origin/${pr.branch}: ${gitError(e)}`);
+          notes.push(`could not move the worktree to origin/${pr.branch}: ${gitError(e)}; record the stage failed with this note`);
         }
       }
-    } else notes.push(`the worktree has commits that are not on origin/${pr.branch}: push them, or record the stage failed`);
+    } else notes.push(`the worktree is at a commit origin/${pr.branch} never had (an earlier session's work that was never pushed): left as it is, so it is not at the branch's head; record the stage failed with this note (see the ticket-state README, "A stuck worktree")`);
   }
   const { linked, missing } = link(clone, wt, target?.links ?? DEFAULT_LINKS);
   exclude(wt, linked);
@@ -196,9 +200,28 @@ export function cloneOf(worktree) {
   return common ? path.dirname(common) : null;
 }
 
+// Work in a worktree that no remote has: commits on no remote-tracking ref (unless the head is one the forge had, in
+// `pushed`), or changes to tracked files. Untracked files (the linked node_modules, a session's notes) don't count.
+export function unsavedWork(wt, pushed = []) {
+  const reasons = [];
+  const changed = tryRun(wt, ['status', '--porcelain', '--untracked-files=no']);
+  if (changed === null) return ['git can not read it'];
+  if (changed) reasons.push(`${changed.split('\n').length} tracked file(s) changed and not committed`);
+  const head = tryRun(wt, ['rev-parse', 'HEAD']);
+  const unpushed = (tryRun(wt, ['rev-list', 'HEAD', '--not', '--remotes']) ?? '').split('\n').filter(Boolean);
+  if (unpushed.length && !pushed.filter(Boolean).some((h) => head?.startsWith(String(h)))) reasons.push(`${unpushed.length} commit(s) on no remote branch`);
+  return reasons;
+}
+
 // Removes one worktree the way git does (`git worktree remove --force`), then prunes the clone's list. Never by moving
-// files: the folder and its `.git` link go together, or nothing goes. A linked `node_modules` is only unlinked.
-export function removeWorktree(clone, wt, { dryRun = false } = {}) {
+// files: the folder and its `.git` link go together, or nothing goes. A linked `node_modules` is only unlinked. A
+// worktree with work no remote has is kept, with what to do: `--force` is only for the untracked links.
+export function removeWorktree(clone, wt, { dryRun = false, pushed = [], branch = null } = {}) {
+  const work = unsavedWork(wt, pushed);
+  if (work.length) {
+    const push = branch ? `push it (\`git -C ${wt} push origin HEAD:refs/heads/${branch}\`) or ` : '';
+    return { path: wt, clone, removed: false, kept: work.join('; '), todo: `${push}copy what you need, then \`git -C ${clone} worktree remove --force ${wt}\`` };
+  }
   if (dryRun) return { path: wt, clone, removed: false, wouldRemove: true };
   try {
     run(clone, ['worktree', 'remove', '--force', wt]);

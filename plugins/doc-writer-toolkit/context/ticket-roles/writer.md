@@ -23,7 +23,6 @@ allowedTools:
   - Bash(git worktree list:*)
   - Bash(git add:*)
   - Bash(git commit:*)
-  - Bash(git push:*)
   - Bash(npx playwright:*)
 disallowedTools:
   - Bash(git checkout:*)

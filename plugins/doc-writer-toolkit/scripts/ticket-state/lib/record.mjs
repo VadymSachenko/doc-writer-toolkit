@@ -343,16 +343,19 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         if (!st.headCommit.startsWith(given)) throw new Refused('stale', `the branch head is ${st.headCommit.slice(0, 12)}, not ${String(given).slice(0, 12)}`, { head: st.headCommit });
         record.head = st.headCommit;
         pr.lastSeenHead = st.headCommit;
-        // The align stage: no UA image changed without its EN counterpart, checked in the PR's worktree at the head.
-        if (stage === 'align') {
+        if (stage === 'readyForMerge') {
+          const missing = CHAIN.filter((s) => pr.chain[s]?.status !== 'done');
+          if (missing.length) throw new Refused('chain', `the chain is not done: ${missing.join(', ')}`, { missing });
+        }
+        // The align stage and ready for merge (a hand commit after ready may change a UA image alone): no UA image
+        // changed without its EN counterpart, checked in the PR's worktree at the head.
+        if (stage === 'align' || stage === 'readyForMerge') {
           const pairs = await imagePairsAt(settings, pr, st.headCommit);
           if (pairs.error) throw new Refused('imagePairs', `the UA → EN image check can't run: ${pairs.error}`);
           if (pairs.missing?.length) throw new Refused('imagePairs', `UA images changed without their EN counterpart: ${pairs.message}`, { missing: pairs.missing });
           record.imagePairs = pairs.summary;
         }
         if (stage === 'readyForMerge') {
-          const missing = CHAIN.filter((s) => pr.chain[s]?.status !== 'done');
-          if (missing.length) throw new Refused('chain', `the chain is not done: ${missing.join(', ')}`, { missing });
           pr.readyForMerge.push({ head: st.headCommit, at });
           pr.stage = 'readyForMerge';
         }

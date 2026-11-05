@@ -26,20 +26,35 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const PLUGIN_ROOT = path.resolve(HERE, '../../..');
 const SCRIPT = path.join(PLUGIN_ROOT, 'scripts', 'ticket-state', 'ticket-state.mjs');
 export const ROLE_DIR = path.join(PLUGIN_ROOT, 'context', 'ticket-roles');
-// A git rule in both spellings: `Bash(git <sub>:*)` also as `git -C <dir> <sub>`, the form a session uses on a
-// worktree. A `:*` after a `*` in the middle of a rule never matches, so the twin is a pair: the command alone, and
-// with arguments.
-export function gitC(rule) {
+// A git allow rule in the `git -C <worktree>` spelling, for each worktree the runner made for the step: the literal
+// path, as a prefix rule (`Bash(git -C /x/wt status:*)`). Never a wildcard path: `Bash(git -C * status *)` would also
+// match `git -C <any folder> clean -fdx -e status`, any subcommand with an allowed word later in the command. A step
+// with no worktree gets no twin.
+export function gitCFor(rule, dirs) {
   const m = /^Bash\(git (?!-C )(.+):\*\)$/.exec(rule);
-  return m ? [`Bash(git -C * ${m[1]})`, `Bash(git -C * ${m[1]} *)`] : [];
+  return m ? dirs.map((d) => `Bash(git -C ${d} ${m[1]}:*)`) : [];
 }
-export const withGitC = (rules) => [...new Set(rules.flatMap((r) => [r, ...gitC(r)]))];
+export const withGitC = (rules, dirs = []) => [...new Set(rules.flatMap((r) => [r, ...gitCFor(r, dirs)]))];
+
+// The only push a session may run: its worktree's HEAD to its ticket branch, exactly as the brief writes it, in both
+// spellings (`cd` to the worktree, then the plain one). No role file allows `git push` otherwise, so a `+` refspec, a
+// force flag anywhere, a deletion (`--delete`, `-d`, `:<ref>`) or another branch is never allowed.
+export const pushRulesFor = (trees = []) => [...new Set(trees.flatMap((t) => [`Bash(git -C ${t.path} push origin HEAD:refs/heads/${t.branch})`, `Bash(git push origin HEAD:refs/heads/${t.branch})`]))];
 
 // Denied in every role, whatever its file says: a push that could drop someone else's commits (the owner pushes to the
-// same branches by hand), skip the hooks, or delete a branch, in both spellings. The rules match by prefix, so
-// `unattended.md` says the same in words for the spellings they miss.
-const PUSH_PLAIN = ['Bash(git push --force:*)', 'Bash(git push -f:*)', 'Bash(git push --force-with-lease:*)', 'Bash(git push --force-if-includes:*)', 'Bash(git push --no-verify:*)', 'Bash(git push --mirror:*)', 'Bash(git push --delete:*)', 'Bash(git push -d:*)'];
-export const PUSH_DENIED = withGitC(PUSH_PLAIN);
+// same branches by hand), skip the hooks, or delete a branch, in both spellings, plain and `git -C <any folder>`. A deny
+// rule may hold a `*` in the middle (a wider deny only denies more): the flag right after `push`, or anywhere after it,
+// and a `+` refspec (a forced update). A `:*` after a middle `*` never matches, so each is written as the command alone
+// and with arguments; a `:<ref>` deletion can't be written as a deny rule at all, and is kept out by allowing only the
+// brief's exact push (`pushRulesFor`).
+const FORCE_FLAGS = ['--force', '-f', '--force-with-lease', '--force-if-includes', '--no-verify', '--mirror', '--delete', '-d'];
+const PUSH_PLAIN = FORCE_FLAGS.map((f) => `Bash(git push ${f}:*)`);
+const pushDenied = (git) => [
+  ...FORCE_FLAGS.flatMap((f) => [`Bash(${git} push ${f})`, `Bash(${git} push ${f} *)`, `Bash(${git} push * ${f})`, `Bash(${git} push * ${f} *)`]),
+  `Bash(${git} push +*)`,
+  `Bash(${git} push * +*)`,
+];
+export const PUSH_DENIED = [...new Set([...PUSH_PLAIN, ...pushDenied('git'), ...pushDenied('git -C *')])];
 // Denied in every role too: the runner prepares the worktree (lib/worktree.mjs), so no session installs packages or
 // links files into it.
 export const SETUP_DENIED = ['Bash(npm ci:*)', 'Bash(npm install:*)', 'Bash(npm i:*)', 'Bash(ln:*)'];
@@ -128,7 +143,7 @@ export function briefFor(step, settings) {
 // What the brief says about the worktrees the runner made for the session.
 function worktreeLines(trees) {
   return [
-    'Worktrees (the runner made them; work only there, and never create, move or remove a worktree, or link a file into one):',
+    'Worktrees (the runner made them; work only there, and never create, move or remove a worktree, or link a file into one). Run git there as `git -C <the path exactly as below> <command>`, or `cd` to it and run plain `git <command>`: other spellings are denied.',
     ...trees.map((t) => `- ${t.repo} ${t.branch}: ${t.path}${t.linked?.length ? ` (linked from the clone: ${t.linked.join(', ')})` : ''}. It is detached at the branch's head; push with \`${t.push}\`.${t.notes?.length ? ` Note: ${t.notes.join('; ')}.` : ''}`),
   ].join('\n');
 }
@@ -136,8 +151,8 @@ function worktreeLines(trees) {
 export function commandFor(step, settings, { model, agentsPath, claude = 'claude', roleDir = ROLE_DIR }) {
   const role = settings.roles[step.role];
   const def = readRole(step.role, roleDir);
-  // Every git rule in both spellings, plain and `git -C <worktree>` (lib/worktree.mjs), so a session may use either.
-  const allowed = withGitC([...def.allowedTools, ...(role.allowedTools ?? [])]);
+  // Every git rule in both spellings, plain and `git -C <worktree>` for each worktree of the step (lib/worktree.mjs).
+  const allowed = [...withGitC([...def.allowedTools, ...(role.allowedTools ?? [])], (step.worktrees ?? []).map((t) => t.path)), ...pushRulesFor(step.worktrees)];
   const disallowed = [...new Set([...def.disallowedTools, ...(role.disallowedTools ?? []), ...PUSH_DENIED, ...SETUP_DENIED])];
   const dirs = [...new Set([...settings.targets.map((t) => (t.path ? path.resolve(settings.root, t.path) : null)), ...(step.worktrees ?? []).map((t) => t.path)].filter((d) => d && d !== settings.root))];
   const args = [
@@ -316,6 +331,8 @@ async function runScripted(step, ctx) {
       return;
     }
     case 'readyForMerge':
+      // Its record checks the UA → EN image pairs in the PR's worktree: made or brought up to date first.
+      for (const p of prsForStep({ ...step, stage: 'align' }, [ledger])) (io.ensureWorktree ?? ensureWorktree)(settings, p);
       for (const k of step.keys) await rec(k, { head: step.head });
       return;
     case 'planApproval':

@@ -934,16 +934,18 @@ test('E3: a 65-minute drop at noon on an awake Mac: one job alert, and the copy 
   assert.match(renderReport({ settings: t.w.settings, st: await t.w.status(), date: '2026-11-10', runLog: [], watched: [], proposal: null, ledgers: [] }), /copy: last run .*disarmed after an hour of failing at 2026-11-10T13:00:00.000Z, re-armed at 2026-11-10T13:05:00.000Z/);
 });
 
-test('E4: the network down 01:00-02:30 on a Mac awake overnight: the job alert waits for schedule.morning, and the copy runs from 02:30', async () => {
+test('E4: the network down 01:00-02:30 on a Mac awake overnight: the job alert is held, dropped when the copy re-arms at 02:30, and nothing sounds in the morning', async () => {
   const t = everyJob({ from: Date.parse('2026-11-10T20:00:00Z'), down: (at) => at >= Date.parse('2026-11-11T01:00:00Z') && at < Date.parse('2026-11-11T02:30:00Z') });
-  await t.checks(Date.parse('2026-11-10T20:00:00Z'), Date.parse('2026-11-11T07:00:00Z'));
+  await t.checks(Date.parse('2026-11-10T20:00:00Z'), Date.parse('2026-11-11T02:30:00Z'));
   assert.deepEqual(jobAlerts(t), [], 'nothing sounds at night');
-  assert.ok(t.state().alert, 'the alert is kept for the morning');
+  assert.ok(t.state().alert, 'disarmed at 02:00: the alert is held for the morning');
+  await t.checks(Date.parse('2026-11-11T02:30:00Z'), Date.parse('2026-11-11T07:00:00Z'));
   assert.deepEqual(t.runs.find(([at]) => at >= '2026-11-11T02:30'), ['2026-11-11T02:30:00.000Z', 0], 'the first check after the boards read');
   assert.equal(t.runs.filter(([at, code]) => at >= '2026-11-11T02:30' && at < '2026-11-11T07:00' && code === 0).length, 54);
+  assert.equal(t.state().alert, null, 're-armed at 02:30: the held alert is dropped');
   await t.checks(Date.parse('2026-11-11T07:00:00Z'), Date.parse('2026-11-11T09:00:00Z'));
-  assert.deepEqual(jobAlerts(t).map((m) => m.text), ['copy failed at each try from 01:00 (13 tries, last exit 1) and was disarmed at 02:00; re-armed at 02:30: board:5f00000000000000000d0001, board:5f00000000000000000d0002 read again. See /ticket-report.']);
-  assert.equal(t.state().alert, null);
+  assert.deepEqual(jobAlerts(t), [], 'the job runs again: no alert in the morning');
+  assert.match(t.state().rearmed.why, /read again/);
 });
 
 test('E6 and set retry job: a job that fails on its own (the network fine) stays disarmed until the morning; set retry job re-arms it', async () => {

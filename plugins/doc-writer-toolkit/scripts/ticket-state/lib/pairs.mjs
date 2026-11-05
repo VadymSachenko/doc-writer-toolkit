@@ -6,10 +6,12 @@ import { worktreePath } from './worktree.mjs';
 
 // The UA → EN image pair check of the align stage (`screenshot-locales pairs`), run by `record align` in the PR's
 // worktree at the head the stage names, so the target repo's own declarations at that head decide (the owner's clone
-// may be on another branch). Returns { missing, message, summary }, or { error } when it can't run.
+// may be on another branch). Returns { missing, message, summary }, or { error } when it can't run (no worktree too):
+// a check that can't run refuses, never passes.
 export async function imagePairsAt(settings, pr, head) {
   const wt = worktreePath(settings, pr);
-  if (!wt || !fs.existsSync(wt)) return { missing: [], summary: `not checked: no worktree at ${wt ?? `${pr.repo} (targets[].path)`}` };
+  // No worktree: the check can't run, so the stage can't pass (the runner makes the worktree before align and ready).
+  if (!wt || !fs.existsSync(wt)) return { missing: [], error: `no worktree of ${pr.repo} ${pr.branch} at ${wt ?? '(no targets[].path)'} to check in; the runner makes it before the next try` };
   const base = pr.base ?? 'main';
   let ref = base;
   try {

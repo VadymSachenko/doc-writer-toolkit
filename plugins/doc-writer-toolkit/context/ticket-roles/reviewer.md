@@ -19,7 +19,6 @@ allowedTools:
   - Bash(git worktree list:*)
   - Bash(git add:*)
   - Bash(git commit:*)
-  - Bash(git push:*)
 disallowedTools:
   - Bash(git checkout:*)
   - Bash(git switch:*)

@@ -270,15 +270,20 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
 
     // 6. Host jobs. A watch job whose board wasn't read in this check neither runs nor changes: it hasn't seen the list.
     // A disarmed job re-arms when the reads that failed with it read again, or by `set retry job <name>`; an alert held
-    // through the night goes out at the first check after `schedule.morning` (lib/rearm.mjs).
+    // through the night goes out at the first check after `schedule.morning` if the job is still disarmed (lib/rearm.mjs).
     const rearms = readRearm(settings.state).jobs;
     const heldAlerts = [];
     for (const job of settings.hostJobs) {
       const r = rearmJob(job, next.jobs[job.name] ?? {}, { sources: out.sources, rearmedAt: rearms[job.name], now: checkStart });
       if (r.state !== next.jobs[job.name] && (next.jobs[job.name] || r.rearmed)) next.jobs[job.name] = r.state;
       if (r.rearmed) say({ kind: 'job', job: job.name, outcome: 'rearmed', note: r.rearmed.why });
-      if (afterMorning && next.jobs[job.name]?.alert) {
-        heldAlerts.push({ name: job.name, ...next.jobs[job.name].alert, ...(next.jobs[job.name].rearmed && Date.parse(next.jobs[job.name].rearmed.at) >= Date.parse(next.jobs[job.name].alert.at) ? { rearmed: next.jobs[job.name].rearmed } : {}) });
+      // A job that re-armed before the morning (the reads came back, or the owner's `set retry job`) needs no alert:
+      // the held one is dropped unsent; the night stays in the job's log.
+      const held = next.jobs[job.name]?.alert;
+      const back = held && next.jobs[job.name].rearmed && Date.parse(next.jobs[job.name].rearmed.at) >= Date.parse(held.at);
+      if (back) next.jobs[job.name] = { ...next.jobs[job.name], alert: null };
+      else if (afterMorning && held) {
+        heldAlerts.push({ name: job.name, ...held });
         next.jobs[job.name] = { ...next.jobs[job.name], alert: null };
       }
     }

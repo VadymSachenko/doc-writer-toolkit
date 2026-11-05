@@ -32,13 +32,13 @@ export function notificationsOf({ morning, run, jobs = [], errors = [], capped =
     }
   }
   for (const j of jobs) {
-    // An alert held through the night (`alertHeld`) goes out at the first check after `schedule.morning`, saying what
-    // happened since: re-armed when the reads came back, or still disarmed.
+    // An alert held through the night (`alertHeld`) goes out at the first check after `schedule.morning`, only when
+    // the job is still disarmed then (one that re-armed before the morning drops its alert, lib/watch.mjs).
     if (j.disarmed && !j.alertHeld) out.push({ key: `job:${today}:${j.name}`, urgent: true, title: 'Ticket flow: a host job keeps failing', text: `${j.name} failed at each try for an hour (${j.failures} tries, last exit ${j.exit}); disarmed until ${j.downWith?.length ? `${j.downWith.length === 1 ? 'a read that failed with it reads' : `the ${j.downWith.length} reads that failed with it read`} again, ${j.until} at the latest` : j.until}. See /ticket-report.` });
     if (j.since && j.at && !j.disarmed) {
       const hhmm = (t) => new Date(t).toTimeString().slice(0, 5);
       const until = Number.isFinite(Date.parse(j.until)) ? `the morning run (${hhmm(j.until)})` : j.until;
-      out.push({ key: `job:${today}:${j.name}`, urgent: true, title: 'Ticket flow: a host job kept failing at night', text: `${j.name} failed at each try from ${hhmm(j.since)} (${j.failures} tries, last exit ${j.exit}) and was disarmed at ${hhmm(j.at)}; ${j.rearmed ? `re-armed at ${hhmm(j.rearmed.at)}: ${j.rearmed.why}` : `disarmed until ${until}`}. See /ticket-report.` });
+      out.push({ key: `job:${today}:${j.name}`, urgent: true, title: 'Ticket flow: a host job kept failing at night', text: `${j.name} failed at each try from ${hhmm(j.since)} (${j.failures} tries, last exit ${j.exit}) and was disarmed at ${hhmm(j.at)}; disarmed until ${until}. See /ticket-report.` });
     }
     if (j.held) out.push(guardNote(j.held, `The host job ${j.name}`, today));
   }

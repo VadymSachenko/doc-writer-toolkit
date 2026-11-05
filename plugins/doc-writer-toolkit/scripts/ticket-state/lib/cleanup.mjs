@@ -134,8 +134,10 @@ export function cleanupTicket({ settings, ledger, prState, dryRun = false, trash
   const out = { mode, dryRun, removed: [], kept: [], freedBytes: 0, blocked: null, worktrees: [] };
   const files = ledger.files ?? [];
   // The ticket's worktrees: one per PR branch, made by the runner.
+  // The heads the forge had for the ticket's PRs: a worktree at one of them holds nothing unpushed.
+  const pushed = (ledger.prs ?? []).flatMap((p) => [p.lastSeenHead, ...(p.readyForMerge ?? []).map((r) => r.head), ...(p.pipelineCommits ?? [])]).filter(Boolean);
   const trees = (ledger.prs ?? [])
-    .map((p) => ({ path: worktreePath(settings, p), clone: clonePath(settings, targetOf(settings, p)) }))
+    .map((p) => ({ path: worktreePath(settings, p), clone: clonePath(settings, targetOf(settings, p)), branch: p.branch }))
     .filter((t) => t.path && t.clone && listWorktrees(t.clone).some((x) => canon(x.path) === canon(t.path)));
   if (!files.length && !trees.length) return out;
   const open = (ledger.prs ?? []).filter((p) => !p.number || prState(p) !== 'merged');
@@ -146,7 +148,7 @@ export function cleanupTicket({ settings, ledger, prState, dryRun = false, trash
     return out;
   }
   // `git worktree remove --force`, then prune: the worktree and its `.git` link go together.
-  for (const t of trees) out.worktrees.push(removeWorktree(t.clone, t.path, { dryRun }));
+  for (const t of trees) out.worktrees.push(removeWorktree(t.clone, t.path, { dryRun, pushed, branch: t.branch }));
   const roots = [settings.root, settings.state].map((r) => path.resolve(r));
   const keeps = (keep ?? []).map(globRe);
   const kept = (abs) => keeps.some((re) => re.test(path.relative(settings.root, abs).split(path.sep).join('/')));
@@ -190,7 +192,7 @@ export function cleanupTicket({ settings, ledger, prState, dryRun = false, trash
         const clone = c.kind === 'worktree' ? cloneOf(c.path) : null;
         if (clone) {
           const bytes = sizeOf(c.path);
-          const res = removeWorktree(clone, c.path, { dryRun });
+          const res = removeWorktree(clone, c.path, { dryRun, pushed });
           out.worktrees.push(res);
           skip.add(c.path);
           if (res.removed || res.wouldRemove) {
@@ -198,7 +200,7 @@ export function cleanupTicket({ settings, ledger, prState, dryRun = false, trash
             out.freedBytes += bytes;
             continue;
           }
-          out.kept.push({ path: r, reason: `a worktree git would not remove (${res.error}): never split` });
+          out.kept.push({ path: r, reason: res.kept ? `a worktree with work no remote has (${res.kept}): kept whole; ${res.todo}` : `a worktree git would not remove (${res.error}): never split` });
         } else out.kept.push({ path: r, reason: c.kind === 'repo' ? 'a repository of its own: kept whole, never split' : 'a worktree whose clone is not found: kept whole, never split' });
         skip.add(c.path);
         whole.add(c.path);

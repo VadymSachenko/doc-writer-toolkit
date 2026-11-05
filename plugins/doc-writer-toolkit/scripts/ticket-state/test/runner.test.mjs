@@ -203,34 +203,66 @@ test('the roles: every role file has its frontmatter and allows no compound shel
   }
 });
 
-test('AC-2: every role allows its stage\'s git commands in both spellings, plain and git -C <worktree>, and carries every push and setup denial', () => {
+// The CLI's Bash rule forms, as the permission probes showed them: `x:*` a prefix, `*` elsewhere any text (a rule that
+// ends in `:*` after a middle `*` never matches), else the exact command.
+function matches(rule, cmd) {
+  const body = /^Bash\((.*)\)$/.exec(rule)?.[1];
+  if (body === undefined) return false;
+  const prefix = /^([^*]*):\*$/.exec(body);
+  if (prefix) return cmd === prefix[1] || cmd.startsWith(`${prefix[1]} `);
+  if (/\*.*:\*$/.test(body)) return false;
+  return new RegExp(`^${body.split('*').map((x) => x.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`).test(cmd);
+}
+const verdict = (cmd, allowed, denied) => (denied.some((r) => matches(r, cmd)) ? 'denied' : allowed.some((r) => matches(r, cmd)) ? 'allowed' : 'not allowed');
+
+test('AC-2: every role allows its stage\'s git commands in both spellings, git -C only on its own worktree, and the brief\'s push only', () => {
   const { w } = busyWorld();
-  // What each role's stages run on the ticket worktree or the target repos.
+  const WT = '/work/.worktrees/guide-docs/ticket-71';
+  const trees = [{ repo: 'guide-docs', branch: 'ticket-71', path: WT }];
+  // What each role's stages run on the ticket worktree (triage reads the target repos and has no worktree).
   const NEEDS = {
     triage: ['log', 'show', 'ls-tree', 'grep'],
-    writer: ['status', 'diff', 'log', 'show', 'fetch', 'worktree list', 'add', 'commit', 'push'],
-    reviewer: ['status', 'diff', 'log', 'show', 'fetch', 'worktree list', 'add', 'commit', 'push'],
-    translator: ['status', 'diff', 'log', 'show', 'fetch', 'worktree list', 'add', 'commit', 'push'],
+    writer: ['status', 'diff', 'log', 'show', 'fetch', 'worktree list', 'add', 'commit'],
+    reviewer: ['status', 'diff', 'log', 'show', 'fetch', 'worktree list', 'add', 'commit'],
+    translator: ['status', 'diff', 'log', 'show', 'fetch', 'worktree list', 'add', 'commit'],
   };
-  // The denials as they stood, each still carried, plus their git -C twins and the setup the runner now does.
   const PLAIN = ['Bash(git push --force:*)', 'Bash(git push -f:*)', 'Bash(git push --force-with-lease:*)', 'Bash(git push --force-if-includes:*)', 'Bash(git push --no-verify:*)', 'Bash(git push --mirror:*)', 'Bash(git push --delete:*)', 'Bash(git push -d:*)'];
   for (const [role, subs] of Object.entries(NEEDS)) {
-    const cmd = commandFor({ stage: role === 'triage' ? 'triage' : 'write', role, keys: ['502'], group: '502' }, w.settings, { agentsPath: '/x/agents.json' });
+    const tree = role === 'triage' ? [] : trees;
+    const cmd = commandFor({ stage: role === 'triage' ? 'triage' : 'write', role, keys: ['502'], group: '502', worktrees: tree }, w.settings, { agentsPath: '/x/agents.json' });
     const allowed = cmd.args.slice(cmd.args.indexOf('--allowedTools') + 1, cmd.args.indexOf('--disallowedTools'));
-    const denied = cmd.args.slice(cmd.args.indexOf('--disallowedTools') + 1).filter((a, i, all) => !a.startsWith('--') && !all.slice(0, i).some((x) => x.startsWith('--')));
+    const after = cmd.args.slice(cmd.args.indexOf('--disallowedTools') + 1);
+    const denied = after.slice(0, after.findIndex((a) => a.startsWith('--')) >>> 0);
     for (const sub of subs) {
-      for (const rule of [`Bash(git ${sub}:*)`, `Bash(git -C * ${sub})`, `Bash(git -C * ${sub} *)`]) assert.ok(allowed.includes(rule), `${role} allows ${rule}`);
+      assert.equal(verdict(`git ${sub} -q`, allowed, denied), 'allowed', `${role}: git ${sub}`);
+      assert.equal(verdict(`git -C ${WT} ${sub} -q`, allowed, denied) === 'allowed', tree.length > 0, `${role}: git -C <worktree> ${sub}`);
     }
-    for (const rule of PLAIN) {
-      assert.ok(denied.includes(rule), `${role} denies ${rule}`);
-      const flagged = /^Bash\(git push (.+):\*\)$/.exec(rule)[1];
-      for (const twin of [`Bash(git -C * push ${flagged})`, `Bash(git -C * push ${flagged} *)`]) assert.ok(denied.includes(twin), `${role} denies ${twin}`);
-    }
-    for (const rule of ['Bash(npm ci:*)', 'Bash(npm install:*)', 'Bash(ln:*)']) assert.ok(denied.includes(rule), `${role} denies ${rule}`);
-    // A session never makes or removes a worktree itself.
-    assert.ok(!allowed.some((r) => /worktree (add|remove|move|prune)|Bash\(git worktree:\*\)|Bash\(git -C \* worktree\)/.test(r)), role);
-    // Every git -C rule uses the forms the CLI matches: a `:*` after a mid-rule `*` never does.
-    assert.ok(![...allowed, ...denied].some((r) => /^Bash\(git -C \*.*:\*\)$/.test(r)), role);
+    // No wildcard folder in an allow rule, and no general push: only the brief's, to the ticket branch.
+    assert.ok(!allowed.some((r) => r.includes('git -C *') || r === 'Bash(git push:*)'), role);
+    for (const push of [`git -C ${WT} push origin HEAD:refs/heads/ticket-71`, 'git push origin HEAD:refs/heads/ticket-71']) assert.equal(verdict(push, allowed, denied) === 'allowed', tree.length > 0, `${role}: ${push}`);
+    // The reviewer's probes: another subcommand with an allowed word later in the command, another folder, a force
+    // push or a deletion in any place, another branch.
+    for (const bad of [
+      `git -C ${WT} tag -d probe-tag status`,
+      `git -C ${WT} clean -fdx -e status`,
+      `git -C ${WT} reset --hard HEAD~1 commit`,
+      'git -C /work/another-clone status',
+      `git -C ${WT} push origin +HEAD:refs/heads/ticket-71`,
+      `git -C ${WT} push origin --force HEAD:refs/heads/ticket-71`,
+      `git -C ${WT} push origin -f HEAD:refs/heads/ticket-71`,
+      `git -C ${WT} push origin --force-with-lease HEAD:refs/heads/ticket-71`,
+      `git -C ${WT} push origin --delete ticket-71`,
+      `git -C ${WT} push origin :refs/heads/ticket-71`,
+      `git -C ${WT} push origin HEAD:refs/heads/main`,
+      'git push origin +HEAD:refs/heads/ticket-71',
+      'git push origin -d ticket-71',
+      'git push --force origin HEAD:refs/heads/ticket-71',
+    ]) assert.notEqual(verdict(bad, allowed, denied), 'allowed', `${role}: ${bad}`);
+    // Force pushes and deletions by flag or `+` are denied outright, in any folder, wherever the flag stands.
+    for (const forced of [`git -C /any push origin +HEAD:refs/heads/x`, 'git -C /any push origin --force x', 'git push origin -f x', 'git push -d origin x', 'git push origin x --delete']) assert.equal(verdict(forced, allowed, denied), 'denied', `${role}: ${forced}`);
+    for (const rule of [...PLAIN, 'Bash(npm ci:*)', 'Bash(npm install:*)', 'Bash(ln:*)']) assert.ok(denied.includes(rule), `${role} denies ${rule}`);
+    assert.ok(!allowed.some((r) => /worktree (add|remove|move|prune)|Bash\(git worktree:\*\)/.test(r)), role);
+    assert.ok(![...allowed, ...denied].some((r) => /^Bash\(.*\*.*:\*\)$/.test(r) && !/^Bash\([^*]*:\*\)$/.test(r)), `${role}: no rule the CLI never matches`);
   }
   assert.ok(PLAIN.every((r) => PUSH_DENIED.includes(r)), 'PUSH_DENIED keeps its rules');
 });

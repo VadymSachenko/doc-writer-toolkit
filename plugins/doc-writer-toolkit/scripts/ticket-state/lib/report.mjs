@@ -133,7 +133,8 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
     if (c.blocked) return [`${l.key}: ${c.blocked}`];
     const trees = (c.worktrees ?? []).filter((t) => t.removed);
     const stuck = (c.worktrees ?? []).filter((t) => !t.removed && t.error);
-    return [`${l.key}: ${c.removed.length} path(s), ${mb(c.freedBytes)} ${c.mode === 'delete' ? 'deleted' : 'moved to the Trash'}${c.removed.length ? ` (${c.removed.map((r) => `\`${r.path}\``).join(', ')})` : ''}${trees.length ? `; ${trees.length} worktree(s) removed with git` : ''}${stuck.length ? `; git would not remove ${stuck.map((t) => `\`${t.path}\` (${t.error})`).join(', ')}` : ''}${c.kept.length ? `; kept ${c.kept.map((k) => `\`${k.path}\` (${k.reason})`).join(', ')}` : ''}`];
+    const held = (c.worktrees ?? []).filter((t) => !t.removed && t.kept);
+    return [`${l.key}: ${c.removed.length} path(s), ${mb(c.freedBytes)} ${c.mode === 'delete' ? 'deleted' : 'moved to the Trash'}${c.removed.length ? ` (${c.removed.map((r) => `\`${r.path}\``).join(', ')})` : ''}${trees.length ? `; ${trees.length} worktree(s) removed with git` : ''}${stuck.length ? `; git would not remove ${stuck.map((t) => `\`${t.path}\` (${t.error})`).join(', ')}` : ''}${held.length ? `; worktree(s) kept, with work no remote has: ${held.map((t) => `\`${t.path}\` (${t.kept}): ${t.todo}`).join('; ')}` : ''}${c.kept.length ? `; kept ${c.kept.map((k) => `\`${k.path}\` (${k.reason})`).join(', ')}` : ''}`];
   });
   const unmerged = st.tickets.filter((t) => t.state === 'outside' && (t.notes ?? []).some((n) => /closed unmerged/.test(n)) && (byKey.get(t.key)?.files ?? []).length);
   for (const t of unmerged) removedLines.push(`${t.key}: a PR was closed unmerged, so its ${byKey.get(t.key).files.length} work file(s) stay (${mb(byKey.get(t.key).files.reduce((s, f) => s + (f.bytes ?? 0), 0))})`);
