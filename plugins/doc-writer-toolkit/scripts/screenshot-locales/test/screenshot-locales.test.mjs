@@ -570,6 +570,20 @@ test('pairs: a new UA image needs its EN file; an EN link to the UA image counts
   assert.equal(r.code, 0, JSON.stringify(r.out));
 });
 
+test('pairs: a UA image with a Cyrillic name (which git quotes in line output) is checked like any other', async () => {
+  const h = await branchHost();
+  const UA = 'portal/transactions/.assets/схема оплати.png';
+  const EN = `${PORTAL_EN}/transactions/.assets/схема оплати.png`;
+  await h.commit({ [UA]: 'uk new' });
+  let r = await cli(h.root, 'pairs', '--base', 'main');
+  assert.equal(r.code, 1, JSON.stringify(r.out));
+  assert.deepEqual(r.out.missing, [{ ua: UA, en: EN, change: 'added' }]);
+  await h.commit({ [EN]: 'en new' });
+  r = await cli(h.root, 'pairs', '--base', 'main');
+  assert.equal(r.code, 0, JSON.stringify(r.out));
+  assert.deepEqual([r.out.checked, r.out.missing], [1, []]);
+});
+
 test('pairs: a host whose screenshot locales leave out en, or that declares none, has nothing to check', async () => {
   let h = await branchHost([]);
   await h.commit({ [UK_IMG]: 'uk v2' });

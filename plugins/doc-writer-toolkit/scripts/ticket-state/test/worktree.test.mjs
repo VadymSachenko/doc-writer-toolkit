@@ -386,6 +386,40 @@ test('AC-5: a file on the cleanup.keep list keeps the worktree too; the build ou
   assert.match(gone.l.stages.close.result.cleanup.kept.find((k) => k.path.endsWith('build')).reason, /^inside the worktree .*, removed with it/);
 });
 
+// Git quotes a non-ASCII path in line output (`".sources/\320\262…"`), so these are read with `-z`.
+test('AC-5: a top-level .sources/ file with a Cyrillic name keeps the worktree, and survives', async () => {
+  const { wt, tree } = await closeWith((wt) => put(wt, { '.sources/відео.mp4': 'video' }));
+  assert.equal(fs.readFileSync(path.join(wt, '.sources/відео.mp4'), 'utf8'), 'video');
+  assert.equal(tree.removed, false);
+  assert.match(tree.kept, /1 ignored work file\(s\) \(\.sources\/відео\.mp4\)/);
+});
+
+test('AC-5: a Cyrillic file a cleanup.keep glob matches keeps the worktree, and survives', async () => {
+  const { wt, tree } = await closeWith((wt, fx, w) => {
+    w.settings.cleanup.keep = [...(w.settings.cleanup.keep ?? []), '**/*.local.md'];
+    put(wt, { 'docs/x/нотатки.local.md': 'mine\n' });
+  });
+  assert.equal(fs.readFileSync(path.join(wt, 'docs/x/нотатки.local.md'), 'utf8'), 'mine\n');
+  assert.equal(tree.removed, false);
+  assert.match(tree.kept, /1 ignored work file\(s\) \(docs\/x\/нотатки\.local\.md\)/);
+});
+
+test('listWorktrees reads a worktree path with Cyrillic letters and a double quote as it is', () => {
+  const root = path.join(tmp('wt-names-'), 'Проєкти "доки"');
+  const clone = gitRepo(path.join(root, 'repo'));
+  clone.commit({ 'a.md': 'a\n' }, 'base');
+  const wt = path.join(root, '.worktrees', 'гілка "1"');
+  clone.g('worktree', 'add', '-q', '--detach', wt, 'HEAD');
+  clone.g('worktree', 'lock', wt);
+  const list = listWorktrees(clone.dir);
+  assert.deepEqual(list.map((x) => [canon(x.path), x.locked]), [[canon(clone.dir), false], [canon(wt), true]]);
+});
+
+test('AC-4: a hand commit that changes an image with a Cyrillic name after ready for merge runs the pack again', async () => {
+  const { out } = await afterReady({ 'docs/x/.assets/схема.png': 'uk v2', [`${EN}/x/.assets/схема.png`]: 'en v2' });
+  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['resync', 'done'], ['visualPack', 'done'], ['readyForMerge', 'done']]);
+});
+
 test('AC-5: a worktree git refuses to remove (locked) is kept and reported with the same todo', async () => {
   const { fx, wt, tree, report } = await closeWith((wt, f) => f.clone.g('worktree', 'lock', wt));
   assert.equal(fs.existsSync(wt), true);

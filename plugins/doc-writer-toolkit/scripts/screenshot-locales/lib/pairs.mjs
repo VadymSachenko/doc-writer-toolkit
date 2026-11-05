@@ -33,12 +33,10 @@ export function checkPairs(cfg, { base, head = 'HEAD' } = {}) {
     return { ok: true, applies: false, why: cfg.multilocale ? "'en' is not a screenshot locale: no EN image is required" : "no 'Screenshot locales:' declared: no EN image is required" };
   }
   if (cfg.problems.length) throw new CliError(`The screenshot locales can't be resolved: ${cfg.problems.map((p) => p.message).join(' ')}`, { code: 2, data: { problems: cfg.problems } });
-  const out = git(cfg.root, ['diff', '--name-status', '--no-renames', `${base}...${head}`]);
+  // `-z`: status and path each end in NUL, so a non-ASCII name is never quoted (and so never missed).
+  const out = git(cfg.root, ['diff', '-z', '--name-status', '--no-renames', `${base}...${head}`]).split('\0');
   const changed = new Map();
-  for (const line of out.split('\n').filter(Boolean)) {
-    const [status, file] = line.split('\t');
-    changed.set(file, status[0]);
-  }
+  for (let i = 0; i + 1 < out.length; i += 2) if (out[i]) changed.set(out[i + 1], out[i][0]);
   // Each pair's default-locale root and EN root, the longest UA root first, so a nested root wins.
   const pairs = cfg.pairs
     .map((p) => ({ id: p.id, ua: cfg.roots[p.id]?.[cfg.defaultLocale], en: cfg.roots[p.id]?.en }))

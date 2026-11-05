@@ -151,9 +151,10 @@ export function makeGit(settings) {
       const cwd = repoPath(target);
       if (!cwd || !hasCommit(cwd, from) || !hasCommit(cwd, to)) return null;
       if (from === to) return [];
-      const out = gitOut(cwd, ['diff', '--name-only', '--no-renames', from, to]);
+      // `-z`: a non-ASCII image name is never quoted, so never missed.
+      const out = gitOut(cwd, ['diff', '-z', '--name-only', '--no-renames', from, to]);
       if (out === null) return null;
-      return out.split('\n').filter((f) => IMAGE.test(f) && !f.split('/').includes('.sources'));
+      return out.split('\0').filter((f) => f && IMAGE.test(f) && !f.split('/').includes('.sources'));
     },
     // The UA page paths of a target at its base (relative to the UA root, without the extension), for the text check.
     pagesOf(target) {

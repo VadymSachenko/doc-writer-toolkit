@@ -22,6 +22,16 @@ const tryRun = (cwd, args) => {
     return null;
   }
 };
+// Paths git prints: `-z` output, split on NUL. A path with a non-ASCII byte, a quote, a backslash or a control
+// character is quoted in line output (`core.quotePath` covers only the first), so a path matched by name is never read
+// from it. Null when git fails.
+const tryPaths = (cwd, args) => {
+  try {
+    return execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 }).split('\0').filter(Boolean);
+  } catch {
+    return null;
+  }
+};
 const gitError = (e) => String(e?.stderr ?? e?.message ?? e).trim().split('\n').filter(Boolean).at(-1) ?? 'git failed';
 
 export const targetOf = (settings, pr) => settings.targets.find((t) => t.id === pr.targets?.[0]) ?? settings.targets.find((t) => t.repo === pr.repo) ?? null;
@@ -36,11 +46,16 @@ export function worktreePath(settings, pr) {
 
 // The worktrees a clone lists (`git worktree list --porcelain`): absolute paths, with `prunable` when the folder is gone.
 export function listWorktrees(clone) {
-  const out = tryRun(clone, ['worktree', 'list', '--porcelain']);
-  if (out === null) return [];
+  // `-z`: each attribute ends in NUL, each worktree in one more, so a path is never quoted or split.
+  let out;
+  try {
+    out = execFileSync('git', ['-C', clone, 'worktree', 'list', '--porcelain', '-z'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch {
+    return [];
+  }
   const list = [];
-  for (const block of out.split('\n\n')) {
-    const lines = block.split('\n');
+  for (const block of out.split('\0\0')) {
+    const lines = block.split('\0');
     const at = lines.find((l) => l.startsWith('worktree '));
     if (!at) continue;
     list.push({ path: at.slice('worktree '.length), prunable: lines.some((l) => l.startsWith('prunable')), locked: lines.some((l) => l === 'locked' || l.startsWith('locked ')) });
@@ -217,9 +232,9 @@ export function unsavedWork(wt, pushed = [], { keep = [] } = {}) {
   const untracked = lines.filter((l) => l.startsWith('??'));
   if (changed.length) reasons.push(`${changed.length} tracked file(s) changed and not committed`);
   if (untracked.length) reasons.push(`${untracked.length} untracked file(s) never added (${untracked.slice(0, 3).map((l) => l.slice(3)).join(', ')}${untracked.length > 3 ? ', …' : ''})`);
-  const ignored = tryRun(wt, ['ls-files', '--others', '--ignored', '--exclude-standard']);
+  const ignored = tryPaths(wt, ['ls-files', '-z', '--others', '--ignored', '--exclude-standard']);
   if (ignored === null) return ['git can not read it'];
-  const work = ignored.split('\n').filter((rel) => rel && isWorkFile(rel, keep));
+  const work = ignored.filter((rel) => isWorkFile(rel, keep));
   if (work.length) reasons.push(`${work.length} ignored work file(s) (${work.slice(0, 3).join(', ')}${work.length > 3 ? ', …' : ''})`);
   const head = tryRun(wt, ['rev-parse', 'HEAD']);
   const unpushed = (tryRun(wt, ['rev-list', 'HEAD', '--not', '--remotes']) ?? '').split('\n').filter(Boolean);
