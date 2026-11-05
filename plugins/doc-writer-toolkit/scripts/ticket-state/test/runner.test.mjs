@@ -303,6 +303,27 @@ test('a start that fails before the card moves holds no slot: the run starts the
   }
 });
 
+test('a manual run gives a waiting failed start its one more try with the failures so far: a second failure holds it, and a manual run then starts nothing', async () => {
+  const { w } = twoReady();
+  const sessions = [];
+  const spawnClaude = async (cmd) => {
+    const [stage, key] = keyOfBrief(cmd);
+    sessions.push(`${stage} ${key} ${originOf(cmd)}`);
+    return { code: 1, stdout: '', stderr: 'the session died' };
+  };
+  const run = (options) => runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: () => usageAt(5), now: () => NOW, spawnClaude }, options });
+  await run({ trigger: 'manual', named: ['501'] });
+  assert.deepEqual([sessions, (await w.one('501')).failed?.sessions, Boolean((await w.one('501')).held)], [['start 501 manual'], 1, false], 'the first failure waits');
+  await run({ trigger: 'manual', named: ['501'] });
+  assert.deepEqual(sessions, ['start 501 manual', 'start 501 manual'], 'a manual run gives the waiting start its one more try');
+  assert.deepEqual(read(w, '501').runs.map((r) => [r.stage, r.outcome, r.failures]), [['start', 'failed', 1], ['start', 'failed', 2]]);
+  const t = await w.one('501');
+  assert.deepEqual([t.state, t.held, t.gate.who], ['ready', true, 'owner']);
+  const third = await run({ trigger: 'manual', named: ['501'] });
+  assert.equal(sessions.length, 2, 'held: a manual run starts nothing');
+  assert.ok(third.notes.some((n) => /^group 501: its start is held for the owner \(501\); `ticket-state set retry <key>` gives it one more try$/.test(n)), third.notes.join('\n'));
+});
+
 test('the runner records a start before its session: one that moves the card and dies still counts, so the open limit holds that day and the next', async () => {
   const { w, cards } = twoReady();
   let day = 0;
