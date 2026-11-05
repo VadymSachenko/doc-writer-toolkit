@@ -791,6 +791,22 @@ test('a watch job that fails at two checks runs again at the next one, not only 
   assert.deepEqual([s.armed, s.failingSince, s.failures, s.lastRun], [false, null, 0, '2026-11-10T04:10:00.000Z']);
 });
 
+test('a watch job that fails at each try for an hour is disarmed until its next new card, with one urgent notification', async () => {
+  const { w, t0, arrive } = releaseWorld({ hostJobs: [{ name: 'notes', watch: { board: WATCH, list: 'Shipping' }, quietHours: 3, run: { script: 'scripts/notes.mjs' } }] });
+  const { check, calls } = checker(w, { spawnJob: () => ({ code: 1, stdout: '', stderr: 'HTTP 502' }) });
+  arrive(t0);
+  await check(t0 + 5 * MIN);
+  for (let at = t0 + 3 * HOUR; at <= t0 + 5 * HOUR; at += 5 * MIN) await check(at);
+  assert.equal(calls.jobs.length, 13, 'at each check from 04:00 to 05:00, then not again');
+  assert.deepEqual(calls.notes.map((m) => [m.urgent, m.text]), [[true, 'notes failed at each try for an hour (13 tries, last exit 1); disarmed until its next new card. See /ticket-report.']]);
+  const s = readFeed(w.settings.state).jobs.notes;
+  assert.deepEqual([s.armed, s.heldUntil, s.failingSince, s.lastFailure], [false, null, null, '2026-11-10T05:00:00.000Z']);
+  // A new card arms it again.
+  arrive(t0 + 5 * HOUR + 10 * MIN);
+  await check(t0 + 5 * HOUR + 15 * MIN);
+  assert.equal(readFeed(w.settings.state).jobs.notes.armed, true);
+});
+
 test('a sleep is not failing time for a host job: failing as the Mac went to sleep and at the first check after the wake, then it runs', async () => {
   const evening = Date.parse('2026-11-10T17:30:00Z');
   const wake = Date.parse('2026-11-11T08:00:00Z');
