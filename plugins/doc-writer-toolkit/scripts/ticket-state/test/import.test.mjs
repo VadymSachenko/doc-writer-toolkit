@@ -7,6 +7,7 @@ import { ledger, read, snapshot, world } from './helpers.mjs';
 import { holdsEveryLine, parseMarkdown, removeClosedMarkdown, runImport } from '../lib/import.mjs';
 import { writeLedger } from '../lib/ledger.mjs';
 import { runDaily } from '../lib/runner.mjs';
+import { runHandover } from '../lib/handover.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
 import { makeClients } from '../lib/world.mjs';
 import { main as stateMain } from '../ticket-state.mjs';
@@ -250,6 +251,35 @@ test('the morning run repeats the removal: a dry run lists it, a live run moves 
   assert.deepEqual(mdIn(w), ['703.md']);
   const report = fs.readFileSync(path.join(w.root, live.reportFile), 'utf8');
   assert.match(report, /702: the Markdown ledger `702\.md` \(closed; its JSON holds every line\) moved to the Trash/);
+  // The closed imported tickets are not listed as in the owner's hands; the open one is.
+  const hands = report.slice(report.indexOf('## Mismatches and tickets in your hands'), report.indexOf('## ', report.indexOf('## Mismatches') + 3));
+  assert.doesNotMatch(hands, /\b70[12]\b/);
+  // The ticket that closed since the import has its close recorded, as the import does for one closed already.
+  const b = read(w, '702');
+  assert.deepEqual([b.stages.close.status, b.stages.close.note, b.mode, b.legacy.seq === b.seq], ['done', 'closed after the import', 'hand', true]);
+  assert.equal((await w.one('702')).state, 'closed');
+});
+
+test('the morning run: a closed ticket whose Markdown changed after the import is kept, and the report says so', async () => {
+  const { w, cards, trash } = legacyWorld();
+  await runImport({ settings: w.settings, clients: w.clients(), sizes: SIZES, now: NOW, trashDir: trash });
+  fs.appendFileSync(path.join(w.settings.state, '702.md'), 'note: a line after the import\n');
+  cards[702].placeId = card({ status: 'done' }).placeId;
+  w.forge.prs.find((p) => p.number === 72).state = 'merged';
+  const io = { readUsage: () => usageAt(5), now: () => NOW, trashDir: trash, spawnClaude: () => assert.fail('no session'), git: quietGit };
+  const live = await runDaily({ settings: w.settings, clients: w.clients(), io, options: { morning: true, trigger: 'manual' } });
+  assert.deepEqual(live.legacyMarkdown.removed, []);
+  assert.ok(mdIn(w).includes('702.md'));
+  const report = fs.readFileSync(path.join(w.root, live.reportFile), 'utf8');
+  const failures = report.slice(report.indexOf('## Failures and guard stops'));
+  assert.match(failures, /702: 702\.md kept: closed, but the Markdown has 16 lines, the JSON holds 15 \(changed since the import\): run the import again/);
+});
+
+test('imported closed tickets have no runs, so they give no measured estimate', async () => {
+  const { w, trash } = legacyWorld();
+  await runImport({ settings: w.settings, clients: w.clients(), sizes: SIZES, now: NOW, trashDir: trash });
+  const st = await w.status({ usage: usageAt(5) });
+  assert.deepEqual([st.estimates.edit.source, st.estimates.newPage.source], ['settings', 'settings']);
 });
 
 test('the import through the CLI: --size pairs, --dry-run, and a size that is not one stops with exit 2', async () => {
@@ -294,4 +324,17 @@ test('import: an archived card with its PR merged is closed; a ready card past t
   const out = await runImport({ settings: w.settings, clients: w.clients(), now: NOW, trashDir: tmp() });
   assert.deepEqual(out.imported.map((x) => [x.key, x.state, x.mode]), [['707', 'closed', 'hand'], ['708', 'open', 'hand'], ['709', 'open', 'hand']]);
   assert.deepEqual(out.removed.map((x) => x.key), ['707']);
+});
+
+test('the removal records a close only for an imported ticket still the owner\'s and untouched since', async () => {
+  const { w, cards, trash } = legacyWorld();
+  await runImport({ settings: w.settings, clients: w.clients(), sizes: SIZES, now: NOW, trashDir: trash });
+  // 702: handed to the pipeline and taken back (mode hand, but recorded into since); 703: the pipeline's (mode pipeline).
+  await runHandover({ settings: w.settings, clients: w.clients(), key: '702', now: NOW });
+  await runHandover({ settings: w.settings, clients: w.clients(), key: '702', to: 'hand', now: NOW });
+  for (const k of [702, 703]) cards[k].placeId = card({ status: 'done' }).placeId;
+  w.forge.prs.find((p) => p.number === 72).state = 'merged';
+  const r = await removeClosedMarkdown({ settings: w.settings, clients: w.clients(), trashDir: trash, now: NOW });
+  assert.deepEqual(r.removed.map((x) => x.key), ['702', '703']);
+  assert.deepEqual([read(w, '702').mode, read(w, '702').stages.close, read(w, '703').mode, read(w, '703').stages.close], ['hand', undefined, 'pipeline', undefined]);
 });

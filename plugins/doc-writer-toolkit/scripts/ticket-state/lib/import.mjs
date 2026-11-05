@@ -61,7 +61,7 @@ const shortLinkOf = (url) => /\/c\/([A-Za-z0-9]+)/.exec(url ?? '')?.[1] ?? null;
 const empty = (v) => /^[—–-]?$/.test(String(v ?? '').trim()) || /^[—–-]\s/.test(String(v ?? '').trim());
 const words = (s) => String(s).toLowerCase().split(/\s+/).filter(Boolean).sort().join(' ');
 
-// A repo by its name or its last part (`OPERATOR` for `X-DOC-OPERATOR`).
+// A repo by its name or its last part (`api` for `acme-api`).
 function repoNamed(settings, word) {
   const w = String(word ?? '').toLowerCase();
   if (w.length < 3) return null;
@@ -378,7 +378,7 @@ export async function runImport({ settings, clients, from = null, sizes = {}, dr
     else writeLedger(settings.state, l);
     out.imported.push({ key, file: name, again: Boolean(existing), state, mode: l.mode, stage: l.stage, lastStage: l.legacy.lastStage, group: l.group, card: l.card?.shortLink ?? null, prs: l.prs.map((p) => `${p.repo}#${p.number}${p.stage === 'merged' ? ' merged' : ''}`), triage: { verdict: l.triage.verdict, size: l.triage.size, targets: l.triage.targets, relations: l.triage.relations, pages: l.triage.pages.length }, lines: { mapped: l.legacy.mapped.length, kept: l.legacy.fields.length }, misses: l.legacy.misses });
   }
-  const r = await removeClosedMarkdown({ settings, clients, from: dir, dryRun, trashDir, planned });
+  const r = await removeClosedMarkdown({ settings, clients, from: dir, dryRun, trashDir, planned, now });
   out.removed = r.removed;
   out.kept = r.kept;
   return out;
@@ -386,11 +386,14 @@ export async function runImport({ settings, clients, from = null, sizes = {}, dr
 
 // The removal, alone: each Markdown ledger whose JSON came from it is removed (to the Trash, or deleted with
 // `cleanup.mode: delete`) once its ticket is closed and the JSON rebuilds it exactly. The morning run repeats it.
-// `planned`: in a dry run, what the import would have written, by key.
-export async function removeClosedMarkdown({ settings, clients, from = null, dryRun = false, trashDir = defaultTrash(settings), planned = new Map() }) {
+// An imported ticket that closed since, still the owner's and with nothing recorded into it, gets its close recorded
+// first, as the import records it for a ticket closed already. `planned`: in a dry run, what the import would have
+// written, by key.
+export async function removeClosedMarkdown({ settings, clients, from = null, dryRun = false, trashDir = defaultTrash(settings), planned = new Map(), now = Date.now() }) {
   const dir = from ?? settings.state;
   const removed = [];
   const kept = [];
+  const at = new Date(now).toISOString();
   for (const name of mdFiles(dir)) {
     const key = name.slice(0, -'.md'.length);
     let l = null;
@@ -407,6 +410,15 @@ export async function removeClosedMarkdown({ settings, clients, from = null, dry
     if (!closed) {
       kept.push({ key, file: name, why: plan?.state === 'ready' ? 'open: ready, the pipeline may start it' : 'open' });
       continue;
+    }
+    if (!plan && !dryRun && l.mode === 'hand' && l.stages?.close?.status !== 'done' && l.legacy.seq === l.seq) {
+      l.seq += 1;
+      l.stages.close = { status: 'done', seq: l.seq, at, note: 'closed after the import' };
+      l.stage = 'close';
+      l.log.push({ seq: l.seq, at, stage: 'close', outcome: 'done', note: 'imported ticket closed since: its card done or archived, no PR open' });
+      l.legacy.seq = l.seq;
+      l.updatedAt = at;
+      writeLedger(settings.state, l);
     }
     const check = holdsEveryLine(legacy, fs.readFileSync(abs, 'utf8'));
     if (!check.ok) {

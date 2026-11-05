@@ -120,7 +120,8 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
   if (st.notStarted.length) out.push('', list(st.notStarted.map((g) => `${g.group} (${g.priority}) didn't start: ${g.reasons.join('; ')}`)));
   out.push('');
 
-  const odd = st.tickets.filter((t) => t.mismatch?.length || t.hand || ['outside', 'merged'].includes(t.state));
+  // A closed ticket in the owner's hands (an imported one, say) is no longer in anyone's hands: left out.
+  const odd = st.tickets.filter((t) => t.mismatch?.length || (t.hand && t.state !== 'closed') || ['outside', 'merged'].includes(t.state));
   out.push('## Mismatches and tickets in your hands', '', list(odd.map((t) => `${link(t)}${cardName(t)}: ${t.state}${t.hand ? ', mode hand' : ''}${t.mismatch?.length ? `; ${t.mismatch.join('; ')}` : ''}${t.notes?.length ? `; ${t.notes.join('; ')}` : ''}`)), '');
   if (st.notTickets.length) out.push('## Cards that are not tickets', '', list(st.notTickets.map((c) => `[${c.key}](${c.card.url})${cardName(c)}: ${c.why}`)), '');
 

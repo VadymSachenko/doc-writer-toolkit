@@ -470,9 +470,11 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
   // removed, each once the check shows its JSON holds every line. No model; a dry run or observe lists them.
   if (morning) {
     try {
-      const r = await removeClosedMarkdown({ settings, clients, dryRun: planOnly, trashDir: trashOf(settings, io) });
+      const r = await removeClosedMarkdown({ settings, clients, dryRun: planOnly, trashDir: trashOf(settings, io), now: clock() });
       out.legacyMarkdown = { removed: r.removed, kept: r.kept };
       if (!planOnly) for (const x of r.removed) say({ kind: 'legacyMarkdown', key: x.key, file: x.file, outcome: 'removed', to: x.to });
+      // A closed ticket's Markdown that fails the check stays; the report's failures say so each morning until it is imported again.
+      for (const x of r.kept.filter((k) => k.why.startsWith('closed, but'))) say({ kind: 'legacyMarkdown', key: x.key, file: x.file, outcome: 'failed', note: `${x.file} kept: ${x.why}` });
     } catch (e) {
       out.notes.push(`the Markdown ledgers' removal: ${e.message}`);
     }
