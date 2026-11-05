@@ -310,6 +310,11 @@ test('AC-3, AC-7: with the owner\'s and the hub\'s layers loaded, every plain-sp
     // A file that widens the session's rules, runs code at the next git command, or is the flow's own state.
     for (const e of ['Edit(~/.claude/**)', 'Edit(~/.claude.json)', 'Edit(//**/.claude/**)', 'Edit(//**/.git/**)', 'Edit(//**/.git)', 'Edit(//**/package.json)', `Edit(//${ROOTS[0].slice(1)}/**)`, `Edit(//${ROOTS[1].slice(1)}/**)`, `Edit(//${path.join(w.settings.state, 'tickets').slice(1)}/**)`]) assert.ok(denied.includes(e), `${role} denies ${e}`);
     assert.ok(!denied.some((e) => e.includes(`${path.join(w.settings.state, 'tmp')}`)), `${role}: the session's own files in <state>/tmp stay writable`);
+    // A layer that allows `node` itself (no layer does today): code from a string, standard input or a preload stays
+    // denied, and the stage's scripts still run.
+    const anyNode = [...wide, 'Bash(node:*)', 'Bash(node *)'];
+    for (const c of ['node -e "1"', 'node -p "1"', 'node --eval "1"', 'node --print "1"', 'node', 'node -', `node -r /tmp/x.js ${R}/scripts/tracker/tracker.mjs`, `node --require /tmp/x.js ${R}/scripts/tracker/tracker.mjs`, `node --import /tmp/x.mjs ${R}/scripts/tracker/tracker.mjs`, `NODE_OPTIONS=--require=/tmp/x.js node ${R}/scripts/tracker/tracker.mjs`]) assert.equal(verdict(c, anyNode, denied), 'denied', `${role} with node allowed: ${c}`);
+    for (const c of OWN[role].filter((x) => x.startsWith('node '))) assert.equal(verdict(c, anyNode, denied), 'allowed', `${role} with node allowed runs ${c}`);
   }
   // A step with no worktree changes no repo: no plain add or commit; it reads the target clones (its --add-dir).
   const plan = rulesOf('writer', w, []);
