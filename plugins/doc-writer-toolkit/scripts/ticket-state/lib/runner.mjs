@@ -351,7 +351,9 @@ export function proposeRoles(ledgers, settings, now = Date.now()) {
 // ------------------------------------------------------------------ the run
 
 export async function runDaily({ settings, clients, io = {}, options = {} }) {
-  const { dryRun = false, morning = false, trigger = 'schedule', named = [], claude = 'claude' } = options;
+  // `progress.begun` turns true once the run starts its first step: a caller can tell a run that failed before doing
+  // anything (safe to start again) from one that failed part way.
+  const { dryRun = false, morning = false, trigger = 'schedule', named = [], claude = 'claude', progress = {} } = options;
   const clock = io.now ?? Date.now;
   const manual = trigger === 'manual';
   // A failed step that waits for a person runs again once at the next morning run, or when the owner runs it by hand.
@@ -432,6 +434,7 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
       const step = { stage: 'triage', role: 'triage', keys: due.map((c) => c.key), group: null, cards: due.map((c) => ({ key: c.key, url: c.card.url, shortLink: c.card.shortLink, priority: c.priority })) };
       if (planOnly) out.triage = describe(step);
       else if (guard('triage')) {
+        progress.begun = true;
         out.triage = await runModelStep(step, { lockGroups: step.keys });
         st = await status();
       }
@@ -498,6 +501,7 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
 
   // Runs a group's steps one after another, as far as it goes: a scripted step, or one session per step.
   async function advance(first) {
+    progress.begun = true;
     const kind = manual ? 'manual' : 'schedule';
     const group = first.group ?? first.keys[0];
     const taken = takeLock(settings.state, { group, kind, stage: first.stage, leaseMinutes: settings.limits.lockLeaseMinutes, now: clock() });

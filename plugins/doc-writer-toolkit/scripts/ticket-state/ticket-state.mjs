@@ -35,6 +35,7 @@ Commands
   report                    Writes the morning report <state>/reports/<date>.md (--print: to stdout instead).
   set <key> <value>         Sets one key of the owner's local settings file (mode, limits.*, schedule.*, roles.*,
                             modelLadder, video.*, cleanup.*), checked before it is written; --unset drops it.
+                            'set retry <key|all>' gives a held or waiting step one more try (no setting does).
 
 Options
   --root <dir>              the host repo (default: cwd)

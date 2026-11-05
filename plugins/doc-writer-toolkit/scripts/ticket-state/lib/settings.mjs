@@ -29,6 +29,7 @@ export const LOCAL_DEFAULTS = {
     sessionPercent: 80,
     triageBatch: 10,
     stepsPerTicket: 12,
+    sessionsPerStageDay: 3,
     estimates: {},
   },
   // `tokenFile`: a file (mode 600) with the long-lived sign-in token the watcher's runs use; none: the CLI's own sign-in.
@@ -100,7 +101,7 @@ export function validateSettings(merged, { root, stateRootDefault }) {
   const mode = merged.mode ?? LOCAL_DEFAULTS.mode;
   if (!MODES.includes(mode)) fail(`mode must be one of ${MODES.join(', ')}`);
   const limits = deepMerge(LOCAL_DEFAULTS.limits, merged.limits ?? {});
-  for (const k of ['inProgress', 'waiting', 'parallel', 'lockLeaseMinutes', 'triageBatch', 'stepsPerTicket']) num(limits[k], `limits.${k}`, { min: 1 });
+  for (const k of ['inProgress', 'waiting', 'parallel', 'lockLeaseMinutes', 'triageBatch', 'stepsPerTicket', 'sessionsPerStageDay']) num(limits[k], `limits.${k}`, { min: 1 });
   num(limits.sessionPercent, 'limits.sessionPercent');
   num(limits.dailyPercent, 'limits.dailyPercent');
   if (limits.maxWeekPercent !== null) num(limits.maxWeekPercent, 'limits.maxWeekPercent');

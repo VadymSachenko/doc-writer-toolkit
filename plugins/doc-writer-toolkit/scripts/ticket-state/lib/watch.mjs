@@ -2,11 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { computeStatus } from './status.mjs';
 import { makeGit } from './world.mjs';
-import { readAllLedgers } from './ledger.mjs';
+import { readLedgersApart } from './ledger.mjs';
 import { runDaily, readUsageFromClaude, parseResult } from './runner.mjs';
 import { allowanceOf } from './allowance.mjs';
 import { appendRunLog, localDate } from './report.mjs';
-import { readRearm } from './setlocal.mjs';
+import { latestRearm, readRearm } from './setlocal.mjs';
 import { HOLD_MS, WINDOW_MS, advance, readFeed, readSource, sourcesOf, ticketsOf, watchDir, writeFeed } from './feed.mjs';
 import { jobCommand, jobDue, jobEnv, listChanges, listMatcher, spawnJob, updateWatchState, writeJobLog } from './jobs.mjs';
 import { notificationsOf, notify } from './notify.mjs';
@@ -82,7 +82,7 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
   const clock = io.now ?? Date.now;
   const checkStart = clock();
   const today = localDate(checkStart);
-  const out = { mode: settings.mode, dryRun, at: iso(checkStart), sources: [], events: 0, unmapped: 0, tickets: [], handed: [], pending: [], morning: null, run: null, jobs: [], errors: [], notified: [], notes: [...(options.notes ?? [])] };
+  const out = { mode: settings.mode, dryRun, at: iso(checkStart), sources: [], events: 0, unmapped: 0, tickets: [], handed: [], pending: [], morning: null, run: null, jobs: [], errors: [], capped: [], notified: [], notes: [...(options.notes ?? [])] };
   if (settings.mode === 'off') {
     out.stopped = 'mode off: nothing runs';
     return out;
@@ -151,19 +151,25 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
     }
     out.events = fresh.length;
 
-    // 3. Tickets. Ledgers that can't be read leave the events unmapped: the morning run reconciles them.
+    // 3. Tickets. A ledger file that doesn't read is reported, and its ticket kept in `pending` (its events can't be
+    // mapped without it); the others map as usual.
     let keys = new Map();
     const wanted = [...(feed.pending ?? [])];
+    const want = (k) => !wanted.includes(k) && wanted.push(k);
     try {
-      const ledgers = readAllLedgers(settings.state);
+      const { ledgers, bad } = readLedgersApart(settings.state);
+      for (const b of bad) {
+        failed(`the ledger ${b.key}`, b.error);
+        want(b.key);
+      }
       const mapped = ticketsOf(fresh, ledgers);
       keys = mapped.keys;
       out.unmapped = mapped.unmapped.length;
-      for (const k of keys.keys()) if (!wanted.includes(k)) wanted.push(k);
-      // A `set` since the last check re-arms the failed steps: their tickets are looked at now.
-      const rearmed = readRearm(settings.state);
+      for (const k of keys.keys()) want(k);
+      // A `set retry` since the last check: the tickets whose last session failed, or that hit the cap, are looked at.
+      const rearmed = latestRearm(readRearm(settings.state));
       if (rearmed && rearmed > (feed.rearmSeen ? Date.parse(feed.rearmSeen) : 0)) {
-        for (const l of ledgers) if ((l.runs ?? []).at(-1)?.outcome === 'failed' && !wanted.includes(l.key)) wanted.push(l.key);
+        for (const l of ledgers) if ((l.runs ?? []).length) want(l.key);
         next.rearmSeen = iso(rearmed);
       }
     } catch (e) {
@@ -173,18 +179,26 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
     // 4 and 5. The morning run, or the tickets that changed. What could not be handed on stays in `pending`.
     const run = io.runDaily ?? runDaily;
     const runnerIo = { ...(io.runner ?? {}), ...(io.claudeEnv ? { claudeEnv: io.claudeEnv } : {}) };
+    // Not in a check whose own board couldn't be read (a Mac just awake, its network not up yet): the next check runs it.
+    const board = out.sources.find((x) => x.name === `board:${settings.tracker.board}`);
+    const offline = board && (board.outcome === 'failed' || board.outcome === 'gap');
     const morningDue = next.morning?.lastDate !== today && localMinutes(checkStart) >= minutesOf(settings.schedule.morning);
+    if (morningDue && offline) out.notes.push(`the morning run waits: the board can't be read in this check (${board.error})`);
     next.pending = [];
-    if (morningDue) {
+    if (morningDue && !offline) {
+      const progress = {};
+      let begun = true;
       try {
-        out.morning = await run({ settings, clients, io: runnerIo, options: { dryRun, morning: true, trigger: 'schedule', claude } });
+        out.morning = await run({ settings, clients, io: runnerIo, options: { dryRun, morning: true, trigger: 'schedule', claude, progress } });
         out.handed = wanted;
       } catch (e) {
-        // Once a day all the same: a morning run that fails is not started again at every check.
+        // A morning run that failed before its first step is started again at the next check; one that failed part
+        // way counts as the day's, so its triage, starts and retries are not repeated at every check.
         failed('the morning run', e);
         next.pending = wanted;
+        begun = Boolean(progress.begun);
       }
-      next.morning = { lastDate: today, at: iso(clock()), ...(out.errors.some((x) => x.part === 'the morning run') ? { error: out.errors.at(-1).error } : {}) };
+      if (begun) next.morning = { lastDate: today, at: iso(clock()), ...(out.errors.some((x) => x.part === 'the morning run') ? { error: out.errors.at(-1).error } : {}) };
     } else if (wanted.length) {
       let st = null;
       try {
@@ -195,6 +209,7 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
       }
       if (st) {
         out.tickets = st.tickets.map((t) => ({ key: t.key, state: t.state, next: t.next ? t.next.stage : null, locked: Boolean(t.locked), hand: Boolean(t.hand), events: (keys.get(t.key) ?? []).length, ...(t.next?.waits ? { waits: t.next.waits } : {}), ...(t.held ? { held: t.gate.why } : {}) }));
+        out.capped = st.tickets.filter((t) => t.capped).map((t) => ({ key: t.key, ...t.capped, why: t.gate.why }));
         // A failed step that waits for a person is not handed on: the runner would read /usage for nothing.
         const runnable = st.tickets.filter((t) => t.next && !t.locked && !t.hand && !t.next.waits && (t.next.stage !== 'start' || t.next.byHand)).map((t) => t.key);
         // A ticket a run holds now is looked at again on the next check, so a change made during that run isn't lost.
@@ -240,12 +255,13 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
     // 7. Notifications, once a day per reason; a caught error goes to the run log once a day too.
     if (!dryRun) {
       for (const k of Object.keys(next.notified ?? {})) if (!k.includes(today)) delete next.notified[k];
-      for (const n of notificationsOf({ morning: out.morning, run: out.run, jobs: out.jobs, errors: out.errors, today })) {
+      for (const n of notificationsOf({ morning: out.morning, run: out.run, jobs: out.jobs, errors: out.errors, capped: out.capped ?? [], today })) {
         if (next.notified?.[n.key]) continue;
         const r = (io.notify ?? notify)(n, io.notifyIo ?? {});
         (next.notified ??= {})[n.key] = iso(clock());
         out.notified.push({ title: n.title, text: n.text, urgent: n.urgent, ...r });
         if (n.error) say({ kind: 'watch', what: n.error.part, outcome: 'failed', note: n.error.error });
+        if (n.capped) say({ kind: 'step', key: n.capped.key, stage: n.capped.stage, pr: n.capped.pr ?? null, outcome: 'failed', note: n.capped.why });
       }
       writeFeed(settings.state, next);
       appendRunLog(settings.state, today, log);

@@ -126,9 +126,17 @@ export function deriveTicket(l, w) {
     t.failed = failed;
     if (failed.held) {
       t.steps = [];
-      t.gate = { who: 'owner', why: `${failed.stage}${failed.pr ? ` on ${failed.pr}` : ''} failed in ${failed.sessions} sessions with no one acting in between: a move, a comment, a review or a commit on the ticket, or \`ticket-state set\`, gives it one more try` };
+      t.gate = { who: 'owner', why: `${failed.stage}${failed.pr ? ` on ${failed.pr}` : ''} failed in ${failed.sessions} sessions with no one acting in between: a comment on the card or the PR gives it one more try (so do a review, a commit, a move of the card, or \`ticket-state set retry ${l.key}\`)` };
       t.held = true;
     } else if (!failed.acted) t.steps[0] = { ...t.steps[0], prior: failed.sessions, waits: 'a person acting on the ticket, or the next morning run' };
+  }
+  // A cap on the sessions of one stage a day, whatever the cause of a loop: beyond it, held for the owner until tomorrow.
+  const capped = !t.held && cappedStep(l, w, t.steps);
+  if (capped) {
+    t.capped = capped;
+    t.steps = [];
+    t.gate = { who: 'owner', why: `${capped.stage}${capped.pr ? ` on ${capped.pr}` : ''} ran ${capped.sessions} sessions today (limits.sessionsPerStageDay): held until tomorrow, or \`ticket-state set retry ${l.key}\`` };
+    t.held = true;
   }
   if (w.mark) t.mark = markOf(l, w);
   for (const p of t.prs) if (t.locked || t.hand || t.held) p.next = null;
@@ -148,14 +156,17 @@ export function markOf(l, w) {
     if (!world) continue;
     prs[prId(pr)] = { head: world.headCommit ?? null, hand: handCommits(pr, world.headCommit, w), comments: (world.newComments ?? []).map((c) => String(c.id)) };
   }
-  return { at: new Date(w.now).toISOString(), list: w.card?.list?.id ?? null, comments: w.cardComments ? w.cardComments.map((c) => String(c.id)) : null, prs };
+  const moves = w.cardMoves ? { lastMove: w.cardMoves.map((m) => m.time).filter(Boolean).sort().at(-1) ?? null } : {};
+  return { at: new Date(w.now).toISOString(), list: w.card?.list?.id ?? null, ...moves, comments: w.cardComments ? w.cardComments.map((c) => String(c.id)) : null, prs };
 }
 
 // What a person did on the ticket after a mark, or null. The pipeline's own writes never count: its recorded comments
 // are in `posted`, its recorded commits in `pipelineCommits`, and what a failed session wrote is in the mark.
 export function actedAfter(l, w, mark) {
-  if (w.rearmedAt && w.rearmedAt > Date.parse(mark.at)) return 'the owner re-armed it with `ticket-state set`';
+  if (w.rearmedAt && w.rearmedAt > Date.parse(mark.at)) return 'the owner re-armed it with `ticket-state set retry`';
   if (mark.list && w.card?.list?.id && w.card.list.id !== mark.list) return 'a person moved the card';
+  // A move there and back leaves the list as it was: the card's own moves (the tracker's times) show it.
+  if ('lastMove' in mark && w.cardMoves?.some((m) => m.time && (!mark.lastMove || m.time > mark.lastMove))) return 'a person moved the card';
   if (mark.comments && w.cardComments) {
     const posted = new Set((l.posted?.card ?? []).map(String));
     if (w.cardComments.some((c) => !mark.comments.includes(String(c.id)) && !posted.has(String(c.id)))) return 'a person commented on the card';
@@ -181,6 +192,16 @@ function failedStep(l, w, steps) {
   const sessions = last.failures ?? 1;
   const acted = actedAfter(l, w, last.after);
   return { stage: last.stage, ...(last.pr ? { pr: last.pr } : {}), at: last.after.at, sessions, ...(acted ? { acted } : { held: sessions >= 2 }) };
+}
+
+// The sessions the ticket's next step already had today (since a `set retry`, if later), when they reach the cap.
+function cappedStep(l, w, steps) {
+  const s = steps[0];
+  const cap = w.settings.limits?.sessionsPerStageDay;
+  if (!s?.role || !cap) return null;
+  const today = dayOf(w.now);
+  const runs = (l.runs ?? []).filter((r) => r.start && r.stage === s.stage && (r.pr ?? null) === (s.pr ?? null) && dayOf(Date.parse(r.start)) === today && !(w.rearmedAt && Date.parse(r.start) <= w.rearmedAt));
+  return runs.length >= cap ? { stage: s.stage, ...(s.pr ? { pr: s.pr } : {}), sessions: runs.length } : null;
 }
 
 // The commits on a PR's branch the pipeline didn't make (neither in pipelineCommits nor from the base), or null when

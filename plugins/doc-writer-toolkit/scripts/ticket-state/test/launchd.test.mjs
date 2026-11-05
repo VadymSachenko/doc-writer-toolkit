@@ -128,12 +128,14 @@ test('set: one key of the local file, checked before it is written; the shared f
   await assert.rejects(run('schedule.morning', '7am'), /schedule.morning must be a time/);
   await assert.rejects(run('tracker.board', 'x'), /not a key of the local settings file/);
   assert.equal(fs.readFileSync(path.join(root, '.claude', 'ticket-flow.local.json'), 'utf8'), before);
-  // A change is a re-arm of the failed steps: its time and key in the state folder; no change, no new stamp.
+  // No setting re-arms a held step; only `set retry <key>` or `set retry all` does, in the state folder.
   const stamp = path.join(root, '.flow', 'rearmed.json');
-  assert.equal(JSON.parse(fs.readFileSync(stamp, 'utf8')).key, 'limits.maxWeekPercent');
-  const stamped = fs.readFileSync(stamp, 'utf8');
-  assert.equal((await run('mode', 'on')).changed, false);
-  assert.equal(fs.readFileSync(stamp, 'utf8'), stamped);
+  assert.equal(fs.existsSync(stamp), false);
+  const all = await run('retry', 'all');
+  assert.deepEqual([all.key, all.ticket, all.changed], ['retry', 'all', true]);
+  assert.equal(JSON.parse(fs.readFileSync(stamp, 'utf8')).all, all.at);
+  await assert.rejects(run('retry', '9999'), /ticket 9999 has no ledger/);
+  assert.equal(fs.readFileSync(path.join(root, '.claude', 'ticket-flow.local.json'), 'utf8'), before, 'the settings files are untouched');
   // --unset drops the key: the default comes back.
   assert.deepEqual((await run('limits.inProgress', '--unset')).after, 3);
 });

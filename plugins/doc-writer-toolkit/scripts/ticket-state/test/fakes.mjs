@@ -85,7 +85,7 @@ export function trackerAdapter({ cards = [], comments = {}, release = [], action
     cardDetail: async (ref) => {
       const c = get(ref);
       reads.push(['cardDetail', c.id]);
-      return { card: { ...c }, comments: comments[c.id] ?? [], attachments: [], checklists: [], moves: [], links: [] };
+      return { card: { ...c }, comments: comments[c.id] ?? [], attachments: [], checklists: [], moves: c.moves ?? [], links: [] };
     },
     comments: async (ref) => comments[get(ref).id] ?? [],
     attachments: async () => [],

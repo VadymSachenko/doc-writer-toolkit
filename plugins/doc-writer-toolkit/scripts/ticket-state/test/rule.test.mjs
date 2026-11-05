@@ -352,12 +352,16 @@ test('a failed step waits until a person acts after it: a move, a comment, a PR 
   assert.deepEqual(waits('957'), ['answerComments guide-docs#72', true, null], 'the failed session own reply is in the mark');
   assert.deepEqual(waits('958'), ['translate guide-docs#73', false, 'a commit on guide-docs#73']);
 
-  // `ticket-state set` after the failure re-arms the held ticket and the waiting one.
+  assert.match(by['954'].gate.why, /a comment on the card or the PR gives it one more try .*`ticket-state set retry 954`/);
+
+  // `set retry 954` after the failure re-arms that ticket only; `set retry all`, every one.
   fs.mkdirSync(w.settings.state, { recursive: true });
-  fs.writeFileSync(path.join(w.settings.state, 'rearmed.json'), JSON.stringify({ at: new Date(NOW - 60000).toISOString(), key: 'roles.writer.maxTurns' }));
+  fs.writeFileSync(path.join(w.settings.state, 'rearmed.json'), JSON.stringify({ all: null, tickets: { 954: new Date(NOW - 60000).toISOString() } }));
   const again = Object.fromEntries((await w.status()).tickets.map((t) => [t.key, t]));
-  assert.deepEqual([next(again['954']), again['954'].failed.acted], ['answers', 'the owner re-armed it with `ticket-state set`']);
-  assert.equal(again['951'].next.waits, undefined);
+  assert.deepEqual([next(again['954']), again['954'].failed.acted], ['answers', 'the owner re-armed it with `ticket-state set retry`']);
+  assert.ok(again['951'].next.waits, 'another ticket is not re-armed');
+  fs.writeFileSync(path.join(w.settings.state, 'rearmed.json'), JSON.stringify({ all: new Date(NOW - 60000).toISOString(), tickets: {} }));
+  assert.equal(Object.fromEntries((await w.status()).tickets.map((t) => [t.key, t]))['951'].next.waits, undefined);
 
   // A held card moved to a list never read: its comments can't be read, and status still answers for every ticket.
   c.held.placeId = LISTS.drafts.id;
@@ -365,4 +369,18 @@ test('a failed step waits until a person acts after it: a move, a comment, a PR 
   const parked = Object.fromEntries((await w.status()).tickets.map((t) => [t.key, t]));
   assert.deepEqual([parked['954'].held, next(parked['954'])], [undefined, 'follow -> drafts'], 'the move is a person\'s: the ticket follows it');
   assert.deepEqual([next(parked['951']), parked['951'].next.waits !== undefined], ['answers', true]);
+});
+
+test('a failed step: a move of the card there and back is a person acting, seen in the card own moves', async () => {
+  const at = new Date(NOW - 30 * 60000).toISOString();
+  const c = { back: card({ number: 961, status: 'inProgress' }), still: card({ number: 962, status: 'inProgress' }) };
+  const moved = (t) => ({ time: t, from: { id: LISTS.inProgress.id, name: 'Doing' }, to: { id: LISTS.blocked.id, name: 'Blocked' } });
+  // Both cards were last moved before the failure; one went to Blocked and back after it.
+  c.back.moves = [moved(ago(2)), moved(ago(0.3)), moved(ago(0.2))];
+  c.still.moves = [moved(ago(2))];
+  const w = world({ cards: Object.values(c) });
+  for (const x of Object.values(c)) ledger(w, x, { stages: { start: 'done', plan: 'done', questions: 'done' }, left: 'blocked', runs: [{ seq: 9, stage: 'answers', outcome: 'failed', failures: 2, start: at, after: { at, list: x.placeId, lastMove: ago(2), comments: [], prs: {} } }] });
+  const st = Object.fromEntries((await w.status()).tickets.map((t) => [t.key, t]));
+  assert.deepEqual([next(st['961']), st['961'].failed.acted], ['answers', 'a person moved the card']);
+  assert.deepEqual([st['962'].next, st['962'].held], [null, true]);
 });

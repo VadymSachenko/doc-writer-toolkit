@@ -53,7 +53,7 @@ A pure function of the ledger and the world. First match wins:
 
 **A person's move (row 6).** Ready → In progress: a manual start. Blocked → In progress: the answers (the question's PR only, if it was a PR's), the plan approved (or a new gate if the plan file changed), the video import (or on without the video). To Blocked or back to ready: the owner's block or a pause, nothing runs. To review, final review or done: the PRs at the card's stage follow, with their stage label; done closes the ticket.
 
-**A failed step** runs again only after a person acts on the ticket later than the failure (a move, a comment, a review, a hand commit), after the owner changes a setting with `ticket-state set`, or once at the next morning run. The pipeline's own writes never count. Two failed sessions with no person's action between them hold the ticket for the owner: no next step, one notification, one line in the report.
+**A failed step** runs again only after a person acts on the ticket later than the failure (a comment, a review, a hand commit, a move of the card), after `ticket-state set retry <key>`, or once at the next morning run. The pipeline's own writes never count. Two failed sessions with no person's action between them hold the ticket for the owner: no next step, one notification, one line in the report. Whatever the cause, a ticket has at most `limits.sessionsPerStageDay` (3) sessions of one stage a day; beyond them it is held the same way until the next day.
 
 **Two PRs** (one repo per review kind, or two repos). Each PR moves on its own; the card stands where the least advanced PR is. An approved `sme` PR goes on to the final review by itself while the slower one waits, and the report lists it. A question on one PR stops only that PR.
 
@@ -108,7 +108,7 @@ The close step of a ticket whose PRs are all merged moves the work files in `fil
 - **The morning run:** once a day, at the first check after `schedule.morning`.
 - **Host jobs (`hostJobs`):** "when list X gets new cards and stays quiet for N hours, run job Y", or "every N minutes"; Y is a host script or a skill. A change in the list restarts the wait. A skill job is guarded like a scheduled step.
 
-`mode` (`off`, `observe`, `on`) and the limits are in the owner's local file. `ticket-state set` edits one key of it, the way a request in plain words is carried out. No `claude` the flow starts gets an API key or an auth token, so the plan pays. A macOS notification gives the morning counts. It is urgent only for a limit reached, a step or a host job that failed twice, or a part of a check that failed (the rest of the check goes on). The sign-in token goes to the `claude` processes only, never to a host script, `git` or `gh`.
+`mode` (`off`, `observe`, `on`) and the limits are in the owner's local file. `ticket-state set` edits one key of it, the way a request in plain words is carried out. No `claude` the flow starts gets an API key or an auth token, so the plan pays. A macOS notification gives the morning counts. It is urgent only for a limit reached, a step or a host job that failed twice, a step at its daily session cap, or a part of a check that failed (the rest of the check goes on). The sign-in token goes to the `claude` processes only, never to a host script, `git` or `gh`.
 
 ## The report
 

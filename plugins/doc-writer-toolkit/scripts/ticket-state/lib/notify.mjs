@@ -21,7 +21,7 @@ const guardNote = (reason, what, today) =>
 
 // What to tell the owner after a check: one urgent notification per reason a day, and the morning counts once a day.
 // `runs` are runner results; `jobs` the host jobs' outcomes. Returns [{ key, title, text, urgent }].
-export function notificationsOf({ morning, run, jobs = [], errors = [], today }) {
+export function notificationsOf({ morning, run, jobs = [], errors = [], capped = [], today }) {
   const out = [];
   for (const r of [morning, run].filter(Boolean)) {
     for (const g of (r.guard ?? []).filter((x) => x.kind === 'guard')) out.push(guardNote(g.reason, 'Scheduled steps', today));
@@ -35,6 +35,7 @@ export function notificationsOf({ morning, run, jobs = [], errors = [], today })
     if (j.held) out.push(guardNote(j.held, `The host job ${j.name}`, today));
   }
   // A part of a check that failed (a watched list, the status, a run, a job): the rest of the check went on.
+  for (const c of capped) out.push({ key: `cap:${today}:${c.key}:${c.stage}${c.pr ? `:${c.pr}` : ''}`, urgent: true, title: 'Ticket flow: a step hit its daily cap', text: `${c.stage} of ${c.key} ran ${c.sessions} sessions today; held until tomorrow. See /ticket-report.`, capped: c });
   for (const e of errors) out.push({ key: `error:${today}:${e.part}`, urgent: true, title: 'Ticket flow: a part of a check failed', text: `${e.part}: ${e.error}`, error: e });
   if (morning && !morning.stopped) {
     const done = (morning.ran ?? []).filter((s) => s.outcome === 'done').length;

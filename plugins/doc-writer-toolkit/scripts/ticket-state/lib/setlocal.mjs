@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { deepMerge, localSettingsPath, readJsonFile } from '../../tracker/lib/settings.mjs';
 import { validateSettings } from './settings.mjs';
 import { CliError } from './errors.mjs';
+import { checkKey, readLedger } from './ledger.mjs';
 
 // `set`: one key of the owner's local settings file, the file a command in plain words edits (D-060): the mode, the
 // limits, the schedule, the roles, the video gate, the cleanup. The shared file is never touched. The merged result is
@@ -29,19 +30,42 @@ export function parseValue(text) {
   }
 }
 
-// When the owner last changed a key with `set`: a step held after failing, or waiting for the morning run, gets one more
-// try after it (lib/rule.mjs). In the state folder, never in the settings files.
+// `set retry <key>` or `set retry all`: the owner gives a held step (after failing, or at its daily session cap), or
+// one that waits for the morning run, one more try (lib/rule.mjs). Only this re-arms; no other setting does. The times
+// live in the state folder, never in the settings files: { all, tickets: { <key>: time } }.
 export const rearmPath = (state) => path.join(state, 'rearmed.json');
 export function readRearm(state) {
   try {
-    const at = Date.parse(JSON.parse(fs.readFileSync(rearmPath(state), 'utf8')).at);
-    return Number.isFinite(at) ? at : null;
+    const r = JSON.parse(fs.readFileSync(rearmPath(state), 'utf8'));
+    return { all: r.all ?? null, tickets: r.tickets ?? {} };
   } catch {
-    return null;
+    return { all: null, tickets: {} };
   }
 }
 
+// When a ticket was last re-armed (ms), or null; `latestRearm`: the last re-arm of any ticket.
+export const rearmedAt = (r, key) => Math.max(...[r.all, r.tickets[key]].map((t) => (t ? Date.parse(t) : 0))) || null;
+export const latestRearm = (r) => Math.max(...[r.all, ...Object.values(r.tickets)].map((t) => (t ? Date.parse(t) : 0))) || null;
+
+function rearm({ settings, which, now }) {
+  if (which === undefined || which === '') throw new CliError("set retry needs a ticket key, or 'all'", { code: 2 });
+  if (which !== 'all' && !readLedger(settings.state, checkKey(which))) throw new CliError(`ticket ${which} has no ledger`, { code: 2 });
+  const r = readRearm(settings.state);
+  const at = new Date(now).toISOString();
+  if (which === 'all') r.all = at;
+  else r.tickets[which] = at;
+  fs.mkdirSync(settings.state, { recursive: true });
+  const tmp = `${rearmPath(settings.state)}.tmp-${process.pid}-${crypto.randomBytes(3).toString('hex')}`;
+  fs.writeFileSync(tmp, JSON.stringify(r, null, 2) + '\n');
+  fs.renameSync(tmp, rearmPath(settings.state));
+  return { file: path.relative(settings.root, rearmPath(settings.state)), key: 'retry', ticket: which, at, changed: true };
+}
+
 export function setLocal({ settings, key, value, unset = false, now = Date.now() }) {
+  if (key === 'retry') {
+    if (unset) throw new CliError('set retry takes no --unset', { code: 2 });
+    return rearm({ settings, which: value, now });
+  }
   if (!SETTABLE.test(String(key ?? ''))) throw new CliError(`'${key}' is not a key of the local settings file: mode, limits.*, schedule.*, roles.<role>.*, modelLadder, video.*, cleanup.*`, { code: 2 });
   if (unset === (value !== undefined)) throw new CliError('set needs a value, or --unset to drop the key and take the default', { code: 2 });
   const localFile = localSettingsPath(settings.file);
@@ -57,10 +81,6 @@ export function setLocal({ settings, key, value, unset = false, now = Date.now()
     const tmp = `${localFile}.tmp-${process.pid}-${crypto.randomBytes(3).toString('hex')}`;
     fs.writeFileSync(tmp, JSON.stringify(next, null, 2) + '\n');
     fs.renameSync(tmp, localFile);
-    fs.mkdirSync(settings.state, { recursive: true });
-    const stamp = `${rearmPath(settings.state)}.tmp-${process.pid}-${crypto.randomBytes(3).toString('hex')}`;
-    fs.writeFileSync(stamp, JSON.stringify({ at: new Date(now).toISOString(), key }) + '\n');
-    fs.renameSync(stamp, rearmPath(settings.state));
   }
   return { file: path.relative(settings.root, localFile), key, before, after, changed };
 }

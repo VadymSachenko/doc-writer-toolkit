@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { BOARD, LISTS, NOW, RELEASE, WATCH, card, quietGit, rawSettings } from './fakes.mjs';
+import { BOARD, LISTS, NOW, RELEASE, WATCH, card, pr, quietGit, rawSettings } from './fakes.mjs';
+import { runRecord } from '../lib/record.mjs';
 import { ledger, read, snapshot, world } from './helpers.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
 import { takeLock, releaseLock } from '../lib/locks.mjs';
@@ -373,10 +374,14 @@ test('a step that fails at a lower model: the retry is the second session and ho
   assert.equal(t.failedTwice().length, 1);
   assert.equal((await t.w.one('401')).held, true, 'the morning run does not try it again');
 
-  // The owner raises the turns with `set`: the next check looks at the held ticket, with no event, and tries it once.
+  // The owner raises the turns with `set`: that alone re-arms nothing. `set retry 401` does: the next check looks at the
+  // held ticket, with no event, and tries it once.
   fs.mkdirSync(path.dirname(t.w.settings.file), { recursive: true });
   fs.writeFileSync(t.w.settings.file, JSON.stringify(rawSettings({ roles: { writer: { model: 'claude-sonnet-5-5' } } })));
-  setLocal({ settings: t.w.settings, key: 'roles.writer.maxTurns', value: '300', now: NOW + 24 * HOUR + MIN });
+  setLocal({ settings: t.w.settings, key: 'roles.writer.maxTurns', value: '300', now: NOW + 24 * HOUR });
+  await t.day(NOW + 24 * HOUR, NOW + 24 * HOUR + 5 * MIN);
+  assert.equal(t.sessions.length, 2);
+  setLocal({ settings: t.w.settings, key: 'retry', value: '401', now: NOW + 24 * HOUR + MIN });
   await t.day(NOW + 24 * HOUR + 5 * MIN, NOW + 25 * HOUR);
   assert.deepEqual(t.sessions.slice(2).map((x) => [x.at, x.model]), [[iso(NOW + 24 * HOUR + 5 * MIN), 'claude-sonnet-5-5'], [iso(NOW + 24 * HOUR + 5 * MIN), 'claude-opus-5-5']], 'one more try, with its retry up the ladder');
   assert.equal((await t.w.one('401')).held, true);
@@ -388,6 +393,108 @@ test('a step that fails at a lower model: the retry is the second session and ho
   const step = out.ran.find((x) => x.stage === 'answers');
   assert.deepEqual([step.outcome, step.note], ['failed', 'failed; the guard held the retry']);
   assert.deepEqual(notificationsOf({ run: out, today: '2026-11-10' }).filter((n) => /failed twice/.test(n.title)), []);
+});
+
+test('the morning run waits for a check that can read the board: a Mac awake before its network runs it once, at 09:05', async () => {
+  const w = world({ actions: { [BOARD]: [] } });
+  // Asleep overnight: the last check was last evening, the morning run last ran yesterday.
+  const f = emptyFeed();
+  for (const src of sourcesOf(w.settings)) f.sources[src.name] = { lastCheck: iso(NOW - 12 * HOUR), seen: {} };
+  f.morning = { lastDate: '2026-11-09' };
+  writeFeed(w.settings.state, f);
+  let down = true;
+  const places = w.tracker.places;
+  w.tracker.places = async (b) => {
+    if (down) throw new Error('fetch failed: getaddrinfo ENOTFOUND tracker.example');
+    return places(b);
+  };
+  const mornings = [];
+  const check = (at) =>
+    runCheck({ settings: w.settings, clients: w.clients(), io: { now: () => at, git: quietGit, runner: { now: () => at, readUsage: () => usageAt(5) }, runDaily: async (a) => (mornings.push([iso(at), a.options.morning]), runDaily(a)), notify: () => ({ sent: true }) }, options: {} });
+  const first = await check(NOW);
+  assert.deepEqual(mornings, [], 'not at 09:00: the board could not be read');
+  assert.match(first.notes.join(' '), /the morning run waits: the board can't be read in this check \(fetch failed: getaddrinfo ENOTFOUND/);
+  assert.equal(readFeed(w.settings.state).morning.lastDate, '2026-11-09');
+  down = false;
+  for (const at of [NOW + 5 * MIN, NOW + 10 * MIN, NOW + 3 * HOUR]) await check(at);
+  assert.deepEqual(mornings, [[iso(NOW + 5 * MIN), true]], 'once, at 09:05, and not again that day');
+  assert.equal(readFeed(w.settings.state).morning.lastDate, '2026-11-10');
+});
+
+test('a morning run that throws before its first step runs again at the next check; one that throws part way counts as the day', async () => {
+  for (const [begun, expected] of [[false, 2], [true, 1]]) {
+    const w = world();
+    seed(w, NOW - 5 * MIN, { morning: '2026-11-09' });
+    let calls = 0;
+    const { check, calls: seen } = checker(w, {
+      runDaily: (a) => {
+        if (calls++) return { mode: 'on', ran: [], starts: [], guard: [] };
+        if (begun) a.options.progress.begun = true;
+        throw new Error('getaddrinfo ENOTFOUND tracker.example');
+      },
+    });
+    const out = await check(NOW);
+    assert.deepEqual(out.errors.map((e) => e.part), ['the morning run']);
+    await check(NOW + 5 * MIN);
+    await check(NOW + 10 * MIN);
+    assert.equal(seen.runs.filter((r) => r.morning).length, expected, begun ? 'part way: once a day' : 'before any step: again at the next check');
+    assert.equal(readFeed(w.settings.state).morning.lastDate, '2026-11-10');
+  }
+});
+
+test('a ledger file that does not read: reported, its ticket kept in pending; the other events are still mapped', async () => {
+  const actions = { [BOARD]: [] };
+  const w = world({ actions });
+  const a = answered(w, 401);
+  seed(w, NOW - 5 * MIN);
+  actions[BOARD].push(act(a, NOW - MIN));
+  const bad = path.join(w.settings.state, 'tickets', '402.json');
+  fs.writeFileSync(bad, '{ "schemaVersion": 1, "key": "40');
+  const { check, calls } = checker(w);
+  const out = await check(NOW);
+  assert.ok(out.errors.some((e) => e.part === 'the ledger 402' && /cannot parse/.test(e.error)));
+  const feed = readFeed(w.settings.state);
+  assert.ok(feed.pending.includes('402') && feed.pending.includes('401'), 'kept for the next check (status reads every ledger, so it waits too)');
+  assert.equal(feed.sources[`board:${BOARD}`].lastCheck, iso(NOW));
+  assert.deepEqual(calls.runs, []);
+  // The file is repaired: the next check hands the ticket on.
+  fs.rmSync(bad);
+  await check(NOW + 5 * MIN);
+  assert.deepEqual(calls.runs.map((r) => r.named), [['401']]);
+});
+
+test('a loop of any cause: a stage that "succeeds" but makes a fresh event each time runs at most limits.sessionsPerStageDay sessions a day', async () => {
+  const activity = { 'guide-docs#81': { comments: [{ id: 8100, author: 'expert-one', body: 'a question', createdAt: iso(NOW - 10 * MIN), updatedAt: iso(NOW - 10 * MIN) }] } };
+  // The PR changed (a comment) a minute before the first check; each reply changes it again.
+  const p81 = { ...pr({ repo: 'guide-docs', number: 81, labels: ['in expert review'] }), updatedAt: iso(NOW - MIN) };
+  const c = card({ number: 481, status: 'smeReview' });
+  // Bounded so a missing cap fails fast: two steps a run, twelve checks (an hour); the cap is 3 a day.
+  const w = world({ cards: [c], activity, changed: { 'guide-docs': [p81] }, prs: [p81], extra: { limits: { stepsPerTicket: 2 } } });
+  ledger(w, c, { stages: { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' }, prs: [{ repo: 'guide-docs', number: 81, targets: ['guide'], review: 'sme', stage: 'smeReview' }] });
+  seed(w, NOW - 5 * MIN);
+  let clock = NOW;
+  const sessions = [];
+  const notes = [];
+  const spawnClaude = async () => {
+    sessions.push(iso(clock));
+    // It handles the newest comment and records the stage, but its own reply isn't in `posted`: a new comment.
+    const list = activity['guide-docs#81'].comments;
+    await runRecord({ settings: w.settings, clients: w.clients(), key: '481', stage: 'answerComments', pr: 'guide-docs#81', status: 'done', result: { handled: list.map((x) => ({ id: x.id, updatedAt: x.updatedAt })) }, now: clock });
+    const id = 8100 + list.length;
+    list.push({ id, author: 'owner-login', body: 'a reply', createdAt: iso(clock), updatedAt: iso(clock + 1000) });
+    p81.updatedAt = iso(clock + MIN);
+    return { code: 0, stdout: RESULT, stderr: '' };
+  };
+  for (let at = NOW; at < NOW + HOUR; at += 5 * MIN) {
+    clock = at;
+    await runCheck({ settings: w.settings, clients: w.clients(), io: { now: () => clock, git: quietGit, runner: { now: () => clock, readUsage: () => usageAt(5), spawnClaude }, notify: (m) => (notes.push(m), { sent: true }) }, options: {} });
+  }
+  assert.equal(sessions.length, 3);
+  const t = await w.one('481');
+  assert.deepEqual([t.next, t.held, t.capped.sessions], [null, true, 3]);
+  assert.match(t.gate.why, /answerComments on guide-docs#81 ran 3 sessions today \(limits.sessionsPerStageDay\): held until tomorrow/);
+  assert.deepEqual(notes.filter((m) => m.urgent).map((m) => m.title), ['Ticket flow: a step hit its daily cap']);
+  assert.equal(readRunLog(w.settings.state, '2026-11-10').filter((e) => e.outcome === 'failed' && e.key === '481').length, 1, 'one line in the report');
 });
 
 test('mode off: nothing is read and the cursors stay', async () => {
