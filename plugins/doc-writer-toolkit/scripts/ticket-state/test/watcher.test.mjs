@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { BOARD, LISTS, NOW, RELEASE, WATCH, card, pr, quietGit, rawSettings } from './fakes.mjs';
+import { BOARD, LISTS, NOW, RELEASE, WATCH, card, noTree, pr, quietGit, rawSettings } from './fakes.mjs';
 import { runRecord } from '../lib/record.mjs';
 import { ledger, read, snapshot, world } from './helpers.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
@@ -565,7 +565,7 @@ test('a loop of any cause: a stage that "succeeds" but makes a fresh event each 
   };
   for (let at = NOW; at < NOW + HOUR; at += 5 * MIN) {
     clock = at;
-    await runCheck({ settings: w.settings, clients: w.clients(), io: { now: () => clock, git: quietGit, runner: { now: () => clock, readUsage: () => usageAt(5), spawnClaude }, notify: (m) => (notes.push(m), { sent: true }) }, options: {} });
+    await runCheck({ settings: w.settings, clients: w.clients(), io: { now: () => clock, git: quietGit, runner: { now: () => clock, readUsage: () => usageAt(5), spawnClaude, ensureWorktree: noTree }, notify: (m) => (notes.push(m), { sent: true }) }, options: {} });
   }
   assert.equal(sessions.length, 3);
   const t = await w.one('481');
@@ -722,12 +722,14 @@ test('AC-5 and AC-2: a skill job waits at the limit; observe plans it; a script 
   assert.deepEqual(s.calls.notes, [], 'a failure shorter than an hour is quiet');
   for (let at = every.t0 + 6 * MIN; at < Date.parse('2026-11-10T07:00:00Z'); at += 30 * MIN) await s.check(at);
   assert.equal(s.calls.jobs.length, 5, 'at 01:00, 01:01, 01:06, 01:36 and 02:06; not after, before the next morning run');
-  assert.deepEqual(s.calls.notes.map((x) => [x.title, x.text]), [['Ticket flow: a host job keeps failing', 'copy failed at each try for an hour (5 tries, last exit 1); disarmed until 2026-11-10T07:00:00.000Z. See /ticket-report.']]);
+  // Disarmed at 02:06, at night: the alert is held until the first check after schedule.morning, as a source's is.
+  assert.deepEqual(s.calls.notes, [], 'no sound at night');
   assert.deepEqual(readRunLog(every.w.settings.state, '2026-11-10').filter((e) => e.kind === 'job' && /disarmed/.test(e.note ?? '')).map((e) => e.at), ['2026-11-10T02:06:00.000Z']);
   assert.equal(readFeed(every.w.settings.state).jobs.copy.heldUntil, '2026-11-10T07:00:00.000Z');
   const morning = await s.check(Date.parse('2026-11-10T07:00:00Z'));
   assert.equal(s.calls.jobs.length, 6);
   assert.deepEqual(morning.jobs.map((j) => [j.name, j.outcome]), [['copy', 'failed']]);
+  assert.deepEqual(s.calls.notes.filter((x) => x.urgent).map((x) => [x.title, x.text]), [['Ticket flow: a host job kept failing at night', 'copy failed at each try from 01:00 (5 tries, last exit 1) and was disarmed at 02:06; disarmed until the morning run (07:00). See /ticket-report.']]);
 });
 
 // An `every 5` script job that reads the board itself (a card copy): it exits 1 while `fails(at)`, and the board's
@@ -798,13 +800,17 @@ test('a watch job that fails at each try for an hour is disarmed until its next 
   await check(t0 + 5 * MIN);
   for (let at = t0 + 3 * HOUR; at <= t0 + 5 * HOUR; at += 5 * MIN) await check(at);
   assert.equal(calls.jobs.length, 13, 'at each check from 04:00 to 05:00, then not again');
-  assert.deepEqual(calls.notes.map((m) => [m.urgent, m.text]), [[true, 'notes failed at each try for an hour (13 tries, last exit 1); disarmed until its next new card. See /ticket-report.']]);
+  assert.deepEqual(calls.notes, [], 'disarmed at 05:00, before schedule.morning: the alert waits');
   const s = readFeed(w.settings.state).jobs.notes;
   assert.deepEqual([s.armed, s.heldUntil, s.failingSince, s.lastFailure], [false, null, null, '2026-11-10T05:00:00.000Z']);
   // A new card arms it again.
   arrive(t0 + 5 * HOUR + 10 * MIN);
   await check(t0 + 5 * HOUR + 15 * MIN);
   assert.equal(readFeed(w.settings.state).jobs.notes.armed, true);
+  // The first check after schedule.morning tells the owner, once.
+  await check(Date.parse('2026-11-10T07:00:00Z'));
+  await check(Date.parse('2026-11-10T07:05:00Z'));
+  assert.deepEqual(calls.notes.filter((m) => m.urgent).map((m) => m.text), ['notes failed at each try from 04:00 (13 tries, last exit 1) and was disarmed at 05:00; disarmed until its next new card. See /ticket-report.']);
 });
 
 test('a sleep is not failing time for a host job: failing as the Mac went to sleep and at the first check after the wake, then it runs', async () => {
@@ -906,4 +912,60 @@ test('settings: a host job needs one trigger and one run, and a script inside th
     [{ name: 'x y', every: 5, run: { skill: 'b' } }, /name/],
   ];
   for (const [job, re] of bad) assert.throws(() => world({ extra: { hostJobs: [job] } }), re);
+});
+
+// ------------------------------------------------------------------ host jobs after an outage
+
+const jobAlerts = (t) => t.urgent().filter((m) => /host job/.test(m.title));
+
+test('E3: a 65-minute drop at noon on an awake Mac: one job alert, and the copy runs again at the first check after the board reads', async () => {
+  const noon = Date.parse('2026-11-10T12:00:00Z');
+  const t = everyJob({ from: Date.parse('2026-11-10T08:00:00Z'), down: (at) => at >= noon && at < noon + 65 * MIN });
+  await t.checks(Date.parse('2026-11-10T08:00:00Z'), noon + HOUR + 5 * MIN);
+  // Disarmed at 13:00, with the boards failing too: one urgent job alert, now (it is day).
+  assert.deepEqual(jobAlerts(t).map((m) => m.text), ['copy failed at each try for an hour (13 tries, last exit 1); disarmed until 2026-11-11T07:00:00.000Z. See /ticket-report.']);
+  assert.deepEqual(t.state().disarmed.downWith, [`board:${BOARD}`, `board:${WATCH}`]);
+  await t.checks(noon + HOUR + 5 * MIN, Date.parse('2026-11-10T18:00:00Z'));
+  // 13:05: the boards read again, so the job re-arms and runs in the same check, then every 5 minutes.
+  assert.deepEqual(t.runs.find(([at]) => at >= '2026-11-10T13:05'), ['2026-11-10T13:05:00.000Z', 0]);
+  assert.equal(t.runs.filter(([at, code]) => at >= '2026-11-10T13:05' && code === 0).length, 59, 'every check from 13:05 to 17:55');
+  assert.deepEqual([t.state().heldUntil, t.state().disarmed, t.state().rearmed.why], [null, null, `board:${BOARD}, board:${WATCH} read again`]);
+  assert.equal(jobAlerts(t).length, 1, 'one job alert; the tracker unreadable for an hour is its own part, told once too');
+  assert.match(renderReport({ settings: t.w.settings, st: await t.w.status(), date: '2026-11-10', runLog: [], watched: [], proposal: null, ledgers: [] }), /copy: last run .*disarmed after an hour of failing at 2026-11-10T13:00:00.000Z, re-armed at 2026-11-10T13:05:00.000Z/);
+});
+
+test('E4: the network down 01:00-02:30 on a Mac awake overnight: the job alert waits for schedule.morning, and the copy runs from 02:30', async () => {
+  const t = everyJob({ from: Date.parse('2026-11-10T20:00:00Z'), down: (at) => at >= Date.parse('2026-11-11T01:00:00Z') && at < Date.parse('2026-11-11T02:30:00Z') });
+  await t.checks(Date.parse('2026-11-10T20:00:00Z'), Date.parse('2026-11-11T07:00:00Z'));
+  assert.deepEqual(jobAlerts(t), [], 'nothing sounds at night');
+  assert.ok(t.state().alert, 'the alert is kept for the morning');
+  assert.deepEqual(t.runs.find(([at]) => at >= '2026-11-11T02:30'), ['2026-11-11T02:30:00.000Z', 0], 'the first check after the boards read');
+  assert.equal(t.runs.filter(([at, code]) => at >= '2026-11-11T02:30' && at < '2026-11-11T07:00' && code === 0).length, 54);
+  await t.checks(Date.parse('2026-11-11T07:00:00Z'), Date.parse('2026-11-11T09:00:00Z'));
+  assert.deepEqual(jobAlerts(t).map((m) => m.text), ['copy failed at each try from 01:00 (13 tries, last exit 1) and was disarmed at 02:00; re-armed at 02:30: board:5f00000000000000000d0001, board:5f00000000000000000d0002 read again. See /ticket-report.']);
+  assert.equal(t.state().alert, null);
+});
+
+test('E6 and set retry job: a job that fails on its own (the network fine) stays disarmed until the morning; set retry job re-arms it', async () => {
+  let broken = true;
+  const t = everyJob({ from: Date.parse('2026-11-10T08:00:00Z'), fails: () => broken });
+  await t.checks(Date.parse('2026-11-10T08:00:00Z'), Date.parse('2026-11-10T10:00:00Z'));
+  assert.equal(jobAlerts(t).length, 1);
+  assert.deepEqual([t.state().heldUntil, t.state().disarmed.downWith], ['2026-11-11T07:00:00.000Z', []], 'no read failed with it: nothing re-arms it by itself');
+  const tries = t.runs.length;
+  await t.checks(Date.parse('2026-11-10T10:00:00Z'), Date.parse('2026-11-10T11:00:00Z'));
+  assert.equal(t.runs.length, tries, 'held: not tried');
+  // The owner fixed the cause and re-arms it.
+  broken = false;
+  assert.throws(() => setLocal({ settings: t.w.settings, key: 'retry', value: 'job', name: 'nope', now: Date.parse('2026-11-10T11:01:00Z') }), /'nope' is not a host job/);
+  assert.throws(() => setLocal({ settings: t.w.settings, key: 'retry', value: 'job', now: Date.parse('2026-11-10T11:01:00Z') }), /needs the job name/);
+  const r = setLocal({ settings: t.w.settings, key: 'retry', value: 'job', name: 'copy', now: Date.parse('2026-11-10T11:01:00Z') });
+  assert.deepEqual([r.job, r.changed], ['copy', true]);
+  await t.checks(Date.parse('2026-11-10T11:05:00Z'), Date.parse('2026-11-10T11:15:00Z'));
+  assert.deepEqual(t.runs.slice(tries), [['2026-11-10T11:05:00.000Z', 0], ['2026-11-10T11:10:00.000Z', 0]]);
+  assert.deepEqual([t.state().heldUntil, t.state().rearmed.why], [null, '`ticket-state set retry job`']);
+  // The same re-arm doesn't apply twice: a later disarm needs a later retry.
+  broken = true;
+  await t.checks(Date.parse('2026-11-10T11:15:00Z'), Date.parse('2026-11-10T12:30:00Z'));
+  assert.ok(t.state().disarmed, 'disarmed again after another hour');
 });

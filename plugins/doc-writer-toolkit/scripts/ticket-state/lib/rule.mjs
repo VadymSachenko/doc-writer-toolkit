@@ -392,8 +392,9 @@ function prStep(l, p, w, out, prs) {
   else {
     if (hand.length) {
       if (pr.readyForMerge?.length) {
-        const synced = pr.steps?.resync?.status === 'done' && pr.steps.resync.head === head;
-        if (pr.readyForMerge.at(-1).head !== head && !synced) return step('resync', { pr: id, head, commits: hand.length });
+        // A hand commit after ready for merge: the re-sync, then the visual pack if it changed an image, then ready again.
+        const after = handAfterReady(pr, p, w, target, head, hand.length, out);
+        if (after) return after;
       } else out.mismatch.push(`${id}: ${hand.length} commit(s) on the branch the pipeline didn't make: a hand edit, kept; the next stage reads the branch`);
     }
   }
@@ -424,6 +425,22 @@ function prStep(l, p, w, out, prs) {
   // Row 12.
   if (p.stage === 'finalReview') return chainStep(l, p, w, out, target, head);
   return null;
+}
+
+// Row 8 after ready for merge: the hand commit's blocks re-synced (`resync`), then, when an image changed since the
+// visual pack saw the branch, the pack again (`visualPack`), and only then `readyForMerge` for the new head.
+function handAfterReady(pr, p, w, target, head, commits, out) {
+  const id = prId(pr);
+  if (pr.readyForMerge.at(-1).head === head) return null;
+  const synced = pr.steps?.resync?.status === 'done' && pr.steps.resync.head === head;
+  if (!synced) return step('resync', { pr: id, head, commits });
+  const pack = pr.chain?.visualPack;
+  if (pack?.head && pack.head !== head) {
+    const images = w.git?.imagesChanged?.(target, pack.head, head) ?? null;
+    if (images === null) out.notes.push(`${id}: the visual pack saw ${String(pack.head).slice(0, 7)}, the head is ${String(head).slice(0, 7)}, and git here can't compare their images`);
+    else if (images.length) return step('visualPack', { pr: id, head, images: images.length });
+  }
+  return p.stage === 'readyForMerge' ? step('readyForMerge', { pr: id, head }) : null;
 }
 
 // The first chain stage not done for the current head. UA pages changed after a stage's head make it (and so every

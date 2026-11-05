@@ -1,0 +1,254 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { NOW, ago, card, gitRepo, pr, tmp } from './fakes.mjs';
+import { ledger, read, world } from './helpers.mjs';
+import { runDaily } from '../lib/runner.mjs';
+import { runRecord } from '../lib/record.mjs';
+import { parseUsage } from '../lib/allowance.mjs';
+import { ensureWorktree, listWorktrees, canon, worktreePath } from '../lib/worktree.mjs';
+
+// The ticket worktree (lib/worktree.mjs): the runner makes it, with the clone's node_modules linked and excluded, so
+// the build needs no role action; the close step removes it with git and never moves a `.git` link alone. And the
+// steps after a hand commit at ready for merge: the re-sync, the visual pack when an image changed, then ready again.
+
+const usage = () => parseUsage('Current session: 10% used · resets 2pm (UTC)\nCurrent week (all models): 5% used · resets Nov 14 at 6am (UTC)\n');
+const RESULT = JSON.stringify({ type: 'result', subtype: 'success', is_error: false, num_turns: 3, total_cost_usd: 0.2, duration_ms: 1000, session_id: 's', usage: { input_tokens: 1, output_tokens: 1 }, permission_denials: [] });
+const CHAIN = ['translate', 'enReview', 'locales', 'align', 'labelSync', 'build', 'visualPack'];
+const EN = 'i18n/en/docusaurus-plugin-content-docs/current';
+const UK_IMG = 'docs/x/.assets/a.png';
+const EN_IMG = `${EN}/x/.assets/a.png`;
+const stageOf = (cmd) => /Stage `(\w+)`/.exec(cmd.args[cmd.args.indexOf('-p') + 1])[1];
+const briefOf = (cmd) => cmd.args[cmd.args.indexOf('-p') + 1];
+
+// A target clone at the fake world's `repos/guide-docs`, with a bare origin, the ticket branch pushed, the clone's own
+// node_modules and .env (untracked; `.gitignore` names `node_modules/`, which doesn't match a link), and the branch
+// checked out in the clone, as an owner's checkout may be.
+function withClone(w, { declare = true } = {}) {
+  const bare = path.join(tmp('origin-'), 'guide-docs.git');
+  execFileSync('git', ['init', '-q', '--bare', '-b', 'main', bare]);
+  const clone = gitRepo(path.join(w.root, 'repos', 'guide-docs'));
+  clone.commit({
+    '.gitignore': 'node_modules/\n.env\n',
+    'package.json': '{ "name": "site", "private": true }\n',
+    'docs/x/index.md': '# Сторінка\n',
+    [UK_IMG]: 'uk v1',
+    [EN_IMG]: 'en v1',
+    ...(declare
+      ? {
+          'CLAUDE.md': '# Site\n\n## Documentation toolkit configuration\n\n- **UA content root:** `docs/`\n' + `- **EN i18n root:** \`${EN}/\`\n` + '- **Screenshot locales:** `uk, en`\n- **Locale switch:** `storage lang uk="uk-UA", en="en-US"`\n',
+          'docusaurus.config.ts': "export default { i18n: { defaultLocale: 'uk', locales: ['uk', 'en'] } };\n",
+        }
+      : {}),
+  }, 'base');
+  clone.g('remote', 'add', 'origin', bare);
+  clone.g('push', '-q', 'origin', 'main');
+  clone.g('fetch', '-q', 'origin');
+  clone.g('checkout', '-q', '-b', 'ticket-71');
+  const h1 = clone.commit({ 'docs/x/index.md': '# Сторінка\n\nНовий абзац.\n' }, 'Draft: page');
+  clone.g('push', '-q', 'origin', 'ticket-71');
+  fs.mkdirSync(path.join(clone.dir, 'node_modules', 'fake-build'), { recursive: true });
+  fs.writeFileSync(path.join(clone.dir, 'node_modules', 'fake-build', 'index.js'), 'module.exports = "built";\n');
+  fs.writeFileSync(path.join(clone.dir, '.env'), 'APP_URL=https://test.example\n');
+  // A second clone, standing in for the owner's push of a hand edit.
+  const other = path.join(tmp('owner-'), 'guide-docs');
+  execFileSync('git', ['clone', '-q', bare, other]);
+  const og = (...args) => execFileSync('git', ['-C', other, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  og('config', 'user.email', 'owner@example.com');
+  og('config', 'user.name', 'Owner');
+  og('config', 'commit.gpgsign', 'false');
+  og('checkout', '-q', 'ticket-71');
+  const handEdit = (files) => {
+    for (const [rel, text] of Object.entries(files)) {
+      fs.mkdirSync(path.dirname(path.join(other, rel)), { recursive: true });
+      fs.writeFileSync(path.join(other, rel), text);
+    }
+    og('add', '-A');
+    og('commit', '-q', '-m', 'Fix: by hand');
+    og('push', '-q', 'origin', 'ticket-71');
+    // The target clone sees it, as when the owner pushes from it (status reads git there and fetches nothing).
+    clone.g('fetch', '-q', 'origin');
+    return og('rev-parse', 'HEAD');
+  };
+  return { clone, bare, h1, handEdit };
+}
+
+function finalReviewTicket({ done = CHAIN.slice(0, 5), stage = 'finalReview', extra = {}, declare } = {}) {
+  const c = card({ number: 1501, status: 'finalReview' });
+  const forgePr = pr({ repo: 'guide-docs', number: 71, head: 'ticket-71' });
+  const w = world({ cards: [c], prs: [forgePr], extra });
+  const fx = withClone(w, { declare });
+  forgePr.headCommit = fx.h1;
+  const chain = Object.fromEntries(done.map((s, i) => [s, { status: 'done', head: fx.h1, seq: 10 + i }]));
+  ledger(w, c, { stages: { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' }, prs: [{ repo: 'guide-docs', number: 71, targets: ['guide'], review: 'sme', branch: 'ticket-71', stage, pipelineCommits: [fx.h1], chain, ...(stage === 'readyForMerge' ? { readyForMerge: [{ head: fx.h1, at: ago(2) }] } : {}) }] });
+  return { w, c, forgePr, ...fx, wt: worktreePath(w.settings, { repo: 'guide-docs', targets: ['guide'], branch: 'ticket-71' }) };
+}
+
+test('AC-1: the runner makes the ticket worktree with the clone\'s node_modules linked and excluded; the build passes with no role action', async () => {
+  const t = finalReviewTicket();
+  const seen = [];
+  const spawnClaude = async (cmd) => {
+    const stage = stageOf(cmd);
+    seen.push({ stage, brief: briefOf(cmd), addDirs: cmd.args.filter((a, i) => cmd.args[i - 1] === '--add-dir') });
+    // The session: in the worktree its brief names, the site builds from the linked node_modules, and git shows
+    // nothing untracked. It installs nothing and links nothing.
+    const built = execFileSync(process.execPath, ['-e', 'process.stdout.write(require("./node_modules/fake-build"))'], { cwd: t.wt, encoding: 'utf8' });
+    assert.equal(built, 'built');
+    assert.equal(execFileSync('git', ['-C', t.wt, 'status', '--porcelain'], { encoding: 'utf8' }), '', 'the link is excluded: nothing untracked');
+    await runRecord({ settings: t.w.settings, clients: t.w.clients(), key: '1501', stage, pr: 'guide-docs#71', status: 'done', head: t.h1, result: { ok: true }, now: NOW });
+    return { code: 0, stdout: RESULT, stderr: '' };
+  };
+  const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1501'] } });
+  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]).slice(0, 1), [['build', 'done']]);
+  assert.equal(read(t.w, '1501').prs[0].chain.build.status, 'done');
+  // The worktree: detached at the branch's head although the clone has the branch checked out, node_modules a link
+  // to the clone's, listed in the common git dir's info/exclude without a trailing slash.
+  assert.equal(execFileSync('git', ['-C', t.wt, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), t.h1);
+  assert.equal(fs.lstatSync(path.join(t.wt, 'node_modules')).isSymbolicLink(), true);
+  assert.equal(fs.realpathSync(path.join(t.wt, 'node_modules')), fs.realpathSync(path.join(t.clone.dir, 'node_modules')));
+  assert.equal(fs.existsSync(path.join(t.wt, '.env')), false, '.env only when the target names it');
+  assert.match(fs.readFileSync(path.join(t.clone.dir, '.git', 'info', 'exclude'), 'utf8'), /^\/node_modules$/m);
+  // The brief names it, with the push command; the session may read and write there.
+  assert.match(seen[0].brief, new RegExp(`guide-docs ticket-71: ${t.wt.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\(linked from the clone: node_modules\\)`));
+  assert.match(seen[0].brief, /push origin HEAD:refs\/heads\/ticket-71/);
+  assert.ok(seen[0].addDirs.includes(t.wt));
+});
+
+test('AC-1: .env too when the target names it; a clone without node_modules is said in the brief; a branch not pushed yet starts from the base', async () => {
+  const t = finalReviewTicket();
+  t.w.settings.targets.find((x) => x.id === 'guide').links = ['node_modules', '.env'];
+  const tree = ensureWorktree(t.w.settings, { repo: 'guide-docs', targets: ['guide'], branch: 'ticket-71', base: 'main' });
+  assert.deepEqual(tree.linked, ['node_modules', '.env']);
+  assert.equal(fs.readFileSync(path.join(t.wt, '.env'), 'utf8'), 'APP_URL=https://test.example\n');
+  assert.match(fs.readFileSync(path.join(t.clone.dir, '.git', 'info', 'exclude'), 'utf8'), /^\/\.env$/m);
+  assert.equal(execFileSync('git', ['-C', t.wt, 'status', '--porcelain'], { encoding: 'utf8' }), '');
+  // Again: nothing doubled.
+  ensureWorktree(t.w.settings, { repo: 'guide-docs', targets: ['guide'], branch: 'ticket-71', base: 'main' });
+  assert.equal(fs.readFileSync(path.join(t.clone.dir, '.git', 'info', 'exclude'), 'utf8').match(/^\/node_modules$/gm).length, 1);
+  // A new branch: from origin/main, at the base's head.
+  fs.rmSync(path.join(t.clone.dir, 'node_modules'), { recursive: true });
+  const fresh = ensureWorktree(t.w.settings, { repo: 'guide-docs', targets: ['guide'], branch: 'ticket-72', base: 'main' });
+  assert.equal(fresh.head, t.clone.g('rev-parse', 'origin/main'));
+  assert.deepEqual(fresh.missing, ['node_modules']);
+  assert.match(fresh.notes.join(' '), /node_modules: not in the clone/);
+});
+
+test('AC-1: a worktree that can not be made starts no session; the stage is recorded failed with the reason', async () => {
+  const t = finalReviewTicket();
+  fs.mkdirSync(t.wt, { recursive: true });
+  fs.writeFileSync(path.join(t.wt, 'stray.txt'), 'not a worktree');
+  const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude: () => assert.fail('no session without its worktree') }, options: { trigger: 'watcher', named: ['1501'] } });
+  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['build', 'failed']]);
+  const l = read(t.w, '1501');
+  assert.equal(l.prs[0].chain.build.status, 'failed');
+  assert.match(l.prs[0].chain.build.note, /the worktree: .* exists and is not a worktree/);
+});
+
+test('AC-5: the close step removes the ticket\'s worktrees with git, prunes, and never moves a .git link alone', async () => {
+  const c = card({ number: 1502, status: 'finalReview' });
+  const forgePr = pr({ repo: 'guide-docs', number: 71, head: 'ticket-71', state: 'merged' });
+  const w = world({ cards: [c], prs: [forgePr] });
+  const host = gitRepo(w.root);
+  host.commit({ '.gitignore': '.flow/\nrepos/\ndocs/.sources/\n', 'docs/index.md': '# Host\n' });
+  const fx = withClone(w);
+  const p = { repo: 'guide-docs', targets: ['guide'], branch: 'ticket-71', base: 'main' };
+  ensureWorktree(w.settings, p);
+  const wt = worktreePath(w.settings, p);
+  // An older worktree a session made inside the host and recorded as a work file, as a ticket of the past did.
+  const legacy = path.join(w.root, 'docs', '.sources', 'tickets', '1502', 'worktree-guide');
+  fx.clone.g('worktree', 'add', '-q', '--detach', legacy, 'origin/ticket-71');
+  fs.writeFileSync(path.join(path.dirname(legacy), 'notes.txt'), 'run notes');
+  ledger(w, c, { stages: { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' }, prs: [{ ...p, number: 71, review: 'sme', stage: 'readyForMerge' }], files: [{ path: 'docs/.sources/tickets/1502', kind: 'runDir', bytes: 0, stage: 'write', at: ago(30) }] });
+  assert.equal(listWorktrees(fx.clone.dir).length, 3);
+  const trash = path.join(tmp('fake-trash-'), '.Trash');
+  const out = await runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: usage, trashDir: trash, now: () => NOW, spawnClaude: () => assert.fail('no model step') }, options: {} });
+  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['close', 'done']]);
+  // The clone lists no worktree of the ticket, and the folders are gone.
+  const left = listWorktrees(fx.clone.dir).map((x) => canon(x.path));
+  assert.deepEqual(left, [canon(fx.clone.dir)]);
+  assert.equal(fs.existsSync(wt), false);
+  assert.equal(fs.existsSync(legacy), false);
+  // No .git link went to the Trash on its own; the run notes did.
+  const inTrash = [];
+  const walk = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      inTrash.push(e.name);
+      if (e.isDirectory()) walk(path.join(d, e.name));
+    }
+  };
+  if (fs.existsSync(trash)) walk(trash);
+  assert.equal(inTrash.includes('.git'), false, `the Trash holds ${inTrash.join(', ')}`);
+  assert.ok(inTrash.includes('notes.txt'));
+  // The clone's own node_modules and .env survived the removal of the worktree they were linked into.
+  assert.equal(fs.readFileSync(path.join(fx.clone.dir, 'node_modules', 'fake-build', 'index.js'), 'utf8'), 'module.exports = "built";\n');
+  assert.equal(fs.existsSync(path.join(fx.clone.dir, '.env')), true);
+  const cleanup = read(w, '1502').stages.close.result.cleanup;
+  assert.deepEqual(cleanup.worktrees.map((x) => [canon(x.path), x.removed]), [[canon(wt), true], [canon(legacy), true]]);
+});
+
+test('AC-5: a recorded folder that is a repository of its own is kept whole, never split', async () => {
+  const c = card({ number: 1503, status: 'finalReview' });
+  const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 73, state: 'merged' })] });
+  gitRepo(w.root).commit({ '.gitignore': '.flow/\nclones/\n', 'docs/index.md': '# Host\n' });
+  const app = gitRepo(path.join(w.root, 'clones', 'app'));
+  app.commit({ 'src/a.js': 'a\n' });
+  fs.writeFileSync(path.join(app.dir, 'scratch.txt'), 'untracked');
+  ledger(w, c, { stages: { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' }, prs: [{ repo: 'guide-docs', number: 73, targets: ['guide'], review: 'sme', stage: 'readyForMerge' }], files: [{ path: 'clones/app', kind: 'clone', bytes: 0, stage: 'plan', at: ago(30) }] });
+  const trash = path.join(tmp('fake-trash-'), '.Trash');
+  await runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: usage, trashDir: trash, now: () => NOW }, options: {} });
+  assert.equal(fs.existsSync(path.join(app.dir, '.git')), true);
+  assert.equal(fs.existsSync(path.join(app.dir, 'scratch.txt')), true);
+  assert.equal(fs.existsSync(trash), false);
+  assert.deepEqual(read(w, '1503').stages.close.result.cleanup.kept.map((k) => k.reason), ['a repository of its own: kept whole, never split']);
+});
+
+// A ready-for-merge PR, then a hand commit; the session stand-in records each model stage at the head it was given.
+async function afterReady(files) {
+  const t = finalReviewTicket({ done: CHAIN, stage: 'readyForMerge' });
+  const h2 = t.handEdit(files);
+  t.forgePr.headCommit = h2;
+  const stages = [];
+  const spawnClaude = async (cmd) => {
+    const stage = stageOf(cmd);
+    stages.push(stage);
+    await runRecord({ settings: t.w.settings, clients: t.w.clients(), key: '1501', stage, pr: 'guide-docs#71', status: 'done', head: h2, result: {}, now: NOW });
+    return { code: 0, stdout: RESULT, stderr: '' };
+  };
+  const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1501'] } });
+  return { t, h2, out, stages, l: read(t.w, '1501') };
+}
+
+test('AC-4: a hand commit that changes an image after ready for merge: the re-sync, the visual pack, then ready again', async () => {
+  const { t, h2, out, l } = await afterReady({ [UK_IMG]: 'uk v2', [EN_IMG]: 'en v2' });
+  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['resync', 'done'], ['visualPack', 'done'], ['readyForMerge', 'done']]);
+  const p = l.prs[0];
+  assert.equal(p.chain.visualPack.head, h2);
+  assert.deepEqual(p.readyForMerge.map((r) => r.head), [t.h1, h2]);
+  assert.ok(p.readyForMerge.at(-1).at >= p.chain.visualPack.at && l.log.findIndex((e) => e.stage === 'readyForMerge' && e.seq > p.chain.visualPack.seq) >= 0, 'ready again only after the pack');
+  // The worktree followed the owner's push.
+  assert.equal(execFileSync('git', ['-C', t.wt, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), h2);
+});
+
+test('AC-4: a hand commit that changes only text after ready for merge: the re-sync, then ready again, with no pack', async () => {
+  const { h2, out, l } = await afterReady({ 'docs/x/index.md': '# Сторінка\n\nВиправлений абзац.\n' });
+  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['resync', 'done'], ['readyForMerge', 'done']]);
+  assert.notEqual(l.prs[0].chain.visualPack.head, h2);
+  assert.equal(l.prs[0].readyForMerge.at(-1).head, h2);
+});
+
+test('AC-3: record align is refused while a UA image changed without its EN counterpart, naming it; both changed passes', async () => {
+  const t = finalReviewTicket({ done: CHAIN.slice(0, 3) });
+  ensureWorktree(t.w.settings, { repo: 'guide-docs', targets: ['guide'], branch: 'ticket-71', base: 'main' });
+  const h2 = t.handEdit({ [UK_IMG]: 'uk v2' });
+  t.forgePr.headCommit = h2;
+  ensureWorktree(t.w.settings, { repo: 'guide-docs', targets: ['guide'], branch: 'ticket-71', base: 'main' });
+  const rec = () => runRecord({ settings: t.w.settings, clients: t.w.clients(), key: '1501', stage: 'align', pr: 'guide-docs#71', status: 'done', head: t.forgePr.headCommit, result: { bugs: 0, warnings: 0 }, now: NOW });
+  await assert.rejects(rec(), (e) => e.refused === 'imagePairs' && e.message.includes(`${UK_IMG} changed without ${EN_IMG}`));
+  assert.equal(read(t.w, '1501').prs[0].chain.align, undefined, 'nothing written');
+  t.forgePr.headCommit = t.handEdit({ [EN_IMG]: 'en v2' });
+  ensureWorktree(t.w.settings, { repo: 'guide-docs', targets: ['guide'], branch: 'ticket-71', base: 'main' });
+  await rec();
+  assert.match(read(t.w, '1501').prs[0].chain.align.imagePairs, /1 UA image\(s\) checked against origin\/main/);
+});

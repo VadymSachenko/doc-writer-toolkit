@@ -15,6 +15,7 @@ import { appendRunLog, localDate, readRunLog, renderReport, writeReport } from '
 import { ROLES } from './settings.mjs';
 import { cleanupTicket } from './cleanup.mjs';
 import { childEnv } from './env.mjs';
+import { ensureWorktree, prsForStep, worktreePath } from './worktree.mjs';
 
 // The daily run (design §7): finish first, then triage the quiet intake cards (mornings), then start ready groups while
 // the limits and the day's allowance allow. A script decides; each step that needs a model is one `claude -p` session
@@ -25,10 +26,23 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const PLUGIN_ROOT = path.resolve(HERE, '../../..');
 const SCRIPT = path.join(PLUGIN_ROOT, 'scripts', 'ticket-state', 'ticket-state.mjs');
 export const ROLE_DIR = path.join(PLUGIN_ROOT, 'context', 'ticket-roles');
+// A git rule in both spellings: `Bash(git <sub>:*)` also as `git -C <dir> <sub>`, the form a session uses on a
+// worktree. A `:*` after a `*` in the middle of a rule never matches, so the twin is a pair: the command alone, and
+// with arguments.
+export function gitC(rule) {
+  const m = /^Bash\(git (?!-C )(.+):\*\)$/.exec(rule);
+  return m ? [`Bash(git -C * ${m[1]})`, `Bash(git -C * ${m[1]} *)`] : [];
+}
+export const withGitC = (rules) => [...new Set(rules.flatMap((r) => [r, ...gitC(r)]))];
+
 // Denied in every role, whatever its file says: a push that could drop someone else's commits (the owner pushes to the
-// same branches by hand), skip the hooks, or delete a branch. The rules match by prefix, so `unattended.md` says the
-// same in words for the spellings they miss.
-export const PUSH_DENIED = ['Bash(git push --force:*)', 'Bash(git push -f:*)', 'Bash(git push --force-with-lease:*)', 'Bash(git push --force-if-includes:*)', 'Bash(git push --no-verify:*)', 'Bash(git push --mirror:*)', 'Bash(git push --delete:*)', 'Bash(git push -d:*)'];
+// same branches by hand), skip the hooks, or delete a branch, in both spellings. The rules match by prefix, so
+// `unattended.md` says the same in words for the spellings they miss.
+const PUSH_PLAIN = ['Bash(git push --force:*)', 'Bash(git push -f:*)', 'Bash(git push --force-with-lease:*)', 'Bash(git push --force-if-includes:*)', 'Bash(git push --no-verify:*)', 'Bash(git push --mirror:*)', 'Bash(git push --delete:*)', 'Bash(git push -d:*)'];
+export const PUSH_DENIED = withGitC(PUSH_PLAIN);
+// Denied in every role too: the runner prepares the worktree (lib/worktree.mjs), so no session installs packages or
+// links files into it.
+export const SETUP_DENIED = ['Bash(npm ci:*)', 'Bash(npm install:*)', 'Bash(npm i:*)', 'Bash(ln:*)'];
 
 // ------------------------------------------------------------------ roles
 
@@ -95,8 +109,10 @@ export function briefFor(step, settings) {
     step.changed ? 'The section plan file changed after its gate: post the new plan and move the card back to Blocked (a new gate).' : null,
     step.stale ? `The UA pages changed after this stage last ran (${step.stale} file(s)): run it again on the current head.` : null,
     step.cards ? `Cards, highest priority first:\n${step.cards.map((c) => `- ${c.key}: ${c.url ?? c.shortLink} (${c.priority})`).join('\n')}` : null,
+    step.worktrees?.length ? worktreeLines(step.worktrees) : null,
     '',
     `Host repo: ${root}`,
+    `The toolkit's scripts folder: ${path.join(PLUGIN_ROOT, 'scripts')}`,
     `Settings (merged): \`${ts} config ${at}\``,
     `The ticket now: \`${ts} status ${at} --ticket ${step.keys[0]}\``,
     rules ? `Host rules:\n${rules}` : null,
@@ -109,12 +125,21 @@ export function briefFor(step, settings) {
     .join('\n');
 }
 
+// What the brief says about the worktrees the runner made for the session.
+function worktreeLines(trees) {
+  return [
+    'Worktrees (the runner made them; work only there, and never create, move or remove a worktree, or link a file into one):',
+    ...trees.map((t) => `- ${t.repo} ${t.branch}: ${t.path}${t.linked?.length ? ` (linked from the clone: ${t.linked.join(', ')})` : ''}. It is detached at the branch's head; push with \`${t.push}\`.${t.notes?.length ? ` Note: ${t.notes.join('; ')}.` : ''}`),
+  ].join('\n');
+}
+
 export function commandFor(step, settings, { model, agentsPath, claude = 'claude', roleDir = ROLE_DIR }) {
   const role = settings.roles[step.role];
   const def = readRole(step.role, roleDir);
-  const allowed = [...new Set([...def.allowedTools, ...(role.allowedTools ?? [])])];
-  const disallowed = [...new Set([...def.disallowedTools, ...(role.disallowedTools ?? []), ...PUSH_DENIED])];
-  const dirs = [...new Set(settings.targets.map((t) => (t.path ? path.resolve(settings.root, t.path) : null)).filter((d) => d && d !== settings.root))];
+  // Every git rule in both spellings, plain and `git -C <worktree>` (lib/worktree.mjs), so a session may use either.
+  const allowed = withGitC([...def.allowedTools, ...(role.allowedTools ?? [])]);
+  const disallowed = [...new Set([...def.disallowedTools, ...(role.disallowedTools ?? []), ...PUSH_DENIED, ...SETUP_DENIED])];
+  const dirs = [...new Set([...settings.targets.map((t) => (t.path ? path.resolve(settings.root, t.path) : null)), ...(step.worktrees ?? []).map((t) => t.path)].filter((d) => d && d !== settings.root))];
   const args = [
     '-p',
     briefFor(step, settings),
@@ -410,13 +435,15 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
         // What the close step would remove after the merge: listed, nothing removed.
         const views = st.tickets.find((t) => t.key === l.key)?.prs ?? [];
         const c = cleanupTicket({ settings, ledger: l, prState: (p) => views.find((v) => v.id === prId(p))?.state ?? (p.merged ? 'merged' : null), dryRun: true, trashDir: trashOf(settings, io) });
-        d.cleanup = { mode: c.mode, wouldRemove: c.removed, keeps: c.kept, freesBytes: c.freedBytes, blocked: c.blocked };
+        d.cleanup = { mode: c.mode, wouldRemove: c.removed, keeps: c.kept, freesBytes: c.freedBytes, blocked: c.blocked, worktrees: c.worktrees.map((t) => t.path) };
       }
       return d;
     }
-    const cmd = commandFor(step, settings, { model: settings.roles[step.role].model, agentsPath: path.join(settings.state, 'roles', 'agents.json'), claude });
+    // The worktrees a live run would make or bring up to date: named, nothing made.
+    const trees = prsForStep(step, step.keys.map((k) => readLedger(settings.state, k))).map((p) => ({ repo: p.repo, branch: p.branch, path: worktreePath(settings, p), push: `git -C ${worktreePath(settings, p)} push origin HEAD:refs/heads/${p.branch}` }));
+    const cmd = commandFor({ ...step, worktrees: trees }, settings, { model: settings.roles[step.role].model, agentsPath: path.join(settings.state, 'roles', 'agents.json'), claude });
     const held = guardReason();
-    return { ...pick(step), runs: `claude -p as ${agentName(step.role)}`, model: cmd.model, effort: cmd.effort, ...(held ? { guard: `a live run would not start it: ${held}` } : {}), command: [cmd.bin, ...cmd.args] };
+    return { ...pick(step), runs: `claude -p as ${agentName(step.role)}`, model: cmd.model, effort: cmd.effort, ...(trees.length ? { worktrees: trees.map((t) => t.path) } : {}), ...(held ? { guard: `a live run would not start it: ${held}` } : {}), command: [cmd.bin, ...cmd.args] };
   };
 
   const finishing = collectSteps(st, { named, includeStart: manual && named.length > 0, retryWaiting });
@@ -557,6 +584,16 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
       if (t.taken) held.push(g);
     }
     try {
+      // The worktrees of the step's PRs, made or brought up to date before the session. If one can't be made, no
+      // session starts: the stage is recorded failed with git's reason.
+      try {
+        step = { ...step, worktrees: prsForStep(step, step.keys.map((k) => readLedger(settings.state, k))).map((p) => (io.ensureWorktree ?? ensureWorktree)(settings, p)) };
+      } catch (e) {
+        const note = `the worktree: ${String(e.message).slice(0, 280)}`;
+        for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'failed', pr: step.pr, note, now: clock() }).catch(() => {});
+        say({ kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, role: step.role, outcome: 'failed', note });
+        return { ...pick(step), outcome: 'failed', note };
+      }
       const agentsPath = path.join(settings.state, 'roles', 'agents.json');
       fs.mkdirSync(path.dirname(agentsPath), { recursive: true });
       fs.writeFileSync(agentsPath, JSON.stringify(agentsFile(io.roleDir), null, 2) + '\n');

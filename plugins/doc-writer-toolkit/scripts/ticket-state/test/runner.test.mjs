@@ -203,6 +203,38 @@ test('the roles: every role file has its frontmatter and allows no compound shel
   }
 });
 
+test('AC-2: every role allows its stage\'s git commands in both spellings, plain and git -C <worktree>, and carries every push and setup denial', () => {
+  const { w } = busyWorld();
+  // What each role's stages run on the ticket worktree or the target repos.
+  const NEEDS = {
+    triage: ['log', 'show', 'ls-tree', 'grep'],
+    writer: ['status', 'diff', 'log', 'show', 'fetch', 'worktree list', 'add', 'commit', 'push'],
+    reviewer: ['status', 'diff', 'log', 'show', 'fetch', 'worktree list', 'add', 'commit', 'push'],
+    translator: ['status', 'diff', 'log', 'show', 'fetch', 'worktree list', 'add', 'commit', 'push'],
+  };
+  // The denials as they stood, each still carried, plus their git -C twins and the setup the runner now does.
+  const PLAIN = ['Bash(git push --force:*)', 'Bash(git push -f:*)', 'Bash(git push --force-with-lease:*)', 'Bash(git push --force-if-includes:*)', 'Bash(git push --no-verify:*)', 'Bash(git push --mirror:*)', 'Bash(git push --delete:*)', 'Bash(git push -d:*)'];
+  for (const [role, subs] of Object.entries(NEEDS)) {
+    const cmd = commandFor({ stage: role === 'triage' ? 'triage' : 'write', role, keys: ['502'], group: '502' }, w.settings, { agentsPath: '/x/agents.json' });
+    const allowed = cmd.args.slice(cmd.args.indexOf('--allowedTools') + 1, cmd.args.indexOf('--disallowedTools'));
+    const denied = cmd.args.slice(cmd.args.indexOf('--disallowedTools') + 1).filter((a, i, all) => !a.startsWith('--') && !all.slice(0, i).some((x) => x.startsWith('--')));
+    for (const sub of subs) {
+      for (const rule of [`Bash(git ${sub}:*)`, `Bash(git -C * ${sub})`, `Bash(git -C * ${sub} *)`]) assert.ok(allowed.includes(rule), `${role} allows ${rule}`);
+    }
+    for (const rule of PLAIN) {
+      assert.ok(denied.includes(rule), `${role} denies ${rule}`);
+      const flagged = /^Bash\(git push (.+):\*\)$/.exec(rule)[1];
+      for (const twin of [`Bash(git -C * push ${flagged})`, `Bash(git -C * push ${flagged} *)`]) assert.ok(denied.includes(twin), `${role} denies ${twin}`);
+    }
+    for (const rule of ['Bash(npm ci:*)', 'Bash(npm install:*)', 'Bash(ln:*)']) assert.ok(denied.includes(rule), `${role} denies ${rule}`);
+    // A session never makes or removes a worktree itself.
+    assert.ok(!allowed.some((r) => /worktree (add|remove|move|prune)|Bash\(git worktree:\*\)|Bash\(git -C \* worktree\)/.test(r)), role);
+    // Every git -C rule uses the forms the CLI matches: a `:*` after a mid-rule `*` never does.
+    assert.ok(![...allowed, ...denied].some((r) => /^Bash\(git -C \*.*:\*\)$/.test(r)), role);
+  }
+  assert.ok(PLAIN.every((r) => PUSH_DENIED.includes(r)), 'PUSH_DENIED keeps its rules');
+});
+
 test('the command line follows the role settings; the retry takes the next model up the ladder', () => {
   const { w } = busyWorld({ roles: { reviewer: { model: 'claude-haiku-5-5', effort: 'low', maxTurns: 30, maxBudgetUsd: 2, disallowedTools: ['WebFetch'] } } });
   const cmd = commandFor({ stage: 'uaReview', role: 'reviewer', keys: ['502'], group: '502' }, w.settings, { agentsPath: '/x/agents.json' });

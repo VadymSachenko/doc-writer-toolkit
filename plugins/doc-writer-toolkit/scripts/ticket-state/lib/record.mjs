@@ -7,6 +7,7 @@ import { lockOf, renewLock } from './locks.mjs';
 import { CARD_STATUS_OF, CHAIN, LABEL_OF, PR_ORDER, PR_STAGE_OF_STATUS, PR_STAGES, STATUSES, TICKET_STAGES } from './stages.mjs';
 import { labelCheck } from './intake.mjs';
 import { KINDS, recordedSize } from './cleanup.mjs';
+import { imagePairsAt } from './pairs.mjs';
 
 // `record <key> --stage <s> --status running|done|failed`: one stage result, written only when the tracker, the forge
 // and the files support it (context/ticket-flow.md, "When a record is accepted"). On any problem nothing is written.
@@ -342,13 +343,20 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         if (!st.headCommit.startsWith(given)) throw new Refused('stale', `the branch head is ${st.headCommit.slice(0, 12)}, not ${String(given).slice(0, 12)}`, { head: st.headCommit });
         record.head = st.headCommit;
         pr.lastSeenHead = st.headCommit;
+        // The align stage: no UA image changed without its EN counterpart, checked in the PR's worktree at the head.
+        if (stage === 'align') {
+          const pairs = await imagePairsAt(settings, pr, st.headCommit);
+          if (pairs.error) throw new Refused('imagePairs', `the UA → EN image check can't run: ${pairs.error}`);
+          if (pairs.missing?.length) throw new Refused('imagePairs', `UA images changed without their EN counterpart: ${pairs.message}`, { missing: pairs.missing });
+          record.imagePairs = pairs.summary;
+        }
         if (stage === 'readyForMerge') {
           const missing = CHAIN.filter((s) => pr.chain[s]?.status !== 'done');
           if (missing.length) throw new Refused('chain', `the chain is not done: ${missing.join(', ')}`, { missing });
           pr.readyForMerge.push({ head: st.headCommit, at });
           pr.stage = 'readyForMerge';
         }
-        if (stage === 'resync') pr.readyForMerge.push({ head: st.headCommit, at, after: 'resync' });
+        // The re-sync no longer makes the PR ready by itself: the rule checks the images, then `readyForMerge` does.
         if (pr.stage === 'reworkWait' && CHAIN.includes(stage)) pr.stage = 'finalReview';
       }
     }

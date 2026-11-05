@@ -108,7 +108,7 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
       // A job that fails is tried at each check; after an hour of failing it is disarmed (`lastFailure`).
       const failing = js.failingSince ? `, failing since ${js.failingSince} (${js.failures ?? 0} tries)` : '';
       if (j.watch && js.armed) return `${j.name}: new cards in ${j.watch.list} since ${js.firstChange}; runs ${j.quietHours} h after the last change (${js.lastChange})${failing}${js.heldUntil ? `, held by the guard until ${js.heldUntil}` : ''}`;
-      return `${j.name}: ${js.lastRun ? `last run ${js.lastRun}` : 'not run yet'}${failing}${js.lastFailure ? `, disarmed after an hour of failing at ${js.lastFailure}` : ''}${js.heldUntil ? `, held until ${js.heldUntil}` : ''}`;
+      return `${j.name}: ${js.lastRun ? `last run ${js.lastRun}` : 'not run yet'}${failing}${js.lastFailure ? `, disarmed after an hour of failing at ${js.lastFailure}${js.rearmed ? `, re-armed at ${js.rearmed.at} (${js.rearmed.why})` : ''}` : ''}${js.heldUntil ? `, held until ${js.heldUntil}` : ''}`;
     });
     out.push('## The watcher', '', `Last check ${checks.at(-1) ?? 'never'}; the morning run ${feed.morning?.lastDate === date ? `ran at ${feed.morning.at ?? date}` : 'has not run on this date'}.`, '', list([...failing, ...jobs], 'no source failing, no host job'), '');
   }
@@ -131,7 +131,9 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
   const removedLines = cleaned.flatMap((l) => {
     const c = l.stages.close.result.cleanup;
     if (c.blocked) return [`${l.key}: ${c.blocked}`];
-    return [`${l.key}: ${c.removed.length} path(s), ${mb(c.freedBytes)} ${c.mode === 'delete' ? 'deleted' : 'moved to the Trash'}${c.removed.length ? ` (${c.removed.map((r) => `\`${r.path}\``).join(', ')})` : ''}${c.kept.length ? `; kept ${c.kept.map((k) => `\`${k.path}\` (${k.reason})`).join(', ')}` : ''}`];
+    const trees = (c.worktrees ?? []).filter((t) => t.removed);
+    const stuck = (c.worktrees ?? []).filter((t) => !t.removed && t.error);
+    return [`${l.key}: ${c.removed.length} path(s), ${mb(c.freedBytes)} ${c.mode === 'delete' ? 'deleted' : 'moved to the Trash'}${c.removed.length ? ` (${c.removed.map((r) => `\`${r.path}\``).join(', ')})` : ''}${trees.length ? `; ${trees.length} worktree(s) removed with git` : ''}${stuck.length ? `; git would not remove ${stuck.map((t) => `\`${t.path}\` (${t.error})`).join(', ')}` : ''}${c.kept.length ? `; kept ${c.kept.map((k) => `\`${k.path}\` (${k.reason})`).join(', ')}` : ''}`];
   });
   const unmerged = st.tickets.filter((t) => t.state === 'outside' && (t.notes ?? []).some((n) => /closed unmerged/.test(n)) && (byKey.get(t.key)?.files ?? []).length);
   for (const t of unmerged) removedLines.push(`${t.key}: a PR was closed unmerged, so its ${byKey.get(t.key).files.length} work file(s) stay (${mb(byKey.get(t.key).files.reduce((s, f) => s + (f.bytes ?? 0), 0))})`);
