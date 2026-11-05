@@ -10,6 +10,7 @@ import { runRecord } from '../lib/record.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
 import { ensureWorktree, listWorktrees, canon, prsForStep, worktreePath } from '../lib/worktree.mjs';
 import { spentOf } from '../lib/limits.mjs';
+import { writeLedger } from '../lib/ledger.mjs';
 import { localDate, renderReport } from '../lib/report.mjs';
 
 // The ticket worktree (lib/worktree.mjs): the runner makes it, with the clone's node_modules linked and excluded, so
@@ -33,7 +34,8 @@ function withClone(w, { declare = true } = {}) {
   execFileSync('git', ['init', '-q', '--bare', '-b', 'main', bare]);
   const clone = gitRepo(path.join(w.root, 'repos', 'guide-docs'));
   clone.commit({
-    '.gitignore': 'node_modules/\n.env\n',
+    // As the hosts do: `.sources/` (work files) and the build's output ignored.
+    '.gitignore': 'node_modules/\n.env\n.sources/\nbuild/\n.docusaurus/\n*.local.md\n',
     'package.json': '{ "name": "site", "private": true }\n',
     'docs/x/index.md': '# Сторінка\n',
     [UK_IMG]: 'uk v1',
@@ -237,6 +239,14 @@ test('AC-1: a stuck worktree starts no session; the stage is recorded failed wit
   // A failed step: the next run doesn't try it again until a person acts.
   const again = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW + 60000, spawnClaude: () => assert.fail('no retry without a person\'s action') }, options: { trigger: 'watcher', named: ['1501'] } });
   assert.deepEqual(again.ran.filter((r) => r.stage === 'build'), []);
+  // A second such failure (the morning run's one more try) holds the ticket, and the gate says no session ran.
+  const l2 = read(t.w, '1501');
+  l2.runs.at(-1).failures = 2;
+  writeLedger(t.w.settings.state, l2);
+  const held = await t.w.one('1501');
+  assert.equal(held.held, true);
+  assert.match(held.gate.why, /^build on guide-docs#71 failed twice with no one acting in between, the last time before any session started \(the worktree: .*never had/);
+  assert.doesNotMatch(held.gate.why, /in 2 sessions/);
 });
 
 test('AC-5: the close step removes the ticket\'s worktrees with git, prunes, and never moves a .git link alone', async () => {
@@ -282,7 +292,7 @@ test('AC-5: the close step removes the ticket\'s worktrees with git, prunes, and
 });
 
 // A merged ticket whose worktree holds work no remote has: `make` leaves it so before the close.
-async function closeWith(make) {
+async function closeWith(make, { files = [] } = {}) {
   const c = card({ number: 1504, status: 'finalReview' });
   const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 71, head: 'ticket-71', state: 'merged' })] });
   gitRepo(w.root).commit({ '.gitignore': '.flow/\nrepos/\n', 'docs/index.md': '# Host\n' });
@@ -290,8 +300,8 @@ async function closeWith(make) {
   const p = { repo: 'guide-docs', targets: ['guide'], branch: 'ticket-71', base: 'main' };
   ensureWorktree(w.settings, p);
   const wt = worktreePath(w.settings, p);
-  make(wt, fx);
-  ledger(w, c, { stages: { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' }, prs: [{ ...p, number: 71, review: 'sme', stage: 'readyForMerge', pipelineCommits: [fx.h1], readyForMerge: [{ head: fx.h1, at: ago(2) }] }] });
+  make(wt, fx, w);
+  ledger(w, c, { stages: { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' }, prs: [{ ...p, number: 71, review: 'sme', stage: 'readyForMerge', pipelineCommits: [fx.h1], readyForMerge: [{ head: fx.h1, at: ago(2) }] }], files: files.map((f) => ({ path: path.relative(w.root, path.join(wt, f)), kind: 'other', bytes: 0, stage: 'write', at: ago(30) })) });
   const trash = path.join(tmp('fake-trash-'), '.Trash');
   const out = await runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: usage, trashDir: trash, now: () => NOW, spawnClaude: () => assert.fail('no model step') }, options: {} });
   assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['close', 'done']]);
@@ -340,13 +350,46 @@ test('AC-5: a worktree whose only untracked entries are the linked node_modules 
   assert.equal(fs.readFileSync(path.join(fx.clone.dir, '.env'), 'utf8'), 'APP_URL=https://test.example\n');
 });
 
+const put = (wt, files) => {
+  for (const [rel, text] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(wt, rel)), { recursive: true });
+    fs.writeFileSync(path.join(wt, rel), text);
+  }
+};
+
+test('AC-5: the close step keeps a worktree with ignored work files under .sources/, and reports a recorded one as kept with it', async () => {
+  const work = { 'docs/x/.sources/app-notes.md': '# Notes\n', 'docs/x/.sources/sme-interview.md': '# Interview\n', 'docs/x/.sources/frames/f1.png': 'png' };
+  const { wt, tree, report, l } = await closeWith((wt) => put(wt, work), { files: ['docs/x/.sources/app-notes.md'] });
+  for (const [rel, text] of Object.entries(work)) assert.equal(fs.readFileSync(path.join(wt, rel), 'utf8'), text, rel);
+  assert.equal(tree.removed, false);
+  assert.match(tree.kept, /3 ignored work file\(s\) \(docs\/x\/\.sources\//);
+  assert.match(tree.todo, /move the work files to the Trash/);
+  assert.match(report, /worktree\(s\) kept: .*ignored work file/);
+  const rec = l.stages.close.result.cleanup.kept.find((k) => k.path.endsWith('app-notes.md'));
+  assert.match(rec.reason, /^inside the worktree .*, kept with it$/);
+  assert.doesNotMatch(JSON.stringify(l.stages.close.result.cleanup.kept), /outside the host repo/);
+});
+
+test('AC-5: a file on the cleanup.keep list keeps the worktree too; the build output alone does not', async () => {
+  const kept = await closeWith((wt, fx, w) => {
+    w.settings.cleanup.keep = [...(w.settings.cleanup.keep ?? []), '**/*.local.md'];
+    put(wt, { 'docs/x/draft.local.md': 'mine\n' });
+  });
+  assert.equal(kept.tree.removed, false);
+  assert.match(kept.tree.kept, /1 ignored work file\(s\) \(docs\/x\/draft\.local\.md\)/);
+  const gone = await closeWith((wt) => put(wt, { 'build/index.html': '<html>', 'build/assets/a.js': 'x', '.docusaurus/client.js': 'x' }), { files: ['build'] });
+  assert.deepEqual([gone.tree.removed, gone.tree.kept], [true, undefined]);
+  assert.equal(fs.existsSync(gone.wt), false);
+  assert.match(gone.l.stages.close.result.cleanup.kept.find((k) => k.path.endsWith('build')).reason, /^inside the worktree .*, removed with it/);
+});
+
 test('AC-5: a worktree git refuses to remove (locked) is kept and reported with the same todo', async () => {
   const { fx, wt, tree, report } = await closeWith((wt, f) => f.clone.g('worktree', 'lock', wt));
   assert.equal(fs.existsSync(wt), true);
   assert.ok(listWorktrees(fx.clone.dir).some((x) => canon(x.path) === canon(wt)));
   assert.deepEqual([tree.removed, tree.error], [false, undefined]);
-  assert.match(tree.kept, /git would not remove it: .*unlock/);
-  assert.match(tree.todo, /worktree remove --force/);
+  assert.match(tree.kept, /git would not remove it \(locked\)/);
+  assert.match(tree.todo, new RegExp(`worktree unlock ${wt.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\`, then \`git -C .* worktree remove --force`));
   assert.match(report, /worktree\(s\) kept: .*git would not remove it/);
 });
 

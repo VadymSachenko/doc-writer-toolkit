@@ -8,7 +8,7 @@ import { makeClients } from '../lib/world.mjs';
 import { runRecord } from '../lib/record.mjs';
 import { lockOf } from '../lib/locks.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
-import { BRANCH_DENIED, PUSH_DENIED, ROLE_DIR, agentsFile, briefFor, collectSteps, commandFor, nextModelUp, proposeRoles, readRole, runDaily } from '../lib/runner.mjs';
+import { BRANCH_DENIED, PUSH_DENIED, PUSH_DENIED_PLAIN, ROLE_DIR, agentsFile, briefFor, collectSteps, commandFor, nextModelUp, proposeRoles, readRole, runDaily } from '../lib/runner.mjs';
 import { localDate } from '../lib/report.mjs';
 import { notificationsOf } from '../lib/notify.mjs';
 
@@ -219,13 +219,13 @@ const verdict = (cmd, allowed, denied) => (denied.some((r) => matches(r, cmd)) ?
 test('AC-2: every role allows its stage\'s git commands in both spellings, git -C only on its own worktree, and the brief\'s push only', () => {
   const { w } = busyWorld();
   const WT = '/work/.worktrees/guide-docs/ticket-71';
-  const trees = [{ repo: 'guide-docs', branch: 'ticket-71', path: WT }];
+  const trees = [{ repo: 'guide-docs', branch: 'ticket-71', base: 'main', path: WT }];
   // What each role's stages run on the ticket worktree (triage reads the target repos and has no worktree).
   const NEEDS = {
     triage: ['log', 'show', 'ls-tree', 'grep'],
-    writer: ['status', 'diff', 'log', 'show', 'fetch', 'worktree list', 'add', 'commit'],
-    reviewer: ['status', 'diff', 'log', 'show', 'fetch', 'worktree list', 'add', 'commit'],
-    translator: ['status', 'diff', 'log', 'show', 'fetch', 'worktree list', 'add', 'commit'],
+    writer: ['status', 'diff', 'log', 'show', 'worktree list', 'add', 'commit'],
+    reviewer: ['status', 'diff', 'log', 'show', 'worktree list', 'add', 'commit'],
+    translator: ['status', 'diff', 'log', 'show', 'worktree list', 'add', 'commit'],
   };
   const PLAIN = ['Bash(git push --force:*)', 'Bash(git push -f:*)', 'Bash(git push --force-with-lease:*)', 'Bash(git push --force-if-includes:*)', 'Bash(git push --no-verify:*)', 'Bash(git push --mirror:*)', 'Bash(git push --delete:*)', 'Bash(git push -d:*)'];
   for (const [role, subs] of Object.entries(NEEDS)) {
@@ -241,6 +241,13 @@ test('AC-2: every role allows its stage\'s git commands in both spellings, git -
     // No wildcard folder in an allow rule, and no general push: only the brief's, to the ticket branch.
     assert.ok(!allowed.some((r) => r.includes('git -C *') || r === 'Bash(git push:*)'), role);
     for (const push of [`git -C ${WT} push origin HEAD:refs/heads/ticket-71`, 'git push origin HEAD:refs/heads/ticket-71']) assert.equal(verdict(push, allowed, denied) === 'allowed', tree.length > 0, `${role}: ${push}`);
+    // A fetch: `git fetch origin`, and the worktree's branch and base by name, in both spellings; never a refspec.
+    const fetches = role !== 'triage';
+    assert.equal(verdict('git fetch origin', allowed, denied) === 'allowed', fetches, `${role}: git fetch origin`);
+    for (const f of [`git -C ${WT} fetch origin`, `git -C ${WT} fetch origin ticket-71`, 'git fetch origin main', `git -C ${WT} fetch origin main`]) assert.equal(verdict(f, allowed, denied) === 'allowed', tree.length > 0, `${role}: ${f}`);
+    // A commit message may name any flag: the `-C` denials name the worktree, so the word after it is the subcommand.
+    // (Triage may not commit at all.)
+    if (tree.length) for (const msg of [`git -C ${WT} commit -m "Document the git branch -D option"`, `git -C ${WT} commit -m "Add the branch list" -m "Second paragraph"`, `git -C ${WT} commit -m "Say why git push --force is denied"`, 'git commit -m "Add the branch list" -m "Second paragraph"']) assert.equal(verdict(msg, allowed, denied), 'allowed', `${role}: ${msg}`);
     // The reviewer's probes: another subcommand with an allowed word later in the command, another folder, a force
     // push or a deletion in any place, another branch.
     for (const bad of [
@@ -258,14 +265,21 @@ test('AC-2: every role allows its stage\'s git commands in both spellings, git -
       'git push origin +HEAD:refs/heads/ticket-71',
       'git push origin -d ticket-71',
       'git push --force origin HEAD:refs/heads/ticket-71',
+      `git -C ${WT} fetch origin +refs/heads/main:refs/heads/other`,
+      `git -C ${WT} fetch origin main:other`,
+      'git fetch origin +refs/heads/main:refs/heads/other',
+      'git fetch origin refs/heads/main:refs/heads/other',
+      'git fetch --all',
     ]) assert.notEqual(verdict(bad, allowed, denied), 'allowed', `${role}: ${bad}`);
-    // Force pushes and deletions by flag or `+` are denied outright, in any folder, wherever the flag stands.
-    for (const forced of [`git -C /any push origin +HEAD:refs/heads/x`, 'git -C /any push origin --force x', 'git push origin -f x', 'git push -d origin x', 'git push origin x --delete']) assert.equal(verdict(forced, allowed, denied), 'denied', `${role}: ${forced}`);
+    // Force pushes and deletions by flag or `+` are denied outright, plain and on the worktree, wherever the flag stands.
+    for (const forced of ['git push origin -f x', 'git push -d origin x', 'git push origin x --delete', 'git push origin +HEAD:refs/heads/x', ...(tree.length ? [`git -C ${WT} push origin +HEAD:refs/heads/x`, `git -C ${WT} push origin --force x`, `git -C ${WT} push -d origin x`] : [])]) assert.equal(verdict(forced, allowed, denied), 'denied', `${role}: ${forced}`);
+    assert.ok(!denied.some((r) => r.includes('git -C *')), `${role}: no wildcard folder in a deny rule either`);
     for (const rule of [...PLAIN, 'Bash(npm ci:*)', 'Bash(npm install:*)', 'Bash(ln:*)']) assert.ok(denied.includes(rule), `${role} denies ${rule}`);
     assert.ok(!allowed.some((r) => /worktree (add|remove|move|prune)|Bash\(git worktree:\*\)/.test(r)), role);
     assert.ok(![...allowed, ...denied].some((r) => /^Bash\(.*\*.*:\*\)$/.test(r) && !/^Bash\([^*]*:\*\)$/.test(r)), `${role}: no rule the CLI never matches`);
   }
-  assert.ok(PLAIN.every((r) => PUSH_DENIED.includes(r)), 'PUSH_DENIED keeps its rules');
+  assert.ok(PLAIN.every((r) => PUSH_DENIED.includes(r) && PUSH_DENIED_PLAIN.includes(r)), 'PUSH_DENIED keeps its rules');
+  assert.ok(PUSH_DENIED.some((r) => r.startsWith('Bash(git -C * push')), 'host jobs, with no worktree, keep the any-folder denials');
 });
 
 test('no role allows git branch, and a branch delete, rename, copy, force or upstream change is denied anywhere, in both spellings', () => {
@@ -273,15 +287,19 @@ test('no role allows git branch, and a branch delete, rename, copy, force or ups
   const WT = '/work/.worktrees/guide-docs/ticket-71';
   for (const role of ['triage', 'writer', 'reviewer', 'translator']) {
     assert.ok(!readRole(role, ROLE_DIR).allowedTools.some((r) => /git branch/.test(r)), `${role} file`);
-    const cmd = commandFor({ stage: role === 'triage' ? 'triage' : 'write', role, keys: ['502'], group: '502', worktrees: role === 'triage' ? [] : [{ repo: 'guide-docs', branch: 'ticket-71', path: WT }] }, w.settings, { agentsPath: '/x/agents.json' });
+    const tree = role === 'triage' ? [] : [{ repo: 'guide-docs', branch: 'ticket-71', path: WT }];
+    const cmd = commandFor({ stage: role === 'triage' ? 'triage' : 'write', role, keys: ['502'], group: '502', worktrees: tree }, w.settings, { agentsPath: '/x/agents.json' });
     const allowed = cmd.args.slice(cmd.args.indexOf('--allowedTools') + 1, cmd.args.indexOf('--disallowedTools'));
     const after = cmd.args.slice(cmd.args.indexOf('--disallowedTools') + 1);
     const denied = after.slice(0, after.findIndex((a) => a.startsWith('--')) >>> 0);
     // Even a role the settings let run `git branch` (a host's override) can't change a branch.
-    const wide = [...allowed, 'Bash(git branch:*)', `Bash(git -C ${WT} branch:*)`];
+    const wide = [...allowed, 'Bash(git branch:*)', ...tree.map((t) => `Bash(git -C ${t.path} branch:*)`)];
     for (const git of ['git', `git -C ${WT}`, 'git -C /work/another-clone']) {
       for (const args of ['-D other', 'other -D', '-d other', '--delete other', '-m own own2', 'own own2 -m', '-M own own2', '--move own own2', '-c own copy', '-C own copy', '--copy own copy', '-f main HEAD', 'main HEAD --force', '-u origin/x', '--set-upstream-to=origin/x', 'own --set-upstream-to=origin/x', '--set-upstream-to origin/x own']) {
-        assert.equal(verdict(`${git} branch ${args}`, wide, denied), 'denied', `${role}: ${git} branch ${args}`);
+        // Denied plain and on the step's worktree; another folder (or a role with no worktree) has no `-C` allow rule.
+        const v = verdict(`${git} branch ${args}`, wide, denied);
+        if (git === 'git' || tree.length && git.includes(WT)) assert.equal(v, 'denied', `${role}: ${git} branch ${args}`);
+        else assert.notEqual(v, 'allowed', `${role}: ${git} branch ${args}`);
       }
     }
     assert.equal(verdict(`git -C ${WT} branch --list`, allowed, denied), 'not allowed', `${role}: no git branch at all`);
@@ -297,7 +315,7 @@ test('the command line follows the role settings; the retry takes the next model
   assert.ok(cmd.args.slice(cmd.args.indexOf('--disallowedTools')).includes('WebFetch'));
   for (const role of ['triage', 'writer', 'reviewer', 'translator']) {
     const denied = commandFor({ stage: 'x', role, keys: ['502'], group: '502' }, w.settings, { agentsPath: '/x/agents.json' }).args;
-    for (const rule of PUSH_DENIED) assert.ok(denied.slice(denied.indexOf('--disallowedTools')).includes(rule), `${role} denies ${rule}`);
+    for (const rule of PUSH_DENIED_PLAIN) assert.ok(denied.slice(denied.indexOf('--disallowedTools')).includes(rule), `${role} denies ${rule}`);
   }
   assert.equal(cmd.cwd, w.root);
   const ladder = w.settings.modelLadder;

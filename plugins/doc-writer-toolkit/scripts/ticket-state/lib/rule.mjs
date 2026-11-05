@@ -140,7 +140,7 @@ export function deriveTicket(l, w) {
     t.failed = failed;
     if (failed.held) {
       t.steps = [];
-      t.gate = { who: 'owner', why: `${failed.stage}${failed.pr ? ` on ${failed.pr}` : ''} failed in ${failed.sessions} sessions with no one acting in between: a comment on the card or the PR gives it one more try (so do a review, a commit, a move of the card, or \`ticket-state set retry ${l.key}\`)` };
+      t.gate = { who: 'owner', why: `${failed.stage}${failed.pr ? ` on ${failed.pr}` : ''} ${failed.noSession ? `failed ${failed.sessions === 2 ? 'twice' : `${failed.sessions} times`} with no one acting in between, the last time before any session started (${failed.noSession.slice(0, 200)})` : `failed in ${failed.sessions} sessions with no one acting in between`}: a comment on the card or the PR gives it one more try (so do a review, a commit, a move of the card, or \`ticket-state set retry ${l.key}\`)` };
       t.held = true;
     } else if (!failed.acted && t.steps.length) t.steps[0] = { ...t.steps[0], prior: failed.sessions, waits: 'a person acting on the ticket, or the next morning run' };
   }
@@ -205,7 +205,8 @@ function failedStep(l, w, steps) {
   if (!s || last?.outcome !== 'failed' || !last.after || last.stage !== s.stage || (last.pr ?? null) !== (s.pr ?? null)) return null;
   const sessions = last.failures ?? 1;
   const acted = actedAfter(l, w, last.after);
-  return { stage: last.stage, ...(last.pr ? { pr: last.pr } : {}), at: last.after.at, sessions, ...(acted ? { acted } : { held: sessions >= 2 }) };
+  // A failure with no session (no `start`: a worktree that couldn't be made or was stuck) says so, with its reason.
+  return { stage: last.stage, ...(last.pr ? { pr: last.pr } : {}), at: last.after.at, sessions, ...(last.start ? {} : { noSession: String(last.note ?? 'no session started') }), ...(acted ? { acted } : { held: sessions >= 2 }) };
 }
 
 // The sessions the ticket's next step already had today (since a `set retry`, if later), when they reach the cap.

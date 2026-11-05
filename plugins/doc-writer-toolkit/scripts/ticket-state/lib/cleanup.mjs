@@ -147,10 +147,11 @@ export function cleanupTicket({ settings, ledger, prState, dryRun = false, trash
     out.kept = [...trees.map((t) => ({ path: t.path, reason: 'not every PR is merged' })), ...files.map((f) => ({ path: f.path, reason: 'not every PR is merged' }))];
     return out;
   }
-  // `git worktree remove --force`, then prune: the worktree and its `.git` link go together.
-  for (const t of trees) out.worktrees.push(removeWorktree(t.clone, t.path, { dryRun, pushed, branch: t.branch }));
-  const roots = [settings.root, settings.state].map((r) => path.resolve(r));
+  // `git worktree remove` (never `--force`), then prune: the worktree and its `.git` link go together. One with work
+  // files (`.sources/`, the keep list) or unsaved work is kept.
   const keeps = (keep ?? []).map(globRe);
+  for (const t of trees) out.worktrees.push(removeWorktree(t.clone, t.path, { dryRun, pushed, branch: t.branch, keep: keeps }));
+  const roots = [settings.root, settings.state].map((r) => path.resolve(r));
   const kept = (abs) => keeps.some((re) => re.test(path.relative(settings.root, abs).split(path.sep).join('/')));
   const go = (abs, entry) => {
     const bytes = sizeOf(abs);
@@ -163,6 +164,12 @@ export function cleanupTicket({ settings, ledger, prState, dryRun = false, trash
   };
   for (const entry of files) {
     const abs = path.resolve(settings.root, entry.path);
+    // A recorded file a session wrote inside a ticket worktree went, or stays, with that worktree.
+    const inTree = out.worktrees.find((t) => inside(canon(abs), canon(t.path)));
+    if (inTree) {
+      out.kept.push({ path: entry.path, reason: inTree.removed || inTree.wouldRemove ? `inside the worktree ${inTree.path}, removed with it (it held no work file)` : `inside the worktree ${inTree.path}, kept with it` });
+      continue;
+    }
     if (!roots.some((r) => inside(abs, r))) {
       out.kept.push({ path: entry.path, reason: 'outside the host repo and the state root' });
       continue;
@@ -192,7 +199,7 @@ export function cleanupTicket({ settings, ledger, prState, dryRun = false, trash
         const clone = c.kind === 'worktree' ? cloneOf(c.path) : null;
         if (clone) {
           const bytes = sizeOf(c.path);
-          const res = removeWorktree(clone, c.path, { dryRun, pushed });
+          const res = removeWorktree(clone, c.path, { dryRun, pushed, keep: keeps });
           out.worktrees.push(res);
           skip.add(c.path);
           if (res.removed || res.wouldRemove) {

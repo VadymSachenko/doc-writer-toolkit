@@ -43,7 +43,7 @@ export function listWorktrees(clone) {
     const lines = block.split('\n');
     const at = lines.find((l) => l.startsWith('worktree '));
     if (!at) continue;
-    list.push({ path: at.slice('worktree '.length), prunable: lines.some((l) => l.startsWith('prunable')) });
+    list.push({ path: at.slice('worktree '.length), prunable: lines.some((l) => l.startsWith('prunable')), locked: lines.some((l) => l === 'locked' || l.startsWith('locked ')) });
   }
   return list;
 }
@@ -161,7 +161,7 @@ export function ensureWorktree(settings, pr) {
   const { linked, missing } = link(clone, wt, target?.links ?? DEFAULT_LINKS);
   exclude(wt, linked);
   for (const name of missing) notes.push(`${name}: not in the clone (${clone}), so not linked`);
-  return { repo: pr.repo, branch: pr.branch, path: wt, clone, head: tryRun(wt, ['rev-parse', 'HEAD']), push: `git -C ${wt} push origin HEAD:refs/heads/${pr.branch}`, linked, missing, notes, stuck };
+  return { repo: pr.repo, branch: pr.branch, base, path: wt, clone, head: tryRun(wt, ['rev-parse', 'HEAD']), push: `git -C ${wt} push origin HEAD:refs/heads/${pr.branch}`, linked, missing, notes, stuck };
 }
 
 // The PRs a step's session works on: the step's PR, or every open PR of its tickets with a branch.
@@ -203,9 +203,12 @@ export function cloneOf(worktree) {
 }
 
 // Work in a worktree that no remote has: commits on no remote-tracking ref (unless the head is one the forge had, in
-// `pushed`), changes to tracked files, or untracked files git doesn't ignore (a page a session wrote and never added).
-// The linked names (`node_modules`, `.env`) are in `info/exclude`, so they don't count.
-export function unsavedWork(wt, pushed = []) {
+// `pushed`), changes to tracked files, untracked files git doesn't ignore (a page a session wrote and never added), and
+// ignored work files: anything under a `.sources/` folder (notes, interviews, frames) or matching `keep` (the
+// `cleanup.keep` globs, over the path from the worktree's top). Other ignored files (the linked `node_modules` and
+// `.env`, `build/`, `.docusaurus/`, a pack's output) go with the worktree.
+export const isWorkFile = (rel, keep = []) => /(^|\/)\.sources(\/|$)/.test(rel) || keep.some((re) => re.test(rel));
+export function unsavedWork(wt, pushed = [], { keep = [] } = {}) {
   const reasons = [];
   const status = tryRun(wt, ['status', '--porcelain', '--untracked-files=all']);
   if (status === null) return ['git can not read it'];
@@ -214,6 +217,10 @@ export function unsavedWork(wt, pushed = []) {
   const untracked = lines.filter((l) => l.startsWith('??'));
   if (changed.length) reasons.push(`${changed.length} tracked file(s) changed and not committed`);
   if (untracked.length) reasons.push(`${untracked.length} untracked file(s) never added (${untracked.slice(0, 3).map((l) => l.slice(3)).join(', ')}${untracked.length > 3 ? ', …' : ''})`);
+  const ignored = tryRun(wt, ['ls-files', '--others', '--ignored', '--exclude-standard']);
+  if (ignored === null) return ['git can not read it'];
+  const work = ignored.split('\n').filter((rel) => rel && isWorkFile(rel, keep));
+  if (work.length) reasons.push(`${work.length} ignored work file(s) (${work.slice(0, 3).join(', ')}${work.length > 3 ? ', …' : ''})`);
   const head = tryRun(wt, ['rev-parse', 'HEAD']);
   const unpushed = (tryRun(wt, ['rev-list', 'HEAD', '--not', '--remotes']) ?? '').split('\n').filter(Boolean);
   if (unpushed.length && !pushed.filter(Boolean).some((h) => head?.startsWith(String(h)))) reasons.push(`${unpushed.length} commit(s) on no remote branch`);
@@ -223,17 +230,19 @@ export function unsavedWork(wt, pushed = []) {
 // Removes one worktree the way git does (`git worktree remove`, never `--force`), then prunes the clone's list. Never
 // by moving files: the folder and its `.git` link go together, or nothing goes. The linked names are ignored files, so
 // git removes the links and leaves what they point to. A worktree with work no remote has is kept, with what to do;
-// so is one git refuses to remove.
-export function removeWorktree(clone, wt, { dryRun = false, pushed = [], branch = null } = {}) {
+// so is one git refuses to remove (a locked one needs `worktree unlock` first).
+export function removeWorktree(clone, wt, { dryRun = false, pushed = [], branch = null, keep = [] } = {}) {
   const push = branch ? `push it (\`git -C ${wt} push origin HEAD:refs/heads/${branch}\`) or ` : '';
-  const todo = `${push}copy what you need, then \`git -C ${clone} worktree remove --force ${wt}\``;
-  const work = unsavedWork(wt, pushed);
+  const locked = listWorktrees(clone).find((x) => canon(x.path) === canon(wt))?.locked;
+  const unlock = locked ? `\`git -C ${clone} worktree unlock ${wt}\`, then ` : '';
+  const todo = `${push}copy what you need (and move the work files to the Trash), then ${unlock}\`git -C ${clone} worktree remove --force ${wt}\``;
+  const work = unsavedWork(wt, pushed, { keep });
   if (work.length) return { path: wt, clone, removed: false, kept: work.join('; '), todo };
   if (dryRun) return { path: wt, clone, removed: false, wouldRemove: true };
   try {
     run(clone, ['worktree', 'remove', wt]);
   } catch (e) {
-    return { path: wt, clone, removed: false, kept: `git would not remove it: ${gitError(e)}`, todo };
+    return { path: wt, clone, removed: false, kept: `git would not remove it${locked ? ' (locked)' : ''}: ${gitError(e)}`, todo };
   } finally {
     tryRun(clone, ['worktree', 'prune']);
   }
