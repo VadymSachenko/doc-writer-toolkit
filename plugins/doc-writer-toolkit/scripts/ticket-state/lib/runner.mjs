@@ -14,6 +14,7 @@ import { CARD_STATUS_OF, LABEL_OF, PR_STAGE_OF_STATUS, PRIORITY_RANK, finishRank
 import { appendRunLog, localDate, readRunLog, renderReport, writeReport } from './report.mjs';
 import { ROLES } from './settings.mjs';
 import { cleanupTicket } from './cleanup.mjs';
+import { childEnv } from './env.mjs';
 
 // The daily run (design §7): finish first, then triage the quiet intake cards (mornings), then start ready groups while
 // the limits and the day's allowance allow. A script decides; each step that needs a model is one `claude -p` session
@@ -133,9 +134,10 @@ export function commandFor(step, settings, { model, agentsPath, claude = 'claude
 }
 
 // Runs one session; resolves { code, stdout, stderr }.
-export function spawnClaude({ bin, args, cwd }, { timeoutMs = 4 * 3600 * 1000 } = {}) {
+// The child gets no API key or auth token (`lib/env.mjs`), so the plan pays.
+export function spawnClaude({ bin, args, cwd }, { timeoutMs = 4 * 3600 * 1000, env = process.env } = {}) {
   return new Promise((resolve) => {
-    const child = spawn(bin, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(bin, args, { cwd, env: childEnv(env), stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => child.kill('SIGTERM'), timeoutMs);
@@ -172,8 +174,8 @@ export function parseResult(stdout) {
   }
 }
 
-export function readUsageFromClaude(claude = 'claude') {
-  const run = spawnSync(claude, ['-p', '/usage'], { cwd: os.tmpdir(), encoding: 'utf8', timeout: 60 * 1000 });
+export function readUsageFromClaude(claude = 'claude', env = process.env) {
+  const run = spawnSync(claude, ['-p', '/usage'], { cwd: os.tmpdir(), env: childEnv(env), encoding: 'utf8', timeout: 60 * 1000 });
   const usage = parseUsage(`${run.stdout ?? ''}${run.stderr ?? ''}`);
   return usage.week || usage.session ? usage : null;
 }
@@ -434,7 +436,8 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
 
   // Start ready groups while the limits and the allowance allow: the highest priority first, the oldest within a level.
   const cardsOf = (keys) => keys.map((k) => st.tickets.find((t) => t.key === k)).filter(Boolean).map((t) => ({ key: t.key, url: t.card?.url, shortLink: t.card?.shortLink, priority: t.priority }));
-  if (!manual) {
+  // The watcher's run finishes the tickets it names; it starts no ready group (the morning run does).
+  if (trigger === 'schedule') {
     if (planOnly) {
       out.starts = st.startable.map((g) => describe({ stage: 'start', role: 'writer', group: g.group, keys: g.keys, priority: g.priority, startedBy: 'schedule', cards: cardsOf(g.keys) }));
     } else {
@@ -448,7 +451,7 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
         st = await status();
       }
     }
-  } else if (named.length) {
+  } else if (manual && named.length) {
     for (const g of st.groups.filter((x) => x.keys.some((k) => named.includes(k)))) {
       const step = { stage: 'start', role: 'writer', group: g.group, keys: g.keys, priority: g.priority, startedBy: 'manual', cards: cardsOf(g.keys) };
       out.starts.push(planOnly ? describe(step) : await advance(step));

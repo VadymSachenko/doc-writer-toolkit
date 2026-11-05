@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { readAllLedgers } from './ledger.mjs';
+import { readFeed } from './feed.mjs';
 
 // The morning report (design §7): a local file `<state>/reports/<date>.md`, written with no model call. Nothing goes to
 // the tracker or the forge. A separate skill reads it on demand.
@@ -91,6 +92,24 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
   out.push('## Ready for merge', '', list(ready), '');
 
   for (const w of watched) out.push(`## Cards left in ${w.list}`, '', list(w.cards.map((c) => `[${c.name}](${c.url}), last activity ${c.lastActivity}`)), '');
+
+  // The watcher: when it last read each source, what fails, and the host jobs waiting for their quiet hours.
+  let feed = null;
+  try {
+    feed = readFeed(settings.state);
+  } catch {
+    /* unreadable: left out */
+  }
+  if (feed && Object.keys(feed.sources).length) {
+    const checks = Object.values(feed.sources).map((x) => x.lastCheck).filter(Boolean).sort();
+    const failing = Object.entries(feed.sources).filter(([, x]) => x.failingSince).map(([n, x]) => `${n} failing since ${x.failingSince}: ${x.lastError ?? 'error'}`);
+    const jobs = (settings.hostJobs ?? []).map((j) => {
+      const js = feed.jobs?.[j.name] ?? {};
+      if (j.watch && js.armed) return `${j.name}: new cards in ${j.watch.list} since ${js.firstChange}; runs ${j.quietHours} h after the last change (${js.lastChange})${js.heldUntil ? `, held by the guard until ${js.heldUntil}` : ''}`;
+      return `${j.name}: ${js.lastRun ? `last run ${js.lastRun}` : 'not run yet'}${js.lastFailure ? `, failed twice at ${js.lastFailure}` : ''}`;
+    });
+    out.push('## The watcher', '', `Last check ${checks.at(-1) ?? 'never'}; the morning run ${feed.morning?.lastDate === date ? `ran at ${feed.morning.at ?? date}` : 'has not run on this date'}.`, '', list([...failing, ...jobs], 'no source failing, no host job'), '');
+  }
 
   out.push('## Starting and finishing', '');
   const steps = st.tickets.filter((t) => t.next);

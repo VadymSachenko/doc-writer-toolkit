@@ -1,10 +1,12 @@
 # ticket-state
 
-The ticket ledger of a docs pipeline and its daily run. `ticket-state.mjs` keeps one ledger per ticket and derives, from the tracker, the forge, git and the files, each ticket's state, its next step and the gate that is open; it records a stage only when the world supports it. `runner.mjs` runs the day: finish first, triage the intake in the morning, start ready groups within the limits, one `claude -p` session per step that needs a model. Node, no dependencies. No AI in either script: they decide, and the role sessions do the work.
+The ticket ledger of a docs pipeline, its daily run and its watcher. `ticket-state.mjs` keeps one ledger per ticket and derives, from the tracker, the forge, git and the files, each ticket's state, its next step and the gate that is open; it records a stage only when the world supports it. `runner.mjs` runs the day: finish first, triage the intake in the morning, start ready groups within the limits, one `claude -p` session per step that needs a model. `watcher.mjs` is started by launchd every few minutes: it reads what changed on the boards and the PRs, and has the runner finish the tickets that changed; once a day it starts the morning run, and it starts the host's jobs. `launchd.mjs` installs and uninstalls its LaunchAgent. Node, no dependencies. No AI in any of them: they decide, and the role sessions do the work.
 
 ```
 node ${CLAUDE_PLUGIN_ROOT}/scripts/ticket-state/ticket-state.mjs <command> [<key>] [options]
 node ${CLAUDE_PLUGIN_ROOT}/scripts/ticket-state/runner.mjs [--dry-run] [--morning] [--manual --ticket <key>] [options]
+node ${CLAUDE_PLUGIN_ROOT}/scripts/ticket-state/watcher.mjs [--dry-run] [--quiet] [options]
+node ${CLAUDE_PLUGIN_ROOT}/scripts/ticket-state/launchd.mjs print|install|uninstall|status [--noop] [options]
 ```
 
 Run them from the host repo (or pass `--root`). Needs Node 18.3+, the `tracker` and `forge` scripts next to this one (their modules are used as libraries, so every tracker and forge rule holds here too), git, and for a live run the `claude` CLI. Tests: `npm test` in this folder (offline: in-memory tracker and forge adapters under the real modules, throwaway git repos, and a stand-in for `claude`).
@@ -26,14 +28,15 @@ The shared file (committed in the host) holds `state`, `tracker`, `forge`, `targ
 | `tracker.priority` | `{ "high": "high", "low": "low" }` | The priority labels (no label: medium; both: high). Read by the `tracker` module. |
 | `targets[].appLabel`, `.path`, `.uaRoot`, `.base` | none, none, required, `main` | The label that names the target, its repo's path from the host root (git reads it there), the UA content root in that repo, the base branch. |
 | `hostRules` | `{}` | The host's rule files the role sessions read (triage, templates, page locator, git). |
-| `hostJobs` | `[]` | The host's own jobs; a `watch: { board, list }` lists the cards left in that list in the report. |
+| `hostJobs` | `[]` | The host's own jobs, started by the watcher (see "Host jobs"). Each has a `name`, a trigger (`watch: { board, list }` with `quietHours`, or `every` minutes), a `run` (`script` inside the host repo, or `skill`) and `timeoutMinutes` (120). The report lists the cards left in each watched list. |
 | `mode` | `observe` | `off` runs nothing; `observe` plans and writes only the report; `on` runs. |
 | `limits.inProgress` / `limits.waiting` | `3` / `5` | The WIP ceilings for scheduled starts. |
 | `limits.parallel` | `3` | Groups advanced at once (1 once the session bar reaches `limits.sessionPercent`, default `80`). |
 | `limits.dailyPercent`, `limits.maxWeekPercent` | `10`, none | The day's allowance: `dailyPercent` × the day of the week window, capped by `maxWeekPercent`. |
 | `limits.estimates` | `{}` | Percent of the week per size (`edit`, `newPage`, `newSection`) until finished tickets give measured ones. |
 | `limits.lockLeaseMinutes`, `limits.triageBatch`, `limits.stepsPerTicket` | `120`, `10`, `12` | A lock's lease; cards per morning triage session; steps one group may take in one run. |
-| `schedule.morning`, `schedule.watchMinutes` | `07:00`, `5` | For the watcher that starts the runner. |
+| `schedule.morning`, `schedule.watchMinutes` | `07:00`, `5` | The morning run starts at the watcher's first check after this local time; the watcher runs every `watchMinutes` (its LaunchAgent takes the value when installed). |
+| `schedule.tokenFile` | none | A file, readable by its owner only (`chmod 600`), holding the long-lived sign-in token from `claude setup-token` on its first line. The watcher gives it to every `claude` it starts as `CLAUDE_CODE_OAUTH_TOKEN`. None: the CLI's own sign-in. |
 | `roles.<role>` | see below | `model`, `effort`, `maxTurns`, `maxBudgetUsd`, `allowedTools`, `disallowedTools` for `triage`, `writer`, `reviewer`, `translator`. |
 | `modelLadder` | haiku, sonnet, opus (`claude-*-5-5`) | The one retry of a failed step takes the next model up. |
 | `video` | `partMinutes 30`, `partsPerDay 3`, `transcriptHours 2`, `browserProfile` none | The video gate. No `browserProfile`: no automatic try, straight to the person. |
@@ -55,6 +58,7 @@ Role defaults: triage `claude-sonnet-5-5` medium, writer `claude-opus-5-5` high,
 | `config` | The merged settings as the skills read them; credentials by variable name only. |
 | `intake` | The intake cards: `due` (quiet for `quietHours`, highest priority first, then the oldest) and `waiting` (with `quietAt`). |
 | `report` | Writes the report `<state>/reports/<date>.md` (`--print`: to stdout instead). |
+| `set <key> <value>` | Sets one key of the owner's local file: `mode`, `limits.*`, `schedule.*`, `roles.<role>.*`, `modelLadder`, `video.*`, `cleanup.*`. The value is read as JSON when it parses (`1`, `null`, `["a"]`), else as text (`on`, `06:30`). The merged settings are checked before the file is written (to a temp file, then renamed); a bad value or a key of the shared file writes nothing (exit 2). `--unset` drops the key, so the default applies. Prints `before`, `after` and `changed`. This is what a request in plain words ("one at a time", "pause the pipeline") turns into. |
 
 The runner takes no command.
 
@@ -80,6 +84,7 @@ The runner takes no command.
 | `--started-by <schedule\|manual>` | `record start`: who started it (default: the lock's kind, else `manual`). |
 | `--group <g>`, `--kind <k>`, `--stale` | `lock`, `unlock`. |
 | `--date <yyyy-mm-dd>`, `--print` | `report`. |
+| `--unset` | `set`: drop the key. |
 | `--origin <url>` | The tracker's API origin (tests). |
 
 `runner.mjs`:
@@ -89,10 +94,35 @@ The runner takes no command.
 | `--dry-run` | Prints the plan: each step with its tracker and forge calls or its `claude` command line, the triage, the starts, the cleanup each close would do, and the report. Writes nothing (no ledger, lock, report or run log) and sends no change; the output lists every request sent (`requests`, reads only) and every write the modules caught (`caught`). |
 | `--morning` | Also triages the intake cards that are due, in one session (`limits.triageBatch` cards, highest priority first). |
 | `--manual` | A manual run: it ignores the limits and the allowance guard, starts only the ready tickets named with `--ticket`, and its tickets stay out of the counts for their whole life. With `--morning` it triages only the named intake cards. |
-| `--ticket <key>` | With `--manual`: only these tickets (repeatable). |
+| `--watcher` | The watcher's run: it finishes only the tickets named with `--ticket`, guarded and counted like a scheduled run; no triage and no start of a ready group. Its sessions are recorded with `trigger: watcher`. |
+| `--ticket <key>` | With `--manual` or `--watcher`: only these tickets (repeatable). |
 | `--usage-file <file\|->` | The `/usage` text (default: the runner runs `claude -p /usage` before and after each session). |
 | `--claude <bin>` | The `claude` command. |
 | `--root`, `--settings`, `--origin` | As above. |
+
+`watcher.mjs`:
+
+| | |
+|---|---|
+| `--dry-run` | Reads the sources and plans: the runner plans as in its own dry run, and a due job is shown with its command line. Writes no cursor, no job state, no run log, no notification. |
+| `--quiet` | Prints nothing for a quiet check, one line otherwise (what the LaunchAgent uses, for its log). |
+| `--noop` | Does nothing and exits 0, reading no settings: for an install check of the LaunchAgent. |
+| `--claude <bin>` | The `claude` command. |
+| `--root`, `--settings`, `--origin` | As above. |
+
+`launchd.mjs`:
+
+| Command | |
+|---|---|
+| `print` | The plist it would install and where; installs nothing. `missing` names `claude`, `git` or `gh` not found on the PATH. |
+| `install` | Writes `~/Library/LaunchAgents/<label>.plist` and loads it (`launchctl bootstrap gui/<uid>`); an existing one is replaced. Stops if `claude`, `git` or `gh` is missing. If loading fails, the plist is removed. |
+| `uninstall` | Unloads it (`launchctl bootout`) and removes the plist. `left` is `false` when neither the job nor the file remains. |
+| `status` | `fileExists` and `loaded`. |
+
+| Option | |
+|---|---|
+| `--noop` | A test agent under its own label (`<label>.noop`) that runs `watcher.mjs --noop`. |
+| `--root`, `--settings` | As above. |
 
 ## `record`: what each stage checks
 
@@ -157,6 +187,46 @@ The role files are `${CLAUDE_PLUGIN_ROOT}/context/ticket-roles/<role>.md` with `
 
 **The report**, `<state>/reports/<date>.md`, written with no model call: the mode, WIP and allowance; what waits for the owner; PRs with places; PRs labelled with the check label; videos waiting for transcripts (the parts to upload today); ready for merge (and PRs that went on to the final review alone); the cards left in each watched list; what finished and started, and why each other group didn't; mismatches and tickets in the owner's hands; cards that are not tickets; the work files removed after the merge and the space freed; failures and guard stops; the day's cost. Once a week it adds proposed changes to the roles (a role whose steps often needed the retry: the next model; many clean steps at high effort: medium), kept in `<state>/roles-proposal.json`; nothing changes on its own.
 
+## The watcher
+
+One check, every `schedule.watchMinutes`, with no model call of its own (design §5):
+
+1. **The sources:** the board in the settings, each `tracker.watchBoards` board and each host job's board (the actions since a time), and for each target repo the PRs that changed and the PR events (a review request or a label may not move a PR's update time, so both are read).
+2. **The cursor**, one per source in `<state>/watch/feed.json`: the window starts 10 minutes before `lastCheck`, and an id already in `seen` is dropped, so the overlap costs nothing. `lastCheck` moves to the start of the check only after every event of the window was handed on; if the hand-off fails, the same window is read again. A source that fails keeps its `lastCheck`, and the others move on; after 24 hours of failing, the gap is written to the run log (the report shows it) and the source starts again from now. A source with no cursor starts from now. The file is written to a temp file and renamed. After a sleep, launchd runs the missed interval once, and that check reads everything since `lastCheck`.
+3. **The tickets:** each event maps to a ticket through the ledgers (a card by id or short link, the ticket's original card, a PR by number or head branch). Events that map to no open ledger (intake cards, other cards) are left to the morning run. A check that finds no event and no ticket waiting ends here: no status, no runner, no `/usage`, no `claude`.
+4. **The decision is `status`'s:** the watcher asks `ticket-state status` (the same module, in process) about the tickets that changed, and hands those with a next step, not locked and not in the owner's hands, to the runner (`--watcher`) in one run, so each runs once. A ticket a run holds now is kept in `pending` and looked at again on the next check. The watcher never decides a step.
+5. **The morning run:** at the first check after `schedule.morning` each day (the Mac may have slept through it), the runner's morning run instead: finishing, triage and starts. It covers every ticket, so the events of that check need nothing more.
+6. **Host jobs** (below), then the notifications.
+
+One check at a time: a lock in `<state>/watch/active/`, freed when its process is gone. `mode off`: nothing is read and the cursors stay. `mode observe`: the runner plans and writes the report only, and a due job is logged as planned, not run.
+
+### Host jobs
+
+The host declares in `hostJobs` "when list X gets new cards and stays quiet for N hours, run job Y", or "run job Y every N minutes". The toolkit knows nothing about what a job does.
+
+- **A watched list:** a card that arrives in the list (created there, or moved in) arms the job; every change in the list (a card in, a card out, an action on a card in it) moves `lastChange` to that change's own time, so a change seen only after a sleep still restarts the wait. The job runs once `quietHours` have passed since the last change, once per armed batch.
+- **`every`:** the job runs when `every` minutes have passed since its last run.
+- **`run.script`:** a file inside the host repo, started from the host root (`node` for `.mjs`/`.js`). Not guarded: it makes no model call.
+- **`run.skill`:** one `claude -p "/<skill> [args]"` session, with the job's `model`, `effort`, `maxTurns` and `allowedTools` (an unattended run stops at an `ask` rule, so the job's allow list must cover what the skill does). It is a model call, so the guard holds it like a scheduled step: at the allowance it waits an hour, and the owner is told.
+- **Its environment:** no API key (below), plus `DOC_TOOLKIT_JOB` (its name), `DOC_TOOLKIT_JOB_LIST`, `DOC_TOOLKIT_JOB_FIRST_CHANGE` and `DOC_TOOLKIT_JOB_LAST_CHANGE` (ISO times: the first card of the batch, the last change). Its output goes to `<state>/watch/jobs/<name>-<time>.log`, its outcome to the run log.
+- **A failure** is tried again at the next check; a second failure in a row disarms the job until its next trigger, and is urgent.
+
+### Notifications
+
+macOS only, with `osascript`, the text passed as an argument (never inside the script). Once a day, after the morning run: its counts (steps done and failed, groups started, tickets in progress and waiting, the week's use against the allowance). Urgent (with a sound), once a day per reason: a limit reached (a guard stop, of a step or a skill job), or a step or a host job that failed twice. Nothing else, and nothing goes to the tracker or the forge. `/ticket-report` reads the report itself.
+
+### The plan pays
+
+Every `claude` the runner and the watcher start gets an environment without `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN`: with `-p`, either would be used before the plan's sign-in. The watcher also removes them from its own environment and says so in its output (by name, never by value). With `schedule.tokenFile`, it reads the long-lived sign-in token and passes it on as `CLAUDE_CODE_OAUTH_TOKEN`; a file others can read is refused. The token is never printed, logged or written into the plist.
+
+### Installing the LaunchAgent
+
+1. Run `claude setup-token`, save the token in a file outside every repo (`chmod 600`), and set `schedule.tokenFile` to it: `ticket-state.mjs set schedule.tokenFile <file>`.
+2. `launchd.mjs print --root <host>` to see the plist; `launchd.mjs install --root <host>`. The label is `dev.doc-toolkit.ticket-flow.<host folder name>`, the log `<state>/watch/launchd.log`.
+3. `launchd.mjs uninstall --root <host>` removes it; `left: false` confirms that nothing is left. `mode off` in the local file stops every run at once, with no uninstall.
+
+The plist holds absolute paths (node, the watcher in the plugin's folder as installed, the host) and a PATH with `claude`, `git` and `gh`: install again after the plugin or one of them moves.
+
 ## `status` output
 
 `tickets[]`: `key`, `group`, `ledger` (`present` or `absent`), `priority`, `createdAt`, `mode`, `startedBy`, `stage` (the last recorded), `card`, `state`, `next` (the first of `steps`, or null), `steps`, `gate` (`who`, `why`), `mismatch`, `notes`, `prs` (each with `id`, `stage`, `state`, `labels`, `head`, `next`, and `approvalStale`, the UA pages changed after the approval), `counts` (`inProgress`, `waiting` or null), `counted`, `locked` (with `derivedState`), `hand`. Then `intake`, `groups`, `wip` (`inProgress`, `waiting`, `limits`, `manual`), `allowance` (`day`, `cap`, `used`, `remaining`, `inWork`, `inWorkUnknown`), `estimates`, `startable`, `notStarted` (with `reasons`), `notTickets`, `locks`, and `requests` (what was sent to the tracker and the forge, by method; `writes` is empty).
@@ -169,18 +239,21 @@ The role files are `${CLAUDE_PLUGIN_ROOT}/context/ticket-roles/<role>.md` with `
 
 | | |
 |---|---|
-| `ticket-state.mjs`, `runner.mjs` | The two CLIs. |
+| `ticket-state.mjs`, `runner.mjs`, `watcher.mjs`, `launchd.mjs` | The four CLIs. |
 | `lib/rule.mjs` | The next-step rule: one ticket's state, steps, gate and mismatches. |
 | `lib/status.mjs`, `lib/world.mjs` | The snapshot: ledgers, the tracker, the forge, git (read only). |
 | `lib/record.mjs`, `lib/handover.mjs` | The only writers of a ledger. |
 | `lib/limits.mjs`, `lib/allowance.mjs`, `lib/intake.mjs` | The limits and estimates, the day's allowance, the intake. |
 | `lib/ids.mjs`, `lib/cleanup.mjs` | The id-only predicate; the cleanup after the merge. |
 | `lib/runner.mjs`, `lib/report.mjs`, `lib/locks.mjs` | The daily run, the report, the locks. |
+| `lib/watch.mjs`, `lib/feed.mjs`, `lib/jobs.mjs`, `lib/notify.mjs` | The watcher's check, its sources and cursor, the host jobs, the notifications. |
+| `lib/launchd.mjs`, `lib/env.mjs`, `lib/setlocal.mjs` | The LaunchAgent; the environment of every `claude` (no API key, the sign-in token); `set`. |
 | `lib/ledger.mjs`, `lib/stages.mjs`, `lib/settings.mjs`, `lib/errors.mjs` | The ledger file, the stage vocabulary, the settings, the errors. |
 | `test/` | The tests, the in-memory adapters (`test/fakes.mjs`, invented data only). |
 
 ## Limits
 
 - The stages' own work (triage rules, writing, the review chain, the video transcriber) belongs to the host's skills and the role sessions; the runner only starts them and checks their records. With no transcriber adapter, an automatic video try fails at once and the gate goes to the person.
-- The watcher that starts the runner on a schedule is not here; `schedule` is for it.
+- The watcher and its LaunchAgent are macOS-first: on another system run `watcher.mjs --quiet` from any scheduler; nothing else changes, and no notification is sent.
+- The watcher reads events only for tickets with a ledger; whatever it misses, the morning run reconciles from the full state.
 - `status` reads git in the target repos at `targets[].path`; a head that isn't fetched there is noted, and hand edits and stale stages aren't checked for it.

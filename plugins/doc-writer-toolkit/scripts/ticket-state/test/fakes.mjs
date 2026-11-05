@@ -52,7 +52,8 @@ export function card({ number = null, name, status = 'ready', list, labels = [],
   };
 }
 
-export function trackerAdapter({ cards = [], comments = {}, release = [] } = {}) {
+// `actions`: { <board id>: [actions in the adapter's shape] }, given back from `since` on, as the real board does.
+export function trackerAdapter({ cards = [], comments = {}, release = [], actions = {} } = {}) {
   const log = [];
   const reads = [];
   const all = () => [...cards, ...release];
@@ -89,7 +90,11 @@ export function trackerAdapter({ cards = [], comments = {}, release = [] } = {})
     comments: async (ref) => comments[get(ref).id] ?? [],
     attachments: async () => [],
     labels: async () => labels,
-    actions: async () => [],
+    actions: async (board, { since } = {}) => {
+      reads.push(['actions', board, since]);
+      if (actions.fail?.[board]) throw new Error(actions.fail[board]);
+      return (actions[board] ?? []).filter((a) => !since || a.time >= since).map((a) => ({ ...a }));
+    },
     download: async () => ({ bytes: 0 }),
     comment: async (ref, text) => {
       log.push(['comment', ref, text]);
@@ -139,8 +144,10 @@ export function pr({ repo = 'guide-docs', number, head, base = 'main', state = '
   };
 }
 
-export function forgeAdapter({ prs = [], activity = {} } = {}) {
+// `changed`: { <repo>: [PRs] } and `events`: { <repo>: [events] }, given back from `since` on. `fail`: { <repo>: message }.
+export function forgeAdapter({ prs = [], activity = {}, changed = {}, events = {}, fail = {} } = {}) {
   const log = [];
+  const reads = [];
   const get = ({ repo, number }) => {
     const p = prs.find((x) => x.repo === repo && x.number === Number(number));
     if (!p) {
@@ -154,12 +161,17 @@ export function forgeAdapter({ prs = [], activity = {} } = {}) {
   return {
     kind: 'memory',
     log,
+    reads,
     prs,
     activity,
     pr: async (a) => ({ ...get(a) }),
     prByHead: async ({ repo, head }) => prs.find((p) => p.repo === repo && p.head === head) ?? null,
     openPrByHead: async ({ repo, head }) => prs.find((p) => p.repo === repo && p.head === head && p.state === 'open') ?? null,
-    changedPrs: async () => [],
+    changedPrs: async ({ repo, since }) => {
+      reads.push(['changedPrs', repo, since]);
+      if (fail[repo]) throw new Error(fail[repo]);
+      return (changed[repo] ?? []).filter((p) => p.updatedAt >= since).map((p) => ({ ...p }));
+    },
     reviews: async (a) => act(a).reviews ?? [],
     threads: async (a) => act(a).threads ?? [],
     issueComments: async (a) => act(a).comments ?? [],
@@ -167,7 +179,11 @@ export function forgeAdapter({ prs = [], activity = {} } = {}) {
     reviewComment: async () => {
       throw new Error('not in these tests');
     },
-    events: async () => ({ events: [], truncated: false }),
+    events: async ({ repo, since }) => {
+      reads.push(['events', repo, since]);
+      if (fail[repo]) throw new Error(fail[repo]);
+      return { events: (events[repo] ?? []).filter((e) => e.createdAt >= since), truncated: false };
+    },
     diffLines: async () => [],
     createPr: async () => {
       throw new Error('not in these tests');

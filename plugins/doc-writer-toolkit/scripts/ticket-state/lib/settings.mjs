@@ -4,6 +4,7 @@ import { deepMerge, localSettingsPath, readJsonFile, settingsFile, validateTrack
 import { validateForge } from '../../forge/lib/settings.mjs';
 import { CliError } from './errors.mjs';
 import { DEFAULT_KEEP } from './cleanup.mjs';
+import { validateJobs } from './jobs.mjs';
 
 // The ticket flow settings: the shared file the host commits (`.claude/ticket-flow.json`, or the `Ticket flow
 // settings:` field of CLAUDE.md, or --settings) and the owner's local file next to it (`<name>.local.json`), merged key
@@ -30,7 +31,8 @@ export const LOCAL_DEFAULTS = {
     stepsPerTicket: 12,
     estimates: {},
   },
-  schedule: { morning: '07:00', watchMinutes: 5 },
+  // `tokenFile`: a file (mode 600) with the long-lived sign-in token the watcher's runs use; none: the CLI's own sign-in.
+  schedule: { morning: '07:00', watchMinutes: 5, tokenFile: null },
   roles: {
     triage: { model: 'claude-sonnet-5-5', effort: 'medium', maxTurns: 40 },
     writer: { model: 'claude-opus-5-5', effort: 'high', maxTurns: 200 },
@@ -120,6 +122,10 @@ export function validateSettings(merged, { root, stateRootDefault }) {
   }
   const modelLadder = merged.modelLadder ?? LOCAL_DEFAULTS.modelLadder;
   if (!Array.isArray(modelLadder) || modelLadder.some((m) => typeof m !== 'string')) fail('modelLadder must be a list of model names, cheapest first');
+  const schedule = deepMerge(LOCAL_DEFAULTS.schedule, merged.schedule ?? {});
+  if (typeof schedule.morning !== 'string' || !/^([01]?\d|2[0-3]):[0-5]\d$/.test(schedule.morning)) fail('schedule.morning must be a time such as 07:00');
+  num(schedule.watchMinutes, 'schedule.watchMinutes', { min: 1 });
+  if (schedule.tokenFile !== null && (typeof schedule.tokenFile !== 'string' || !schedule.tokenFile.trim())) fail('schedule.tokenFile must be a file path');
   const video = deepMerge(LOCAL_DEFAULTS.video, merged.video ?? {});
   num(video.partsPerDay, 'video.partsPerDay', { min: 1 });
   num(video.partMinutes, 'video.partMinutes', { min: 1 });
@@ -142,9 +148,9 @@ export function validateSettings(merged, { root, stateRootDefault }) {
     noReviewLabel: merged.noReviewLabel ?? null,
     appRepos: merged.appRepos ?? [],
     hostRules: merged.hostRules ?? {},
-    hostJobs: merged.hostJobs ?? [],
+    hostJobs: validateJobs(merged.hostJobs ?? [], root),
     limits,
-    schedule: deepMerge(LOCAL_DEFAULTS.schedule, merged.schedule ?? {}),
+    schedule,
     roles,
     modelLadder,
     video,
