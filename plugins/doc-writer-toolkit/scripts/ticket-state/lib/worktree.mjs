@@ -117,6 +117,8 @@ export function ensureWorktree(settings, pr) {
   const wt = worktreePath(settings, pr);
   const base = pr.base ?? target?.base ?? 'main';
   const notes = [];
+  // Why the worktree can't be brought to the branch's head: the runner starts no session on it (lib/runner.mjs).
+  const stuck = [];
   // Fresh refs, best effort: offline, the refs the clone has are used, and the brief says so.
   if (tryRun(clone, ['fetch', '-q', 'origin', `+refs/heads/${base}:refs/remotes/origin/${base}`]) === null) notes.push(`could not fetch ${base} from origin: the clone's refs are used`);
   const branchFetched = tryRun(clone, ['fetch', '-q', 'origin', `+refs/heads/${pr.branch}:refs/remotes/origin/${pr.branch}`]) !== null;
@@ -145,21 +147,21 @@ export function ensureWorktree(settings, pr) {
     // whose head the branch once had, by the remote-tracking ref's own log, follows it. A head the branch never had
     // holds a session's unpushed work, and stays.
     const wasBranch = head && (tryRun(wt, ['merge-base', '--is-ancestor', head, remoteBranch]) !== null || (tryRun(clone, ['reflog', 'show', '--format=%H', `refs/remotes/origin/${pr.branch}`]) ?? '').split('\n').includes(head));
-    if (dirty) notes.push(`the worktree has uncommitted changes to tracked files from an earlier session: left as they are, so it may not be at the branch's head; record the stage failed with this note (see the ticket-state README, "A stuck worktree")`);
+    if (dirty) stuck.push(`uncommitted changes to tracked files from an earlier session, left as they are, so it may not be at the branch's head (see the ticket-state README, "A stuck worktree")`);
     else if (wasBranch) {
       if (head !== tryRun(wt, ['rev-parse', remoteBranch])) {
         try {
           run(wt, ['checkout', '-q', '--detach', remoteBranch]);
         } catch (e) {
-          notes.push(`could not move the worktree to origin/${pr.branch}: ${gitError(e)}; record the stage failed with this note`);
+          stuck.push(`could not move it to origin/${pr.branch}: ${gitError(e)} (see the ticket-state README, "A stuck worktree")`);
         }
       }
-    } else notes.push(`the worktree is at a commit origin/${pr.branch} never had (an earlier session's work that was never pushed): left as it is, so it is not at the branch's head; record the stage failed with this note (see the ticket-state README, "A stuck worktree")`);
+    } else stuck.push(`at a commit origin/${pr.branch} never had (an earlier session's work that was never pushed), left as it is, so it is not at the branch's head (see the ticket-state README, "A stuck worktree")`);
   }
   const { linked, missing } = link(clone, wt, target?.links ?? DEFAULT_LINKS);
   exclude(wt, linked);
   for (const name of missing) notes.push(`${name}: not in the clone (${clone}), so not linked`);
-  return { repo: pr.repo, branch: pr.branch, path: wt, clone, head: tryRun(wt, ['rev-parse', 'HEAD']), push: `git -C ${wt} push origin HEAD:refs/heads/${pr.branch}`, linked, missing, notes };
+  return { repo: pr.repo, branch: pr.branch, path: wt, clone, head: tryRun(wt, ['rev-parse', 'HEAD']), push: `git -C ${wt} push origin HEAD:refs/heads/${pr.branch}`, linked, missing, notes, stuck };
 }
 
 // The PRs a step's session works on: the step's PR, or every open PR of its tickets with a branch.
@@ -201,32 +203,37 @@ export function cloneOf(worktree) {
 }
 
 // Work in a worktree that no remote has: commits on no remote-tracking ref (unless the head is one the forge had, in
-// `pushed`), or changes to tracked files. Untracked files (the linked node_modules, a session's notes) don't count.
+// `pushed`), changes to tracked files, or untracked files git doesn't ignore (a page a session wrote and never added).
+// The linked names (`node_modules`, `.env`) are in `info/exclude`, so they don't count.
 export function unsavedWork(wt, pushed = []) {
   const reasons = [];
-  const changed = tryRun(wt, ['status', '--porcelain', '--untracked-files=no']);
-  if (changed === null) return ['git can not read it'];
-  if (changed) reasons.push(`${changed.split('\n').length} tracked file(s) changed and not committed`);
+  const status = tryRun(wt, ['status', '--porcelain', '--untracked-files=all']);
+  if (status === null) return ['git can not read it'];
+  const lines = status.split('\n').filter(Boolean);
+  const changed = lines.filter((l) => !l.startsWith('??'));
+  const untracked = lines.filter((l) => l.startsWith('??'));
+  if (changed.length) reasons.push(`${changed.length} tracked file(s) changed and not committed`);
+  if (untracked.length) reasons.push(`${untracked.length} untracked file(s) never added (${untracked.slice(0, 3).map((l) => l.slice(3)).join(', ')}${untracked.length > 3 ? ', …' : ''})`);
   const head = tryRun(wt, ['rev-parse', 'HEAD']);
   const unpushed = (tryRun(wt, ['rev-list', 'HEAD', '--not', '--remotes']) ?? '').split('\n').filter(Boolean);
   if (unpushed.length && !pushed.filter(Boolean).some((h) => head?.startsWith(String(h)))) reasons.push(`${unpushed.length} commit(s) on no remote branch`);
   return reasons;
 }
 
-// Removes one worktree the way git does (`git worktree remove --force`), then prunes the clone's list. Never by moving
-// files: the folder and its `.git` link go together, or nothing goes. A linked `node_modules` is only unlinked. A
-// worktree with work no remote has is kept, with what to do: `--force` is only for the untracked links.
+// Removes one worktree the way git does (`git worktree remove`, never `--force`), then prunes the clone's list. Never
+// by moving files: the folder and its `.git` link go together, or nothing goes. The linked names are ignored files, so
+// git removes the links and leaves what they point to. A worktree with work no remote has is kept, with what to do;
+// so is one git refuses to remove.
 export function removeWorktree(clone, wt, { dryRun = false, pushed = [], branch = null } = {}) {
+  const push = branch ? `push it (\`git -C ${wt} push origin HEAD:refs/heads/${branch}\`) or ` : '';
+  const todo = `${push}copy what you need, then \`git -C ${clone} worktree remove --force ${wt}\``;
   const work = unsavedWork(wt, pushed);
-  if (work.length) {
-    const push = branch ? `push it (\`git -C ${wt} push origin HEAD:refs/heads/${branch}\`) or ` : '';
-    return { path: wt, clone, removed: false, kept: work.join('; '), todo: `${push}copy what you need, then \`git -C ${clone} worktree remove --force ${wt}\`` };
-  }
+  if (work.length) return { path: wt, clone, removed: false, kept: work.join('; '), todo };
   if (dryRun) return { path: wt, clone, removed: false, wouldRemove: true };
   try {
-    run(clone, ['worktree', 'remove', '--force', wt]);
+    run(clone, ['worktree', 'remove', wt]);
   } catch (e) {
-    return { path: wt, clone, removed: false, error: gitError(e) };
+    return { path: wt, clone, removed: false, kept: `git would not remove it: ${gitError(e)}`, todo };
   } finally {
     tryRun(clone, ['worktree', 'prune']);
   }

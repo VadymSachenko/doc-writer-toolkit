@@ -48,13 +48,16 @@ export const pushRulesFor = (trees = []) => [...new Set(trees.flatMap((t) => [`B
 // and with arguments; a `:<ref>` deletion can't be written as a deny rule at all, and is kept out by allowing only the
 // brief's exact push (`pushRulesFor`).
 const FORCE_FLAGS = ['--force', '-f', '--force-with-lease', '--force-if-includes', '--no-verify', '--mirror', '--delete', '-d'];
-const PUSH_PLAIN = FORCE_FLAGS.map((f) => `Bash(git push ${f}:*)`);
-const pushDenied = (git) => [
-  ...FORCE_FLAGS.flatMap((f) => [`Bash(${git} push ${f})`, `Bash(${git} push ${f} *)`, `Bash(${git} push * ${f})`, `Bash(${git} push * ${f} *)`]),
-  `Bash(${git} push +*)`,
-  `Bash(${git} push * +*)`,
-];
-export const PUSH_DENIED = [...new Set([...PUSH_PLAIN, ...pushDenied('git'), ...pushDenied('git -C *')])];
+// A flag of `git <sub>` denied wherever it stands, in both spellings: first, last, or between other words.
+const flagDenied = (sub, flags, git) => flags.flatMap((f) => [`Bash(${git} ${sub} ${f})`, `Bash(${git} ${sub} ${f} *)`, `Bash(${git} ${sub} * ${f})`, `Bash(${git} ${sub} * ${f} *)`]);
+const pushDenied = (git) => [...flagDenied('push', FORCE_FLAGS, git), `Bash(${git} push +*)`, `Bash(${git} push * +*)`];
+export const PUSH_DENIED = [...new Set([...FORCE_FLAGS.map((f) => `Bash(git push ${f}:*)`), ...pushDenied('git'), ...pushDenied('git -C *')])];
+// A worktree shares the clone's refs, so a `git branch` that deletes, renames, copies, moves or re-points a branch
+// would change the owner's own branches. No role allows `git branch`; these are denied in every role whatever its file
+// or the settings allow, in both spellings (`--set-upstream-to=<x>` as one word too).
+const BRANCH_FLAGS = ['-D', '-d', '--delete', '-m', '-M', '--move', '-c', '-C', '--copy', '-f', '--force', '-u', '--set-upstream-to'];
+const branchDenied = (git) => [...flagDenied('branch', BRANCH_FLAGS, git), `Bash(${git} branch --set-upstream-to=*)`, `Bash(${git} branch * --set-upstream-to=*)`];
+export const BRANCH_DENIED = [...new Set([...BRANCH_FLAGS.map((f) => `Bash(git branch ${f}:*)`), ...branchDenied('git'), ...branchDenied('git -C *')])];
 // Denied in every role too: the runner prepares the worktree (lib/worktree.mjs), so no session installs packages or
 // links files into it.
 export const SETUP_DENIED = ['Bash(npm ci:*)', 'Bash(npm install:*)', 'Bash(npm i:*)', 'Bash(ln:*)'];
@@ -143,8 +146,8 @@ export function briefFor(step, settings) {
 // What the brief says about the worktrees the runner made for the session.
 function worktreeLines(trees) {
   return [
-    'Worktrees (the runner made them; work only there, and never create, move or remove a worktree, or link a file into one). Run git there as `git -C <the path exactly as below> <command>`, or `cd` to it and run plain `git <command>`: other spellings are denied.',
-    ...trees.map((t) => `- ${t.repo} ${t.branch}: ${t.path}${t.linked?.length ? ` (linked from the clone: ${t.linked.join(', ')})` : ''}. It is detached at the branch's head; push with \`${t.push}\`.${t.notes?.length ? ` Note: ${t.notes.join('; ')}.` : ''}`),
+    'Worktrees (the runner made them; work only there, and never create, move or remove a worktree, or link a file into one). Run git there as `git -C <the path exactly as below, unquoted> <command>`, or `cd` to it as a separate call and then run plain `git <command>`: other spellings are denied, a quoted path and `cd <path> && git …` among them.',
+    ...trees.map((t) => `- ${t.repo} ${t.branch}: ${t.path}${t.linked?.length ? ` (linked from the clone: ${t.linked.join(', ')})` : ''}. It is detached at origin/${t.branch} as the runner fetched it; push with \`${t.push}\`.${t.notes?.length ? ` Note: ${t.notes.join('; ')}.` : ''}`),
   ].join('\n');
 }
 
@@ -153,7 +156,7 @@ export function commandFor(step, settings, { model, agentsPath, claude = 'claude
   const def = readRole(step.role, roleDir);
   // Every git rule in both spellings, plain and `git -C <worktree>` for each worktree of the step (lib/worktree.mjs).
   const allowed = [...withGitC([...def.allowedTools, ...(role.allowedTools ?? [])], (step.worktrees ?? []).map((t) => t.path)), ...pushRulesFor(step.worktrees)];
-  const disallowed = [...new Set([...def.disallowedTools, ...(role.disallowedTools ?? []), ...PUSH_DENIED, ...SETUP_DENIED])];
+  const disallowed = [...new Set([...def.disallowedTools, ...(role.disallowedTools ?? []), ...PUSH_DENIED, ...BRANCH_DENIED, ...SETUP_DENIED])];
   const dirs = [...new Set([...settings.targets.map((t) => (t.path ? path.resolve(settings.root, t.path) : null)), ...(step.worktrees ?? []).map((t) => t.path)].filter((d) => d && d !== settings.root))];
   const args = [
     '-p',
@@ -601,13 +604,22 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
       if (t.taken) held.push(g);
     }
     try {
-      // The worktrees of the step's PRs, made or brought up to date before the session. If one can't be made, no
-      // session starts: the stage is recorded failed with git's reason.
+      // The worktrees of the step's PRs, made or brought up to date before the session. If one can't be made, or is
+      // stuck (work the runner won't move past, lib/worktree.mjs), no session starts: the stage is recorded failed with
+      // the reason, and the failed-step rules apply (see the README, "A stuck worktree").
       try {
-        step = { ...step, worktrees: prsForStep(step, step.keys.map((k) => readLedger(settings.state, k))).map((p) => (io.ensureWorktree ?? ensureWorktree)(settings, p)) };
+        const trees = prsForStep(step, step.keys.map((k) => readLedger(settings.state, k))).map((p) => (io.ensureWorktree ?? ensureWorktree)(settings, p));
+        const stuck = trees.flatMap((t) => (t.stuck ?? []).map((n) => `${t.path}: ${n}`));
+        if (stuck.length) throw new Error(stuck.join('; '));
+        step = { ...step, worktrees: trees };
       } catch (e) {
-        const note = `the worktree: ${String(e.message).slice(0, 280)}`;
+        const note = `the worktree: ${String(e.message).slice(0, 400)}`;
         for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'failed', pr: step.pr, note, now: clock() }).catch(() => {});
+        // A failed step like a failed session, so the failed-step rules apply (it waits for a person, then holds), with
+        // no `start`: no session ran, so it counts toward no cap, cost or report of sessions.
+        const marks = await marksOf(step);
+        const failures = (step.prior ?? 0) + 1;
+        for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, run: JSON.stringify({ stage: step.stage, role: step.role, outcome: 'failed', session: null, note, failures, ...(marks[k] ? { after: marks[k] } : {}) }), pr: step.pr, now: clock() }).catch(() => {});
         say({ kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, role: step.role, outcome: 'failed', note });
         return { ...pick(step), outcome: 'failed', note };
       }

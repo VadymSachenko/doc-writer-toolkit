@@ -200,7 +200,7 @@ export function cleanupTicket({ settings, ledger, prState, dryRun = false, trash
             out.freedBytes += bytes;
             continue;
           }
-          out.kept.push({ path: r, reason: res.kept ? `a worktree with work no remote has (${res.kept}): kept whole; ${res.todo}` : `a worktree git would not remove (${res.error}): never split` });
+          out.kept.push({ path: r, reason: res.kept ? `a worktree kept whole (${res.kept}); ${res.todo}` : `a worktree git would not remove (${res.error}): never split` });
         } else out.kept.push({ path: r, reason: c.kind === 'repo' ? 'a repository of its own: kept whole, never split' : 'a worktree whose clone is not found: kept whole, never split' });
         skip.add(c.path);
         whole.add(c.path);

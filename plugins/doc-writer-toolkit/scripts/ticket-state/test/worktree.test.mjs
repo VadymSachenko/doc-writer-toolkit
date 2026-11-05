@@ -170,7 +170,7 @@ test('AC-1: an existing worktree follows the owner\'s push although a session le
   const kept = ensureWorktree(t.w.settings, p);
   assert.equal(kept.head, h2);
   assert.notEqual(kept.head, h3);
-  assert.match(kept.notes.join(' '), /uncommitted changes/);
+  assert.match(kept.stuck.join(' '), /uncommitted changes/);
 });
 
 test('AC-1: a rewritten branch: a clean worktree moves to the new head; one with work the branch never had, or tracked changes, stays and says why', async () => {
@@ -180,7 +180,7 @@ test('AC-1: a rewritten branch: a clean worktree moves to the new head; one with
   ensureWorktree(t.w.settings, p);
   const h2 = t.rewrite();
   const moved = ensureWorktree(t.w.settings, p);
-  assert.deepEqual([moved.head, moved.notes], [h2, []]);
+  assert.deepEqual([moved.head, moved.notes, moved.stuck], [h2, [], []]);
   // A session's commit that was never pushed: kept, with the note.
   const u = finalReviewTicket();
   ensureWorktree(u.w.settings, p);
@@ -188,8 +188,8 @@ test('AC-1: a rewritten branch: a clean worktree moves to the new head; one with
   u.rewrite();
   const kept = ensureWorktree(u.w.settings, p);
   assert.equal(kept.head, mine);
-  assert.match(kept.notes.join(' '), /never had .*record the stage failed with this note \(see the ticket-state README, "A stuck worktree"\)/);
-  assert.doesNotMatch(kept.notes.join(' '), /push them/);
+  assert.match(kept.stuck.join(' '), /never had .*\(see the ticket-state README, "A stuck worktree"\)/);
+  assert.doesNotMatch(kept.stuck.join(' '), /push them/);
   // Uncommitted changes to a tracked file: kept too.
   const v = finalReviewTicket();
   ensureWorktree(v.w.settings, p);
@@ -197,7 +197,7 @@ test('AC-1: a rewritten branch: a clean worktree moves to the new head; one with
   v.rewrite();
   const dirty = ensureWorktree(v.w.settings, p);
   assert.equal(dirty.head, v.h1);
-  assert.match(dirty.notes.join(' '), /uncommitted changes/);
+  assert.match(dirty.stuck.join(' '), /uncommitted changes/);
 });
 
 test('AC-1: a worktree that can not be made starts no session; the stage is recorded failed with the reason', async () => {
@@ -209,6 +209,24 @@ test('AC-1: a worktree that can not be made starts no session; the stage is reco
   const l = read(t.w, '1501');
   assert.equal(l.prs[0].chain.build.status, 'failed');
   assert.match(l.prs[0].chain.build.note, /the worktree: .* exists and is not a worktree/);
+});
+
+test('AC-1: a stuck worktree starts no session; the stage is recorded failed with the reason, and the failed-step rules apply', async () => {
+  const t = finalReviewTicket();
+  ensureWorktree(t.w.settings, { repo: 'guide-docs', targets: ['guide'], branch: 'ticket-71', base: 'main' });
+  const mine = commitIn(t.wt, 'docs/x/index.md', 'a session\'s work, never pushed\n');
+  t.rewrite();
+  const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude: () => assert.fail('no session on a stuck worktree') }, options: { trigger: 'watcher', named: ['1501'] } });
+  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['build', 'failed']]);
+  const l = read(t.w, '1501');
+  assert.equal(l.prs[0].chain.build.status, 'failed');
+  assert.match(l.prs[0].chain.build.note, /the worktree: .*never had .*"A stuck worktree"/);
+  assert.equal(execFileSync('git', ['-C', t.wt, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), mine, 'the work is left as it is');
+  const tk = await t.w.one('1501');
+  assert.match(tk.next.waits, /a person acting on the ticket/);
+  // A failed step: the next run doesn't try it again until a person acts.
+  const again = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW + 60000, spawnClaude: () => assert.fail('no retry without a person\'s action') }, options: { trigger: 'watcher', named: ['1501'] } });
+  assert.deepEqual(again.ran.filter((r) => r.stage === 'build'), []);
 });
 
 test('AC-5: the close step removes the ticket\'s worktrees with git, prunes, and never moves a .git link alone', async () => {
@@ -281,7 +299,7 @@ test('AC-5: the close step keeps a worktree with a commit no remote has, and the
   assert.equal(tree.removed, false);
   assert.match(tree.kept, /1 commit\(s\) on no remote branch/);
   assert.match(tree.todo, /push origin HEAD:refs\/heads\/ticket-71.*worktree remove --force/);
-  assert.match(report, /worktree\(s\) kept, with work no remote has: .*1 commit\(s\) on no remote branch.*worktree remove --force/);
+  assert.match(report, /worktree\(s\) kept: .*1 commit\(s\) on no remote branch.*worktree remove --force/);
 });
 
 test('AC-5: the close step keeps a worktree with a tracked change, and the report says what to do', async () => {
@@ -289,7 +307,37 @@ test('AC-5: the close step keeps a worktree with a tracked change, and the repor
   assert.equal(fs.readFileSync(path.join(wt, 'docs/x/index.md'), 'utf8'), 'not committed\n');
   assert.equal(tree.removed, false);
   assert.match(tree.kept, /1 tracked file\(s\) changed and not committed/);
-  assert.match(report, /worktree\(s\) kept, with work no remote has: .*tracked file\(s\) changed/);
+  assert.match(report, /worktree\(s\) kept: .*tracked file\(s\) changed/);
+});
+
+test('AC-5: the close step keeps a worktree with a page written and never added', async () => {
+  const { wt, tree, report } = await closeWith((wt) => fs.writeFileSync(path.join(wt, 'docs/x/new-page.md'), '# Нова сторінка\n'));
+  assert.equal(fs.readFileSync(path.join(wt, 'docs/x/new-page.md'), 'utf8'), '# Нова сторінка\n');
+  assert.equal(tree.removed, false);
+  assert.match(tree.kept, /1 untracked file\(s\) never added \(docs\/x\/new-page\.md\)/);
+  assert.match(report, /worktree\(s\) kept: .*never added/);
+});
+
+test('AC-5: a worktree whose only untracked entries are the linked node_modules and .env goes without --force; the clone\'s own stay', async () => {
+  const { fx, wt, tree } = await closeWith((wt, f) => {
+    assert.equal(fs.lstatSync(path.join(wt, 'node_modules')).isSymbolicLink(), true);
+    fs.symlinkSync(path.join(f.clone.dir, '.env'), path.join(wt, '.env'));
+    fs.appendFileSync(path.join(f.clone.dir, '.git', 'info', 'exclude'), '/.env\n');
+  });
+  assert.deepEqual([tree.removed, tree.kept], [true, undefined]);
+  assert.equal(fs.existsSync(wt), false);
+  assert.equal(fs.readFileSync(path.join(fx.clone.dir, 'node_modules', 'fake-build', 'index.js'), 'utf8'), 'module.exports = "built";\n');
+  assert.equal(fs.readFileSync(path.join(fx.clone.dir, '.env'), 'utf8'), 'APP_URL=https://test.example\n');
+});
+
+test('AC-5: a worktree git refuses to remove (locked) is kept and reported with the same todo', async () => {
+  const { fx, wt, tree, report } = await closeWith((wt, f) => f.clone.g('worktree', 'lock', wt));
+  assert.equal(fs.existsSync(wt), true);
+  assert.ok(listWorktrees(fx.clone.dir).some((x) => canon(x.path) === canon(wt)));
+  assert.deepEqual([tree.removed, tree.error], [false, undefined]);
+  assert.match(tree.kept, /git would not remove it: .*unlock/);
+  assert.match(tree.todo, /worktree remove --force/);
+  assert.match(report, /worktree\(s\) kept: .*git would not remove it/);
 });
 
 test('AC-5: a worktree at a head the pipeline pushed goes, although the forge deleted the branch after a squash merge', async () => {

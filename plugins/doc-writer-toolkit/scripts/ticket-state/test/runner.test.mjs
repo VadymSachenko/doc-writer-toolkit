@@ -8,7 +8,7 @@ import { makeClients } from '../lib/world.mjs';
 import { runRecord } from '../lib/record.mjs';
 import { lockOf } from '../lib/locks.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
-import { PUSH_DENIED, ROLE_DIR, agentsFile, briefFor, collectSteps, commandFor, nextModelUp, proposeRoles, readRole, runDaily } from '../lib/runner.mjs';
+import { BRANCH_DENIED, PUSH_DENIED, ROLE_DIR, agentsFile, briefFor, collectSteps, commandFor, nextModelUp, proposeRoles, readRole, runDaily } from '../lib/runner.mjs';
 import { localDate } from '../lib/report.mjs';
 
 // The daily run: finishing first, the morning triage, starts within the limits; one `claude -p` session per model
@@ -265,6 +265,28 @@ test('AC-2: every role allows its stage\'s git commands in both spellings, git -
     assert.ok(![...allowed, ...denied].some((r) => /^Bash\(.*\*.*:\*\)$/.test(r) && !/^Bash\([^*]*:\*\)$/.test(r)), `${role}: no rule the CLI never matches`);
   }
   assert.ok(PLAIN.every((r) => PUSH_DENIED.includes(r)), 'PUSH_DENIED keeps its rules');
+});
+
+test('no role allows git branch, and a branch delete, rename, copy, force or upstream change is denied anywhere, in both spellings', () => {
+  const { w } = busyWorld();
+  const WT = '/work/.worktrees/guide-docs/ticket-71';
+  for (const role of ['triage', 'writer', 'reviewer', 'translator']) {
+    assert.ok(!readRole(role, ROLE_DIR).allowedTools.some((r) => /git branch/.test(r)), `${role} file`);
+    const cmd = commandFor({ stage: role === 'triage' ? 'triage' : 'write', role, keys: ['502'], group: '502', worktrees: role === 'triage' ? [] : [{ repo: 'guide-docs', branch: 'ticket-71', path: WT }] }, w.settings, { agentsPath: '/x/agents.json' });
+    const allowed = cmd.args.slice(cmd.args.indexOf('--allowedTools') + 1, cmd.args.indexOf('--disallowedTools'));
+    const after = cmd.args.slice(cmd.args.indexOf('--disallowedTools') + 1);
+    const denied = after.slice(0, after.findIndex((a) => a.startsWith('--')) >>> 0);
+    // Even a role the settings let run `git branch` (a host's override) can't change a branch.
+    const wide = [...allowed, 'Bash(git branch:*)', `Bash(git -C ${WT} branch:*)`];
+    for (const git of ['git', `git -C ${WT}`, 'git -C /work/another-clone']) {
+      for (const args of ['-D other', 'other -D', '-d other', '--delete other', '-m own own2', 'own own2 -m', '-M own own2', '--move own own2', '-c own copy', '-C own copy', '--copy own copy', '-f main HEAD', 'main HEAD --force', '-u origin/x', '--set-upstream-to=origin/x', 'own --set-upstream-to=origin/x', '--set-upstream-to origin/x own']) {
+        assert.equal(verdict(`${git} branch ${args}`, wide, denied), 'denied', `${role}: ${git} branch ${args}`);
+      }
+    }
+    assert.equal(verdict(`git -C ${WT} branch --list`, allowed, denied), 'not allowed', `${role}: no git branch at all`);
+    assert.equal(verdict('git branch --show-current', wide, denied), 'allowed', 'a read is not denied');
+  }
+  assert.ok(BRANCH_DENIED.includes('Bash(git branch -D:*)'));
 });
 
 test('the command line follows the role settings; the retry takes the next model up the ladder', () => {
