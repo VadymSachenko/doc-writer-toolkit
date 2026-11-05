@@ -6,7 +6,6 @@ allowedTools:
   - Glob
   - Grep
   - Write
-  - Bash(node:*)
   - Bash(cd:*)
   - Bash(ls:*)
   - Bash(git log:*)

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { CliError } from './errors.mjs';
 import { childEnv, scriptEnv } from './env.mjs';
-import { PUSH_DENIED } from './runner.mjs';
+import { JOB_DENIED } from './runner.mjs';
 
 // Host jobs (D-054): the host declares "when list X gets new cards and stays quiet for N hours, run job Y", or "run job
 // Y every N minutes"; Y is a script or a skill. The watcher knows nothing about what a job does. A job:
@@ -120,7 +120,7 @@ export function jobCommand(job, { settings, state = {}, claude = 'claude', node 
     ...(job.run.maxTurns ? ['--max-turns', String(job.run.maxTurns)] : []),
     ...(job.run.allowedTools?.length ? ['--allowedTools', ...job.run.allowedTools] : []),
     // Whatever the job allows, no force push and no branch deletion, as in every role.
-    '--disallowedTools', ...PUSH_DENIED,
+    '--disallowedTools', ...JOB_DENIED,
   ];
   return { bin: claude, args, model: true };
 }

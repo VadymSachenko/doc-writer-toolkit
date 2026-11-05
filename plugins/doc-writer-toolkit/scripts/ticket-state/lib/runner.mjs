@@ -39,15 +39,16 @@ export function gitCFor(rule, dirs) {
 }
 export const withGitC = (rules, dirs = []) => [...new Set(rules.flatMap((r) => [r, ...gitCFor(r, dirs)]))];
 
-// The only push a session may run: its worktree's HEAD to its ticket branch, exactly as the brief writes it, in both
-// spellings (`cd` to the worktree, then the plain one). No role file allows `git push` otherwise, so a `+` refspec, a
-// force flag anywhere, a deletion (`--delete`, `-d`, `:<ref>`) or another branch is never allowed.
-export const pushRulesFor = (trees = []) => [...new Set(trees.flatMap((t) => [`Bash(git -C ${t.path} push origin HEAD:refs/heads/${t.branch})`, `Bash(git push origin HEAD:refs/heads/${t.branch})`]))];
+// The only push a session may run: its worktree's HEAD to its ticket branch, exactly as the brief writes it, in the
+// `git -C <worktree>` spelling only. A plain push would push whatever checkout the session's folder holds (the hub's
+// HEAD, say), and the hub's own settings allow `git push:*`, so every plain push is denied (`ROLE_DENIED`). No other
+// `-C` push is allowed, so a `+` refspec, a force flag, a deletion (`--delete`, `-d`, `:<ref>`) or another branch never is.
+export const pushRulesFor = (trees = []) => [...new Set(trees.map((t) => `Bash(git -C ${t.path} push origin HEAD:refs/heads/${t.branch})`))];
 
 // A fetch with a refspec of its own (`+refs/heads/main:refs/heads/other`) would move the owner's local branches, which a
-// worktree shares. The roles allow `git fetch origin` exactly (the default refspec updates only `origin/*`); the runner
-// adds `git fetch origin <branch>` for each worktree's branch and base, in both spellings. Nothing else is a fetch.
-export const fetchRulesFor = (trees = []) => [...new Set(trees.flatMap((t) => [t.branch, t.base].filter(Boolean).flatMap((b) => [`Bash(git fetch origin ${b})`, `Bash(git -C ${t.path} fetch origin ${b})`])))];
+// worktree shares. A role fetches only as `git -C <worktree> fetch origin`, or `… fetch origin <branch>` for the
+// worktree's branch and base (the default refspec updates only `origin/*`); every plain fetch is denied (`ROLE_DENIED`).
+export const fetchRulesFor = (trees = []) => [...new Set(trees.flatMap((t) => [`Bash(git -C ${t.path} fetch origin)`, ...[t.branch, t.base].filter(Boolean).map((b) => `Bash(git -C ${t.path} fetch origin ${b})`)]))];
 
 // Denied in every role, whatever its file says: a push that could drop someone else's commits (the owner pushes to the
 // same branches by hand), skip the hooks, or delete a branch, in both spellings: plain, and `git -C <worktree>` for each
@@ -76,6 +77,71 @@ export const deniedFor = (dirs = []) => [...new Set(dirs.flatMap((d) => [...push
 // Denied in every role too: the runner prepares the worktree (lib/worktree.mjs), so no session installs packages or
 // links files into it.
 export const SETUP_DENIED = ['Bash(npm ci:*)', 'Bash(npm install:*)', 'Bash(npm i:*)', 'Bash(ln:*)'];
+// Host jobs have no worktree, and a job's own allow list may hold `Bash(git:*)`: no branch change and no fetch, in any
+// folder (a fetch refspec can't be told from a plain fetch by a rule that works, see `PUSH_DENIED`).
+export const JOB_DENIED = [...new Set([...PUSH_DENIED, ...BRANCH_DENIED, ...branchDenied('git -C *'), 'Bash(git fetch:*)', 'Bash(git -C * fetch)', 'Bash(git -C * fetch *)'])];
+
+// ------------------------------------------------------------------ what a role session may run
+
+// A role session loads every settings layer: the owner's (~/.claude/settings.json), the hub's project and local files,
+// and the runner's flags; a deny in any layer wins over an allow in any other. The owner's and the hub's layers allow
+// far more than a role needs (`git push:*`, `git fetch:*`, `git branch *`, `git stash:*`, `git mv *`,
+// `git cherry-pick *`, `python3 -c ' *`, `gh pr *`, unscoped Write and Edit, the tracker's MCP tools), so the runner
+// denies, in every role, what no stage runs. Mutating git commands in the plain spelling (a plain command runs in
+// whatever checkout the session's folder holds): the role's own changes go through `git -C <worktree>` only.
+const GIT_PLAIN_DENIED = ['push', 'branch', 'fetch', 'stash', 'cherry-pick', 'mv', 'rm', 'clean', 'tag', 'remote', 'config', 'update-ref', 'reflog', 'gc', 'replace', 'notes', 'submodule', 'filter-branch', 'worktree add', 'worktree remove', 'worktree move', 'worktree prune', 'worktree lock', 'worktree unlock', 'checkout', 'switch', 'pull', 'reset', 'rebase', 'merge', 'restore', 'revert'].map((c) => `Bash(git ${c}:*)`);
+// Code from a string, standard input or a file the session wrote: roles run only the toolkit's scripts by name
+// (`scriptRulesFor`). The interpreters a layer allows (`python3 -c ' *`, `python3 <a relative file>`), the shells, and
+// the forms that run another command (`find -exec`, `xargs`, `env`, an env prefix a layer allows).
+const CODE_DENIED = [
+  ...['-e', '-p', '--eval', '--print', '-r', '--require', '--import', '--loader', '--experimental-loader', '-i', '--interactive', '--input-type', '-'].map((f) => `Bash(node ${f}:*)`),
+  'Bash(node)', 'Bash(NODE_OPTIONS=*)', 'Bash(CORPUS=*)', 'Bash(node_modules/.bin/playwright:*)',
+  ...['python3', 'python', 'perl', 'ruby', 'php', 'sh', 'bash', 'zsh', 'osascript', 'eval', 'exec', 'source', 'xargs', 'env', 'nohup', 'deno', 'bun', 'tsx', 'ts-node'].map((c) => `Bash(${c}:*)`),
+  ...['-exec', '-execdir', '-ok', '-okdir', '-delete'].flatMap((f) => [`Bash(find * ${f})`, `Bash(find * ${f} *)`]),
+];
+// The tracker's and the browser's MCP tools: a role reaches the tracker only through `ticket-state record` and the
+// tracker script, and no stage drives a browser through MCP.
+const MCP_DENIED = ['mcp__claude_ai_Trello', 'mcp__trello', 'mcp__playwright'];
+export const ROLE_DENIED = [...new Set([...GIT_PLAIN_DENIED, ...CODE_DENIED, ...MCP_DENIED])];
+
+// The scripts a stage runs, by name: `node <root>/scripts/<script>`, from the toolkit the runner runs (the brief's
+// "scripts folder") and from the installed plugin the session's skills name (`${CLAUDE_PLUGIN_ROOT}`). A literal path
+// as a prefix rule: never a wildcard, which `../` would walk out of.
+export const NODE_SCRIPTS = ['ticket-state/ticket-state.mjs', 'tracker/tracker.mjs', 'forge/forge.mjs', 'locale-sync/locale-sync.mjs', 'ui-labels/ui-labels.mjs', 'doc-align/doc-align.mjs', 'screenshot-locales/screenshot-locales.mjs', 'section-state/section-state.mjs', 'visual-pack/visual-pack.mjs'];
+export const scriptRulesFor = (roots = []) => [...new Set(roots.flatMap((r) => NODE_SCRIPTS.map((s) => `Bash(node ${path.join(r, 'scripts', s)}:*)`)))];
+
+// The toolkit roots a session may run scripts from: the runner's own, and every install of the plugin the hub's
+// sessions load (the owner's, or the hub's project install), from Claude Code's list of installed plugins.
+export function scriptRoots(settings, { home = os.homedir(), env = process.env } = {}) {
+  const roots = [PLUGIN_ROOT];
+  try {
+    const file = path.join(env.CLAUDE_CONFIG_DIR || path.join(home, '.claude'), 'plugins', 'installed_plugins.json');
+    const list = JSON.parse(fs.readFileSync(file, 'utf8')).plugins ?? {};
+    for (const [name, installs] of Object.entries(list)) {
+      if (!name.startsWith('doc-writer-toolkit@')) continue;
+      for (const i of installs ?? []) if (i.installPath && (i.scope === 'user' || (i.projectPath && path.resolve(i.projectPath) === path.resolve(settings.root)))) roots.push(i.installPath);
+    }
+  } catch {
+    /* no list: the runner's own root */
+  }
+  return [...new Set(roots.map((r) => path.resolve(r)))];
+}
+
+// Files a session may not write, whatever a layer allows (the owner's unscoped Write and Edit): what widens its own
+// rules or runs code on the next git command or session (the settings layers, `.git/` hooks and config), the toolkit's
+// scripts it may run, the ticket flow's own state (only `record` writes it; a session's files go in `<state>/tmp/`), and
+// the hub's protected build files, in any folder. An `Edit(...)` deny covers Write too.
+export function writeDeniedFor(settings, roots = []) {
+  const abs = (p) => `//${String(p).replace(/^\/+/, '')}`;
+  const state = path.resolve(settings.state);
+  return [
+    'Edit(~/.claude/**)', 'Edit(~/.claude.json)', 'Edit(//**/.claude/**)', 'Edit(//**/.git/**)', 'Edit(//**/.git)',
+    ...['package.json', 'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'docusaurus.config.*', 'sidebars.*', 'playwright.config.*'].map((f) => `Edit(//**/${f})`),
+    ...roots.map((r) => `Edit(${abs(r)}/**)`),
+    ...['tickets', 'locks', 'roles', 'watch', 'jobs', 'runs', 'reports'].map((d) => `Edit(${abs(path.join(state, d))}/**)`),
+    ...['rearmed.json', 'roles-proposal.json'].map((f) => `Edit(${abs(path.join(state, f))})`),
+  ];
+}
 
 // ------------------------------------------------------------------ roles
 
@@ -167,20 +233,26 @@ export function briefFor(step, settings) {
 // What the brief says about the worktrees the runner made for the session.
 function worktreeLines(trees) {
   return [
-    'Worktrees (the runner made them; work only there, and never create, move or remove a worktree, or link a file into one). Run git there as `git -C <the path exactly as below, unquoted> <command>`, or `cd` to it as a separate call and then run plain `git <command>`: other spellings are denied, a quoted path and `cd <path> && git …` among them.',
-    ...trees.map((t) => `- ${t.repo} ${t.branch}: ${t.path}${t.linked?.length ? ` (linked from the clone: ${t.linked.join(', ')})` : ''}. It is detached at origin/${t.branch} as the runner fetched it; push with \`${t.push}\`.${t.notes?.length ? ` Note: ${t.notes.join('; ')}.` : ''}`),
+    'Worktrees (the runner made them; work only there, and never create, move or remove a worktree, or link a file into one). Run git there as `git -C <the path exactly as below, unquoted> <command>`. A read (status, diff, log, show) and an add or commit may also run as plain `git <command>` after a `cd` to it as a separate call; a push and a fetch run only as `git -C`. Other spellings are denied, a quoted path and `cd <path> && git …` among them.',
+    ...trees.map((t) => `- ${t.repo} ${t.branch}: ${t.path}${t.linked?.length ? ` (linked from the clone: ${t.linked.join(', ')})` : ''}. It is detached at origin/${t.branch} as the runner fetched it; push with \`${t.push}\`, fetch with \`git -C ${t.path} fetch origin\`.${t.notes?.length ? ` Note: ${t.notes.join('; ')}.` : ''}`),
   ].join('\n');
 }
 
-export function commandFor(step, settings, { model, agentsPath, claude = 'claude', roleDir = ROLE_DIR }) {
+export function commandFor(step, settings, { model, agentsPath, claude = 'claude', roleDir = ROLE_DIR, roots = scriptRoots(settings) }) {
   const role = settings.roles[step.role];
   const def = readRole(step.role, roleDir);
-  // Every git rule in both spellings, plain and `git -C <worktree>` for each worktree of the step (lib/worktree.mjs).
+  // Every git rule in both spellings, plain and `git -C <worktree>` for each worktree of the step (lib/worktree.mjs); the
+  // toolkit's scripts by name; and the denials every role carries (`ROLE_DENIED`, `writeDeniedFor`).
   const roleRules = [...def.allowedTools, ...(role.allowedTools ?? [])];
-  const dirsOf = (step.worktrees ?? []).map((t) => t.path);
-  const allowed = [...withGitC(roleRules, dirsOf), ...pushRulesFor(step.worktrees), ...(roleRules.includes('Bash(git fetch origin)') ? fetchRulesFor(step.worktrees) : [])];
-  const disallowed = [...new Set([...def.disallowedTools, ...(role.disallowedTools ?? []), ...PUSH_DENIED_PLAIN, ...BRANCH_DENIED, ...deniedFor(dirsOf), ...SETUP_DENIED])];
-  const dirs = [...new Set([...settings.targets.map((t) => (t.path ? path.resolve(settings.root, t.path) : null)), ...(step.worktrees ?? []).map((t) => t.path)].filter((d) => d && d !== settings.root))];
+  const trees = step.worktrees ?? [];
+  const dirsOf = trees.map((t) => t.path);
+  const allowed = [...withGitC(roleRules, dirsOf), ...scriptRulesFor(roots), ...pushRulesFor(trees), ...fetchRulesFor(trees)];
+  // A step with no worktree changes no repo: no add or commit in the plain spelling either.
+  const noTree = trees.length ? [] : ['Bash(git add:*)', 'Bash(git commit:*)'];
+  const disallowed = [...new Set([...def.disallowedTools, ...(role.disallowedTools ?? []), ...PUSH_DENIED_PLAIN, ...BRANCH_DENIED, ...deniedFor(dirsOf), ...dirsOf.map((d) => `Bash(git -C ${d} branch:*)`), ...ROLE_DENIED, ...noTree, ...writeDeniedFor(settings, roots), ...SETUP_DENIED])];
+  // The folders a session may reach (`--add-dir`, and so `cd`): the step's worktrees; a step with none (triage, the plan)
+  // reads the target clones instead.
+  const dirs = [...new Set((trees.length ? dirsOf : settings.targets.map((t) => (t.path ? path.resolve(settings.root, t.path) : null))).filter((d) => d && d !== settings.root))];
   const args = [
     '-p',
     briefFor(step, settings),
