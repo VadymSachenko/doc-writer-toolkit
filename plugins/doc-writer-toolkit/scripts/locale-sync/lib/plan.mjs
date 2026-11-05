@@ -43,7 +43,7 @@ export async function estimateWords(s, page, cell) {
   const fm = diffFrontmatter(pageA.fm, pageB.fm);
   let words = 0;
   for (const g of groups) {
-    if (!g.bNodes.length) continue;
+    if (!g.bNodes.length || g.splice) continue; // a heading anchor or link fragment the script splices: no words
     words += fullWords(pageB.lines.slice(g.bNodes[0].start, g.bNodes.at(-1).end + 1).join('\n'));
   }
   for (const c of fm) if (c.b) words += fullWords(c.b.raw);

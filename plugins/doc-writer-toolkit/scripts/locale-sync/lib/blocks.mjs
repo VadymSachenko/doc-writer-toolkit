@@ -3,7 +3,7 @@ import { existingBlobs } from './git.mjs';
 import { abs, listUaPages, localePagePath, readIfExists, readState } from './pages.mjs';
 import { resolveTargets, selectPages } from './settings.mjs';
 import { cachedBlob, classify, modeOf } from './plan.mjs';
-import { composeChanges, diffBodies, diffFrontmatter, introducedBold } from './diff.mjs';
+import { addedOn, composeChanges, diffBodies, diffFrontmatter, introducedBold, spliceLinkPaths } from './diff.mjs';
 import { boldSpans, parsePage, splitCode } from './parse.mjs';
 import { parseCategory, readCategoryTarget } from './categories.mjs';
 import { loadStore, mergedLabels } from '../../ui-labels/lib/store.mjs';
@@ -12,7 +12,7 @@ import { labelRows, termRows, uiIndex } from './spans.mjs';
 import { acceptedLabels } from './labels.mjs';
 import { sectionMap } from './scope.mjs';
 import { blocksAtLines, parseLines } from './redo.mjs';
-import { linkRows } from './links.mjs';
+import { linkedPage, linkRows } from './links.mjs';
 
 // For each page and locale: exactly the UA blocks the translator has to write, with the matching translated text.
 // `redo` re-translates blocks of a current page: target line numbers ("12,14-16"), or "all" for the whole page.
@@ -155,14 +155,17 @@ async function blocksFor(s, page, locale, state, { overwrite, withOld, ctx, redo
   const pageT = parsePage(targetText);
   const groups = diffBodies(pageA, pageB);
   const fmChanges = diffFrontmatter(pageA.fm, pageB.fm);
-  const { changes, unmapped } = composeChanges({ pageA, pageB, pageT, groups, fmChanges, withOld });
+  const verifyLink = await linkVerifier(s, page, spliceLinkPaths(groups));
+  const { changes, unmapped, spliced } = composeChanges({ pageA, pageB, pageT, groups, fmChanges, withOld, verifyLink });
   const segments = changeSegments(b, changes);
   return {
     ...head,
     mode: 'incremental',
     source: { kind: 'blob-diff', from: cell.base, to: page.blob },
-    noop: !changes.length && !unmapped.length,
+    noop: !changes.length && !unmapped.length && !spliced.length,
+    spliceOnly: spliced.length > 0 && !changes.length && !unmapped.length,
     changes,
+    spliced,
     unmapped,
     introducedBold: introducedBold(changes, pageA),
     ...labelRows(segments, state, locale, ctx),
@@ -172,8 +175,21 @@ async function blocksFor(s, page, locale, state, { overwrite, withOld, ctx, redo
       replace: changes.filter((c) => c.op === 'replace').length,
       add: changes.filter((c) => c.op === 'add').length,
       remove: changes.filter((c) => c.op === 'remove').length,
+      spliced: spliced.length,
       unmapped: unmapped.length,
       words: changes.reduce((n, c) => n + (c.words ?? 0), 0),
     },
   };
+}
+
+// For the splice of link fragments to another page: each path resolved to its UA page, as it is committed now.
+async function linkVerifier(s, page, paths) {
+  const known = new Map();
+  for (const p of paths) {
+    const target = await linkedPage(s, page, p);
+    if (!target) known.set(p, () => false);
+    else if (target.path === page.path) known.set(p, () => 'self');
+    else known.set(p, addedOn(parsePage(await cachedBlob(s.root, target.blob))));
+  }
+  return (path, from, to) => known.get(path)?.(from, to) ?? false;
 }

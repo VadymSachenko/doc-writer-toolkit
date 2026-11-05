@@ -129,7 +129,7 @@ Once for all pages at the gate (`gate.name` is `uaApproval`, the pages in `gate.
 3. Record `translate` running, then run `doc-translator <id>` (`<pair>:<id>` when the ledger has a `pair`):
    - the EN page exists (`enExists`) → `--sync --base <syncBase>`, the page's `syncBase` in `status` (the commit of its last translation, or `baseCommit` before the first). It asks nothing, and runs the alignment check itself (its sync step 6);
    - no EN page → a full translation.
-4. Record `translate` done. The script accepts the translator's `last_update.date` change in the UA page, and keeps `HEAD` as the next `syncBase`. Refused because the UA page changed beyond the date → back to Step 7 for that page.
+4. Record `translate` done. The script accepts the heading ids the translator added (its Step 5b), with the links rewritten to them: an id-only change (`heading-anchors.md`, "Id-only changes") keeps the approvals. It accepts a `last_update.date` change too, and keeps `HEAD` as the next `syncBase`. Refused because the UA page changed beyond that (a changed or removed id, a changed heading text, any other edit) → back to Step 7 for that page. Another approved page whose links the translator rewrote keeps its records the same way.
 5. Sync reports unmapped blocks → record `translate` failed with them, and go on.
 
 ### Step 11 — Align (each translated page)

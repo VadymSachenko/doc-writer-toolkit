@@ -10,6 +10,8 @@ import { compare } from '../lib/compare.mjs';
 import { cellCount } from '../lib/parse.mjs';
 import { createSlugger, slugify, uaHeadingId } from '../lib/headings.mjs';
 import { findNames, looseKey, mergeRows, parseNamesTable, searchable } from '../lib/names.mjs';
+import { proposeIds } from '../lib/ids.mjs';
+import { isIdOnlyChange } from '../lib/idonly.mjs';
 
 const run = promisify(execFile);
 const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'doc-align.mjs');
@@ -550,4 +552,230 @@ test('CLI: --names reads the names table from one or more glossaries', async () 
   const missing = await cli(files.ua, files.en, '--names', path.join(dir, 'nope.md'));
   assert.equal(missing.code, 2);
   assert.match(missing.out.error, /file not found/);
+});
+
+// --propose-ids: the missing UA heading ids, taken from the EN anchors, and the links to the old fragments
+// (heading-anchors.md, rules 2, 6 and 8). Invented pages.
+const IDS_UA = `---
+title: Баланси
+---
+
+# Баланси
+
+Дивіться [огляд](#огляд-балансів), [перший довідник](#довідкова-інформація) і [другий](#довідкова-інформація-1).
+
+## Огляд балансів
+
+Текст. \`[код](#огляд-балансів)\`
+
+### Фільтри
+
+\`\`\`md
+[у коді](#фільтри)
+\`\`\`
+
+## Довідкова інформація
+
+## Готовий розділ {/* #ready-section */}
+
+## Довідкова інформація
+
+## Комісії й ліміти
+
+## Повтор
+`;
+
+const IDS_EN = `---
+title: Balances
+---
+
+# Balances
+
+See the [overview](#balances-overview), the [first reference](#reference-information-create-balance) and the [second](#reference-information-close-balance). The [filters](#фільтри) link was copied from UA.
+
+## Balances overview
+
+Text. \`[code](#balances-overview)\`
+
+### Filters
+
+\`\`\`md
+[in code](#фільтри)
+\`\`\`
+
+## Reference information {#reference-information-create-balance}
+
+## Ready section
+
+## Reference information {#reference-information-close-balance}
+
+## Fees & limits
+
+## Ready section
+`;
+
+async function idsFixture() {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'doc-align-ids-'));
+  const put = async (rel, text) => {
+    await fs.mkdir(path.dirname(path.join(dir, rel)), { recursive: true });
+    await fs.writeFile(path.join(dir, rel), text);
+  };
+  await put('docs/02-balances/balances.md', IDS_UA);
+  await put('i18n/en/current/02-balances/balances.md', IDS_EN);
+  await put(
+    'docs/other/other.md',
+    [
+      '# Інша',
+      '',
+      '[a](/balances/#огляд-балансів) [b](/02-balances/balances#%D1%84%D1%96%D0%BB%D1%8C%D1%82%D1%80%D0%B8) [c](../02-balances/balances.md#огляд-балансів)',
+      '[d](/other/#огляд-балансів) [e](../02-balances/#фільтри) [f](https://example.com/balances/#огляд-балансів) [g](/02-balances/balances.md#фільтри)',
+      '<Link to="/balances/#фільтри">h</Link>',
+      '',
+    ].join('\n'),
+  );
+  await put('docs/.sources/notes.md', '[x](/balances/#огляд-балансів)\n');
+  return { dir, ua: path.join(dir, 'docs/02-balances/balances.md'), en: path.join(dir, 'i18n/en/current/02-balances/balances.md'), other: path.join(dir, 'docs/other/other.md'), root: path.join(dir, 'docs') };
+}
+
+test('--propose-ids: each id is the EN anchor at the same position, explicit or generated (AC-1)', async () => {
+  const r = await proposeIds(IDS_UA, IDS_EN, { uaPath: 'ua.md', enPath: 'en.md' });
+  const rows = r.proposals.map((p) => [p.line, p.id, p.from, p.oldFragment, p.problem ?? null]);
+  assert.deepEqual(rows.slice(0, 4), [
+    [9, 'balances-overview', 'generated', 'огляд-балансів', null],
+    [13, 'filters', 'generated', 'фільтри', null],
+    [19, 'reference-information-create-balance', 'explicit', 'довідкова-інформація', null],
+    [23, 'reference-information-close-balance', 'explicit', 'довідкова-інформація-1', null],
+  ]);
+  assert.equal(r.proposals.length, 6);
+  // A slug that is not kebab-case is not written.
+  assert.deepEqual(rows[4].slice(0, 2), [25, 'fees--limits']);
+  assert.match(rows[4][4], /not lowercase ASCII kebab-case/);
+  // The second "Ready section" gets `ready-section-1` in EN, numbered like Docusaurus numbers it: a valid id.
+  assert.deepEqual(rows[5], [27, 'ready-section-1', 'generated', 'повтор', null]);
+  assert.deepEqual(
+    r.links.map((l) => [l.file, l.line, l.url, l.newUrl]),
+    [
+      ['ua.md', 7, '#огляд-балансів', '#balances-overview'],
+      ['ua.md', 7, '#довідкова-інформація', '#reference-information-create-balance'],
+      ['ua.md', 7, '#довідкова-інформація-1', '#reference-information-close-balance'],
+      ['en.md', 7, '#фільтри', '#filters'],
+    ],
+    'links in inline code and code blocks are not links; an EN link copied from UA is found too',
+  );
+  assert.deepEqual(r.warnings, ['no --root given: only links on the UA and EN pages themselves are found']);
+
+  // An id another UA heading already has is not written either.
+  const taken = await proposeIds('# Т\n\n## Огляд {/* #overview */}\n\n## Вступ\n', '# T\n\n## Overview\n\n## Overview {#overview}\n', { uaPath: 'ua.md', enPath: 'en.md' });
+  assert.match(taken.proposals[0].problem, /already the id of the UA heading on line 3/);
+});
+
+test('--propose-ids: links across the roots by route, file path and relative .md path; the rest unresolved', async () => {
+  const f = await idsFixture();
+  const r = await proposeIds(IDS_UA, IDS_EN, { uaPath: f.ua, enPath: f.en, roots: [{ dir: f.root, prefix: '/' }] });
+  const other = r.links.filter((l) => l.file.endsWith('other/other.md')).map((l) => [l.line, l.url, l.newUrl]);
+  assert.deepEqual(other, [
+    [3, '/balances/#огляд-балансів', '/balances/#balances-overview'],
+    [3, '/02-balances/balances#%D1%84%D1%96%D0%BB%D1%8C%D1%82%D1%80%D0%B8', '/02-balances/balances#filters'],
+    [3, '../02-balances/balances.md#огляд-балансів', '../02-balances/balances.md#balances-overview'],
+    [4, '/02-balances/balances.md#фільтри', '/02-balances/balances.md#filters'],
+    [5, '/balances/#фільтри', '/balances/#filters'],
+  ]);
+  assert.deepEqual(r.unresolved.map((u) => [u.line, u.url]), [[4, '../02-balances/#фільтри']]);
+  assert.ok(!r.links.some((l) => l.url.startsWith('/other/') || l.url.startsWith('https:')), 'a link to another page or site is not listed');
+  assert.ok(!r.links.some((l) => l.file.includes('.sources')), 'folders starting with a dot are not searched');
+  assert.equal(r.warnings, undefined);
+});
+
+test('--propose-ids: nothing is proposed when the heading counts differ; an explicit {#id} on a UA heading is skipped', async () => {
+  const r = await proposeIds(IDS_UA, IDS_EN.replace('## Fees & limits\n\n', ''), { uaPath: 'ua.md', enPath: 'en.md' });
+  assert.equal(r.proposals.length, 0);
+  assert.match(r.reason, /positions don't line up/);
+  assert.equal(r.skipped.length, 6);
+  const ex = await proposeIds('# Т\n\n## Огляд {#overview}\n', '# T\n\n## Overview\n', { uaPath: 'ua.md', enPath: 'en.md' });
+  assert.deepEqual([ex.proposals.length, ex.skipped.length], [0, 1]);
+  assert.match(ex.skipped[0].reason, /explicit \{#id\}/);
+  const none = await proposeIds('# Т\n\n## Огляд {/* #overview */}\n', '# T\n\n## Overview\n', { uaPath: 'ua.md', enPath: 'en.md' });
+  assert.deepEqual([none.proposals, none.links, none.skipped], [[], [], []]);
+});
+
+test('CLI --propose-ids --write: only the id comments and the link fragments change', async () => {
+  const f = await idsFixture();
+  const before = { ua: await fs.readFile(f.ua, 'utf8'), other: await fs.readFile(f.other, 'utf8'), en: await fs.readFile(f.en, 'utf8') };
+  const dry = await cli(f.ua, f.en, '--propose-ids', '--root', `${f.root}=/`);
+  assert.equal(dry.code, 0, dry.stderr);
+  assert.deepEqual(Object.keys(dry.out), ['ua', 'en', 'proposals', 'links', 'unresolved', 'skipped']);
+  assert.equal(await fs.readFile(f.ua, 'utf8'), before.ua, 'nothing is written without --write');
+
+  const r = await cli(f.en, f.ua, '--propose-ids', '--root', f.root, '--write');
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.out.ua, f.ua, 'the UA page is found from its Cyrillic text');
+  assert.deepEqual(r.out.written, [f.ua, f.en, path.relative(process.cwd(), f.other)]);
+  const ua = await fs.readFile(f.ua, 'utf8');
+  let want = before.ua;
+  for (const [from, to] of [
+    ['## Огляд балансів\n', '## Огляд балансів {/* #balances-overview */}\n'],
+    ['### Фільтри\n', '### Фільтри {/* #filters */}\n'],
+    ['## Довідкова інформація\n\n## Готовий', '## Довідкова інформація {/* #reference-information-create-balance */}\n\n## Готовий'],
+    ['## Довідкова інформація\n\n## Комісії', '## Довідкова інформація {/* #reference-information-close-balance */}\n\n## Комісії'],
+    ['## Повтор\n', '## Повтор {/* #ready-section-1 */}\n'],
+    ['(#огляд-балансів),', '(#balances-overview),'],
+    ['(#довідкова-інформація)', '(#reference-information-create-balance)'],
+    ['(#довідкова-інформація-1)', '(#reference-information-close-balance)'],
+  ]) want = edit(want, from, to);
+  assert.equal(ua, want);
+  assert.equal(ua.split('\n').length, before.ua.split('\n').length);
+  assert.ok(ua.includes('## Комісії й ліміти\n'), 'a proposal with a problem is not written');
+  assert.ok(ua.includes('`[код](#огляд-балансів)`') && ua.includes('[у коді](#фільтри)'), 'code is untouched');
+  const other = await fs.readFile(f.other, 'utf8');
+  assert.equal(other.split('\n').length, before.other.split('\n').length);
+  assert.ok(other.includes('[a](/balances/#balances-overview)') && other.includes('<Link to="/balances/#filters">') && other.includes('[e](../02-balances/#фільтри)') && other.includes('[d](/other/#огляд-балансів)'));
+  assert.equal(await fs.readFile(f.en, 'utf8'), edit(before.en, '[filters](#фільтри)', '[filters](#filters)'), 'in EN, only the copied link changes');
+
+  // Afterwards the alignment check finds a missing id only on the heading whose proposal had a problem.
+  const after = await cli(f.ua, f.en, '--ua', 'main');
+  assert.deepEqual(after.out.warnings.filter((w) => w.flag === 'HEADING-ID-MISSING').map((w) => w.line), [25]);
+  assert.ok(!after.out.warnings.some((w) => w.flag === 'HEADING-ID-MISMATCH'));
+});
+
+test('CLI --propose-ids: usage errors', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'doc-align-'));
+  const ua = path.join(dir, 'ua.md');
+  const en = path.join(dir, 'en.md');
+  await fs.writeFile(ua, '# Тест\n\n## Огляд\n');
+  await fs.writeFile(en, '# Test\n\n## Overview\n');
+  for (const [args, message] of [
+    [[ua, en, '--write'], /--root and --write go with --propose-ids/],
+    [[ua, en, '--propose-ids', '--root', path.join(dir, 'nope')], /--root: not a folder/],
+    [[ua, en, '--propose-ids', '--names', ua], /--names does not go with --propose-ids/],
+    [[en, en, '--propose-ids'], /cannot tell which page is UA/],
+  ]) {
+    const r = await cli(...args);
+    assert.equal(r.code, 2, args.join(' '));
+    assert.match(r.out.error, message);
+  }
+});
+
+// isIdOnlyChange: the id-only change of heading-anchors.md, the one implementation the scripts share.
+test('isIdOnlyChange: ids added and links rewritten to them; anything else is a real change', () => {
+  const before = '---\ntitle: Т\n---\n\n# Т\n\nДив. [огляд](#огляд-балансів) і `[код](#огляд-балансів)`.\n\n## Огляд балансів\n\nТекст.\n\n## Експорт {/* #export */}\n';
+  const after = before.replace('## Огляд балансів\n', '## Огляд балансів {/* #balances-overview */}\n').replace('[огляд](#огляд-балансів)', '[огляд](#balances-overview)');
+  const page = { path: 'docs/balances/balances.md', before, after };
+  assert.equal(isIdOnlyChange(page), true);
+  assert.equal(isIdOnlyChange({ ...page, after: before }), true, 'no change at all');
+  for (const [what, text] of [
+    ['a changed id', after.replace('{/* #export */}', '{/* #export-data */}')],
+    ['a removed id', after.replace(' {/* #export */}', '')],
+    ['a changed heading text', after.replace('## Огляд балансів {', '## Огляд рахунків {')],
+    ['a prose change', after.replace('Текст.', 'Інший текст.')],
+    ['a fragment in inline code', after.replace('`[код](#огляд-балансів)`', '`[код](#balances-overview)`')],
+    ['a fragment no heading got', after.replace('(#balances-overview)', '(#export)')],
+    ['an added line', `${after}\n`],
+  ]) assert.equal(isIdOnlyChange({ ...page, after: text }), false, what);
+
+  // A link on another page counts when its path resolves to a page of the same change whose heading got that id.
+  const other = { path: 'docs/other/other.md', before: 'Див. [огляд](/balances/#огляд-балансів).\n', after: 'Див. [огляд](/balances/#balances-overview).\n' };
+  assert.equal(isIdOnlyChange(other, [other, page]), true);
+  assert.equal(isIdOnlyChange({ ...other, before: other.before.replace('/balances/', '../balances/balances.md'), after: other.after.replace('/balances/', '../balances/balances.md') }, [other, page]), true, 'a relative file path');
+  assert.equal(isIdOnlyChange(other, [other]), false, 'the linked page is not part of the change');
+  assert.equal(isIdOnlyChange(other, [other, { ...page, after: before }]), false, 'the linked heading got no id');
 });

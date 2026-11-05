@@ -1,4 +1,5 @@
-import { PAGE_STAGES, dateOnlyChange, fileHash, headText, listPages, norm, readText, sectionFile, uncommitted, withoutDates } from './ledger.mjs';
+import { isIdOnlyChange } from '../../doc-align/lib/idonly.mjs';
+import { PAGE_STAGES, approvedChange, otherPages, fileHash, headText, listPages, norm, readText, sectionFile, uncommitted, withoutDates } from './ledger.mjs';
 
 const ok = (state) => state === 'done' || state === 'skipped';
 
@@ -111,14 +112,18 @@ async function sectionStates(root, ledger, warnings) {
 async function pageState(root, ledger, page, warnings) {
   let cur = await fileHash(root, page.path);
   const curEn = await fileHash(root, page.enPath);
-  // A translation interrupted (or failed) after the translator saved: the UA page differs from the approved version
-  // only in its frontmatter dates. That is the translator's date bump, not an edit: the records still hold.
+  // The UA page differs from the approved version by an id-only change (heading-anchors.md): heading ids a translator
+  // added, here or on another page whose links it rewrote. That is no edit: the records still hold (`idOnly`). Or, for
+  // a translation interrupted (or failed) after an earlier translator saved, only in its frontmatter dates (`dateBump`).
   const approved = page.stages?.uaApproval?.status === 'done' ? page.stages.uaApproval.uaHash : null;
   const tr = page.stages?.translate?.status;
   let dateBump = false;
-  if (approved && cur !== null && cur !== approved && (tr === 'running' || tr === 'failed')) {
-    dateBump = (await dateOnlyChange(root, page.path, approved)).dateOnly;
-    if (dateBump) cur = approved;
+  let idOnly = false;
+  if (approved && cur !== null && cur !== approved) {
+    const c = await approvedChange(root, page.path, approved, await otherPages(root, ledger, page));
+    dateBump = c.dateOnly && (tr === 'running' || tr === 'failed');
+    idOnly = c.idOnly;
+    if (dateBump || idOnly) cur = approved;
   }
   const stages = {};
   let prevOk = true;
@@ -157,6 +162,7 @@ async function pageState(root, ledger, page, warnings) {
   if (handEdited) warnings.push(`${page.id}: the UA page changed outside the pipeline; its fix, review, approval, translation and alignment run again`);
   if (enHandEdited) warnings.push(`${page.id}: the EN page changed outside the pipeline; only its alignment runs again`);
   if (dateBump) warnings.push(`${page.id}: the UA page differs from the approved version only in its date (an interrupted translation); the records still hold`);
+  if (idOnly) warnings.push(`${page.id}: the UA page differs from the approved version by heading ids and the links to them only (an id-only change); the records still hold`);
   return {
     id: page.id,
     path: page.path,
@@ -171,6 +177,7 @@ async function pageState(root, ledger, page, warnings) {
     enHandEdited,
     unknownDraft,
     dateBump,
+    idOnly,
     blocked: page.blocked ?? null,
     stages,
     results,
@@ -195,7 +202,7 @@ export async function computeStatus(root, section, ledger) {
   const outside = ledger.stages?.planApproval?.status === 'done' ? (await listPages(root, ledger.section)).filter((p) => !known.has(p)) : [];
   for (const p of outside) warnings.push(`${p}: not in the approved plan; outside this run`);
 
-  const next = await nextStage(root, stages, pages);
+  const next = await nextStage(root, stages, pages, ledger);
   return {
     section: ledger.section,
     ledger: 'present',
@@ -216,7 +223,7 @@ export async function computeStatus(root, section, ledger) {
 
 // The first stage in chain order that isn't done. A page stage runs across all pages before the next one starts;
 // a blocked page doesn't hold the others back.
-async function nextStage(root, stages, pages) {
+async function nextStage(root, stages, pages, ledger) {
   for (const name of ['readiness', 'explore', 'plan', 'planApproval']) {
     if (!ok(stages[name].state)) return { stage: name, state: stages[name].state, pages: [] };
   }
@@ -231,8 +238,9 @@ async function nextStage(root, stages, pages) {
     if (name === 'translate') {
       const due = active.filter((p) => ids.includes(p.id));
       const dirty = await uncommitted(root, due.map((p) => p.path));
-      // A date bump of an interrupted translation is not a change to commit: the translation reads the commit before it.
-      for (const p of due) if (p.dateBump && dirty.has(p.path) && (await sameButDates(root, p.path))) dirty.delete(p.path);
+      // A date bump of an interrupted translation, or an id-only change, is not a change to commit: the translation reads
+      // the commit before it, and has nothing to translate in it.
+      for (const p of due) if ((p.dateBump || p.idOnly) && dirty.has(p.path) && (await sameButIds(root, ledger, p))) dirty.delete(p.path);
       out.uncommitted = due.filter((p) => dirty.has(p.path)).map((p) => p.id);
     }
     return out;
@@ -240,9 +248,14 @@ async function nextStage(root, stages, pages) {
   return { stage: null, pages: [] };
 }
 
-async function sameButDates(root, file) {
-  const [head, now] = [await headText(root, file), await readText(root, file)];
-  return head !== null && now !== null && withoutDates(head) === withoutDates(now);
+// The file differs from HEAD only in its frontmatter dates, or by an id-only change.
+async function sameButIds(root, ledger, p) {
+  const [head, now] = [await headText(root, p.path), await readText(root, p.path)];
+  if (head === null || now === null) return false;
+  const page = { path: p.path, before: withoutDates(head), after: withoutDates(now) };
+  if (page.before === page.after) return true;
+  const others = await otherPages(root, ledger, ledger.pages.find((x) => x.id === p.id) ?? p);
+  return isIdOnlyChange(page, [page, ...others]);
 }
 
 function gateOf(stages, pages, next) {

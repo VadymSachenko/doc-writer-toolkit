@@ -668,3 +668,68 @@ test('the plan: api pages and pages differing only in the extension', async () =
   assert.deepEqual(st.outside, [S('old/old.md'), S('overview/overview.md')]);
   assert.match((await cli(dir, 'status', SECTION, '--md')).out, /list-reports\.md` \(api\)/);
 });
+
+// ------------------------------------------------------------------ id-only changes keep the approvals (heading-anchors.md)
+
+const OV_BODY = 'Дивіться [звіти за період](#звіти-за-період).\n\n## Звіти за період\n\nТекст розділу.\n\n## Експорт {/* #export */}\n\nТекст експорту.';
+const CARDS_BODY = 'Звіти дивіться [тут](/reports/overview/#звіти-за-період).';
+
+// Both pages written with headings, fixed, reviewed, approved and committed, and their EN pages saved.
+async function approvedWithHeadings(dir) {
+  await approved(dir);
+  await write(dir, S('overview/overview.md'), page('Звіти', OV_BODY));
+  await write(dir, S('manage-cards/manage-cards.md'), page('Керування картками', CARDS_BODY));
+  for (const id of [OVERVIEW, CARDS]) assert.equal((await record(dir, 'write', 'done', '--page', id)).code, 0);
+  assert.equal((await record(dir, 'resolve', 'done')).code, 0);
+  for (const id of [OVERVIEW, CARDS]) assert.equal((await record(dir, 'fix', 'done', '--page', id, '--result', '{"applied":0,"left":0}')).code, 0);
+  for (const id of [OVERVIEW, CARDS]) assert.equal((await record(dir, 'review', 'done', '--page', id, '--result', '{"errors":0,"deviations":0,"suggestions":0,"round":1}')).code, 0);
+  assert.equal((await record(dir, 'uaApproval', 'done', '--page', OVERVIEW, '--page', CARDS)).code, 0);
+  await commit(dir, 'Approved pages');
+  await write(dir, `${EN}/reports/overview/overview.md`, page('Reports', 'See [reports by period](#reports-by-period).\n\n## Reports by period\n\nText.\n\n## Export\n\nText.'));
+  await write(dir, `${EN}/reports/manage-cards/manage-cards.md`, page('Manage cards', 'See the reports [here](/reports/overview/#reports-by-period).'));
+}
+
+// What the translator's id step writes: the id on the heading, the link fragments on both pages.
+const addId = (ov) => ov.replace('## Звіти за період\n', '## Звіти за період {/* #reports-by-period */}\n').replace('(#звіти-за-період)', '(#reports-by-period)');
+
+test('translate: an id-only UA change keeps the approvals, on the page and on a page whose link it rewrote', async () => {
+  const dir = await host();
+  await approvedWithHeadings(dir);
+  await write(dir, S('overview/overview.md'), addId(await read(dir, S('overview/overview.md'))));
+  const cards = await read(dir, S('manage-cards/manage-cards.md'));
+  await write(dir, S('manage-cards/manage-cards.md'), cards.replace('#звіти-за-період', '#reports-by-period'));
+
+  let st = await status(dir);
+  assert.deepEqual(st.pages.map((p) => [p.id, p.idOnly, p.handEdited, p.stages.uaApproval]), [[OVERVIEW, true, false, 'done'], [CARDS, true, false, 'done']]);
+  assert.deepEqual(st.next, { stage: 'translate', pages: [OVERVIEW, CARDS], uncommitted: [] }, 'an id-only change is no change to commit first');
+  assert.ok(st.warnings.some((w) => /an id-only change/.test(w)));
+
+  const r = await record(dir, 'translate', 'done', '--page', OVERVIEW);
+  assert.equal(r.code, 0, JSON.stringify(r.out));
+  const c = await record(dir, 'translate', 'done', '--page', CARDS);
+  assert.equal(c.code, 0, JSON.stringify(c.out));
+  st = await status(dir);
+  assert.deepEqual(st.pages.map((p) => [p.stages.fix, p.stages.review, p.stages.uaApproval, p.stages.translate, p.handEdited]), [['done', 'done', 'done', 'done', false], ['done', 'done', 'done', 'done', false]]);
+  const ledger = JSON.parse(await read(dir, S('.sources/section-state.json')));
+  assert.ok(ledger.runLog.some((l) => l.outcome === 'id-only' && l.page === OVERVIEW));
+});
+
+test('translate: a changed id, a heading text change or a prose change is an edit, and is refused', async () => {
+  const dir = await host();
+  await approvedWithHeadings(dir);
+  const withId = addId(await read(dir, S('overview/overview.md')));
+  for (const [what, text] of [
+    ['a changed existing id', withId.replace('{/* #export */}', '{/* #export-reports */}')],
+    ['a heading text change', withId.replace('## Звіти за період {', '## Звіти за місяць {')],
+    ['a prose change', withId.replace('Текст розділу.', 'Інший текст розділу.')],
+  ]) {
+    await write(dir, S('overview/overview.md'), text);
+    const st = await status(dir);
+    assert.deepEqual([st.pages[0].idOnly, st.pages[0].handEdited], [false, true], what);
+    const r = await record(dir, 'translate', 'done', '--page', OVERVIEW);
+    assert.equal(r.code, 1, what);
+    assert.match(r.out.error, /uaApproval is stale/, what);
+  }
+  await write(dir, S('overview/overview.md'), withId);
+  assert.equal((await record(dir, 'translate', 'done', '--page', OVERVIEW)).code, 0, 'the id-only version still records');
+});

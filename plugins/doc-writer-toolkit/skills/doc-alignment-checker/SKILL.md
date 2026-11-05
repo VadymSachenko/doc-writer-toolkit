@@ -89,7 +89,7 @@ When comparing UA headings, strip the anchor comment (`{/* #slug */}`) before co
 - EN headings must **not** have `{/* … */}` anchor comments.
 
 **Flag:** `[HEADING COUNT/LEVEL MISMATCH]` — list the position and differing headings side by side.
-**Flag:** `[UA HEADING MISSING ANCHOR]` — show the heading and the expected anchor, and say that adding it changes the heading's fragment, so links to the old fragment change with it (`heading-anchors.md`, rule 8).
+**Flag:** `[UA HEADING MISSING ANCHOR]` — show the heading and the expected anchor, and say that adding it changes the heading's fragment, so links to the old fragment change with it (`heading-anchors.md`, rule 8). Say who adds it: `doc-translator`, Step 5b, which gives every UA heading of the page without an id its EN anchor and rewrites those links in the same change (`heading-anchors.md`, "Who adds a missing id"). Without a translation, the same script does it alone: `doc-align --propose-ids --write` (`${CLAUDE_PLUGIN_ROOT}/scripts/doc-align/README.md`). Don't add the id yourself: this skill edits nothing.
 
 Script flags: `HEADING-COUNT-MISMATCH`, `HEADING-LEVEL-MISMATCH`, `HEADING-ID-MISSING`, `HEADING-ID-MALFORMED`, `HEADING-ID-DUPLICATE`, `EN-HEADING-COMMENT`, `HEADING-ID-MISMATCH` (the EN heading's id differs from the UA id at the same position), `HEADING-ID-SKIPPED`.
 

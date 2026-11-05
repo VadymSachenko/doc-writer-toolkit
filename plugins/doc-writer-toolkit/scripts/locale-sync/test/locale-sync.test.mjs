@@ -531,7 +531,7 @@ test('blocks: full for a new page, incremental with exact target text, none when
   await f.write('docs/filters/filters.md', ua2);
   await f.commit();
   r = (await cli(f.dir, 'blocks', 'filters', '--locales', 'tr', '--with-old')).out.results[0];
-  assert.deepEqual([r.mode, r.source, r.noop, r.summary], ['incremental', { kind: 'blob-diff', from: uaBlob(), to: uaBlob(ua2) }, false, { replace: 1, add: 0, remove: 0, unmapped: 0, words: r.summary.words }]);
+  assert.deepEqual([r.mode, r.source, r.noop, r.summary], ['incremental', { kind: 'blob-diff', from: uaBlob(), to: uaBlob(ua2) }, false, { replace: 1, add: 0, remove: 0, spliced: 0, unmapped: 0, words: r.summary.words }]);
   assert.deepEqual([r.changes[0].target.text, r.changes[0].uaOld.text, r.changes[0].ua.text], ['- Eylemler yalnızca **İşlemde** durumunda kullanılabilir.', '- Дії доступні лише в статусі **В роботі**.', '- Дії доступні лише для записів у статусі **В роботі**.']);
 
   // Only formatting changed in UA: the page is stale (new blob) but there is nothing to translate.
@@ -1962,4 +1962,198 @@ test('check: an unknown Page link form is a configuration error (exit 2)', async
   const r = await cli(f.dir, 'check', 'filters', '--locales', 'tr');
   assert.equal(r.code, 2);
   assert.match(r.out.error, /'Page link form: relative' is not a page link form\. Use route or file-path\./);
+});
+
+// ------------------------------------------------------------------ id-only changes spliced by the script (heading-anchors.md)
+
+// The page before its `## Робота з записами` heading got an id: no comment, and a link to the old fragment (the slug of
+// the UA text, which has no Ukrainian-only letters, so the translations pass their checks). The translations copy the
+// link verbatim and have no comment either.
+const OLD_LINK_UA = '- Докладніше — на сторінці [Огляд](/overview/).';
+const OLD_LINK_TR = '- Ayrıntılar için [Genel bakış](/overview/) sayfasına bakın.';
+const OLD_LINK_RU = '- Подробнее — на странице [Обзор](/overview/).';
+const legacy = (text, from, to, link, linkLine) => edit(edit(text, `${from} {/* #operations */}`, to), link, linkLine);
+const UA_A = legacy(UA, '## Операції', '## Робота з записами', OLD_LINK_UA, '- Докладніше — на сторінці [Огляд](/overview/) і в розділі [Операції](#робота-з-записами).');
+const TR_A = legacy(TR, '## İşlemler', '## İşlemler', OLD_LINK_TR, '- Ayrıntılar için [Genel bakış](/overview/) sayfasına ve [İşlemler](#робота-з-записами) bölümüne bakın.');
+const RU_A = legacy(RU, '## Операции', '## Операции', OLD_LINK_RU, '- Подробнее — на странице [Обзор](/overview/) и в разделе [Операции](#робота-з-записами).');
+const UA_B = edit(edit(UA_A, '## Робота з записами\n', '## Робота з записами {/* #operations */}\n'), '(#робота-з-записами)', '(#operations)');
+
+test('splice: an id added to a ## with subsections gives only the comment line in the target (AC-4)', () => {
+  const b = edit(UA_A, '## Робота з записами\n', '## Робота з записами {/* #operations */}\n');
+  const { changes, unmapped, spliced } = plan(UA_A, b, TR_A);
+  assert.deepEqual([changes, unmapped], [[], []], 'no block goes to a translator');
+  assert.equal(spliced.length, 1);
+  const s = spliced[0];
+  assert.deepEqual([s.id, s.op, s.kind, s.anchor, s.target.text, s.write], ['s1', 'replace', 'anchor', { from: null, to: 'operations' }, '## İşlemler', '## İşlemler {/* #operations */}']);
+  assert.equal(s.target.lines[0], s.target.lines[1], 'the heading line only, not its section');
+  assert.equal(TR_A.split('\n')[s.target.lines[0] - 1], '## İşlemler');
+  assert.deepEqual(s.headingPath, ['Робота з записами']);
+});
+
+test('splice: a changed comment is spliced the same way; a removed one is not an id-only change (AC-4)', () => {
+  const changed = plan(UA, edit(UA, '## Операції {/* #operations */}', '## Операції {/* #operations-list */}'), TR);
+  assert.deepEqual([changed.changes, changed.unmapped], [[], []]);
+  assert.deepEqual([changed.spliced[0].anchor, changed.spliced[0].write], [{ from: 'operations', to: 'operations-list' }, '## İşlemler {/* #operations-list */}']);
+
+  const removed = plan(UA, edit(UA, '## Операції {/* #operations */}', '## Операції'), TR);
+  assert.deepEqual([removed.spliced, removed.changes.map((c) => c.kind)], [[], ['section']]);
+});
+
+test('splice: a heading whose text and anchor both change is still re-translated (AC-4)', () => {
+  const { changes, spliced } = plan(UA_A, edit(UA_A, '## Робота з записами\n', '## Дії над записами {/* #operations */}\n'), TR_A);
+  assert.equal(spliced.length, 0);
+  assert.deepEqual(changes.map((c) => [c.op, c.kind]), [['replace', 'section']]);
+  assert.ok(changes[0].ua.text.includes('### Додаткові дії'), 'the whole section, subsections included');
+});
+
+test('splice: a rewritten link fragment is spliced and its sentence is untouched (AC-4)', () => {
+  const { changes, unmapped, spliced } = plan(UA_A, UA_B, TR_A);
+  assert.deepEqual([changes, unmapped], [[], []]);
+  const link = spliced.find((s) => s.kind === 'link');
+  assert.deepEqual([link.block, link.fragments], ['item', [{ from: '#робота-з-записами', to: '#operations' }]]);
+  assert.equal(link.target.text, '- Ayrıntılar için [Genel bakış](/overview/) sayfasına ve [İşlemler](#робота-з-записами) bölümüne bakın.');
+  assert.equal(link.write, '- Ayrıntılar için [Genel bakış](/overview/) sayfasına ve [İşlemler](#operations) bölümüne bakın.');
+  assert.deepEqual(spliced.map((s) => s.kind).sort(), ['anchor', 'link']);
+});
+
+test('splice: rewritten fragments never push a section to the whole-body rule; a fragment no heading explains is a change', () => {
+  // Two of three items changed only in a fragment: still two splices, not the whole section body.
+  const a = edit(UA_A, '- Фільтр `status` приймає значення `done`.', '- Фільтр `status` приймає значення `done`, див. [операції](#робота-з-записами).');
+  const t = edit(TR_A, '- `status` filtresi `done` değerini kabul eder.', '- `status` filtresi `done` değerini kabul eder, bkz. [işlemler](#робота-з-записами).');
+  const b = edit(a, '## Робота з записами\n', '## Робота з записами {/* #operations */}\n').replaceAll('(#робота-з-записами)', '(#operations)');
+  const r = plan(a, b, t);
+  assert.deepEqual([r.changes.length, r.spliced.filter((s) => s.kind === 'link').length], [0, 2]);
+
+  // A fragment rewritten to an anchor that no heading of this change got: a translator writes the block (as before).
+  const other = plan(UA, edit(UA, '- Докладніше — на сторінці [Огляд](/overview/).', '- Докладніше — на сторінці [Огляд](/overview/#what-to-know).'), TR);
+  assert.equal(other.spliced.length, 0);
+  const moved = plan(UA_A, edit(UA_A, '(#робота-з-записами)', '(#reference)'), TR_A);
+  assert.deepEqual([moved.spliced, moved.changes.map((c) => c.kind)], [[], ['item']]);
+  // A link to another page is spliced only when the caller can vouch for that page's ids.
+  const cross = (verifyLink) => {
+    const pa = parsePage(UA);
+    const pb = parsePage(edit(UA, '[Огляд](/overview/)', '[Огляд](/overview/#overview-page)'));
+    const pa2 = parsePage(edit(UA, '[Огляд](/overview/)', '[Огляд](/overview/#огляд)'));
+    return composeChanges({ pageA: pa2, pageB: pb, pageT: parsePage(edit(TR, '[Genel bakış](/overview/)', '[Genel bakış](/overview/#огляд)')), groups: diffBodies(pa2, pb), fmChanges: [], verifyLink });
+  };
+  assert.deepEqual(cross(null).changes.map((c) => c.kind), ['item']);
+  const ok = cross((p, from, to) => p === '/overview/' && from === 'огляд' && to === 'overview-page');
+  assert.deepEqual([ok.changes.length, ok.spliced[0].write], [0, '- Ayrıntılar için [Genel bakış](/overview/#overview-page) sayfasına bakın.']);
+});
+
+test('splice: a heading id and a real change in its section: the comment is spliced, the block goes to the translator', () => {
+  const b = edit(UA_B, 'Ви також можете скинути фільтри.', 'Ви також можете скинути всі фільтри.');
+  const { changes, spliced } = plan(UA_A, b, TR_A);
+  assert.deepEqual(changes.map((c) => c.kind), ['paragraph']);
+  assert.deepEqual(spliced.map((s) => s.kind).sort(), ['anchor', 'link']);
+});
+
+test('splice: a target heading whose anchor already differs from the old UA fails, and nothing is spliced on the page (AC-4)', () => {
+  const t = edit(TR_A, '## İşlemler\n', '## İşlemler {/* #islemler */}\n');
+  const { changes, unmapped, spliced } = plan(UA_A, UA_B, t);
+  assert.deepEqual([changes, spliced], [[], []]);
+  assert.equal(unmapped.length, 2);
+  assert.match(unmapped.find((u) => u.kind === 'anchor').reason, /'islemler' in the translation but missing in the old UA page/);
+  assert.match(unmapped.find((u) => u.kind === 'link').reason, /nothing is spliced on this page/);
+});
+
+async function spliceFixture() {
+  const f = await fixtureRepo();
+  await f.write('docs/filters/filters.md', UA_A);
+  const OTHER_A = '---\ntitle: Інша\n---\n\nДивіться [операції з фільтрами](/filters/#робота-з-записами).\n';
+  const OTHER_TR = '---\ntitle: Diğer\n---\n\n[Filtre işlemlerine](/filters/#робота-з-записами) bakın.\n';
+  const OTHER_RU = '---\ntitle: Другая\n---\n\nСмотрите [операции с фильтрами](/filters/#робота-з-записами).\n';
+  await f.write('docs/other/other.md', OTHER_A);
+  await f.commit('legacy pages');
+  await f.write(`${TR_ROOT}/filters/filters.md`, TR_A);
+  await f.write('i18n/ru/docusaurus-plugin-content-docs/current/filters/filters.md', RU_A);
+  await f.write(`${TR_ROOT}/other/other.md`, OTHER_TR);
+  await f.write('i18n/ru/docusaurus-plugin-content-docs/current/other/other.md', OTHER_RU);
+  await writeState(f, { tr: trEntry(uaBlob(UA_A)), ru: trEntry(uaBlob(UA_A)) });
+  await f.write('.doc-toolkit/pages/other/other.json', { spans: {}, locales: { tr: trEntry(uaBlob(OTHER_A)), ru: trEntry(uaBlob(OTHER_A)) } });
+  for (const p of ['filters', 'other']) assert.equal((await cli(f.dir, 'link-assets', p)).code, 0);
+  for (const p of ['filters', 'other']) assert.equal((await cli(f.dir, 'check', p)).code, 0, `${p} passes before the change`);
+  // The id-only change: the heading gets its id, and the links on this page and on another page follow it.
+  await f.write('docs/filters/filters.md', UA_B);
+  await f.write('docs/other/other.md', OTHER_A.replace('#робота-з-записами', '#operations'));
+  await f.commit('ids');
+  return { f, OTHER_A, OTHER_TR, OTHER_RU };
+}
+
+test('splice command: id-only pages are carried into every locale with no worker; headings passes and record advances them (AC-4)', async () => {
+  const { f, OTHER_TR, OTHER_RU } = await spliceFixture();
+  const st = (await cli(f.dir, 'status')).out;
+  assert.deepEqual(st.pages.map((p) => [p.page, p.locales.tr.state, p.locales.tr.words]), [['filters/filters', 'stale', 0], ['other/other', 'stale', 0]]);
+
+  const bl = (await cli(f.dir, 'blocks', 'filters', '--locales', 'tr')).out.results[0];
+  assert.deepEqual([bl.mode, bl.noop, bl.spliceOnly, bl.changes, bl.summary.spliced, bl.summary.words], ['incremental', false, true, [], 2, 0]);
+  const ob = (await cli(f.dir, 'blocks', 'other', '--locales', 'tr')).out.results[0];
+  assert.deepEqual([ob.spliceOnly, ob.spliced[0].fragments], [true, [{ from: '/filters/#робота-з-записами', to: '/filters/#operations' }]], 'a link to another page whose heading got the id');
+
+  const r = await cli(f.dir, 'splice', '--date', '2026-11-04');
+  assert.equal(r.code, 0, JSON.stringify(r.out, null, 2));
+  assert.deepEqual(r.out.results.map((x) => [x.page, x.locale, x.recorded]).sort(), [['filters/filters', 'ru', true], ['filters/filters', 'tr', true], ['other/other', 'ru', true], ['other/other', 'tr', true]]);
+  assert.deepEqual(r.out.toTranslate, []);
+
+  const date = (t) => t.replace('date: 10/7/2026', 'date: 11/4/2026');
+  const wantTr = date(edit(edit(TR_A, '## İşlemler\n', '## İşlemler {/* #operations */}\n'), '(#робота-з-записами)', '(#operations)'));
+  assert.equal(await f.read(`${TR_ROOT}/filters/filters.md`), wantTr, 'only the comment, the fragment and the date changed');
+  const wantRu = date(edit(edit(RU_A, '## Операции\n', '## Операции {/* #operations */}\n'), '(#робота-з-записами)', '(#operations)'));
+  assert.equal(await f.read('i18n/ru/docusaurus-plugin-content-docs/current/filters/filters.md'), wantRu);
+  assert.equal(await f.read(`${TR_ROOT}/other/other.md`), OTHER_TR.replace('#робота-з-записами', '#operations').replace('---\n\n', 'last_update:\n  date: 2026-11-04\n---\n\n'));
+  assert.ok((await f.read('i18n/ru/docusaurus-plugin-content-docs/current/other/other.md')).includes('[операции с фильтрами](/filters/#operations)'));
+  assert.ok(OTHER_RU);
+
+  const after = (await cli(f.dir, 'status')).out;
+  assert.ok(after.pages.every((p) => p.locales.tr.state === 'current' && p.locales.ru.state === 'current'));
+  const c = await cli(f.dir, 'check', 'filters', '--locales', 'tr');
+  assert.equal(c.code, 0);
+  assert.deepEqual([c.out.results[0].ok, c.out.results[0].checks], [true, []], 'headings and every other check pass');
+  assert.equal(JSON.parse(await f.read('.doc-toolkit/pages/filters/filters.json')).locales.tr.sourceBlob, uaBlob(UA_B));
+  assert.deepEqual((await cli(f.dir, 'splice')).out.results, [], 'nothing left to splice');
+});
+
+test('splice command: a page with other changes goes to the translator, and apply puts the splices in with its blocks', async () => {
+  const { f } = await spliceFixture();
+  const b = edit(UA_B, 'Ви також можете скинути фільтри.', 'Ви також можете скинути всі фільтри.');
+  await f.write('docs/filters/filters.md', b);
+  await f.commit('a real change too');
+  const r = await cli(f.dir, 'splice', 'filters', '--locales', 'tr');
+  assert.deepEqual([r.code, r.out.results, r.out.toTranslate], [0, [], [{ page: 'filters/filters', locale: 'tr', mode: 'incremental', noop: false, changes: 1, spliced: 2, unmapped: 0 }]]);
+  assert.equal(await f.read(`${TR_ROOT}/filters/filters.md`), TR_A, 'nothing written');
+
+  const bl = (await cli(f.dir, 'blocks', 'filters', '--locales', 'tr')).out.results[0];
+  await f.write('t.json', { [bl.changes[0].id]: 'Tüm filtreleri sıfırlayabilirsiniz.' });
+  await f.write('bad.json', { [bl.changes[0].id]: 'x', s1: 'y' });
+  assert.equal((await cli(f.dir, 'apply', 'filters', '--locales', 'tr', '--translations', 'bad.json', '--out', 'cand.md')).code, 2, 'a spliced block is never translated');
+  assert.equal((await cli(f.dir, 'apply', 'filters', '--locales', 'tr', '--out', 'cand.md')).code, 2, 'a block to translate needs --translations');
+  const ap = await cli(f.dir, 'apply', 'filters', '--locales', 'tr', '--translations', 't.json', '--out', 'cand.md');
+  assert.equal(ap.code, 0, JSON.stringify(ap.out));
+  const want = edit(edit(edit(TR_A, '## İşlemler\n', '## İşlemler {/* #operations */}\n'), '(#робота-з-записами)', '(#operations)'), 'Filtreleri sıfırlayabilirsiniz.', 'Tüm filtreleri sıfırlayabilirsiniz.');
+  assert.equal(await f.read('cand.md'), want);
+  assert.equal((await cli(f.dir, 'record', 'filters', '--locales', 'tr', '--candidate', 'cand.md')).code, 0);
+});
+
+test('splice command: a target heading whose anchor already differs fails; nothing is spliced or recorded (AC-4)', async () => {
+  const { f } = await spliceFixture();
+  await f.write(`${TR_ROOT}/filters/filters.md`, edit(TR_A, '## İşlemler\n', '## İşlemler {/* #islemler */}\n'));
+  const before = await f.read(`${TR_ROOT}/filters/filters.md`);
+  const r = await cli(f.dir, 'splice', 'filters', '--locales', 'tr');
+  assert.deepEqual([r.out.results, r.out.toTranslate.map((x) => [x.spliced, x.unmapped])], [[], [[0, 2]]]);
+  assert.equal(await f.read(`${TR_ROOT}/filters/filters.md`), before);
+  // Applied anyway, the candidate fails `headings` and is not recorded.
+  assert.equal((await cli(f.dir, 'apply', 'filters', '--locales', 'tr', '--out', 'cand.md')).code, 0);
+  const rec = await cli(f.dir, 'record', 'filters', '--locales', 'tr', '--candidate', 'cand.md');
+  assert.equal(rec.code, 1);
+  assert.ok(rec.out.results[0].failures.some((x) => x.check === 'headings'));
+  assert.equal(await f.read(`${TR_ROOT}/filters/filters.md`), before);
+  assert.equal(JSON.parse(await f.read('.doc-toolkit/pages/filters/filters.json')).locales.tr.sourceBlob, uaBlob(UA_A));
+});
+
+test('splice command: a fragment rewrite the other page does not explain goes to the translator', async () => {
+  const { f, OTHER_A } = await spliceFixture();
+  await f.write('docs/other/other.md', OTHER_A.replace('#робота-з-записами', '#no-such-heading'));
+  await f.commit('a fragment no heading has');
+  const r = await cli(f.dir, 'splice', 'other', '--locales', 'tr');
+  assert.deepEqual([r.out.results, r.out.toTranslate.map((x) => [x.page, x.changes, x.spliced])], [[], [['other/other', 1, 0]]]);
 });
