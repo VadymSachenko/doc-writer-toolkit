@@ -38,17 +38,19 @@ export async function main(argv, io = {}) {
   if (!['print', 'install', 'uninstall', 'status'].includes(command)) throw new CliError(`unknown command '${command}'.\n\n${USAGE}`, { code: 2 });
   if (process.platform !== 'darwin' && !io.launchctl && command !== 'print') throw new CliError('launchd is macOS only', { code: 2 });
   const root = path.resolve(values.root ?? process.cwd());
-  const settings = await loadSettings({ root, settings: values.settings });
   const noop = Boolean(values.noop);
   let result;
-  if (command === 'print') {
-    const a = agentFor(settings, { noop, io });
-    result = { label: a.label, file: a.file, missing: a.missing, plist: a.text };
-  } else if (command === 'install') result = install(settings, { noop, io });
-  else if (command === 'uninstall') result = uninstall(settings, { noop, io });
-  else {
+  // `uninstall` and `status` need the path only: they work for a host that moved or whose settings don't load.
+  if (command === 'uninstall') result = uninstall(root, { noop, io });
+  else if (command === 'status') {
     const label = labelOf(root, { noop });
     result = agentState(label, path.join(agentsDirOf(io), `${label}.plist`), io);
+  } else {
+    const settings = await loadSettings({ root, settings: values.settings });
+    if (command === 'print') {
+      const a = agentFor(settings, { noop, io });
+      result = { label: a.label, file: a.file, missing: a.missing, plist: a.text };
+    } else result = install(settings, { noop, io });
   }
   stdout.write(JSON.stringify({ ok: true, command, ...result }, null, 2) + '\n');
   return 0;

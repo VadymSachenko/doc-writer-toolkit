@@ -46,8 +46,9 @@ test('AC-3: install writes one plist and loads it; uninstall unloads it and remo
   const calls = [];
   const env = io(agentsDir, calls);
   const r = install(settings, { io: env });
-  assert.deepEqual([r.installed, r.loaded, r.fileExists, r.label], [true, true, true, 'dev.doc-toolkit.ticket-flow.acme-docs']);
-  assert.deepEqual(fs.readdirSync(agentsDir), ['dev.doc-toolkit.ticket-flow.acme-docs.plist']);
+  assert.deepEqual([r.installed, r.loaded, r.fileExists], [true, true, true]);
+  assert.match(r.label, /^dev\.doc-toolkit\.ticket-flow\.acme-docs-[0-9a-f]{8}$/);
+  assert.deepEqual(fs.readdirSync(agentsDir), [`${r.label}.plist`]);
   assert.deepEqual(calls.map((c) => c[0]), ['bootout', 'bootstrap', 'print']);
   assert.equal(calls[1][1], 'gui/501');
   const text = fs.readFileSync(path.join(agentsDir, `${r.label}.plist`), 'utf8');
@@ -63,11 +64,11 @@ test('AC-3: install writes one plist and loads it; uninstall unloads it and remo
   install(settings, { io: env });
   assert.equal(fs.readdirSync(agentsDir).length, 1);
 
-  const u = uninstall(settings, { io: env });
+  const u = uninstall(settings.root, { io: env });
   assert.deepEqual([u.bootout, u.fileRemoved, u.loaded, u.fileExists, u.left], ['unloaded', true, false, false, false]);
   assert.deepEqual(fs.readdirSync(agentsDir), []);
   // Uninstalling what isn't there is fine and still reports nothing left.
-  const again = uninstall(settings, { io: env });
+  const again = uninstall(settings.root, { io: env });
   assert.deepEqual([again.bootout, again.left], ['was not loaded', false]);
 });
 
@@ -135,4 +136,36 @@ test('set: one key of the local file, checked before it is written; the shared f
   assert.equal(fs.readFileSync(stamp, 'utf8'), stamped);
   // --unset drops the key: the default comes back.
   assert.deepEqual((await run('limits.inProgress', '--unset')).after, 3);
+});
+
+test('the label is unique per host: the folder name (ASCII) and a hash of the path; uninstall needs only the path', async () => {
+  const one = await settingsOf();
+  const two = await settingsOf();
+  assert.equal(path.basename(one.root), path.basename(two.root));
+  assert.notEqual(labelOf(one.root), labelOf(two.root), 'two hosts with the same folder name');
+  assert.match(labelOf('/Users/owner/Документи'), /^dev\.doc-toolkit\.ticket-flow\.host-[0-9a-f]{8}$/, 'still ASCII');
+  const agentsDir = tmp('agents-');
+  const calls = [];
+  const env = io(agentsDir, calls);
+  install(one, { io: env });
+  install(two, { io: env });
+  assert.equal(fs.readdirSync(agentsDir).length, 2, 'the second host does not replace the first');
+
+  // The first host moves away: its settings no longer load, and uninstall by its old path still removes its agent.
+  fs.rmSync(one.root, { recursive: true, force: true });
+  let out = '';
+  await launchdMain(['uninstall', '--root', one.root], { ...env, stdout: { write: (x) => (out += x) } });
+  const u = JSON.parse(out);
+  assert.deepEqual([u.label, u.bootout, u.fileRemoved, u.left], [labelOf(one.root), 'unloaded', true, false]);
+  assert.deepEqual(fs.readdirSync(agentsDir), [`${labelOf(two.root)}.plist`]);
+
+  // An agent installed under an earlier label is found by its plist's --root: install replaces it, uninstall removes it.
+  const old = path.join(agentsDir, 'dev.doc-toolkit.ticket-flow.acme-docs.plist');
+  fs.writeFileSync(old, agentFor(two, { io: env }).text);
+  install(two, { io: env });
+  assert.deepEqual(fs.readdirSync(agentsDir), [`${labelOf(two.root)}.plist`]);
+  fs.writeFileSync(old, agentFor(two, { io: env }).text);
+  const both = uninstall(two.root, { io: env });
+  assert.deepEqual([both.others.map((a) => a.label), both.left], [['dev.doc-toolkit.ticket-flow.acme-docs'], false]);
+  assert.deepEqual(fs.readdirSync(agentsDir), []);
 });

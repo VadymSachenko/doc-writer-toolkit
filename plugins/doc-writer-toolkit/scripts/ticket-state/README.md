@@ -116,8 +116,8 @@ The runner takes no command.
 |---|---|
 | `print` | The plist it would install and where; installs nothing. `missing` names `claude`, `git` or `gh` not found on the PATH. |
 | `install` | Writes `~/Library/LaunchAgents/<label>.plist` and loads it (`launchctl bootstrap gui/<uid>`); an existing one is replaced. Stops if `claude`, `git` or `gh` is missing. If loading fails, the plist is removed. |
-| `uninstall` | Unloads it (`launchctl bootout`) and removes the plist. `left` is `false` when neither the job nor the file remains. |
-| `status` | `fileExists` and `loaded`. |
+| `uninstall` | Unloads it (`launchctl bootout`) and removes the plist, and any other agent of ours started for the same root (`others`). `left` is `false` when neither a job nor a file remains. Reads no settings. |
+| `status` | `fileExists` and `loaded`. Reads no settings. |
 
 | Option | |
 |---|---|
@@ -233,8 +233,8 @@ Every `claude` the runner and the watcher start gets an environment without `ANT
 ### Installing the LaunchAgent
 
 1. Run `claude setup-token`, save the token in a file outside every repo (`chmod 600`), and set `schedule.tokenFile` to it: `ticket-state.mjs set schedule.tokenFile <file>`.
-2. `launchd.mjs print --root <host>` to see the plist; `launchd.mjs install --root <host>`. The label is `dev.doc-toolkit.ticket-flow.<host folder name>`, the log `<state>/watch/launchd.log`.
-3. `launchd.mjs uninstall --root <host>` removes it; `left: false` confirms that nothing is left. `mode off` in the local file stops every run at once, with no uninstall.
+2. `launchd.mjs print --root <host>` to see the plist; `launchd.mjs install --root <host>`. The label is `dev.doc-toolkit.ticket-flow.<host folder name>-<hash>`: the folder's name in ASCII (`host` when nothing is left) and the first 8 hex digits of the SHA-256 of the host's absolute path, so two hosts with the same folder name get two agents. The log is `<state>/watch/launchd.log`. An agent of the same host under another label (found by its plist's `--root`) is replaced.
+3. `launchd.mjs uninstall --root <host>` removes it; `left: false` confirms that nothing is left. It needs the path only, not the settings: a host that moved is uninstalled with its old path. It also removes any agent of ours whose plist starts the watcher for that path (`others`). `mode off` in the local file stops every run at once, with no uninstall.
 
 The plist holds absolute paths (node, the watcher in the plugin's folder as installed, the host) and a PATH with `claude`, `git` and `gh`: install again after the plugin or one of them moves.
 
