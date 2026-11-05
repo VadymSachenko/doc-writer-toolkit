@@ -461,3 +461,137 @@ test('resolve leaves a committed shot alone unless --shot names it', async () =>
   assert.equal(await h.read(UK_LIVE), 'new uk', 'the live set stays until a new one is promoted');
   assert.equal((await cli(h.root, 'resolve', MANIFEST, '--shot', 'nope')).code, 2);
 });
+
+// ------------------------------------------------------------------ the storage switch
+
+const STORAGE = ['- **Screenshot locales:** `uk, en`', '- **Locale switch:** `storage lang uk="uk-UA", en="en-US"`'];
+
+test('storage: config takes the localStorage key and the stored text per locale, quotes and all', async () => {
+  const h = await host({ extra: STORAGE });
+  const r = await cli(h.root, 'config');
+  assert.equal(r.code, 0, JSON.stringify(r.out));
+  assert.equal(r.out.switch.mode, 'storage');
+  assert.equal(r.out.switch.name, 'lang');
+  assert.deepEqual(r.out.switch.tokens, { uk: '"uk-UA"', en: '"en-US"' });
+  assert.equal(r.out.switch.capture.key, 'lang');
+  assert.equal(r.out.switch.capture.when, 'before the page loads');
+  // The value is set before the page loads; a script per locale, for addInitScript, with the stored text as written.
+  assert.equal(r.out.switch.capture.initScript.en, 'window.localStorage.setItem("lang", "\\"en-US\\"");');
+  const stored = {};
+  new Function('window', r.out.switch.capture.initScript.uk)({ localStorage: { setItem: (k, v) => (stored[k] = v) } });
+  assert.deepEqual(stored, { lang: '"uk-UA"' }, 'what the app reads back with JSON.parse is uk-UA');
+  assert.deepEqual(r.out.switch.capture.check.en, { storedValue: '"en-US"', pageLanguage: 'en' });
+});
+
+test('storage: a capture never clicks the language picker; only ui does', async () => {
+  let h = await host({ extra: STORAGE });
+  let r = await cli(h.root, 'config');
+  assert.equal(r.out.switch.capture.clicksPicker, false);
+  // A Locale switch path left from the ui mode is accepted, and still never makes the capture click.
+  h = await host({ extra: [...STORAGE, '- **Locale switch path:** the language picker at the bottom of the right-hand panel'] });
+  r = await cli(h.root, 'config');
+  assert.equal(r.code, 0, JSON.stringify(r.out));
+  assert.equal(r.out.switch.capture.clicksPicker, false);
+  assert.deepEqual(r.out.warnings, []);
+  h = await host({ extra: ['- **Screenshot locales:** `uk, en`', '- **Locale switch:** `ui uk=Українська, en=English`', '- **Locale switch path:** the picker in the footer'] });
+  r = await cli(h.root, 'config');
+  assert.equal(r.out.switch.capture.clicksPicker, true);
+  for (const mode of ['url-prefix uk=/, en=/en/', 'query lang uk=uk, en=en', 'cookie locale uk=uk, en=en']) {
+    h = await host({ extra: ['- **Screenshot locales:** `uk, en`', `- **Locale switch:** \`${mode}\``] });
+    r = await cli(h.root, 'config');
+    assert.equal(r.out.switch.capture.clicksPicker, false, mode);
+  }
+  // The contract says the same in words, for every consumer that captures.
+  const contract = await fs.readFile(path.join(path.dirname(CLI), '..', '..', 'context', 'doc-rules', 'project-rules', 'screenshot-locales.md'), 'utf8');
+  assert.match(contract, /`storage`[^\n]*never click/i);
+});
+
+test('storage: the key is required, and a locale without a token is a problem', async () => {
+  assert.match(parseSwitch('storage uk="uk-UA", en="en-US"').problems[0], /'storage' needs the localStorage key name/);
+  assert.deepEqual(parseSwitch('storage lang uk=uk-UA, en=en-US').tokens, { uk: 'uk-UA', en: 'en-US' }, 'an app that stores plain text: no quotes');
+  const h = await host({ extra: ['- **Screenshot locales:** `uk, en`', '- **Locale switch:** `storage lang uk="uk-UA"`'] });
+  const r = await cli(h.root, 'config');
+  assert.equal(r.code, 2);
+  assert.match(r.out.problems[0].message, /no token for 'en'/);
+});
+
+// ------------------------------------------------------------------ the UA → EN image pair check
+
+const UK_IMG = 'portal/transactions/.assets/a.png';
+const EN_IMG = `${PORTAL_EN}/transactions/.assets/a.png`;
+
+async function branchHost(extra = MULTI) {
+  const h = await host({ extra });
+  const g = (...args) => run('git', ['-C', h.root, ...args]);
+  await g('init', '-q', '-b', 'main');
+  await g('config', 'user.email', 'test@example.com');
+  await g('config', 'user.name', 'Test');
+  await g('config', 'commit.gpgsign', 'false');
+  await h.write(UK_IMG, 'uk v1');
+  await h.write(EN_IMG, 'en v1');
+  await g('add', '-A');
+  await g('commit', '-q', '-m', 'base');
+  await g('checkout', '-q', '-b', 'ticket');
+  const commit = async (files) => {
+    for (const [rel, text] of Object.entries(files)) await h.write(rel, text);
+    await g('add', '-A');
+    await g('commit', '-q', '-m', 'change');
+  };
+  return { ...h, g, commit };
+}
+
+test('pairs: a UA image changed without its EN counterpart fails and names both paths; changing both passes', async () => {
+  const h = await branchHost();
+  await h.commit({ [UK_IMG]: 'uk v2', 'portal/transactions/transactions.md': '# Транзакції\n\nНовий текст.\n' });
+  let r = await cli(h.root, 'pairs', '--base', 'main');
+  assert.equal(r.code, 1, JSON.stringify(r.out));
+  assert.equal(r.out.ok, false);
+  assert.deepEqual(r.out.missing, [{ ua: UK_IMG, en: EN_IMG, change: 'changed' }]);
+  await h.commit({ [EN_IMG]: 'en v2' });
+  r = await cli(h.root, 'pairs', '--base', 'main');
+  assert.equal(r.code, 0, JSON.stringify(r.out));
+  assert.deepEqual([r.out.ok, r.out.checked, r.out.missing], [true, 1, []]);
+});
+
+test('pairs: a new UA image needs its EN file; an EN link to the UA image counts; .sources images and EN-only changes are not checked', async () => {
+  const h = await branchHost();
+  const NEW = 'portal/transactions/.assets/b.png';
+  await h.commit({ [NEW]: 'uk new', 'portal/transactions/.sources/frames/f1.png': 'frame', [`${PORTAL_EN}/transactions/.assets/c.png`]: 'en only' });
+  let r = await cli(h.root, 'pairs', '--base', 'main');
+  assert.equal(r.code, 1);
+  assert.deepEqual(r.out.missing, [{ ua: NEW, en: `${PORTAL_EN}/transactions/.assets/b.png`, change: 'added' }]);
+  // EN links to the UA image: a UA change is an EN change too.
+  const enLink = path.join(h.root, PORTAL_EN, 'transactions/.assets/b.png');
+  await fs.symlink(path.relative(path.dirname(enLink), path.join(h.root, NEW)), enLink);
+  await h.g('add', '-A');
+  await h.g('commit', '-q', '-m', 'link');
+  await h.commit({ [NEW]: 'uk new 2' });
+  r = await cli(h.root, 'pairs', '--base', 'main');
+  assert.equal(r.code, 0, JSON.stringify(r.out));
+});
+
+test('pairs: a UA image with a Cyrillic name (which git quotes in line output) is checked like any other', async () => {
+  const h = await branchHost();
+  const UA = 'portal/transactions/.assets/схема оплати.png';
+  const EN = `${PORTAL_EN}/transactions/.assets/схема оплати.png`;
+  await h.commit({ [UA]: 'uk new' });
+  let r = await cli(h.root, 'pairs', '--base', 'main');
+  assert.equal(r.code, 1, JSON.stringify(r.out));
+  assert.deepEqual(r.out.missing, [{ ua: UA, en: EN, change: 'added' }]);
+  await h.commit({ [EN]: 'en new' });
+  r = await cli(h.root, 'pairs', '--base', 'main');
+  assert.equal(r.code, 0, JSON.stringify(r.out));
+  assert.deepEqual([r.out.checked, r.out.missing], [1, []]);
+});
+
+test('pairs: a host whose screenshot locales leave out en, or that declares none, has nothing to check', async () => {
+  let h = await branchHost([]);
+  await h.commit({ [UK_IMG]: 'uk v2' });
+  let r = await cli(h.root, 'pairs', '--base', 'main');
+  assert.deepEqual([r.code, r.out.applies], [0, false]);
+  h = await branchHost(['- **Screenshot locales:** `uk`']);
+  await h.commit({ [UK_IMG]: 'uk v2' });
+  r = await cli(h.root, 'pairs', '--base', 'main');
+  assert.deepEqual([r.code, r.out.applies], [0, false]);
+  assert.equal((await cli(h.root, 'pairs')).code, 2, 'no --base');
+});

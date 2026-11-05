@@ -140,7 +140,7 @@ export function deriveTicket(l, w) {
     t.failed = failed;
     if (failed.held) {
       t.steps = [];
-      t.gate = { who: 'owner', why: `${failed.stage}${failed.pr ? ` on ${failed.pr}` : ''} failed in ${failed.sessions} sessions with no one acting in between: a comment on the card or the PR gives it one more try (so do a review, a commit, a move of the card, or \`ticket-state set retry ${l.key}\`)` };
+      t.gate = { who: 'owner', why: `${failed.stage}${failed.pr ? ` on ${failed.pr}` : ''} ${failed.noSession ? `failed ${failed.sessions === 2 ? 'twice' : `${failed.sessions} times`} with no one acting in between, the last time before any session started (${failed.noSession.slice(0, 200)})` : `failed in ${failed.sessions} sessions with no one acting in between`}: a comment on the card or the PR gives it one more try (so do a review, a commit, a move of the card, or \`ticket-state set retry ${l.key}\`)` };
       t.held = true;
     } else if (!failed.acted && t.steps.length) t.steps[0] = { ...t.steps[0], prior: failed.sessions, waits: 'a person acting on the ticket, or the next morning run' };
   }
@@ -205,7 +205,8 @@ function failedStep(l, w, steps) {
   if (!s || last?.outcome !== 'failed' || !last.after || last.stage !== s.stage || (last.pr ?? null) !== (s.pr ?? null)) return null;
   const sessions = last.failures ?? 1;
   const acted = actedAfter(l, w, last.after);
-  return { stage: last.stage, ...(last.pr ? { pr: last.pr } : {}), at: last.after.at, sessions, ...(acted ? { acted } : { held: sessions >= 2 }) };
+  // A failure with no session (no `start`: a worktree that couldn't be made or was stuck) says so, with its reason.
+  return { stage: last.stage, ...(last.pr ? { pr: last.pr } : {}), at: last.after.at, sessions, ...(last.start ? {} : { noSession: String(last.note ?? 'no session started') }), ...(acted ? { acted } : { held: sessions >= 2 }) };
 }
 
 // The sessions the ticket's next step already had today (since a `set retry`, if later), when they reach the cap.
@@ -412,8 +413,9 @@ function prStep(l, p, w, out, prs) {
   else {
     if (hand.length) {
       if (pr.readyForMerge?.length) {
-        const synced = pr.steps?.resync?.status === 'done' && pr.steps.resync.head === head;
-        if (pr.readyForMerge.at(-1).head !== head && !synced) return step('resync', { pr: id, head, commits: hand.length });
+        // A hand commit after ready for merge: the re-sync, then the visual pack if it changed an image, then ready again.
+        const after = handAfterReady(pr, p, w, target, head, hand.length, out);
+        if (after) return after;
       } else out.mismatch.push(`${id}: ${hand.length} commit(s) on the branch the pipeline didn't make: a hand edit, kept; the next stage reads the branch`);
     }
   }
@@ -444,6 +446,22 @@ function prStep(l, p, w, out, prs) {
   // Row 12.
   if (p.stage === 'finalReview') return chainStep(l, p, w, out, target, head);
   return null;
+}
+
+// Row 8 after ready for merge: the hand commit's blocks re-synced (`resync`), then, when an image changed since the
+// visual pack saw the branch, the pack again (`visualPack`), and only then `readyForMerge` for the new head.
+function handAfterReady(pr, p, w, target, head, commits, out) {
+  const id = prId(pr);
+  if (pr.readyForMerge.at(-1).head === head) return null;
+  const synced = pr.steps?.resync?.status === 'done' && pr.steps.resync.head === head;
+  if (!synced) return step('resync', { pr: id, head, commits });
+  const pack = pr.chain?.visualPack;
+  if (pack?.head && pack.head !== head) {
+    const images = w.git?.imagesChanged?.(target, pack.head, head) ?? null;
+    if (images === null) out.notes.push(`${id}: the visual pack saw ${String(pack.head).slice(0, 7)}, the head is ${String(head).slice(0, 7)}, and git here can't compare their images`);
+    else if (images.length) return step('visualPack', { pr: id, head, images: images.length });
+  }
+  return p.stage === 'readyForMerge' ? step('readyForMerge', { pr: id, head }) : null;
 }
 
 // The first chain stage not done for the current head. UA pages changed after a stage's head make it (and so every

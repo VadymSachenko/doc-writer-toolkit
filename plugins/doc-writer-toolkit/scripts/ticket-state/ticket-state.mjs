@@ -36,7 +36,8 @@ Commands
   report                    Writes the morning report <state>/reports/<date>.md (--print: to stdout instead).
   set <key> <value>         Sets one key of the owner's local settings file (mode, limits.*, schedule.*, roles.*,
                             modelLadder, video.*, cleanup.*), checked before it is written; --unset drops it.
-                            'set retry <key|all>' gives a held or waiting step one more try (no setting does).
+                            'set retry <key|all>' gives a held or waiting step one more try (no setting does);
+                            'set retry job <name>' re-arms a host job the watcher disarmed.
   import                    The Markdown ledgers from before the JSON ones (<from>/<key>.md, default the state
                             folder), each into a JSON ledger holding every line; closed tickets' Markdown removed
                             once checked (to the Trash, or deleted with cleanup.mode delete); open ones kept.
@@ -142,10 +143,12 @@ export async function main(argv, io = {}) {
   if (TAKES_KEY.includes(command) && !key) throw new CliError(`${command} needs the ticket key.\n\n${USAGE}`, { code: 2 });
   if (command === 'set') {
     if (!key) throw new CliError(`set needs the key.\n\n${USAGE}`, { code: 2 });
-    if (rest.length > 1) throw new CliError(`unexpected argument '${rest[1]}'`, { code: 2 });
+    // `set retry job <name>` is the one form with a third word.
+    const extra = key === 'retry' && rest[0] === 'job' ? 2 : 1;
+    if (rest.length > extra) throw new CliError(`unexpected argument '${rest[extra]}'`, { code: 2 });
     const root = path.resolve(values.root ?? process.cwd());
     const settings = await loadSettings({ root, settings: values.settings });
-    stdout.write(JSON.stringify({ ok: true, command, ...setLocal({ settings, key, value: rest[0], unset: Boolean(values.unset) }) }, null, 2) + '\n');
+    stdout.write(JSON.stringify({ ok: true, command, ...setLocal({ settings, key, value: rest[0], name: rest[1], unset: Boolean(values.unset) }) }, null, 2) + '\n');
     return 0;
   }
   if (!TAKES_KEY.includes(command) && !['lock', 'unlock'].includes(command) && key) throw new CliError(`unexpected argument '${key}'`, { code: 2 });

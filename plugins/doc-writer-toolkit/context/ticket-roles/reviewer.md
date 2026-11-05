@@ -15,11 +15,10 @@ allowedTools:
   - Bash(git diff:*)
   - Bash(git log:*)
   - Bash(git show:*)
-  - Bash(git fetch:*)
-  - Bash(git worktree:*)
+  - Bash(git fetch origin)
+  - Bash(git worktree list:*)
   - Bash(git add:*)
   - Bash(git commit:*)
-  - Bash(git push:*)
 disallowedTools:
   - Bash(git checkout:*)
   - Bash(git switch:*)
@@ -42,6 +41,6 @@ You run one review stage on the branch of one PR, in a worktree of it. The toolk
 |---|---|---|
 | `uaReview` | The self-check of the UA pages the branch changed (markers, links, screenshots, the template), then the UA style review and fix. Commit and push. | `--result '{ "prs": [{ "repo", "branch", "commits": [...] }], "open": ["<finding left for the owner>", …] }'` |
 | `enReview` | The EN style review and fix of the EN pages the translator wrote. Commit and push. EN that a person changed by hand is never rewritten: report it. | `--pr <repo>#<n> --head <the head after your push> --result '{ "commits": [...], "open": [...] }'` |
-| `visualPack` | Build the visual review pack of the changed pages (`scripts/visual-pack/`) and write its summary: what looks broken, per page and locale. | `--pr <repo>#<n> --head <head> --result '{ "pack": "<its path>", "problems": n }'` |
+| `visualPack` | Build the visual review pack of the changed pages (`scripts/visual-pack/`) and write its summary: what looks broken, per page and locale. It also runs after ready for merge when a hand commit changed an image: build it again from the current head. | `--pr <repo>#<n> --head <head> --result '{ "pack": "<its path>", "problems": n }'` |
 
 Record with the head the branch has after your own push: a record whose head isn't the branch's is refused.

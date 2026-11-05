@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { canon, checkoutKind, clonePath, cloneOf, listWorktrees, removeWorktree, targetOf, worktreePath } from './worktree.mjs';
 
 // Cleanup when a ticket's PRs are merged (D-074). The ticket's work files outside git (videos and their parts, audio,
 // transcripts, frames, downloaded attachments, run folders, clones) are recorded in the ledger as each stage makes
@@ -12,6 +13,9 @@ import { execFileSync } from 'node:child_process';
 //   - a path the keep list names (`cleanup.keep`: the distilled notes later page updates read);
 //   - everything, while a PR of the ticket is open or was closed unmerged.
 // `cleanup.mode` `trash` (default) moves them into the macOS Trash, `delete` removes them.
+// First, the ticket's worktrees (lib/worktree.mjs) go with `git worktree remove --force`, then the clone's list is
+// pruned. A recorded folder that is a worktree, or holds one, goes the same way; one that is a repository of its own is
+// kept whole. A `.git` link or folder is never moved on its own: the checkout and its link go together, or nothing does.
 
 export const KINDS = ['video', 'videoPart', 'audio', 'transcript', 'frames', 'attachment', 'runDir', 'clone', 'other'];
 export const DEFAULT_KEEP = ['**/sme-interview.md', '**/app-notes.md'];
@@ -52,10 +56,25 @@ function sizeOf(abs) {
   return sum;
 }
 
-function walk(abs) {
+// The files under a path, and nothing inside a folder in `skip` (a checkout, handled whole before the walk).
+function walk(abs, skip = new Set()) {
+  if (skip.has(abs)) return [];
   const st = fs.lstatSync(abs);
   if (!st.isDirectory()) return [abs];
-  return fs.readdirSync(abs).flatMap((e) => walk(path.join(abs, e)));
+  return fs.readdirSync(abs).flatMap((e) => walk(path.join(abs, e), skip));
+}
+
+// The checkouts at or under a folder (a folder with a `.git` link or folder), not looking inside one, nor through a link.
+function checkoutsUnder(abs) {
+  const kind = checkoutKind(abs);
+  if (kind) return [{ path: abs, kind }];
+  let entries;
+  try {
+    entries = fs.readdirSync(abs, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  return entries.filter((e) => e.isDirectory() && !e.isSymbolicLink()).flatMap((e) => checkoutsUnder(path.join(abs, e.name)));
 }
 
 const git = (cwd, args) => {
@@ -112,18 +131,27 @@ export function moveToTrash(abs, trashDir) {
 // (`merged`, `open`, `closed`). With `dryRun` nothing is removed: the list says what would go.
 export function cleanupTicket({ settings, ledger, prState, dryRun = false, trashDir = path.join(os.homedir(), '.Trash') }) {
   const { mode, keep } = settings.cleanup;
-  const out = { mode, dryRun, removed: [], kept: [], freedBytes: 0, blocked: null };
+  const out = { mode, dryRun, removed: [], kept: [], freedBytes: 0, blocked: null, worktrees: [] };
   const files = ledger.files ?? [];
-  if (!files.length) return out;
+  // The ticket's worktrees: one per PR branch, made by the runner.
+  // The heads the forge had for the ticket's PRs: a worktree at one of them holds nothing unpushed.
+  const pushed = (ledger.prs ?? []).flatMap((p) => [p.lastSeenHead, ...(p.readyForMerge ?? []).map((r) => r.head), ...(p.pipelineCommits ?? [])]).filter(Boolean);
+  const trees = (ledger.prs ?? [])
+    .map((p) => ({ path: worktreePath(settings, p), clone: clonePath(settings, targetOf(settings, p)), branch: p.branch }))
+    .filter((t) => t.path && t.clone && listWorktrees(t.clone).some((x) => canon(x.path) === canon(t.path)));
+  if (!files.length && !trees.length) return out;
   const open = (ledger.prs ?? []).filter((p) => !p.number || prState(p) !== 'merged');
   if (!(ledger.prs ?? []).length || open.length) {
     const closed = open.filter((p) => p.number && prState(p) === 'closed');
     out.blocked = closed.length ? `${closed.map((p) => `${p.repo}#${p.number}`).join(', ')} closed unmerged: nothing is removed` : `${open.length ? open.map((p) => (p.number ? `${p.repo}#${p.number}` : `${p.repo}:${p.branch}`)).join(', ') : 'no PR'} not merged: nothing is removed`;
-    out.kept = files.map((f) => ({ path: f.path, reason: 'not every PR is merged' }));
+    out.kept = [...trees.map((t) => ({ path: t.path, reason: 'not every PR is merged' })), ...files.map((f) => ({ path: f.path, reason: 'not every PR is merged' }))];
     return out;
   }
-  const roots = [settings.root, settings.state].map((r) => path.resolve(r));
+  // `git worktree remove` (never `--force`), then prune: the worktree and its `.git` link go together. One with work
+  // files (`.sources/`, the keep list) or unsaved work is kept.
   const keeps = (keep ?? []).map(globRe);
+  for (const t of trees) out.worktrees.push(removeWorktree(t.clone, t.path, { dryRun, pushed, branch: t.branch, keep: keeps }));
+  const roots = [settings.root, settings.state].map((r) => path.resolve(r));
   const kept = (abs) => keeps.some((re) => re.test(path.relative(settings.root, abs).split(path.sep).join('/')));
   const go = (abs, entry) => {
     const bytes = sizeOf(abs);
@@ -136,6 +164,12 @@ export function cleanupTicket({ settings, ledger, prState, dryRun = false, trash
   };
   for (const entry of files) {
     const abs = path.resolve(settings.root, entry.path);
+    // A recorded file a session wrote inside a ticket worktree went, or stays, with that worktree.
+    const inTree = out.worktrees.find((t) => inside(canon(abs), canon(t.path)));
+    if (inTree) {
+      out.kept.push({ path: entry.path, reason: inTree.removed || inTree.wouldRemove ? `inside the worktree ${inTree.path}, removed with it (it held no work file)` : `inside the worktree ${inTree.path}, kept with it` });
+      continue;
+    }
     if (!roots.some((r) => inside(abs, r))) {
       out.kept.push({ path: entry.path, reason: 'outside the host repo and the state root' });
       continue;
@@ -154,18 +188,43 @@ export function cleanupTicket({ settings, ledger, prState, dryRun = false, trash
       out.kept.push({ path: entry.path, reason: 'a link that leads outside the host repo and the state root' });
       continue;
     }
-    const tracked = new Set(trackedUnder(abs).map((p) => path.resolve(p)));
     const isDir = fs.lstatSync(abs).isDirectory();
+    // A recorded folder that is, or holds, a checkout: a worktree goes with git (never its files one by one, which
+    // would move its `.git` link alone); a repository of its own is kept whole.
+    const skip = new Set();
+    const whole = new Set();
+    if (isDir) {
+      for (const c of checkoutsUnder(abs)) {
+        const r = path.relative(settings.root, c.path);
+        const clone = c.kind === 'worktree' ? cloneOf(c.path) : null;
+        if (clone) {
+          const bytes = sizeOf(c.path);
+          const res = removeWorktree(clone, c.path, { dryRun, pushed, keep: keeps });
+          out.worktrees.push(res);
+          skip.add(c.path);
+          if (res.removed || res.wouldRemove) {
+            out.removed.push({ path: r, kind: 'worktree', bytes });
+            out.freedBytes += bytes;
+            continue;
+          }
+          out.kept.push({ path: r, reason: res.kept ? `a worktree kept whole (${res.kept}); ${res.todo}` : `a worktree git would not remove (${res.error}): never split` });
+        } else out.kept.push({ path: r, reason: c.kind === 'repo' ? 'a repository of its own: kept whole, never split' : 'a worktree whose clone is not found: kept whole, never split' });
+        skip.add(c.path);
+        whole.add(c.path);
+      }
+      if (!fs.existsSync(abs) || skip.has(abs)) continue;
+    }
+    const tracked = new Set(trackedUnder(abs).map((p) => path.resolve(p)));
     if (!isDir) {
       if (tracked.has(abs) || tracked.has(real)) out.kept.push({ path: entry.path, reason: 'git tracks it' });
       else if (kept(abs)) out.kept.push({ path: entry.path, reason: 'on the keep list' });
       else go(abs, entry);
       continue;
     }
-    // A folder: whole when nothing in it is tracked or kept; else file by file, keeping those.
-    const inner = walk(abs);
+    // A folder: whole when nothing in it is tracked, kept or a checkout; else file by file, keeping those.
+    const inner = walk(abs, skip);
     const holds = inner.filter((f) => tracked.has(path.resolve(f)) || kept(f));
-    if (!holds.length && !tracked.size) {
+    if (!holds.length && !tracked.size && !whole.size && !(dryRun && skip.size)) {
       go(abs, entry);
       continue;
     }

@@ -110,6 +110,8 @@ const gitOut = (cwd, args) => {
   }
 };
 
+export const IMAGE = /\.(png|jpe?g|gif|webp|avif|svg)$/i;
+
 export function makeGit(settings) {
   const repoPath = (target) => (target?.path ? path.resolve(settings.root, target.path) : null);
   const hasCommit = (cwd, sha) => Boolean(sha) && gitOut(cwd, ['cat-file', '-e', `${sha}^{commit}`]) !== null;
@@ -142,6 +144,17 @@ export function makeGit(settings) {
         .filter(Boolean)
         .map((f) => ({ path: f, before: gitOut(cwd, ['show', `${from}:${f}`]), after: gitOut(cwd, ['show', `${to}:${f}`]) }));
       return changeSet.filter((page) => !isIdOnlyChange(page, changeSet)).map((page) => page.path);
+    },
+    // The images (anywhere in the repo but a `.sources/` folder) that changed between two commits, for the visual pack
+    // after a hand commit. Null when either commit isn't here.
+    imagesChanged(target, from, to) {
+      const cwd = repoPath(target);
+      if (!cwd || !hasCommit(cwd, from) || !hasCommit(cwd, to)) return null;
+      if (from === to) return [];
+      // `-z`: a non-ASCII image name is never quoted, so never missed.
+      const out = gitOut(cwd, ['diff', '-z', '--name-only', '--no-renames', from, to]);
+      if (out === null) return null;
+      return out.split('\0').filter((f) => f && IMAGE.test(f) && !f.split('/').includes('.sources'));
     },
     // The UA page paths of a target at its base (relative to the UA root, without the extension), for the text check.
     pagesOf(target) {

@@ -7,6 +7,7 @@ import { runDaily, readUsageFromClaude, parseResult } from './runner.mjs';
 import { allowanceOf } from './allowance.mjs';
 import { appendRunLog, localDate } from './report.mjs';
 import { latestRearm, readRearm } from './setlocal.mjs';
+import { rearmJob } from './rearm.mjs';
 import { ALERT_MS, HOLD_MS, WINDOW_MS, advance, pauseMs, readFeed, readSource, sourcesOf, ticketsOf, watchDir, writeFeed } from './feed.mjs';
 import { jobCommand, jobDue, jobEnv, listChanges, listMatcher, spawnJob, updateWatchState, writeJobLog } from './jobs.mjs';
 import { notificationsOf, notify } from './notify.mjs';
@@ -269,6 +270,24 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
     if (!dryRun) writeFeed(settings.state, next);
 
     // 6. Host jobs. A watch job whose board wasn't read in this check neither runs nor changes: it hasn't seen the list.
+    // A disarmed job re-arms when the reads that failed with it read again, or by `set retry job <name>`; an alert held
+    // through the night goes out at the first check after `schedule.morning` if the job is still disarmed (lib/rearm.mjs).
+    const rearms = readRearm(settings.state).jobs;
+    const heldAlerts = [];
+    for (const job of settings.hostJobs) {
+      const r = rearmJob(job, next.jobs[job.name] ?? {}, { sources: out.sources, rearmedAt: rearms[job.name], now: checkStart });
+      if (r.state !== next.jobs[job.name] && (next.jobs[job.name] || r.rearmed)) next.jobs[job.name] = r.state;
+      if (r.rearmed) say({ kind: 'job', job: job.name, outcome: 'rearmed', note: r.rearmed.why });
+      // A job that re-armed before the morning (the reads came back, or the owner's `set retry job`) needs no alert:
+      // the held one is dropped unsent; the night stays in the job's log.
+      const held = next.jobs[job.name]?.alert;
+      const back = held && next.jobs[job.name].rearmed && Date.parse(next.jobs[job.name].rearmed.at) >= Date.parse(held.at);
+      if (back) next.jobs[job.name] = { ...next.jobs[job.name], alert: null };
+      else if (afterMorning && held) {
+        heldAlerts.push({ name: job.name, ...held });
+        next.jobs[job.name] = { ...next.jobs[job.name], alert: null };
+      }
+    }
     for (const job of settings.hostJobs) {
       const state = next.jobs[job.name] ?? {};
       const src = job.watch ? out.sources.find((x) => x.name === `board:${job.watch.board}`) : null;
@@ -292,7 +311,7 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
     // 7. Notifications, once a day per reason; a caught error goes to the run log once a day too.
     if (!dryRun) {
       for (const k of Object.keys(next.notified ?? {})) if (!k.includes(today)) delete next.notified[k];
-      for (const n of notificationsOf({ morning: out.morning, run: out.run, jobs: out.jobs, errors: out.errors, capped: out.capped ?? [], today })) {
+      for (const n of notificationsOf({ morning: out.morning, run: out.run, jobs: [...out.jobs, ...heldAlerts], errors: out.errors, capped: out.capped ?? [], today })) {
         if (next.notified?.[n.key]) continue;
         const r = (io.notify ?? notify)(n, io.notifyIo ?? {});
         (next.notified ??= {})[n.key] = iso(clock());
@@ -313,7 +332,7 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
     async function runJob(job, state) {
       const cmd = jobCommand(job, { settings, state, claude });
       const shown = [cmd.bin, ...cmd.args];
-      const done = { ...state, armed: false, firstChange: null, lastRun: iso(checkStart), failures: 0, failingSince: null, heldUntil: null };
+      const done = { ...state, armed: false, firstChange: null, lastRun: iso(checkStart), failures: 0, failingSince: null, heldUntil: null, disarmed: null };
       if (dryRun || settings.mode !== 'on') {
         if (!dryRun) {
           next.jobs[job.name] = done;
@@ -346,10 +365,14 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
       const failingSince = ok ? null : state.failingSince ?? iso(checkStart);
       const lasting = !ok && checkStart - Math.max(Date.parse(failingSince), awakeSince) >= ALERT_MS;
       const until = lasting ? (job.every !== undefined ? iso(nextMorning(checkStart, settings.schedule.morning)) : 'its next new card') : null;
-      next.jobs[job.name] = ok ? done : lasting ? { ...done, lastFailure: iso(started), heldUntil: job.every !== undefined ? until : null } : { ...state, failures, failingSince };
+      // Disarmed while reads were failing too (the network, a board): it re-arms once those read again. Before
+      // `schedule.morning` its alert is held until the first check after it, as a source's is.
+      const downWith = lasting ? out.sources.filter((x) => x.outcome === 'failed' || x.outcome === 'gap').map((x) => x.name) : [];
+      const alert = lasting && !afterMorning ? { at: iso(started), since: failingSince, failures, exit: res.code, until } : null;
+      next.jobs[job.name] = ok ? done : lasting ? { ...done, lastFailure: iso(started), heldUntil: job.every !== undefined ? until : null, disarmed: { at: iso(started), downWith }, rearmed: null, alert } : { ...state, failures, failingSince };
       const entry = { kind: 'job', job: job.name, outcome: ok ? 'done' : 'failed', exit: res.code, durationMs: clock() - started, log: path.relative(settings.root, file), ...(result?.costUsd !== undefined && result?.costUsd !== null ? { costUsd: result.costUsd } : {}), ...(lasting ? { note: `failed at each try for an hour (${failures} tries); disarmed until ${until}` } : !ok ? { note: 'failed; tried again at the next check' } : {}) };
       say(entry);
-      return { name: job.name, due: true, outcome: entry.outcome, exit: res.code, log: entry.log, ...(lasting ? { disarmed: true, failures, until } : entry.note ? { note: entry.note } : {}) };
+      return { name: job.name, due: true, outcome: entry.outcome, exit: res.code, log: entry.log, ...(lasting ? { disarmed: true, failures, until, ...(downWith.length ? { downWith } : {}), ...(alert ? { alertHeld: iso(nextMorning(checkStart, settings.schedule.morning)) } : {}) } : entry.note ? { note: entry.note } : {}) };
     }
   } finally {
     lock.release();

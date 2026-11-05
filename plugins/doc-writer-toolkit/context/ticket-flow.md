@@ -57,7 +57,11 @@ A pure function of the ledger and the world. First match wins:
 
 **Two PRs** (one repo per review kind, or two repos). Each PR moves on its own; the card stands where the least advanced PR is. An approved `sme` PR goes on to the final review by itself while the slower one waits, and the report lists it. A question on one PR stops only that PR.
 
-**The chain** of a PR in the final review: `translate`, `enReview`, `locales`, `align`, `labelSync`, `build`, `visualPack`. Each stage keeps the head it saw; a UA page changed after that head makes it and every later stage stale, unless the change is id-only (`scripts/ticket-state/README.md`, "The id-only change"). The approval (the move to the final review) keeps its head the same way: a later word change in UA is reported as a mismatch, not undone.
+**The chain** of a PR in the final review: `translate`, `enReview`, `locales`, `align`, `labelSync`, `build`, `visualPack`. Each stage keeps the head it saw; a UA page changed after that head makes it and every later stage stale, unless the change is id-only (`scripts/ticket-state/README.md`, "The id-only change"). The approval (the move to the final review) keeps its head the same way: a later word change in UA is reported as a mismatch, not undone. `align` is recorded only when no UA image the branch changed lacks its EN counterpart, in a host whose screenshot locales include `en`.
+
+**After ready for merge**, a hand commit runs `resync`, then `visualPack` again if it changed an image, then `readyForMerge` for the new head.
+
+**The ticket worktree.** The runner, not a role, makes the worktree a session works in: one per PR branch, beside the target's clone, detached at the branch's head, with the clone's `node_modules` (and any other name in `targets[].links`, such as `.env`) linked and excluded. The brief names it and the push command. No role makes or removes a worktree, links a file, or installs packages; each role's git rules hold in both spellings, plain and `git -C <worktree>` for the worktree the brief names, and the only push allowed is the brief's. A worktree with unsaved work is kept after the merge and reported.
 
 ## The ledger
 
@@ -100,7 +104,7 @@ Only tickets a scheduled run started, in `mode pipeline`, count. A scheduled run
 
 ## Cleanup after the merge
 
-The close step of a ticket whose PRs are all merged moves the work files in `files` into the Trash (`cleanup.mode`), except a path git tracks, a path outside the host repo and the state root, and a path `cleanup.keep` names (default `**/sme-interview.md`, `**/app-notes.md`). A path the ledger didn't record is never touched. While a PR is open or was closed unmerged, nothing is removed. The close record keeps what went and the space freed.
+The close step of a ticket whose PRs are all merged first removes its worktrees with `git worktree remove --force` and prunes the clone's list, then moves the work files in `files` into the Trash (`cleanup.mode`), except a path git tracks, a path outside the host repo and the state root, and a path `cleanup.keep` names (default `**/sme-interview.md`, `**/app-notes.md`). A path the ledger didn't record is never touched. While a PR is open or was closed unmerged, nothing is removed. A recorded folder that holds a worktree goes with git; one that is a repository of its own is kept whole; a `.git` entry is never moved alone. The close record keeps what went and the space freed.
 
 ## The watcher
 
@@ -108,7 +112,7 @@ The close step of a ticket whose PRs are all merged moves the work files in `fil
 
 - **The cursor:** a window from 10 minutes before the last check, seen ids dropped. The cursor moves only after every event was handed on. A source that fails keeps its place until 24 hours after its last good read, then the gap is reported. A source that has failed for an hour while the Mac was awake (a token gone, say) is a failed part of the check, one per client, told each day from `schedule.morning` on; its 24-hour gap is told too. A failure right after a wake stays quiet.
 - **The morning run:** once a day, at the first check after `schedule.morning` whose board reads.
-- **Host jobs (`hostJobs`):** "when list X gets new cards and stays quiet for N hours, run job Y", or "every N minutes"; Y is a host script or a skill. A change in the list restarts the wait. A skill job is guarded like a scheduled step.
+- **Host jobs (`hostJobs`):** "when list X gets new cards and stays quiet for N hours, run job Y", or "every N minutes"; Y is a host script or a skill. A change in the list restarts the wait. A skill job is guarded like a scheduled step. A job that failed at each try for an hour is disarmed; if reads were failing with it, it re-arms once they read again, and `ticket-state set retry job <name>` re-arms it by hand. Its alert, before `schedule.morning`, waits for the morning.
 
 `mode` (`off`, `observe`, `on`) and the limits are in the owner's local file. `ticket-state set` edits one key of it, the way a request in plain words is carried out. No `claude` the flow starts gets an API key or an auth token, so the plan pays. A macOS notification gives the morning counts. It is urgent only for a limit reached, a step that failed twice or hit its daily session cap, a host job that failed at each try for an hour while the Mac was awake (a shorter failure is tried again at the next check, quietly), or a part of a check that failed (the rest of the check goes on). The sign-in token goes to the `claude` processes only, never to a host script, `git` or `gh`.
 

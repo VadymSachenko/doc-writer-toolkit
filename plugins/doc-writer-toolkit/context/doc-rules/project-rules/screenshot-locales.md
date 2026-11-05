@@ -31,7 +31,7 @@ In the host's `CLAUDE.md`, "Documentation toolkit configuration" section (`${CLA
 ```
 
 - **`Screenshot locales:`** — the UI languages screenshots must exist in. It is separate from `Content language:`: a project that authors in `uk` and translates to `en` declares `Content language: uk` and may still need `en` screenshots, so the English page shows the English UI.
-- **`Locale switch:`** — how the app changes its UI language: `url-prefix`, `query`, `cookie` or `ui`, with one token per locale. `ui` also needs `Locale switch path:`, the way to the app's language picker.
+- **`Locale switch:`** — how the app changes its UI language: `url-prefix`, `query`, `cookie`, `ui` or `storage`, with one token per locale. `ui` also needs `Locale switch path:`, the way to the app's language picker. `storage <key>` is a setting the app keeps in the browser's `localStorage`: `storage lang uk="uk-UA", en="en-US"`, each token being the stored text exactly as written (an app that stores a JSON string needs the quotes). Use it whenever the app reads its language from storage, even if it also has a picker: in `storage` mode a capture must never click the language picker, which may also save the language on the signed-in account.
 - **`Locale env prefix:`** — optional, only when a locale needs another base URL or test account. Credentials stay in `.env`; the prefix only says which variables to read. The prefixed base URL must be a test environment, like the unprefixed one: never production. If you can't confirm that, ask before you use it.
 
 The value formats are in the script's README, "Configuration".
@@ -96,7 +96,10 @@ For each shot to create, replace or edit:
    - `app-explorer` seeds the scenario once, through the API test collection (its Step 2). Seed data that expires (a queued payment that times out) right before its captures, in every locale.
    - A consumer that doesn't seed (`resolve-markers`, and the writers through it) re-captures from the data the manifest names: before the first locale, check on screen that the shot's `seededValues` are still there. If they aren't, don't capture with other data: `SL fail` each locale of the round with the reason `the scenario's data is no longer in the test environment; run app-explorer`, keep the marker, and report it.
 4. **Capture every locale of the round** (`toCapture`), one after another, in the same session:
-   1. Switch the app to the locale with the declared mode and token, reading that locale's `.env` variables (`Locale env prefix:`).
+   1. Switch the app to the locale with the declared mode and token, reading that locale's `.env` variables (`Locale env prefix:`). `SL config` gives the way in `switch.capture`:
+      - **`storage`** (`clicksPicker: false`): set the value before the page loads, with that locale's `initScript` (Playwright's `context.addInitScript`, or the same `setItem` on a page of the app followed by a reload), then load the route. Check the language before you capture: the stored value must still be the token after the load (an app may replace it with the account's language), and the page must show that locale (the `html` element's `lang` attribute when the app sets it, else a label you know in that locale). If either check fails, `SL fail` the locale with what you saw. Never click the language picker in `storage` mode, not even to check it.
+      - **`ui`** (`clicksPicker: true`): the picker that `Locale switch path:` describes.
+      - **`url-prefix`, `query`, `cookie`**: the URL or the cookie; no picker either.
    2. Go to the same route and bring the UI into the same state.
    3. Capture by `screenshot-capture.md` (Sections 0 to 4), with the same viewport, selectors, annotation target and blurred fields. The capture's `path` is the locale's **staged path**, never the live `.assets/` file.
 5. **A locale that can't be captured** (the state can't be reproduced, a selector is missing, a page doesn't load, the switch has no effect): `SL fail <manifest> --shot <id> --locale <l> --reason "<what happened>"`. Don't stage a capture of a different state instead.
@@ -131,6 +134,7 @@ Folders: only `SL promote` creates a locale's `.assets/` folder, from the derive
 | One locale fails | — | `SL fail` with the reason; promote moves nothing; report it |
 | A state can't be reproduced in a locale | that locale | `SL fail` with the reason; never stage a different state |
 | A locale `docusaurus.config` doesn't list, or no switch token | — | Capture nothing; ask one focused question |
+| `storage` switch: the stored value or the page language isn't the locale's after the load | that locale | `SL fail` with what you saw; never click the picker to fix it |
 | A request names an undeclared locale | — | Capture nothing; ask whether to declare it |
 | The scenario would reach pages the request didn't name, or can't be reset | section | Ask first, naming the pages and shots |
 | A screenshot locale was added after a page's last capture | the missing locale | `SL status` lists it in `missingLocales`. Capture the full set when that screenshot is next created, replaced or edited. No backfill otherwise |

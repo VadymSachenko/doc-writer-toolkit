@@ -16,6 +16,7 @@ import { ROLES } from './settings.mjs';
 import { cleanupTicket } from './cleanup.mjs';
 import { removeClosedMarkdown } from './import.mjs';
 import { childEnv } from './env.mjs';
+import { ensureWorktree, prsForStep, worktreePath } from './worktree.mjs';
 
 // The daily run (design §7): finish first, then triage the quiet intake cards (mornings), then start ready groups while
 // the limits and the day's allowance allow. A script decides; each step that needs a model is one `claude -p` session
@@ -26,10 +27,55 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const PLUGIN_ROOT = path.resolve(HERE, '../../..');
 const SCRIPT = path.join(PLUGIN_ROOT, 'scripts', 'ticket-state', 'ticket-state.mjs');
 export const ROLE_DIR = path.join(PLUGIN_ROOT, 'context', 'ticket-roles');
+// A git allow rule in the `git -C <worktree>` spelling, for each worktree the runner made for the step: the literal
+// path, as a prefix rule (`Bash(git -C /x/wt status:*)`). Never a wildcard path: `Bash(git -C * status *)` would also
+// match `git -C <any folder> clean -fdx -e status`, any subcommand with an allowed word later in the command. A step
+// with no worktree gets no twin. An exact rule (`Bash(git fetch origin)`) gets an exact twin.
+export function gitCFor(rule, dirs) {
+  const m = /^Bash\(git (?!-C )(.+):\*\)$/.exec(rule);
+  if (m) return dirs.map((d) => `Bash(git -C ${d} ${m[1]}:*)`);
+  const exact = /^Bash\(git (?!-C )([^*:]+)\)$/.exec(rule);
+  return exact ? dirs.map((d) => `Bash(git -C ${d} ${exact[1]})`) : [];
+}
+export const withGitC = (rules, dirs = []) => [...new Set(rules.flatMap((r) => [r, ...gitCFor(r, dirs)]))];
+
+// The only push a session may run: its worktree's HEAD to its ticket branch, exactly as the brief writes it, in both
+// spellings (`cd` to the worktree, then the plain one). No role file allows `git push` otherwise, so a `+` refspec, a
+// force flag anywhere, a deletion (`--delete`, `-d`, `:<ref>`) or another branch is never allowed.
+export const pushRulesFor = (trees = []) => [...new Set(trees.flatMap((t) => [`Bash(git -C ${t.path} push origin HEAD:refs/heads/${t.branch})`, `Bash(git push origin HEAD:refs/heads/${t.branch})`]))];
+
+// A fetch with a refspec of its own (`+refs/heads/main:refs/heads/other`) would move the owner's local branches, which a
+// worktree shares. The roles allow `git fetch origin` exactly (the default refspec updates only `origin/*`); the runner
+// adds `git fetch origin <branch>` for each worktree's branch and base, in both spellings. Nothing else is a fetch.
+export const fetchRulesFor = (trees = []) => [...new Set(trees.flatMap((t) => [t.branch, t.base].filter(Boolean).flatMap((b) => [`Bash(git fetch origin ${b})`, `Bash(git -C ${t.path} fetch origin ${b})`])))];
+
 // Denied in every role, whatever its file says: a push that could drop someone else's commits (the owner pushes to the
-// same branches by hand), skip the hooks, or delete a branch. The rules match by prefix, so `unattended.md` says the
-// same in words for the spellings they miss.
-export const PUSH_DENIED = ['Bash(git push --force:*)', 'Bash(git push -f:*)', 'Bash(git push --force-with-lease:*)', 'Bash(git push --force-if-includes:*)', 'Bash(git push --no-verify:*)', 'Bash(git push --mirror:*)', 'Bash(git push --delete:*)', 'Bash(git push -d:*)'];
+// same branches by hand), skip the hooks, or delete a branch, in both spellings: plain, and `git -C <worktree>` for each
+// worktree of the step (`deniedFor`), never `git -C *`, whose `*` would span a commit message and deny
+// `git -C <wt> commit -m "… branch -D …"`. Host jobs, which have no worktree, keep `git -C *` (`PUSH_DENIED`). A deny
+// rule may hold a `*` in the middle (a wider deny only denies more): the flag right after `push`, or anywhere after it,
+// and a `+` refspec (a forced update). A `:*` after a middle `*` never matches, so each is written as the command alone
+// and with arguments; a `:<ref>` deletion can't be written as a deny rule at all, and is kept out by allowing only the
+// brief's exact push (`pushRulesFor`).
+const FORCE_FLAGS = ['--force', '-f', '--force-with-lease', '--force-if-includes', '--no-verify', '--mirror', '--delete', '-d'];
+// A flag of `git <sub>` denied wherever it stands, in both spellings: first, last, or between other words.
+const flagDenied = (sub, flags, git) => flags.flatMap((f) => [`Bash(${git} ${sub} ${f})`, `Bash(${git} ${sub} ${f} *)`, `Bash(${git} ${sub} * ${f})`, `Bash(${git} ${sub} * ${f} *)`]);
+const pushDenied = (git) => [...flagDenied('push', FORCE_FLAGS, git), `Bash(${git} push +*)`, `Bash(${git} push * +*)`];
+export const PUSH_DENIED_PLAIN = [...new Set([...FORCE_FLAGS.map((f) => `Bash(git push ${f}:*)`), ...pushDenied('git')])];
+export const PUSH_DENIED = [...new Set([...PUSH_DENIED_PLAIN, ...pushDenied('git -C *')])];
+// A worktree shares the clone's refs, so a `git branch` that deletes, renames, copies, moves or re-points a branch
+// would change the owner's own branches. No role allows `git branch`; these flags are denied on top, plain and per
+// worktree (`--set-upstream-to=<x>` as one word too). They don't cover abbreviations (`--del`) or combined flags (`-rD`):
+// a host that allows `git branch` reopens those.
+const BRANCH_FLAGS = ['-D', '-d', '--delete', '-m', '-M', '--move', '-c', '-C', '--copy', '-f', '--force', '-u', '--set-upstream-to'];
+const branchDenied = (git) => [...flagDenied('branch', BRANCH_FLAGS, git), `Bash(${git} branch --set-upstream-to=*)`, `Bash(${git} branch * --set-upstream-to=*)`];
+export const BRANCH_DENIED = [...new Set([...BRANCH_FLAGS.map((f) => `Bash(git branch ${f}:*)`), ...branchDenied('git')])];
+// The push and branch denials in the `git -C <worktree>` spelling, for the literal path of each worktree: the word after
+// the path is always the subcommand.
+export const deniedFor = (dirs = []) => [...new Set(dirs.flatMap((d) => [...pushDenied(`git -C ${d}`), ...branchDenied(`git -C ${d}`)]))];
+// Denied in every role too: the runner prepares the worktree (lib/worktree.mjs), so no session installs packages or
+// links files into it.
+export const SETUP_DENIED = ['Bash(npm ci:*)', 'Bash(npm install:*)', 'Bash(npm i:*)', 'Bash(ln:*)'];
 
 // ------------------------------------------------------------------ roles
 
@@ -102,8 +148,10 @@ export function briefFor(step, settings) {
     step.changed ? 'The section plan file changed after its gate: post the new plan and move the card back to Blocked (a new gate).' : null,
     step.stale ? `The UA pages changed after this stage last ran (${step.stale} file(s)): run it again on the current head.` : null,
     step.cards ? `Cards, highest priority first:\n${step.cards.map((c) => `- ${c.key}: ${c.url ?? c.shortLink} (${c.priority})`).join('\n')}` : null,
+    step.worktrees?.length ? worktreeLines(step.worktrees) : null,
     '',
     `Host repo: ${root}`,
+    `The toolkit's scripts folder: ${path.join(PLUGIN_ROOT, 'scripts')}`,
     `Settings (merged): \`${ts} config ${at}\``,
     `The ticket now: \`${ts} status ${at} --ticket ${step.keys[0]}\``,
     rules ? `Host rules:\n${rules}` : null,
@@ -116,12 +164,23 @@ export function briefFor(step, settings) {
     .join('\n');
 }
 
+// What the brief says about the worktrees the runner made for the session.
+function worktreeLines(trees) {
+  return [
+    'Worktrees (the runner made them; work only there, and never create, move or remove a worktree, or link a file into one). Run git there as `git -C <the path exactly as below, unquoted> <command>`, or `cd` to it as a separate call and then run plain `git <command>`: other spellings are denied, a quoted path and `cd <path> && git …` among them.',
+    ...trees.map((t) => `- ${t.repo} ${t.branch}: ${t.path}${t.linked?.length ? ` (linked from the clone: ${t.linked.join(', ')})` : ''}. It is detached at origin/${t.branch} as the runner fetched it; push with \`${t.push}\`.${t.notes?.length ? ` Note: ${t.notes.join('; ')}.` : ''}`),
+  ].join('\n');
+}
+
 export function commandFor(step, settings, { model, agentsPath, claude = 'claude', roleDir = ROLE_DIR }) {
   const role = settings.roles[step.role];
   const def = readRole(step.role, roleDir);
-  const allowed = [...new Set([...def.allowedTools, ...(role.allowedTools ?? [])])];
-  const disallowed = [...new Set([...def.disallowedTools, ...(role.disallowedTools ?? []), ...PUSH_DENIED])];
-  const dirs = [...new Set(settings.targets.map((t) => (t.path ? path.resolve(settings.root, t.path) : null)).filter((d) => d && d !== settings.root))];
+  // Every git rule in both spellings, plain and `git -C <worktree>` for each worktree of the step (lib/worktree.mjs).
+  const roleRules = [...def.allowedTools, ...(role.allowedTools ?? [])];
+  const dirsOf = (step.worktrees ?? []).map((t) => t.path);
+  const allowed = [...withGitC(roleRules, dirsOf), ...pushRulesFor(step.worktrees), ...(roleRules.includes('Bash(git fetch origin)') ? fetchRulesFor(step.worktrees) : [])];
+  const disallowed = [...new Set([...def.disallowedTools, ...(role.disallowedTools ?? []), ...PUSH_DENIED_PLAIN, ...BRANCH_DENIED, ...deniedFor(dirsOf), ...SETUP_DENIED])];
+  const dirs = [...new Set([...settings.targets.map((t) => (t.path ? path.resolve(settings.root, t.path) : null)), ...(step.worktrees ?? []).map((t) => t.path)].filter((d) => d && d !== settings.root))];
   const args = [
     '-p',
     briefFor(step, settings),
@@ -299,6 +358,8 @@ async function runScripted(step, ctx) {
       return;
     }
     case 'readyForMerge':
+      // Its record checks the UA → EN image pairs in the PR's worktree: made or brought up to date first.
+      for (const p of prsForStep({ ...step, stage: 'align' }, [ledger])) (io.ensureWorktree ?? ensureWorktree)(settings, p);
       for (const k of step.keys) await rec(k, { head: step.head });
       return;
     case 'planApproval':
@@ -421,13 +482,15 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
         // What the close step would remove after the merge: listed, nothing removed.
         const views = st.tickets.find((t) => t.key === l.key)?.prs ?? [];
         const c = cleanupTicket({ settings, ledger: l, prState: (p) => views.find((v) => v.id === prId(p))?.state ?? (p.merged ? 'merged' : null), dryRun: true, trashDir: trashOf(settings, io) });
-        d.cleanup = { mode: c.mode, wouldRemove: c.removed, keeps: c.kept, freesBytes: c.freedBytes, blocked: c.blocked };
+        d.cleanup = { mode: c.mode, wouldRemove: c.removed, keeps: c.kept, freesBytes: c.freedBytes, blocked: c.blocked, worktrees: c.worktrees.map((t) => t.path) };
       }
       return d;
     }
-    const cmd = commandFor(step, settings, { model: settings.roles[step.role].model, agentsPath: path.join(settings.state, 'roles', 'agents.json'), claude });
+    // The worktrees a live run would make or bring up to date: named, nothing made.
+    const trees = prsForStep(step, step.keys.map((k) => readLedger(settings.state, k))).map((p) => ({ repo: p.repo, branch: p.branch, path: worktreePath(settings, p), push: `git -C ${worktreePath(settings, p)} push origin HEAD:refs/heads/${p.branch}` }));
+    const cmd = commandFor({ ...step, worktrees: trees }, settings, { model: settings.roles[step.role].model, agentsPath: path.join(settings.state, 'roles', 'agents.json'), claude });
     const held = guardReason();
-    return { ...pick(step), runs: `claude -p as ${agentName(step.role)}`, model: cmd.model, effort: cmd.effort, ...(held ? { guard: `a live run would not start it: ${held}` } : {}), command: [cmd.bin, ...cmd.args] };
+    return { ...pick(step), runs: `claude -p as ${agentName(step.role)}`, model: cmd.model, effort: cmd.effort, ...(trees.length ? { worktrees: trees.map((t) => t.path) } : {}), ...(held ? { guard: `a live run would not start it: ${held}` } : {}), command: [cmd.bin, ...cmd.args] };
   };
 
   const finishing = collectSteps(st, { named, includeStart: manual && named.length > 0, retryWaiting });
@@ -604,6 +667,25 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
           say({ kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: null, role: step.role, outcome: 'failed', note });
           return { ...pick(step), outcome: 'failed', note };
         }
+      }
+      // The worktrees of the step's PRs, made or brought up to date before the session. If one can't be made, or is
+      // stuck (work the runner won't move past, lib/worktree.mjs), no session starts: the stage is recorded failed with
+      // the reason, and the failed-step rules apply (see the README, "A stuck worktree").
+      try {
+        const trees = prsForStep(step, step.keys.map((k) => readLedger(settings.state, k))).map((p) => (io.ensureWorktree ?? ensureWorktree)(settings, p));
+        const stuck = trees.flatMap((t) => (t.stuck ?? []).map((n) => `${t.path}: ${n}`));
+        if (stuck.length) throw new Error(stuck.join('; '));
+        step = { ...step, worktrees: trees };
+      } catch (e) {
+        const note = `the worktree: ${String(e.message).slice(0, 400)}`;
+        for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'failed', pr: step.pr, note, now: clock() }).catch(() => {});
+        // A failed step like a failed session, so the failed-step rules apply (it waits for a person, then holds), with
+        // no `start`: no session ran, so it counts toward no cap, cost or report of sessions.
+        const marks = await marksOf(step);
+        const failures = (step.prior ?? 0) + 1;
+        for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, run: JSON.stringify({ stage: step.stage, role: step.role, outcome: 'failed', session: null, note, failures, ...(marks[k] ? { after: marks[k] } : {}) }), pr: step.pr, now: clock() }).catch(() => {});
+        say({ kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, role: step.role, outcome: 'failed', note });
+        return { ...pick(step), outcome: 'failed', note };
       }
       const agentsPath = path.join(settings.state, 'roles', 'agents.json');
       fs.mkdirSync(path.dirname(agentsPath), { recursive: true });

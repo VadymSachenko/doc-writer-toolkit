@@ -260,8 +260,11 @@ export function settingsFor(root, extra = {}) {
   return { ...validateSettings(raw, { root, stateRootDefault: '.doc-toolkit/ticket-flow/' }), file: path.join(root, '.claude/ticket-flow.json'), localFile: null };
 }
 
-// A git stand-in for tests that don't need history: no hand edits, nothing changed, no pages.
-export const quietGit = { branchCommits: () => [], changedUnder: () => [], pagesOf: () => [] };
+// A git stand-in for tests that don't need history: no hand edits, nothing changed, no pages, no image changed.
+export const quietGit = { branchCommits: () => [], changedUnder: () => [], pagesOf: () => [], imagesChanged: () => [] };
+
+// A worktree stand-in for a world with no clones on disk (the runner's `io.ensureWorktree`).
+export const noTree = (settings, p) => ({ repo: p.repo, branch: p.branch, path: path.join(settings.root, '.worktrees', p.repo, p.branch), push: `git push origin HEAD:refs/heads/${p.branch}`, linked: [], missing: [], notes: [] });
 
 // A throwaway git repository.
 export function gitRepo(dir) {

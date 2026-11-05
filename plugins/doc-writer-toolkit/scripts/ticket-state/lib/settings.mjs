@@ -73,6 +73,9 @@ function validateTargets(raw, forge) {
     const r = raw.find((x) => x.id === t.id) ?? {};
     if (!['places', 'sme'].includes(r.review)) fail(`targets '${t.id}'.review must be "places" or "sme"`);
     if (typeof r.uaRoot !== 'string' || !r.uaRoot.trim()) fail(`targets '${t.id}'.uaRoot is required (the UA content root in its repo)`);
+    // The clone's untracked files the runner links into a ticket worktree (lib/worktree.mjs): names at the repo's top.
+    const links = r.links ?? ['node_modules'];
+    if (!Array.isArray(links) || links.some((n) => typeof n !== 'string' || !/^[^/\\]+$/.test(n) || n === '.' || n === '..' || n === '.git')) fail(`targets '${t.id}'.links must be a list of names at the repo's top, such as "node_modules" or ".env"`);
     return {
       id: t.id,
       repo: t.repo,
@@ -83,6 +86,7 @@ function validateTargets(raw, forge) {
       path: typeof r.path === 'string' && r.path.trim() ? r.path : null,
       uaRoot: r.uaRoot.replace(/^\.\/+/, '').replace(/\/*$/, '/'),
       base: typeof r.base === 'string' && r.base.trim() ? r.base : 'main',
+      links,
     };
   });
 }
