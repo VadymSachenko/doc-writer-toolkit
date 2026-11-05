@@ -55,7 +55,9 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
   const byKey = new Map(ledgers.map((l) => [l.key, l]));
   out.push(`# Ticket flow, ${date}`, '');
   const a = st.allowance;
-  out.push(`Mode \`${st.mode}\`. In progress ${st.wip.inProgress} of ${st.wip.limits.inProgress}, waiting ${st.wip.waiting} of ${st.wip.limits.waiting}${st.wip.manual ? `, ${st.wip.manual} started by hand (not counted)` : ''}.`);
+  // With `limits.open`, the tickets that hold its slots, by name.
+  const open = typeof st.wip.limits.open === 'number' ? `, open ${st.wip.open} of ${st.wip.limits.open}${st.wip.openKeys?.length ? ` (${st.wip.openKeys.join(', ')})` : ''}` : '';
+  out.push(`Mode \`${st.mode}\`. In progress ${st.wip.inProgress} of ${st.wip.limits.inProgress}, waiting ${st.wip.waiting} of ${st.wip.limits.waiting}${open}${st.wip.manual ? `, ${st.wip.manual} started by hand (not counted)` : ''}.`);
   out.push(a ? `Allowance: day ${a.day} of the week window, ${a.used}% of the week used of ${a.cap}% allowed by now, ${a.remaining}% left today; finishing the tickets in work needs about ${a.inWork}%${a.inWorkUnknown?.length ? ` plus ${a.inWorkUnknown.length} ticket(s) with no estimate yet` : ''}.` : 'Allowance: no usage reading.');
   out.push('');
 
@@ -120,7 +122,8 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
   if (st.notStarted.length) out.push('', list(st.notStarted.map((g) => `${g.group} (${g.priority}) didn't start: ${g.reasons.join('; ')}`)));
   out.push('');
 
-  const odd = st.tickets.filter((t) => t.mismatch?.length || t.hand || ['outside', 'merged'].includes(t.state));
+  // A closed ticket in the owner's hands (an imported one, say) is no longer in anyone's hands: left out.
+  const odd = st.tickets.filter((t) => t.mismatch?.length || (t.hand && t.state !== 'closed') || ['outside', 'merged'].includes(t.state));
   out.push('## Mismatches and tickets in your hands', '', list(odd.map((t) => `${link(t)}${cardName(t)}: ${t.state}${t.hand ? ', mode hand' : ''}${t.mismatch?.length ? `; ${t.mismatch.join('; ')}` : ''}${t.notes?.length ? `; ${t.notes.join('; ')}` : ''}`)), '');
   if (st.notTickets.length) out.push('## Cards that are not tickets', '', list(st.notTickets.map((c) => `[${c.key}](${c.card.url})${cardName(c)}: ${c.why}`)), '');
 
@@ -134,6 +137,7 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
     return [`${l.key}: ${c.removed.length} path(s), ${mb(c.freedBytes)} ${c.mode === 'delete' ? 'deleted' : 'moved to the Trash'}${c.removed.length ? ` (${c.removed.map((r) => `\`${r.path}\``).join(', ')})` : ''}${c.kept.length ? `; kept ${c.kept.map((k) => `\`${k.path}\` (${k.reason})`).join(', ')}` : ''}`];
   });
   const unmerged = st.tickets.filter((t) => t.state === 'outside' && (t.notes ?? []).some((n) => /closed unmerged/.test(n)) && (byKey.get(t.key)?.files ?? []).length);
+  for (const e of runLog.filter((x) => x.kind === 'legacyMarkdown' && x.outcome === 'removed')) removedLines.push(`${e.key}: the Markdown ledger \`${e.file}\` (closed; its JSON holds every line) ${e.to === 'deleted' ? 'deleted' : 'moved to the Trash'}`);
   for (const t of unmerged) removedLines.push(`${t.key}: a PR was closed unmerged, so its ${byKey.get(t.key).files.length} work file(s) stay (${mb(byKey.get(t.key).files.reduce((s, f) => s + (f.bytes ?? 0), 0))})`);
   out.push('## Work files removed after the merge', '', list(removedLines), ...(freed ? ['', `Space freed today: ${mb(freed)}.`] : []), '');
 

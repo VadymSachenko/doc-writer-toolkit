@@ -51,9 +51,9 @@ A pure function of the ledger and the world. First match wins:
 | 14 | `ready` and a free slot | `start` (the `startable` groups) |
 | 15 | Otherwise | the state's own step: `start`, `plan`, `write`, `uaReview`, `pr` |
 
-**A person's move (row 6).** Ready → In progress: a manual start. Blocked → In progress: the answers (the question's PR only, if it was a PR's), the plan approved (or a new gate if the plan file changed), the video import (or on without the video). To Blocked or back to ready: the owner's block or a pause, nothing runs. To review, final review or done: the PRs at the card's stage follow, with their stage label; done closes the ticket.
+**A person's move (row 6).** Ready → In progress: a manual start, unless the runner recorded a start for the ticket before (its own start session moved the card, or a person moved it after that start failed): then that start goes on, as it was started. Blocked → In progress: the answers (the question's PR only, if it was a PR's), the plan approved (or a new gate if the plan file changed), the video import (or on without the video). To Blocked or back to ready: the owner's block or a pause, nothing runs. To review, final review or done: the PRs at the card's stage follow, with their stage label; done closes the ticket.
 
-**A failed step** runs again only after a person acts on the ticket later than the failure (a comment, a review, a hand commit, a move of the card), after `ticket-state set retry <key>`, or once at the next morning run. The pipeline's own writes never count. Two failed sessions with no person's action between them hold the ticket for the owner: no next step, one notification, one line in the report. Whatever the cause, a ticket has at most `limits.sessionsPerStageDay` (3) sessions of one stage a day; beyond them it is held the same way until the next day.
+**A failed step** runs again only after a person acts on the ticket later than the failure (a comment, a review, a hand commit, a move of the card), after `ticket-state set retry <key>`, or once at the next morning run. The pipeline's own writes never count. Two failed sessions with no person's action between them hold the ticket for the owner: no next step, one notification, one line in the report. A failed start counts the same: the runner records each start before its session, so a start whose card never left the ready status leaves the ticket `ready` (counted for nothing; its group waits and holds no slot), and one whose card is in work is `planning`, counted, its start going on as it was started. Whatever the cause, a ticket has at most `limits.sessionsPerStageDay` (3) sessions of one stage a day; beyond them it is held the same way until the next day.
 
 **Two PRs** (one repo per review kind, or two repos). Each PR moves on its own; the card stands where the least advanced PR is. An approved `sme` PR goes on to the final review by itself while the slower one waits, and the report lists it. A question on one PR stops only that PR.
 
@@ -61,14 +61,14 @@ A pure function of the ledger and the world. First match wins:
 
 ## The ledger
 
-`<state>/tickets/<key>.json`, in the host's git-ignored state folder (`state` in the settings, default `<Toolkit state root>/ticket-flow/`). Written only by `record` and `handover`, to a temp file and renamed. `key` is the card's team number, else its short link.
+`<state>/tickets/<key>.json`, in the host's git-ignored state folder (`state` in the settings, default `<Toolkit state root>/ticket-flow/`). Written only by `record`, `handover` and `import`, to a temp file and renamed. `key` is the card's team number, else its short link.
 
 | Field | |
 |---|---|
 | `schemaVersion` | `1`. |
 | `key`, `group` | The ticket, and the group it runs with (its keys joined with `-`). |
 | `seq`, `createdAt`, `updatedAt` | `seq` counts records; each record carries its `seq`, so "after" needs no clock. |
-| `mode`, `startedBy` | `pipeline` or `hand`; `schedule` or `manual` (a manual start stays out of the counts for its whole life). |
+| `mode`, `startedBy` | `pipeline` or `hand`; `schedule` or `manual` (a manual start stays out of the counts for its whole life), recorded by the runner with the start, before its session. |
 | `priority` | `high`, `medium` or `low`, from the card when it was triaged. The card's current label wins in `status`. |
 | `card`, `original` | The card's id, short link, url, name, creation time; the card it copies, if any. |
 | `stage`, `stages` | The last ticket-level stage; each stage's record: `status`, `seq`, `at`, `note`, `result`. |
@@ -82,7 +82,9 @@ A pure function of the ledger and the world. First match wins:
 | `files` | The work files outside git the stages created or downloaded: `path`, `kind`, `bytes`, `stage`, `at`. |
 | `runs` | Each session: role, model, effort, start, turns, the CLI's cost estimate, tokens, the week bar before and after, outcome, `retryOf`, the share of a group session; a failed one also `failures` (failed sessions in a row) and `after` (what the ticket looked like when it ended). |
 | `log` | Append-only: `seq`, `at`, `stage`, `pr`, `outcome`, `note`. |
-| `legacy` | Set when the ledger was rebuilt at handover. |
+| `legacy` | Set when the ledger was rebuilt at handover, or imported from a Markdown ledger: then it holds every line of that Markdown with its number (`mapped`, the lines that also filled a field; `fields`, the rest), the file's hash, the old last stage and what the import couldn't map (`misses`). |
+
+**The import.** `ticket-state import` turns a host's Markdown ledgers from before the JSON ones into JSON ledgers. A file with no card URL or no stage line is not a ledger: it is listed and left as it is. A closed ticket (no PR open; the card done, out of scope, archived or gone) gets `mode hand` and its close; a ready one (the card in the ready status, no PR, only triaged) gets `mode pipeline`; any other open one gets `mode hand` until `handover`. A closed ticket's Markdown is removed only once the JSON is checked to rebuild it byte for byte; the morning run repeats that for tickets that closed since, recording the close of one still in the owner's hands and untouched since the import. An open ticket's Markdown stays. The details are in `scripts/ticket-state/README.md`, "The import".
 
 ## When a record is accepted
 
@@ -94,7 +96,7 @@ One lock per group, `<state>/locks/<group>/owner.json`, taken with `mkdir` so tw
 
 ## Limits and priority
 
-Only tickets a scheduled run started, in `mode pipeline`, count. A scheduled run starts a ready group only if: tickets in progress + the group's size ≤ `limits.inProgress` (a group larger than that only when nothing is in progress); tickets waiting < `limits.waiting`; and the group's estimated cost plus what the tickets in work still need fits what is left of the day's allowance (`limits.dailyPercent` of the week per day of the week window, from `/usage`). Estimates are per size, measured on finished tickets, else `limits.estimates`; with none yet, one ticket at a time. Priority is the card's label (`tracker.priority`): high first, then medium (no label), then low, the oldest card first within a level. A group held back by the limits holds back every lower level; within a level, a younger group that fits may start. Finishing comes before starting, and a higher priority first within each kind of finishing.
+Only tickets a scheduled run started, in `mode pipeline`, count. A scheduled run starts a ready group only if: tickets in progress + the group's size ≤ `limits.inProgress` (a group larger than that only when nothing is in progress); tickets waiting < `limits.waiting`; and the group's estimated cost plus what the tickets in work still need fits what is left of the day's allowance (`limits.dailyPercent` of the week per day of the week window, from `/usage`). Estimates are per size, measured on finished tickets, else `limits.estimates`; with none yet, one ticket at a time. With `limits.open` set, the open tickets + the group's size ≤ it (a larger group only when none is open). Open: a scheduled run started it, and it is from planning to the final review, ready for merge included; a paused ticket, one outside the flow, a merged or a closed one is not open. The reason a group didn't start names the tickets that hold the slots, and so does the report. Priority is the card's label (`tracker.priority`): high first, then medium (no label), then low, the oldest card first within a level. The start order is `limits.startOrder`: `priority` (by priority, then the oldest; a group held back by the limits holds back every lower level, and within a level a younger group that fits may start) or `easiest` (the smallest triage size first, a size not known yet last; then fewer repos; then fewer pages; then priority and age; a group held back by the limits holds back every group after it, equally easy ones too). A group whose start failed waits as a failed step does, and holds no slot and no other group meanwhile; a run doesn't count a group it already tried, so it goes on to the next. Finishing comes before starting, and a higher priority first within each kind of finishing.
 
 ## Cleanup after the merge
 

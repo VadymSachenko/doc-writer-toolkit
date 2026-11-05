@@ -14,6 +14,7 @@ import { CARD_STATUS_OF, LABEL_OF, PR_STAGE_OF_STATUS, PRIORITY_RANK, finishRank
 import { appendRunLog, localDate, readRunLog, renderReport, writeReport } from './report.mjs';
 import { ROLES } from './settings.mjs';
 import { cleanupTicket } from './cleanup.mjs';
+import { removeClosedMarkdown } from './import.mjs';
 import { childEnv } from './env.mjs';
 
 // The daily run (design §7): finish first, then triage the quiet intake cards (mornings), then start ready groups while
@@ -75,6 +76,11 @@ export const nextModelUp = (model, ladder) => {
   return i >= 0 && i < ladder.length - 1 ? ladder[i + 1] : null;
 };
 
+// Who started a start step: the step names it (`schedule` for a ready group a scheduled run starts, `manual` for a
+// manual run's start and a card a person moved into work, the ledger's own for a start that goes on; lib/rule.mjs).
+// A step that names none is a person's: `manual`, outside every limit.
+export const startOrigin = (step) => (step.startedBy === 'schedule' ? 'schedule' : 'manual');
+
 // ------------------------------------------------------------------ one step's session
 
 // What a session is told: the ticket, the stage, where the settings and the ticket's status are, and how to record.
@@ -86,8 +92,9 @@ export function briefFor(step, settings) {
   const keys = step.keys.join(', ');
   const rules = Object.entries(settings.hostRules ?? {}).map(([k, v]) => `- ${k}: ${v}`).join('\n');
   const cardOf = (key) => step.cards?.find((c) => c.key === key);
+  // A start's origin, as the runner recorded it before the session (`startOrigin`): the session records the same.
   const recordLine = (key) =>
-    `${ts} record ${key} ${at} --stage ${step.stage}${step.pr ? ` --pr ${step.pr}` : ''} --status done${step.stage === 'start' || step.stage === 'triage' ? ` --card ${cardOf(key)?.shortLink ?? '<card>'}` : ''}${step.stage === 'start' ? ` --started-by ${step.startedBy ?? 'schedule'}` : ''} --result ${step.stage === 'start' && step.group ? `'{"group":"${step.group}"}'` : '<json>'}`;
+    `${ts} record ${key} ${at} --stage ${step.stage}${step.pr ? ` --pr ${step.pr}` : ''} --status done${step.stage === 'start' || step.stage === 'triage' ? ` --card ${cardOf(key)?.shortLink ?? '<card>'}` : ''}${step.stage === 'start' ? ` --started-by ${startOrigin(step)}` : ''} --result ${step.stage === 'start' && step.group ? `'{"group":"${step.group}"}'` : '<json>'}`;
   return [
     `Stage \`${step.stage}\` of ticket${step.keys.length > 1 ? 's' : ''} ${keys}${step.group ? ` (group ${step.group})` : ''}${step.pr ? `, PR ${step.pr}` : ''}.`,
     step.interrupted ? 'The last run of this stage was interrupted: read what it left and finish it.' : null,
@@ -185,14 +192,15 @@ export function readUsageFromClaude(claude = 'claude', env = process.env) {
 // The runnable steps of a status, one per group: tickets of a group with the same next stage run as one session.
 // Finishing first (merged, ready for merge, final review, review comments, answers in, writing), and within a kind the
 // higher priority, then the older card. A step whose last session failed, with no person's action since, waits for
-// the morning run or a manual one (`retryWaiting`).
+// the morning run or a manual one (`retryWaiting`). A start runs here only for a card already in work: one a person
+// moved (`byHand`), or one whose recorded start goes on (`again`); a ready group's start is `startable`'s.
 export function collectSteps(st, { named = [], includeStart = false, retryWaiting = false } = {}) {
   const groups = new Map();
   for (const t of st.tickets) {
     if (!t.next || t.locked || t.hand) continue;
     if (t.next.waits && !retryWaiting) continue;
     if (named.length && !named.includes(t.key)) continue;
-    if (t.next.stage === 'start' && !includeStart && !t.next.byHand) continue;
+    if (t.next.stage === 'start' && !includeStart && !t.next.byHand && !t.next.again) continue;
     const g = t.group ?? t.key;
     if (!groups.has(g)) groups.set(g, []);
     groups.get(g).push(t);
@@ -200,7 +208,7 @@ export function collectSteps(st, { named = [], includeStart = false, retryWaitin
   const out = [];
   for (const [group, tickets] of groups) {
     const first = tickets[0];
-    const same = tickets.filter((t) => t.next.stage === first.next.stage && (t.next.pr ?? null) === (first.next.pr ?? null));
+    const same = tickets.filter((t) => t.next.stage === first.next.stage && (t.next.pr ?? null) === (first.next.pr ?? null) && (t.next.startedBy ?? null) === (first.next.startedBy ?? null));
     out.push({
       ...first.next,
       group,
@@ -397,7 +405,10 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
   }
 
   const own = new Set();
-  const status = () => computeStatus({ settings, clients, usage, now: clock(), ignoreLocks: own });
+  // The tickets this run already started or tried to: a start that failed holds no slot in the run's later
+  // calculations, so the run tries the next group; the failed one waits as any failed step does.
+  const tried = new Set();
+  const status = () => computeStatus({ settings, clients, usage, now: clock(), ignoreLocks: own, tried, retryWaiting });
   let st = await status();
   out.before = summary(st);
 
@@ -441,27 +452,50 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
     } else out.triage = { note: 'no intake card is due' };
   }
 
-  // Start ready groups while the limits and the allowance allow: the highest priority first, the oldest within a level.
+  // Start ready groups while the limits and the allowance allow, in `limits.startOrder`. A group whose earlier start
+  // failed carries its failed sessions so far (`prior`): a second failure holds it for the owner.
   const cardsOf = (keys) => keys.map((k) => st.tickets.find((t) => t.key === k)).filter(Boolean).map((t) => ({ key: t.key, url: t.card?.url, shortLink: t.card?.shortLink, priority: t.priority }));
+  const startOf = (g, startedBy) => ({ stage: 'start', role: 'writer', group: g.group, keys: g.keys, priority: g.priority, startedBy, cards: cardsOf(g.keys), ...(g.prior ? { prior: g.prior } : {}) });
   // The watcher's run finishes the tickets it names; it starts no ready group (the morning run does).
   if (trigger === 'schedule') {
     if (planOnly) {
-      out.starts = st.startable.map((g) => describe({ stage: 'start', role: 'writer', group: g.group, keys: g.keys, priority: g.priority, startedBy: 'schedule', cards: cardsOf(g.keys) }));
+      out.starts = st.startable.map((g) => describe(startOf(g, 'schedule')));
     } else {
-      const started = new Set();
       while (st.startable.length && guard('start')) {
-        const g = st.startable.find((x) => !started.has(x.group));
+        const g = st.startable.find((x) => !x.keys.some((k) => tried.has(k)));
         if (!g) break;
-        started.add(g.group);
-        const r = await advance({ stage: 'start', role: 'writer', group: g.group, keys: g.keys, priority: g.priority, startedBy: 'schedule', cards: cardsOf(g.keys) });
+        for (const k of g.keys) tried.add(k);
+        const r = await advance(startOf(g, 'schedule'));
         out.starts.push(r);
         st = await status();
       }
     }
   } else if (manual && named.length) {
     for (const g of st.groups.filter((x) => x.keys.some((k) => named.includes(k)))) {
-      const step = { stage: 'start', role: 'writer', group: g.group, keys: g.keys, priority: g.priority, startedBy: 'manual', cards: cardsOf(g.keys) };
+      // A start held for the owner after failing twice: as for any held step, a manual run does nothing with it.
+      if (g.failedStart?.held?.length) {
+        out.notes.push(`group ${g.group}: its start is held for the owner (${g.failedStart.held.map((h) => h.key).join(', ')}); \`ticket-state set retry <key>\` gives it one more try`);
+        continue;
+      }
+      const step = startOf({ ...g, prior: g.failedStart?.sessions ?? 0 }, 'manual');
       out.starts.push(planOnly ? describe(step) : await advance(step));
+    }
+  }
+
+  // Mornings: the Markdown ledgers from before the JSON ones (`ticket-state import`) whose ticket closed since are
+  // removed, each once the check shows its JSON holds every line. No model; a dry run or observe lists them.
+  if (morning) {
+    try {
+      const r = await removeClosedMarkdown({ settings, clients, dryRun: planOnly, trashDir: trashOf(settings, io), now: clock() });
+      out.legacyMarkdown = { removed: r.removed, kept: r.kept, failed: r.failed };
+      if (!planOnly) for (const x of r.removed) say({ kind: 'legacyMarkdown', key: x.key, file: x.file, outcome: 'removed', to: x.to });
+      // A closed ticket's Markdown that fails the check stays; the report's failures say so each morning until it is imported again.
+      for (const x of r.kept.filter((k) => k.why.startsWith('closed, but'))) say({ kind: 'legacyMarkdown', key: x.key, file: x.file, outcome: 'failed', note: `${x.file} kept: ${x.why}` });
+      // A file whose ticket could not be looked up (the tracker or the forge failing, a ledger that doesn't read) stays,
+      // and so does nothing else: the others went on. Each one is in the report's failures.
+      for (const x of r.failed) say({ kind: 'legacyMarkdown', key: x.key, file: x.file, outcome: 'failed', note: `${x.file} kept: ${x.error}` });
+    } catch (e) {
+      say({ kind: 'legacyMarkdown', what: "the Markdown ledgers' removal", outcome: 'failed', note: String(e.message ?? e).split('\n')[0] });
     }
   }
 
@@ -470,7 +504,9 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
     say({ kind: 'guard', reason: `${guardReason()}: a live run would start no model step`, what: 'the plan' });
   }
 
-  st = planOnly ? st : await status();
+  // After a live run, the state as the next run finds it: a start that failed in this run waits (for a person or the
+  // next morning run), and the report says so.
+  st = planOnly ? st : await computeStatus({ settings, clients, usage, now: clock(), ignoreLocks: own });
   out.after = summary(st);
   out.notStarted = st.notStarted;
   out.guard = log.filter((e) => e.kind === 'guard');
@@ -557,6 +593,18 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
       if (t.taken) held.push(g);
     }
     try {
+      // A start is recorded before its session, with its origin (`running`, `--started-by`): a session that dies after
+      // moving the card still counts as the start it was, and one that dies before it leaves a ledger whose failed start
+      // the failed-step rules hold (a ready card with no ledger gets one here). No record, no session.
+      if (step.stage === 'start') {
+        try {
+          await recordStart(step);
+        } catch (e) {
+          const note = `the start was not recorded before its session, so none ran: ${String(e.message ?? e).split('\n')[0]}`.slice(0, 300);
+          say({ kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: null, role: step.role, outcome: 'failed', note });
+          return { ...pick(step), outcome: 'failed', note };
+        }
+      }
       const agentsPath = path.join(settings.state, 'roles', 'agents.json');
       fs.mkdirSync(path.dirname(agentsPath), { recursive: true });
       fs.writeFileSync(agentsPath, JSON.stringify(agentsFile(io.roleDir), null, 2) + '\n');
@@ -608,6 +656,18 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
       return { ...pick(step), outcome: 'failed' };
     } finally {
       for (const g of held) releaseLock(settings.state, g);
+    }
+  }
+
+  // The runner's own record of a start, before its session: each ticket's start `running`, its origin, and the group it
+  // runs with (so the group's lock covers the ticket at once). A ready card with no ledger gets one, with the triage
+  // `status` read for it.
+  async function recordStart(step) {
+    for (const k of step.keys) {
+      const view = st.tickets.find((t) => t.key === k);
+      const card = step.cards?.find((c) => c.key === k) ?? view?.card;
+      const result = { group: step.group ?? k, ...(view?.ledger === 'absent' && view.triage ? { triage: view.triage } : {}) };
+      await runRecord({ settings, clients, key: k, stage: 'start', status: 'running', startedBy: startOrigin(step), card: card?.shortLink ?? card?.id, result, now: clock() });
     }
   }
 

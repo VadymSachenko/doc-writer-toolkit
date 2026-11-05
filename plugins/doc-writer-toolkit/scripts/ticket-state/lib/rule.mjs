@@ -19,9 +19,20 @@ import { prId } from './ledger.mjs';
 //
 // Over every row: a step whose last session failed runs again only after a person acted on the ticket (a move, a
 // comment, a review, a hand commit) or the owner re-armed it with `set`; until then it waits for the next morning run,
-// and after two failed sessions with no such action between them the ticket is held for the owner.
+// and after two failed sessions with no such action between them the ticket is held for the owner. A ready ticket's
+// failed start (row 14) is held or waits the same way.
 
 export const step = (stage, extra = {}) => ({ stage, role: ROLE_OF[stage] ?? null, ...extra });
+
+// The start of a ticket whose card is in work, with its origin (`startedBy`, which the brief passes on). The runner
+// records a start before its session, with its origin: such a start goes on as it was started (`again`), whoever moved
+// the card since (the session itself, or a person giving the failed start one more try). With no start recorded, a
+// person took the card into work by hand: a manual start, out of the limits for the ticket's whole life (`byHand`).
+const startStep = (l, extra = {}) => (l.stages?.start && l.startedBy ? step('start', { again: true, startedBy: l.startedBy, ...extra }) : step('start', { byHand: true, startedBy: 'manual', ...extra }));
+
+// A start recorded but not done whose card is still in the ready status: the start didn't happen (its session failed
+// or died before the move), so the ticket is still ready.
+const startNotMoved = (l, status) => l.stage === 'start' && Boolean(l.stages?.start) && l.stages.start.status !== 'done' && status === 'ready';
 
 const rank = (stage) => PR_ORDER.indexOf(stage);
 const dayOf = (ms, timeZone) => new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms));
@@ -53,7 +64,7 @@ function phaseOf(l) {
 
 // The next writer or reviewer stage before the PR: plan, then write, then the UA review, then the PR.
 function preparationStep(l) {
-  if (l.stages?.plan?.status !== 'done') return step(l.stages?.start?.status === 'done' ? 'plan' : 'start');
+  if (l.stages?.plan?.status !== 'done') return l.stages?.start?.status === 'done' ? step('plan') : startStep(l);
   const resumed = ['answers', 'planApproval', 'videoImport'].filter((s) => l.stages?.[s]?.status === 'done').map((s) => l.stages[s].seq);
   const lastResume = resumed.length ? Math.max(...resumed) : 0;
   const writeRec = l.stages?.write;
@@ -121,17 +132,20 @@ export function deriveTicket(l, w) {
     t.steps = [];
   }
   // The failed step's gate, after every row (row 6 resumes the same move at every call, so no row can hold it alone).
-  const failed = failedStep(l, w, t.steps);
+  // A ready ticket's step is its start, which the start loop runs (row 14): its failed start is held or waits the same
+  // way, and `startable` (lib/limits.mjs) reads it from `failed` and `held`.
+  const pending = t.steps.length ? t.steps : d.state === 'ready' && !t.hand && !t.locked ? [step('start')] : [];
+  const failed = failedStep(l, w, pending);
   if (failed) {
     t.failed = failed;
     if (failed.held) {
       t.steps = [];
       t.gate = { who: 'owner', why: `${failed.stage}${failed.pr ? ` on ${failed.pr}` : ''} failed in ${failed.sessions} sessions with no one acting in between: a comment on the card or the PR gives it one more try (so do a review, a commit, a move of the card, or \`ticket-state set retry ${l.key}\`)` };
       t.held = true;
-    } else if (!failed.acted) t.steps[0] = { ...t.steps[0], prior: failed.sessions, waits: 'a person acting on the ticket, or the next morning run' };
+    } else if (!failed.acted && t.steps.length) t.steps[0] = { ...t.steps[0], prior: failed.sessions, waits: 'a person acting on the ticket, or the next morning run' };
   }
   // A cap on the sessions of one stage a day, whatever the cause of a loop: beyond it, held for the owner until tomorrow.
-  const capped = !t.held && cappedStep(l, w, t.steps);
+  const capped = !t.held && cappedStep(l, w, pending);
   if (capped) {
     t.capped = capped;
     t.steps = [];
@@ -253,11 +267,16 @@ function derive(l, w) {
   }
   // Row 6.
   if (l.left?.list?.id && card.list?.id !== l.left.list.id) return personMoved(l, w, out, prs);
+  // Row 14 before row 7: a start whose card never left the ready status is still ready, running or failed.
+  if (startNotMoved(l, status)) {
+    out.state = hasLabel(card, w.settings.intake?.needsInfoLabel) ? 'needsInfo' : 'ready';
+    return out;
+  }
   // Row 7.
   const running = runningStage(l);
   if (running) {
     out.state = stateOf(l, prs, status);
-    out.steps.push(step(running.stage, { ...(running.pr ? { pr: running.pr } : {}), interrupted: true }));
+    out.steps.push(running.stage === 'start' && !running.pr ? startStep(l, { interrupted: true }) : step(running.stage, { ...(running.pr ? { pr: running.pr } : {}), interrupted: true }));
     return out;
   }
 
@@ -338,9 +357,10 @@ function personMoved(l, w, out, prs) {
     return out;
   }
   if ((from === 'ready' || from === 'intake') && to === 'inProgress') {
-    // A person took the card into work by hand: a manual start, out of the limits for the ticket's whole life.
+    // A person took the card into work by hand: a manual start, out of the limits for the ticket's whole life. A card
+    // the runner's own start session moved (or a person moved after that start failed) goes on as that start.
     out.state = 'planning';
-    out.steps.push(step('start', { byHand: true }));
+    out.steps.push(startStep(l));
     return out;
   }
   if (from === 'blocked' && to === 'inProgress') {

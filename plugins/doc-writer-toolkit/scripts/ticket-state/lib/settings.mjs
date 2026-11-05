@@ -16,6 +16,7 @@ import { validateJobs } from './jobs.mjs';
 export const MODES = ['off', 'observe', 'on'];
 export const ROLES = ['triage', 'writer', 'reviewer', 'translator'];
 export const SIZES = ['edit', 'newPage', 'newSection'];
+export const START_ORDERS = ['priority', 'easiest'];
 
 export const LOCAL_DEFAULTS = {
   mode: 'observe',
@@ -31,6 +32,12 @@ export const LOCAL_DEFAULTS = {
     stepsPerTicket: 12,
     sessionsPerStageDay: 3,
     estimates: {},
+    // `open`: the most open tickets a scheduled run started, from planning to the final review, ready for merge included
+    // (none: no limit).
+    open: null,
+    // `startOrder`: which ready group a scheduled run starts first: `priority` (then the oldest) or `easiest` (the
+    // triage size, then fewer repos, then fewer pages, then priority).
+    startOrder: 'priority',
   },
   // `tokenFile`: a file (mode 600) with the long-lived sign-in token the watcher's runs use; none: the CLI's own sign-in.
   schedule: { morning: '07:00', watchMinutes: 5, tokenFile: null },
@@ -105,6 +112,8 @@ export function validateSettings(merged, { root, stateRootDefault }) {
   num(limits.sessionPercent, 'limits.sessionPercent');
   num(limits.dailyPercent, 'limits.dailyPercent');
   if (limits.maxWeekPercent !== null) num(limits.maxWeekPercent, 'limits.maxWeekPercent');
+  if (limits.open !== null) num(limits.open, 'limits.open', { min: 1 });
+  if (!START_ORDERS.includes(limits.startOrder)) fail(`limits.startOrder must be one of ${START_ORDERS.join(', ')}`);
   if (!isObject(limits.estimates)) fail('limits.estimates must be { size: percent of the week }');
   for (const [size, v] of Object.entries(limits.estimates)) {
     if (!SIZES.includes(size)) fail(`limits.estimates.${size} is not a size (${SIZES.join(', ')})`);

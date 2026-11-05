@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import { CliError } from './errors.mjs';
 
 // One ledger per ticket, `<state>/tickets/<key>.json`, in the host's git-ignored state folder. Written only through
-// `record` (and `handover`), to a temp file and renamed. It keeps only what the tracker, the forge and git can't show.
+// `record` (and `handover`, `import`), to a temp file and renamed. It keeps only what the tracker, the forge and git can't show.
 // The fields are in context/ticket-flow.md ("The ledger").
 
 export const SCHEMA_VERSION = 1;

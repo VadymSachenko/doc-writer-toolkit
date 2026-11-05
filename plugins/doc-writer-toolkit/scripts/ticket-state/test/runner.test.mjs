@@ -10,6 +10,7 @@ import { lockOf } from '../lib/locks.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
 import { PUSH_DENIED, ROLE_DIR, agentsFile, briefFor, collectSteps, commandFor, nextModelUp, proposeRoles, readRole, runDaily } from '../lib/runner.mjs';
 import { localDate } from '../lib/report.mjs';
+import { notificationsOf } from '../lib/notify.mjs';
 
 // The daily run: finishing first, the morning triage, starts within the limits; one `claude -p` session per model
 // step in its role; a dry run that plans and changes nothing; observe mode; the guard; the retry; the report.
@@ -27,7 +28,7 @@ function busyWorld(extra = estimates) {
   const intake = card({ number: 503, status: 'intake', labels: ['Api'], lastActivity: ago(5) });
   const w = world({ cards: [ready, planning, intake], extra });
   ledger(w, ready, { stages: { triage: 'done' }, triage: { verdict: 'docs-required', targets: ['guide'], size: 'edit' } });
-  ledger(w, planning, { stages: { triage: 'done', start: 'done' }, triage: { verdict: 'docs-required', targets: ['guide'], size: 'edit' } });
+  ledger(w, planning, { stages: { triage: 'done', start: 'done' }, startedBy: 'schedule', triage: { verdict: 'docs-required', targets: ['guide'], size: 'edit' } });
   return { w, ready, planning, intake };
 }
 
@@ -142,7 +143,7 @@ test('a manual run starts the named ready ticket past the limits, and the ticket
   for (const n of [601, 602, 603]) {
     const c = card({ number: n, status: 'inProgress' });
     w.tracker.cards.push(c);
-    ledger(w, c, { stages: { triage: 'done', start: 'done', plan: 'done' }, triage: { size: 'edit' } });
+    ledger(w, c, { stages: { triage: 'done', start: 'done', plan: 'done' }, startedBy: 'schedule', triage: { size: 'edit' } });
   }
   const seen = [];
   const spawnClaude = async (cmd) => {
@@ -243,4 +244,160 @@ test('the report: waiting for the owner, places, the check label, videos, ready 
   assert.match(r, /## Videos waiting for transcripts\n\n- \[704\]\(\S+\): 1 part\(s\) without a transcript; to upload today: `v-part1\.mp4` \(from 0 s, save as `v-part1\.txt`\); the automatic try failed: a sign-in wall/);
   assert.match(r, /## Ready for merge\n\n- \[guide-docs#82\]\(\S+\) \(\[703\]\(\S+\)\): ready for your final edit and the merge/);
   assert.match(r, /## Cards left in Shipping\n\n- \[Release notes 1\.2\]\(\S+\), last activity /);
+});
+
+// ------------------------------------------------------------------ a start that fails
+
+const DAY = 86400000;
+const keyOfBrief = (cmd) => /Stage `(\w+)` of tickets? (\d+)/.exec(briefOf(cmd)).slice(1);
+const originOf = (cmd) => /--started-by (\w+)/.exec(briefOf(cmd))?.[1] ?? null;
+// Two ready tickets as the triage left them (no start yet, so no `startedBy`), with `limits.open` at 1.
+function twoReady({ limits = {} } = {}) {
+  const w = world({ extra: { limits: { estimates: { edit: 4, newPage: 8 }, open: 1, startOrder: 'easiest', ...limits } } });
+  const cards = {};
+  for (const [n, size] of [[501, 'edit'], [502, 'newPage']]) {
+    cards[n] = card({ number: n, status: 'ready' });
+    w.tracker.cards.push(cards[n]);
+    ledger(w, cards[n], { stages: { triage: 'done' }, triage: { verdict: 'docs-required', targets: ['guide'], size } });
+  }
+  return { w, cards };
+}
+
+test('a start that fails before the card moves holds no slot: the run starts the next group; the next morning run tries each once more, then holds it, with one notification', async () => {
+  // A session that dies with nothing recorded, and one that records its start failed with its brief's own line.
+  for (const kind of ['dies', 'records failed']) {
+    const { w, cards } = twoReady();
+    let day = 0;
+    const sessions = [];
+    const spawnClaude = async (cmd) => {
+      const [stage, key] = keyOfBrief(cmd);
+      sessions.push(`${day}:${stage} ${key}`);
+      if (kind === 'dies') return { code: 1, stdout: '', stderr: 'the session died' };
+      await runRecord({ settings: w.settings, clients: w.clients(), key, stage: 'start', status: 'failed', note: 'the attachment could not be read', card: cards[key].shortLink, startedBy: originOf(cmd), result: { group: key }, now: NOW + day * DAY });
+      return { code: 0, stdout: RESULT() };
+    };
+    const run = (d, morning = true) => {
+      day = d;
+      return runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: () => usageAt(5), now: () => NOW + d * DAY, spawnClaude }, options: { morning } });
+    };
+    const first = await run(0);
+    assert.deepEqual(sessions, ['0:start 501', '0:start 502'], `${kind}: the failed start held no slot, so the run started the next group`);
+    assert.deepEqual(first.after.wip.open, 0);
+    assert.deepEqual(first.notStarted.map((g) => g.group), ['501', '502']);
+    for (const g of first.notStarted) assert.match(g.reasons.join(), /^its start failed at \S+ \(\d+\): waits for a person acting on the ticket, or the next morning run$/, kind);
+    assert.ok(first.log.some((e) => e.group === '501' && e.outcome === 'waits' && /runs again after a person acts on the ticket, or once at the next morning run/.test(e.note)));
+    assert.deepEqual([read(w, '501').startedBy, read(w, '501').stages.start.status, (await w.one('501')).state], ['schedule', 'failed', 'ready']);
+    // A run that is not the morning's leaves a waiting start alone.
+    await run(0.25, false);
+    assert.equal(sessions.length, 2, `${kind}: no session outside the morning run`);
+    // The next morning: one more try each, then held for the owner, with the notification.
+    const second = await run(1);
+    assert.deepEqual(sessions.slice(2), ['1:start 501', '1:start 502'], kind);
+    assert.deepEqual(notificationsOf({ morning: second, today: '2026-11-11' }).filter((n) => n.title === 'Ticket flow: a step failed twice').map((n) => n.text), ['start of 501 failed twice. See /ticket-report.', 'start of 502 failed twice. See /ticket-report.']);
+    assert.deepEqual(read(w, '501').runs.map((r) => [r.stage, r.outcome, r.failures]), [['start', 'failed', 1], ['start', 'failed', 2]]);
+    await run(2);
+    assert.equal(sessions.length, 4, `${kind}: held, so no session on the third morning`);
+    const st = await w.status({ usage: usageAt(5) });
+    assert.deepEqual(st.tickets.map((t) => [t.key, t.state, t.held, t.gate.who]), [['501', 'ready', true, 'owner'], ['502', 'ready', true, 'owner']]);
+    assert.deepEqual(st.startable, []);
+  }
+});
+
+test('a manual run gives a waiting failed start its one more try with the failures so far: a second failure holds it, and a manual run then starts nothing', async () => {
+  const { w } = twoReady();
+  const sessions = [];
+  const spawnClaude = async (cmd) => {
+    const [stage, key] = keyOfBrief(cmd);
+    sessions.push(`${stage} ${key} ${originOf(cmd)}`);
+    return { code: 1, stdout: '', stderr: 'the session died' };
+  };
+  const run = (options) => runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: () => usageAt(5), now: () => NOW, spawnClaude }, options });
+  await run({ trigger: 'manual', named: ['501'] });
+  assert.deepEqual([sessions, (await w.one('501')).failed?.sessions, Boolean((await w.one('501')).held)], [['start 501 manual'], 1, false], 'the first failure waits');
+  await run({ trigger: 'manual', named: ['501'] });
+  assert.deepEqual(sessions, ['start 501 manual', 'start 501 manual'], 'a manual run gives the waiting start its one more try');
+  assert.deepEqual(read(w, '501').runs.map((r) => [r.stage, r.outcome, r.failures]), [['start', 'failed', 1], ['start', 'failed', 2]]);
+  const t = await w.one('501');
+  assert.deepEqual([t.state, t.held, t.gate.who], ['ready', true, 'owner']);
+  const third = await run({ trigger: 'manual', named: ['501'] });
+  assert.equal(sessions.length, 2, 'held: a manual run starts nothing');
+  assert.ok(third.notes.some((n) => /^group 501: its start is held for the owner \(501\); `ticket-state set retry <key>` gives it one more try$/.test(n)), third.notes.join('\n'));
+});
+
+test('the runner records a start before its session: one that moves the card and dies still counts, so the open limit holds that day and the next', async () => {
+  const { w, cards } = twoReady();
+  let day = 0;
+  const sessions = [];
+  const spawnClaude = async (cmd) => {
+    const [stage, key] = keyOfBrief(cmd);
+    sessions.push(`${day}:${stage} ${key} ${originOf(cmd) ?? '-'}`);
+    if (stage !== 'start') return { code: 1, stdout: '', stderr: 'not this test' };
+    assert.deepEqual([read(w, key).startedBy, read(w, key).stages.start.status], ['schedule', 'running'], 'recorded before the session');
+    cards[key].placeId = LISTS.inProgress.id; // the session moves the card ...
+    if (day === 0) return { code: 1, stdout: '', stderr: 'the session died' }; // ... and dies before its record
+    await runRecord({ settings: w.settings, clients: w.clients(), key, stage: 'start', status: 'done', card: cards[key].shortLink, startedBy: originOf(cmd), result: { group: key }, now: NOW + day * DAY });
+    return { code: 0, stdout: RESULT() };
+  };
+  const run = (d) => {
+    day = d;
+    return runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: () => usageAt(5), now: () => NOW + d * DAY, spawnClaude }, options: { morning: true } });
+  };
+  const first = await run(0);
+  assert.deepEqual(sessions, ['0:start 501 schedule'], 'the card in work counts: the next group waits');
+  assert.deepEqual([first.after.wip.open, first.after.wip.openKeys], [1, ['501']]);
+  assert.match(first.notStarted.find((g) => g.group === '502').reasons.join(), /1 open \(501\) \+ 1 > 1/);
+  const a = await w.one('501');
+  assert.deepEqual([a.state, a.counted, a.next.stage, a.next.again, a.next.startedBy, Boolean(a.next.waits)], ['planning', true, 'start', true, 'schedule', true]);
+  // The next morning the start goes on as the scheduled start it was; the limit still holds.
+  const second = await run(1);
+  assert.deepEqual(sessions.filter((x) => /:start /.test(x)), ['0:start 501 schedule', '1:start 501 schedule']);
+  assert.equal(read(w, '501').startedBy, 'schedule');
+  assert.deepEqual([second.after.wip.open, second.after.wip.openKeys], [1, ['501']]);
+  assert.ok(!sessions.some((x) => / 502 /.test(x)), '502 never started: open stayed at 1');
+});
+
+test('a card a person moved into work is a hand start: the runner and the brief record it manual, and it holds no slot', async () => {
+  const { w, cards } = twoReady();
+  cards[501].placeId = LISTS.inProgress.id; // a person's move: no start recorded before it
+  const t = await w.one('501');
+  assert.deepEqual([t.next.stage, t.next.byHand, t.next.startedBy], ['start', true, 'manual']);
+  const seen = [];
+  const spawnClaude = async (cmd) => {
+    const [stage, key] = keyOfBrief(cmd);
+    if (stage !== 'start') return { code: 1, stdout: '', stderr: 'not this test' };
+    seen.push([key, originOf(cmd), read(w, key).startedBy]);
+    cards[key].placeId = LISTS.inProgress.id;
+    await runRecord({ settings: w.settings, clients: w.clients(), key, stage: 'start', status: 'done', card: cards[key].shortLink, startedBy: originOf(cmd), result: { group: key }, now: NOW });
+    return { code: 0, stdout: RESULT() };
+  };
+  const out = await runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: () => usageAt(5), now: () => NOW, spawnClaude }, options: {} });
+  assert.deepEqual(seen, [['501', 'manual', 'manual'], ['502', 'schedule', 'schedule']], 'the hand start first, then the scheduled one: the hand start holds no slot');
+  assert.deepEqual([read(w, '501').startedBy, read(w, '502').startedBy], ['manual', 'schedule']);
+  assert.deepEqual([out.after.wip.open, out.after.wip.openKeys, out.after.wip.manual], [1, ['502'], 1]);
+});
+
+test('the start recorded before its session puts each ticket under its group lock at once, and gives a ready card with no ledger one, with its triage', async () => {
+  const w = world({ extra: { limits: { estimates: { edit: 4 } } } });
+  for (const n of [601, 602]) {
+    const c = card({ number: n, status: 'ready' });
+    w.tracker.cards.push(c);
+    ledger(w, c, { stages: { triage: 'done' }, triage: { verdict: 'docs-required', targets: ['guide'], size: 'edit', relations: n === 601 ? ['602'] : [] } });
+  }
+  const owner = card({ number: 603, status: 'ready', labels: ['Guide'] }); // an owner's card: no triage, no ledger
+  w.tracker.cards.push(owner);
+  const during = [];
+  const spawnClaude = async (cmd) => {
+    const st = await w.status(); // another reader, while the session runs
+    during.push(st.tickets.filter((t) => t.locked).map((t) => t.key));
+    return { code: 1, stdout: '', stderr: 'the session died' };
+  };
+  await runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: () => usageAt(5), now: () => NOW, spawnClaude }, options: { morning: true } });
+  assert.deepEqual(during, [['601', '602'], ['603']], 'the group lock covers each ticket of the group during its session');
+  assert.deepEqual([read(w, '601').group, read(w, '602').group], ['601-602', '601-602']);
+  const l = read(w, '603');
+  assert.deepEqual([l.startedBy, l.stages.start.status, l.left.status, l.triage.verdict, l.triage.targets], ['schedule', 'failed', 'ready', 'owner-card', ['guide']]);
+  const st = await w.status({ usage: usageAt(5) });
+  const t = st.tickets.find((x) => x.key === '603');
+  assert.deepEqual([t.ledger, t.state, t.failed.sessions], ['present', 'ready', 1]);
+  assert.deepEqual(st.groups.find((g) => g.keys.includes('603')).repoCount, 1, 'still grouped by its target');
 });
