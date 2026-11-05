@@ -162,11 +162,14 @@ test('AC-1: an existing worktree follows the owner\'s push although a session le
   ensureWorktree(t.w.settings, p);
   fs.mkdirSync(path.join(t.wt, 'docs', 'x', '.sources'), { recursive: true });
   fs.writeFileSync(path.join(t.wt, 'docs', 'x', '.sources', 'run-notes.md'), 'a session left this');
+  // An untracked file git doesn't ignore, too.
+  fs.writeFileSync(path.join(t.wt, 'docs', 'x', 'session-notes.txt'), 'and this');
   const h2 = t.handEdit({ 'docs/x/index.md': '# Сторінка\n\nРучна правка.\n' });
   const tree = ensureWorktree(t.w.settings, p);
   assert.equal(tree.head, h2);
   assert.deepEqual(tree.notes, []);
   assert.equal(fs.existsSync(path.join(t.wt, 'docs', 'x', '.sources', 'run-notes.md')), true);
+  assert.equal(fs.readFileSync(path.join(t.wt, 'docs', 'x', 'session-notes.txt'), 'utf8'), 'and this');
   // A change to a tracked file is a session's work: the worktree stays where it is, and the brief says why.
   fs.writeFileSync(path.join(t.wt, 'docs', 'x', 'index.md'), 'unsaved work');
   const h3 = t.handEdit({ 'docs/x/index.md': '# Сторінка\n\nЩе одна правка.\n' });
