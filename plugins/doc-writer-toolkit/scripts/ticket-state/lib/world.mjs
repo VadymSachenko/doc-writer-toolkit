@@ -216,11 +216,13 @@ export async function readPrs({ settings, forge, ledgers }) {
 }
 
 // Comments and reviews on a PR that the pipeline didn't post and no record handled (an edit after the handling counts
-// as new). Each says whether the owner wrote it (an instruction) or a reviewer did.
+// as new). Each says whether the owner wrote it (an instruction) or a reviewer did. A bot's (a preview notice, a CI
+// summary) asks nothing of the pipeline and starts no session.
 export function unhandled(ledger, pr, activity, self) {
   const posted = new Set((ledger.posted?.pr ?? []).map(String));
   const handled = new Map((ledger.reviewComments ?? []).filter((c) => c.repo === pr.repo && Number(c.pr) === Number(pr.number)).map((c) => [String(c.id), c.updatedAt ?? c.at ?? '']));
-  const fresh = (c) => !posted.has(String(c.id)) && !(handled.has(String(c.id)) && (handled.get(String(c.id)) ?? '') >= (c.updatedAt ?? c.submittedAt ?? ''));
+  const isBot = (c) => c.authorBot === true || /\[bot\]$/.test(c.author ?? '');
+  const fresh = (c) => !isBot(c) && !posted.has(String(c.id)) && !(handled.has(String(c.id)) && (handled.get(String(c.id)) ?? '') >= (c.updatedAt ?? c.submittedAt ?? ''));
   const who = (author) => (self && author === self ? 'owner' : 'reviewer');
   const out = [];
   for (const t of activity.threads ?? []) {
@@ -229,7 +231,7 @@ export function unhandled(ledger, pr, activity, self) {
   for (const c of activity.comments ?? []) if (fresh(c)) out.push({ id: c.id, kind: 'comment', author: c.author, by: who(c.author), updatedAt: c.updatedAt });
   for (const r of activity.reviews ?? []) {
     if (!String(r.body ?? '').trim()) continue; // a verdict with no text asks nothing
-    const c = { id: r.id, updatedAt: r.submittedAt };
+    const c = { id: r.id, author: r.author, authorBot: r.authorBot, updatedAt: r.submittedAt };
     if (fresh(c)) out.push({ id: r.id, kind: 'review', state: r.state, author: r.author, by: who(r.author), updatedAt: r.submittedAt });
   }
   return out;

@@ -49,7 +49,10 @@ test('the dry run prints the plan and each claude command line, and writes and s
   assert.equal(flag(cmd, '--output-format'), 'json');
   assert.equal(flag(cmd, '--max-turns'), '200');
   assert.ok(cmd.args.includes('--allowedTools') && cmd.args.includes('--disallowedTools'));
-  assert.deepEqual(cmd.args.filter((a, i) => cmd.args[i - 1] === '--add-dir'), ['repos/guide-docs', 'repos/api-docs', 'repos/portal-docs'].map((p) => path.join(w.root, p)));
+  // The target clones, then the toolkit roots a session reads its scripts from.
+  const added = cmd.args.filter((a, i) => cmd.args[i - 1] === '--add-dir');
+  assert.deepEqual(added.slice(0, 3), ['repos/guide-docs', 'repos/api-docs', 'repos/portal-docs'].map((p) => path.join(w.root, p)));
+  assert.ok(added.includes(PLUGIN_ROOT));
   assert.match(briefOf(cmd), /record 502 --root .* --stage plan --status done --result <json>/);
   // The morning triage: one session for the due cards, highest priority first; the start of the ready group.
   assert.deepEqual([out.triage.stage, out.triage.keys, out.triage.model, out.triage.effort], ['triage', ['503'], 'claude-sonnet-5-5', 'medium']);
@@ -441,9 +444,9 @@ test('AC-3, AC-7: with the owner\'s and the hub\'s layers loaded, every plain-sp
   // A step with no worktree changes no repo: no plain add or commit; it reads the target clones (its --add-dir).
   const plan = rulesOf('writer', w, []);
   for (const c of ['git add -A', 'git commit -m x']) assert.equal(verdict(c, [...plan.allowed, ...LAYERS], plan.denied), 'denied', `plan: ${c}`);
-  assert.deepEqual(plan.addDirs, [...new Set(w.settings.targets.filter((t) => t.path).map((t) => path.resolve(w.settings.root, t.path)))]);
-  // A step with worktrees reaches them only, not the target clones (a `cd` outside the add-dirs is denied).
-  assert.deepEqual(rulesOf('writer', w).addDirs, [WT]);
+  assert.deepEqual(plan.addDirs, [...new Set(w.settings.targets.filter((t) => t.path).map((t) => path.resolve(w.settings.root, t.path))), ...ROOTS]);
+  // A step with worktrees reaches them and the toolkit roots, not the target clones (a `cd` outside the add-dirs is denied).
+  assert.deepEqual(rulesOf('writer', w).addDirs, [WT, ...ROOTS]);
 });
 
 test('on a step with worktrees, the target clones\' content roots are not writable; their dot folders, the state and the worktree are', () => {

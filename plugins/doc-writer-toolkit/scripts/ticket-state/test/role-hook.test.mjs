@@ -11,6 +11,7 @@ import { ROLE_SESSION_VARIABLE, DOWNLOAD_DIRS_VARIABLE, TRACKER_TEST_VARIABLE } 
 import { isBareGit, jobCommand, validateJobs } from '../lib/jobs.mjs';
 import { loadSettings, localOnly, sharedAtHead } from '../lib/settings.mjs';
 import { setLocal } from '../lib/setlocal.mjs';
+import { unhandled } from '../lib/world.mjs';
 import { host, rawSettings, tmp } from './fakes.mjs';
 import { world } from './helpers.mjs';
 
@@ -217,20 +218,26 @@ test('per-role scripts: triage gets ticket-state and the tracker only; each role
   const expected = {
     triage: ['ticket-state/ticket-state.mjs', 'tracker/tracker.mjs'],
     writer: ['ticket-state/ticket-state.mjs', 'ticket-state/browser-lock.mjs', 'tracker/tracker.mjs', 'forge/forge.mjs', 'ui-labels/ui-labels.mjs', 'screenshot-locales/screenshot-locales.mjs', 'video-parts/video-parts.mjs'],
-    reviewer: ['ticket-state/ticket-state.mjs', 'visual-pack/visual-pack.mjs'],
-    translator: ['ticket-state/ticket-state.mjs', 'locale-sync/locale-sync.mjs', 'ui-labels/ui-labels.mjs', 'doc-align/doc-align.mjs', 'screenshot-locales/screenshot-locales.mjs'],
+    reviewer: ['ticket-state/ticket-state.mjs', 'visual-pack/visual-pack.mjs', 'forge/forge.mjs'],
+    translator: ['ticket-state/ticket-state.mjs', 'locale-sync/locale-sync.mjs', 'ui-labels/ui-labels.mjs', 'doc-align/doc-align.mjs', 'screenshot-locales/screenshot-locales.mjs', 'forge/forge.mjs'],
   };
+  const sub = (role, s) => (s === 'ticket-state/ticket-state.mjs' ? ' status' : s === 'ticket-state/browser-lock.mjs' ? ' take' : s === 'forge/forge.mjs' && role !== 'writer' ? ' pr-state' : ' x');
   const everyScript = ['tracker/tracker.mjs', 'forge/forge.mjs', 'locale-sync/locale-sync.mjs', 'ui-labels/ui-labels.mjs', 'doc-align/doc-align.mjs', 'screenshot-locales/screenshot-locales.mjs', 'section-state/section-state.mjs', 'visual-pack/visual-pack.mjs', 'video-parts/video-parts.mjs', 'ticket-state/browser-lock.mjs', 'ticket-state/ticket-state.mjs'];
   for (const [role, names] of Object.entries(expected)) {
     assert.deepEqual([...new Set(ROLE_SCRIPTS[role].map((s) => s.split(' ')[0]))].sort(), [...names].sort(), role);
     const cmd = commandOf(role, w);
     const allowed = cmd.args.slice(cmd.args.indexOf('--allowedTools') + 1, cmd.args.indexOf('--disallowedTools'));
     for (const s of everyScript) {
-      const rule = allowed.includes(`Bash(node ${R}/scripts/${s}:*)`) || allowed.includes(`Bash(node ${R}/scripts/${s} status:*)`);
+      const rule = allowed.includes(`Bash(node ${R}/scripts/${s}:*)`) || allowed.includes(`Bash(node ${R}/scripts/${s} status:*)`) || allowed.includes(`Bash(node ${R}/scripts/${s} pr-state:*)`);
       assert.equal(rule, names.includes(s), `${role}: the rule for ${s}`);
-      const line = `node ${R}/scripts/${s}${s === 'ticket-state/ticket-state.mjs' ? ' status' : s === 'ticket-state/browser-lock.mjs' ? ' take' : ' x'}`;
+      const line = `node ${R}/scripts/${s}${sub(role, s)}`;
       assert.equal(refusalOf(line, cfg[role], { cwd: root }) === null, names.includes(s), `${role}: the hook on ${s}`);
     }
+  }
+  // The reviewer and the translator read a PR's base with `forge pr-state`, and do nothing else with the forge.
+  for (const role of ['reviewer', 'translator']) {
+    assert.equal(refusalOf(`node ${R}/scripts/forge/forge.mjs pr-state --repo guide-docs --number 7`, cfg[role], { cwd: root }), null, role);
+    for (const c of ['open-pr --repo x', 'comment --repo x', 'add-label --label y', '--repo x pr-state']) assert.ok(refusalOf(`node ${R}/scripts/forge/forge.mjs ${c}`, cfg[role], { cwd: root }), `${role}: ${c}`);
   }
 });
 
@@ -257,7 +264,11 @@ test('the hook: exit 0 lets a command through, exit 2 refuses it with the reason
   const no = runHook(call(`git log --out''put=/x`), env);
   assert.equal(no.status, 2);
   assert.match(no.stderr, /--output/);
-  assert.match(no.stderr, /Don't try another spelling/);
+  // What a session does next depends on this text: a subagent sees nothing else. It leads to a form that passes, and it
+  // keeps the failed record for when none exists.
+  assert.match(no.stderr, /Do the same work in a form that passes: one plain command per call, literal paths, or the Read, Grep and Write tools\./);
+  assert.match(no.stderr, /Only when no such form exists, record the stage failed with the reason\./);
+  assert.doesNotMatch(no.stderr, /another spelling/);
 });
 
 test('fail closed: no config, bad input, no command, a stalled input and the deadline all refuse', async () => {
@@ -330,6 +341,82 @@ test('spawnClaude: the child gets the session\'s markers, and never a billed var
   assert.equal(seen[HOOK_VARIABLE], '{}');
   assert.equal(seen.OWN, 'kept');
   assert.ok(!('ANTHROPIC_API_KEY' in seen) && !(TRACKER_TEST_VARIABLE in seen));
+});
+
+test('a recursive read of .env is refused whatever the flag\'s spelling or a too-wide --include; a file kind passes', () => {
+  const { cfg, root } = SHARED();
+  const go = (c) => refusalOf(c, cfg.writer, { cwd: root });
+  for (const c of [
+    "grep -r FAKE . --include='*'", 'grep --directories recurse FAKE .', 'grep --directories=recurse FAKE .', 'grep --dir=rec FAKE .', 'grep --dir recurse FAKE .', 'grep -d recurse FAKE .', 'grep -nd recurse FAKE .', 'grep --recur FAKE .', 'grep --rec FAKE .', 'grep --dereference-rec FAKE .',
+    "grep -r FAKE . --include '*'", "grep -r FAKE . --incl='*'", "grep -r FAKE . '--include=.*'", "grep -r FAKE . --include=.env", "grep -r FAKE . --include=.env.md", "grep -r FAKE . '--include=*.foo'", "grep -r FAKE . '--include=*.md' '--include=*'", "grep -r FAKE . '--include=[.]env'", "grep -r FAKE . '--include=?env'", "grep -r FAKE . --include-dir=docs",
+    'diff --recur /a /b', 'diff --rec /a /b', 'diff --recursive /a /b', 'diff -ru /a /b', 'diff -r /a /b',
+    'sort --out=/x a', 'sort --comp=/x a', 'sort --temporary=/x a',
+    `git -C ${WT} add --forc .`, `git -C ${WT} add --fo .`, `git -C ${WT} add --pathspec-from=/x`, `git -C ${WT} add --pathspec-from-file=/x`, `git -C ${WT} add --pathspec=/x`,
+  ]) assert.ok(go(c), c);
+  for (const c of ["grep -rl 'x' --include='*.md' docs", "grep -r x '--include=*.md' '--include=*.mdx' docs", 'grep -r x --include README.md docs', "grep -R x --include '*.json' docs", "grep --include='*.md' x docs/a.md", 'grep -n x docs/a.md', 'grep --directories=skip x docs/a.md', 'grep -d skip x docs/a.md', 'diff a.md b.md', 'diff -u a.md b.md']) assert.equal(go(c), null, c);
+  // An unquoted one is told how to pass, not that it can't.
+  assert.match(go('grep -r x --include=*.md docs'), /quote it/);
+});
+
+test('ls-remote: the literal form on the worktree, for its branch or base, in the rules and the hook; nothing else', () => {
+  const { w, cfg, root } = SHARED();
+  for (const role of ['writer', 'reviewer', 'translator']) {
+    const cmd = commandOf(role, w);
+    const allowed = cmd.args.slice(cmd.args.indexOf('--allowedTools') + 1, cmd.args.indexOf('--disallowedTools'));
+    for (const b of ['ticket-71', 'main']) {
+      assert.ok(allowed.includes(`Bash(git -C ${WT} ls-remote origin ${b})`), `${role}: ${b}`);
+      assert.equal(refusalOf(`git -C ${WT} ls-remote origin ${b}`, cfg[role], { cwd: root }), null, `${role}: ${b}`);
+    }
+    assert.ok(!allowed.some((r) => /ls-remote.*\*/.test(r)), 'exact rules only');
+    for (const c of [`git -C ${WT} ls-remote --upload-pack=id origin main`, `git -C ${WT} ls-remote origin main --upload-pack=id`, `git -C ${WT} '--upload-pack=id' ls-remote`, `git -C ${WT} ls-remote origin other`, `git -C ${WT} ls-remote origin`, `git -C ${WT} ls-remote /elsewhere main`, 'git ls-remote origin main', 'git -C /other ls-remote origin main']) assert.ok(refusalOf(c, cfg[role], { cwd: root }), `${role}: ${c}`);
+  }
+});
+
+test('reads the first layer lacked: rev-parse in the worktree roles, the role\'s reads on each clone on a step with no worktree, ls in the toolkit roots', () => {
+  const w = world({ extra: { workFolder: 'work/tickets/<key>' } });
+  const allowedOf = (cmd) => cmd.args.slice(cmd.args.indexOf('--allowedTools') + 1, cmd.args.indexOf('--disallowedTools'));
+  for (const role of ['writer', 'reviewer', 'translator']) assert.ok(allowedOf(commandOf(role, w)).includes(`Bash(git -C ${WT} rev-parse:*)`), role);
+  const clones = [...new Set(w.settings.targets.map((t) => (t.path ? path.resolve(w.settings.root, t.path) : null)).filter(Boolean))];
+  assert.ok(clones.length);
+  const reads = { triage: ['log', 'show', 'ls-tree'], writer: ['log', 'show', 'ls-tree', 'status', 'diff'] };
+  for (const [role, subs] of Object.entries(reads)) {
+    const cmd = commandOf(role, w, []);
+    const allowed = allowedOf(cmd);
+    for (const clone of clones) {
+      for (const s of subs) assert.ok(allowed.includes(`Bash(git -C ${clone} ${s}:*)`), `${role}: ${s} on ${clone}`);
+      for (const s of ['add', 'commit', 'push', 'fetch', 'rev-parse', 'worktree list']) assert.ok(!allowed.includes(`Bash(git -C ${clone} ${s}:*)`), `${role}: no ${s} on ${clone}`);
+    }
+  }
+  // On a step with a worktree, a clone has none: the work is in the worktree.
+  const withTree = allowedOf(commandOf('writer', w));
+  for (const clone of clones) assert.ok(!withTree.some((r) => r.startsWith(`Bash(git -C ${clone} `)), clone);
+  // The toolkit roots are reachable and closed to writes.
+  for (const role of ['triage', 'writer']) {
+    const cmd = commandOf(role, w);
+    const added = cmd.args.filter((a, i) => cmd.args[i - 1] === '--add-dir');
+    for (const r of ROOTS) {
+      assert.ok(added.includes(r), `${role}: ${r}`);
+      assert.ok(cmd.args.includes(`Edit(//${r.slice(1)}/**)`), `${role}: writes in ${r} denied`);
+      assert.equal(refusalOf(`ls ${r}/scripts`, JSON.parse(cmd.env[HOOK_VARIABLE]), { cwd: w.settings.root }), null);
+      assert.ok(refusalOf(`mkdir ${r}/x`, JSON.parse(cmd.env[HOOK_VARIABLE]), { cwd: w.settings.root }), `mkdir in ${r}`);
+    }
+  }
+});
+
+test('a bot\'s comment or review on a PR is not new: it starts no session, whichever way its author is told', () => {
+  const pr = { repo: 'guide-docs', number: 7 };
+  const at = '2026-11-05T10:00:00Z';
+  const activity = {
+    comments: [{ id: 1, author: 'netlify', authorBot: true, updatedAt: at }, { id: 2, author: 'netlify[bot]', updatedAt: at }, { id: 3, author: 'someone', updatedAt: at }],
+    threads: [{ id: 't', comments: [{ id: 4, author: 'coderabbitai', authorBot: true, updatedAt: at }, { id: 5, author: 'someone', updatedAt: at }, { id: 6, author: 'me', updatedAt: at }] }],
+    reviews: [{ id: 7, author: 'github-actions', authorBot: true, state: 'COMMENTED', body: 'a summary', submittedAt: at }, { id: 8, author: 'dependabot[bot]', state: 'COMMENTED', body: 'x', submittedAt: at }, { id: 9, author: 'someone', state: 'COMMENTED', body: 'please fix', submittedAt: at }],
+  };
+  const out = unhandled({ posted: { pr: [] }, reviewComments: [] }, pr, activity, 'me');
+  assert.deepEqual(out.map((c) => [c.id, c.by]), [[5, 'reviewer'], [6, 'owner'], [3, 'reviewer'], [9, 'reviewer']]);
+  // A person whose login merely looks close is still a person.
+  assert.equal(unhandled({}, pr, { comments: [{ id: 1, author: 'robot', updatedAt: at }, { id: 2, author: 'bot', updatedAt: at }] }, 'me').length, 2);
+  // Only bots on the PR: no step.
+  assert.deepEqual(unhandled({}, pr, { comments: [{ id: 1, author: 'netlify', authorBot: true, updatedAt: at }] }, 'me'), []);
 });
 
 test('whole tools no stage uses are denied in every role; the ones stages use are not, and a host job keeps its own', () => {

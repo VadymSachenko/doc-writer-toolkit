@@ -14,7 +14,8 @@
 //   Event    { id, event, createdAt, actor|null, number, label?, reviewer?, team?, requester?, commit? }
 //   Review   { id, nodeId, author|null, state, body, submittedAt, commit|null }
 //   Thread   { id, resolved, outdated, path, line|null, truncated, comments: [Comment] }
-//   Comment  { id, nodeId, author|null, body, createdAt, updatedAt, path?, line?, inReplyTo?|null, reviewId? }
+//   Comment  { id, nodeId, author|null, authorBot?, body, createdAt, updatedAt, path?, line?, inReplyTo?|null, reviewId? }
+//            (`authorBot: true` on a Comment or a Review whose author is a bot)
 //
 // Reads (nothing here changes the forge)
 //   pr({repo, number})                    -> Pr

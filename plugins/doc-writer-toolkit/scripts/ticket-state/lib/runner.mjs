@@ -53,6 +53,13 @@ export const pushRulesFor = (trees = []) => [...new Set(trees.map((t) => `Bash(g
 // worktree shares. A role fetches only as `git -C <worktree> fetch origin`, or `… fetch origin <branch>` for the
 // worktree's branch and base (the default refspec updates only `origin/*`); every plain fetch is denied (`ROLE_DENIED`).
 export const fetchRulesFor = (trees = []) => [...new Set(trees.flatMap((t) => [`Bash(git -C ${t.path} fetch origin)`, ...[t.branch, t.base].filter(Boolean).map((b) => `Bash(git -C ${t.path} fetch origin ${b})`)]))];
+// `ls-remote` the same way, literal and exact, since `--upload-pack=<cmd>` runs a command: what the branch or base is on origin now.
+export const lsRemoteRulesFor = (trees = []) => [...new Set(trees.flatMap((t) => [t.branch, t.base].filter(Boolean).map((b) => `Bash(git -C ${t.path} ls-remote origin ${b})`)))];
+
+// A step with no worktree (triage, the plan) reads the target clones and the hub in the `git -C <folder>` spelling too: the
+// role's own read rules, for these reads only, never `add` or `commit`.
+const CLONE_READS = /^Bash\(git (log|show|ls-tree|status|diff)(:\*)?\)$/;
+export const cloneReadRules = (rules, dirs = []) => rules.filter((r) => CLONE_READS.test(r)).flatMap((r) => gitCFor(r, dirs));
 
 // Denied in every role, whatever its file says: a push that could drop someone else's commits (the owner pushes to the
 // same branches by hand), skip the hooks, or delete a branch, in both spellings: plain, and `git -C <worktree>` for each
@@ -117,7 +124,9 @@ const MEDIA_DENIED = ['Bash(ffmpeg:*)', 'Bash(ffprobe:*)'];
 // Moving or removing folders, which a broad host allow would reopen, and a browser lock made by hand (no holder, so
 // nothing frees it): a role takes and frees the lock only with browser-lock.mjs.
 const FOLDER_DENIED = ['Bash(mv:*)', 'Bash(rmdir:*)', 'Bash(mkdir *.playwright.lock*)', 'Bash(mkdir .playwright.lock*)'];
-// Whole tools no stage uses that run or schedule work, or send something outside the session; the hook doesn't read them.
+// Whole tools no stage needs that run or schedule work, or send something outside the session; the hook doesn't read them.
+// `ScheduleWakeup` a session has used (a pilot's `locales` orchestrator, 4 times), but it doesn't need it: a session with a
+// background worker that got no wakeup finished when the worker reported.
 // A name this CLI doesn't have is ignored (probed), so the list survives CLI updates. `Agent`/`Task` (the translator's
 // workers), `SendMessage`, `TaskStop`, `ListAgents`, `Monitor`, `Skill` and `ToolSearch` stay: stages or their skills use them.
 export const TOOLS_DENIED = ['Workflow', 'CronCreate', 'CronDelete', 'CronList', 'RemoteTrigger', 'ScheduleWakeup', 'PushNotification', 'DesignSync', 'EnterWorktree', 'ExitWorktree', 'WebFetch', 'WebSearch', 'Artifact', 'ArtifactData', 'ArtifactComments', 'SendUserFile'];
@@ -133,14 +142,15 @@ export const jobDenied = (settings, roots = scriptRoots(settings)) => [...new Se
 export const NODE_SCRIPTS = ['ticket-state/ticket-state.mjs record', 'ticket-state/ticket-state.mjs status', 'ticket-state/ticket-state.mjs config', 'tracker/tracker.mjs', 'forge/forge.mjs', 'locale-sync/locale-sync.mjs', 'ui-labels/ui-labels.mjs', 'doc-align/doc-align.mjs', 'screenshot-locales/screenshot-locales.mjs', 'section-state/section-state.mjs', 'visual-pack/visual-pack.mjs', 'video-parts/video-parts.mjs', 'ticket-state/browser-lock.mjs'];
 // Each role's own, from what its stages and the skills it runs call. Triage reads and answers cards and writes nothing else;
 // the writer's skills run the UI label check and the screenshot paths; the translator's run the locale pipeline and the
-// alignment check; the reviewer builds the visual pack. A role's list narrows only: a script not in it has no rule, and
+// alignment check; the reviewer builds the visual pack. The last two read a PR's base with `forge pr-state`, which neither
+// `status` nor the brief gives. A role's list narrows only: a script not in it has no rule, and
 // the role's hook refuses it however it is spelled.
 const STATE_SCRIPTS = ['ticket-state/ticket-state.mjs record', 'ticket-state/ticket-state.mjs status', 'ticket-state/ticket-state.mjs config'];
 export const ROLE_SCRIPTS = {
   triage: [...STATE_SCRIPTS, 'tracker/tracker.mjs'],
   writer: [...STATE_SCRIPTS, 'ticket-state/browser-lock.mjs', 'tracker/tracker.mjs', 'forge/forge.mjs', 'ui-labels/ui-labels.mjs', 'screenshot-locales/screenshot-locales.mjs', 'video-parts/video-parts.mjs'],
-  reviewer: [...STATE_SCRIPTS, 'visual-pack/visual-pack.mjs'],
-  translator: [...STATE_SCRIPTS, 'locale-sync/locale-sync.mjs', 'ui-labels/ui-labels.mjs', 'doc-align/doc-align.mjs', 'screenshot-locales/screenshot-locales.mjs'],
+  reviewer: [...STATE_SCRIPTS, 'visual-pack/visual-pack.mjs', 'forge/forge.mjs pr-state'],
+  translator: [...STATE_SCRIPTS, 'locale-sync/locale-sync.mjs', 'ui-labels/ui-labels.mjs', 'doc-align/doc-align.mjs', 'screenshot-locales/screenshot-locales.mjs', 'forge/forge.mjs pr-state'],
 };
 export const scriptRulesFor = (roots = [], role = null) => [...new Set(roots.flatMap((r) => (role ? ROLE_SCRIPTS[role] : NODE_SCRIPTS).map((s) => `Bash(node ${path.join(r, 'scripts', s)}:*)`)))];
 // Script flags that run code: ui-labels' `--source 'command <cmd>'` (a shell) and visual-pack's `--playwright-from
@@ -380,13 +390,16 @@ export function commandFor(step, settings, { model, agentsPath, claude = 'claude
   const roleRules = [...def.allowedTools, ...(role.allowedTools ?? [])].filter((r) => !UNSCOPED_WRITE.test(r));
   const trees = step.worktrees ?? [];
   const dirsOf = trees.map((t) => t.path);
-  const allowed = [...withGitC(roleRules, dirsOf), ...writeAllowedFor(step, settings), ...scriptRulesFor(roots, step.role), ...pushRulesFor(trees), ...fetchRulesFor(trees)];
+  const readDirs = trees.length ? [] : [...new Set(settings.targets.map((t) => clonePath(settings, t)).filter(Boolean))];
+  const allowed = [...new Set([...withGitC(roleRules, dirsOf), ...cloneReadRules(roleRules, readDirs), ...writeAllowedFor(step, settings), ...scriptRulesFor(roots, step.role), ...pushRulesFor(trees), ...fetchRulesFor(trees), ...lsRemoteRulesFor(trees)])];
   // A role that doesn't run Playwright doesn't get it from the hub's `npx playwright:*`.
   const noPlaywright = roleRules.some((r) => r.startsWith('Bash(npx playwright')) ? [] : ['Bash(npx playwright:*)'];
   const disallowed = [...new Set([...def.disallowedTools, ...(role.disallowedTools ?? []), ...PUSH_DENIED_PLAIN, ...BRANCH_DENIED, ...deniedFor(dirsOf), ...dirsOf.flatMap((d) => [`Bash(git -C ${d} branch:*)`, `Bash(git -C ${d} grep:*)`]), ...ROLE_DENIED, ...noPlaywright, ...scriptFlagsDenied(roots), ...writeDeniedFor(settings, roots), ...(trees.length ? checkoutDeniedFor(settings) : []), ...SETUP_DENIED])];
   // The folders a session may reach (`--add-dir`, and so `cd`): the step's worktrees; a step with none (triage, the plan)
   // reads the target clones instead.
-  const dirs = [...new Set((trees.length ? dirsOf : settings.targets.map((t) => (t.path ? path.resolve(settings.root, t.path) : null))).filter((d) => d && d !== settings.root))];
+  // The toolkit roots too, so `ls` works where a session reads its scripts: probed, this loads no further skill or plugin,
+  // and `writeDeniedFor` keeps them closed to Write and the hook to `mkdir`.
+  const dirs = [...new Set([...(trees.length ? dirsOf : settings.targets.map((t) => (t.path ? path.resolve(settings.root, t.path) : null))), ...roots].filter((d) => d && d !== settings.root))];
   const args = [
     '-p',
     briefFor(step, settings),

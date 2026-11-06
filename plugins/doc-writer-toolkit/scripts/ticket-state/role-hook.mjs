@@ -11,7 +11,7 @@ const DEADLINE_MS = Number(process.env.DOC_TOOLKIT_ROLE_HOOK_DEADLINE_MS) || 200
 
 function refuse(why) {
   try {
-    fs.writeSync(2, `Refused by the role session's check: ${why}. Don't try another spelling; if the stage can't go on without it, record it failed with the reason.\n`);
+    fs.writeSync(2, `Refused by the role session's check: ${why}. Do the same work in a form that passes: one plain command per call, literal paths, or the Read, Grep and Write tools. Only when no such form exists, record the stage failed with the reason.\n`);
   } finally {
     process.exit(2);
   }
