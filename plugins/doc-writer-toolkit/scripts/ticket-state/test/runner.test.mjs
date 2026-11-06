@@ -388,6 +388,37 @@ test('on a step with worktrees, the target clones\' content roots are not writab
   assert.ok(fileDenied('Edit', held, at(clone, 'docs/a.md')), 'the other clones keep theirs');
 });
 
+test('the video gate: the writer runs video-parts by its path, from either root, and never ffmpeg or ffprobe itself, plain, after a cd or by a full path', () => {
+  const { w } = busyWorld();
+  const { allowed, denied } = rulesOf('writer', w);
+  const wide = [...allowed, ...LAYERS];
+  // A call with shell operators: the CLI checks each command in it, and runs it only when every one is allowed.
+  const verdictOfCall = (call, a, d) => {
+    const v = call.split(/\s*(?:&&|\|\||;|\|)\s*/).map((c) => verdict(c, a, d));
+    return v.includes('denied') ? 'denied' : v.every((x) => x === 'allowed') ? 'allowed' : 'not allowed';
+  };
+  const work = 'docs/x/.sources/tickets/502';
+  for (const r of ROOTS) {
+    for (const c of [`node ${r}/scripts/video-parts/video-parts.mjs --root /hub --work ${work} --video ${work}/call.mp4`, `node ${r}/scripts/video-parts/video-parts.mjs --root /hub --settings /hub/flow.json --work ${work} --video ${work}/call.mp4 --transcript-name {part}-transcript.txt --dry-run`]) {
+      assert.equal(verdict(c, wide, denied), 'allowed', c);
+    }
+  }
+  // By hand: denied even under a layer that allows them (the owner's has allowed single ffprobe calls); after a `cd`
+  // (its own call, which the writer may make) the same command; in one call with the `cd`, the `ffmpeg` part is denied.
+  const byHand = [`ffmpeg -i ${work}/call.mp4 -ss 0 -t 1800 ${work}/a.m4a`, `ffprobe -v error -show_entries format=duration ${work}/call.mp4`, 'ffmpeg -i call.mp4 -ss 0 -t 1800 a.m4a', 'ffprobe call.mp4', 'ffmpeg', 'ffprobe'];
+  const mediaLayer = [...wide, 'Bash(ffmpeg:*)', 'Bash(ffprobe:*)', 'Bash(ffmpeg *)', 'Bash(ffprobe *)', 'Bash(ffmpeg -i "/hub/docs/x/.sources/call.mp4")'];
+  assert.equal(verdict(`cd ${work}`, wide, denied), 'allowed');
+  for (const c of byHand) for (const layers of [wide, mediaLayer]) assert.equal(verdict(c, layers, denied), 'denied', c);
+  assert.equal(verdict('ffmpeg -i "/hub/docs/x/.sources/call.mp4"', mediaLayer, denied), 'denied');
+  for (const c of [`cd ${work} && ffmpeg -i call.mp4 a.m4a`, `cd ${work}; ffprobe call.mp4`]) assert.equal(verdictOfCall(c, mediaLayer, denied), 'denied', c);
+  // A full path or another way in is allowed by no rule; nor is the script by another path, or with a preload.
+  for (const c of ['/opt/homebrew/bin/ffmpeg -i call.mp4 a.m4a', '/usr/local/bin/ffprobe call.mp4', './ffmpeg -i call.mp4 a.m4a', 'npx ffmpeg -i call.mp4 a.m4a', 'node scripts/video-parts/video-parts.mjs --work x --video x/v.mp4', `node ${ROOTS[0]}/scripts/video-parts/../tracker/../../x.mjs`, `node ${ROOTS[0]}/scripts/video-parts/video-parts.mjs/../../x.mjs`, `node ${ROOTS[1]}/scripts/video-parts/video-parts.mjs/../../../../../tmp/mine.mjs --work x`, `node ${ROOTS[0]}/scripts/video-parts/video-parts.mjs.bak`, `node --require /tmp/x.js ${ROOTS[0]}/scripts/video-parts/video-parts.mjs`]) {
+    assert.notEqual(verdict(c, wide, denied), 'allowed', c);
+  }
+  // Every role has the same denial.
+  for (const role of ['triage', 'reviewer', 'translator']) assert.ok(['Bash(ffmpeg:*)', 'Bash(ffprobe:*)'].every((r) => rulesOf(role, w).denied.includes(r)), role);
+});
+
 test('the toolkit roots a session may run scripts from: the runner\'s, and each install of the plugin the hub loads', () => {
   const { w } = busyWorld();
   const home = tmp('home-');

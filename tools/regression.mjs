@@ -28,6 +28,8 @@ const STEPS = [
   { id: 'tracker', cmd: 'npm', args: ['test'], cwd: `${scripts}/tracker` },
   { id: 'forge', cmd: 'npm', args: ['test'], cwd: `${scripts}/forge` },
   { id: 'ticket-state', cmd: 'npm', args: ['test'], cwd: `${scripts}/ticket-state` },
+  // With ffmpeg on the PATH it also cuts a real 5-second video; without it those two tests are skipped.
+  { id: 'video-parts', cmd: 'npm', args: ['test'], cwd: `${scripts}/video-parts` },
   // The offline tests always; the browser test only where VISUAL_PACK_PLAYWRIGHT_FROM names a Playwright with Chromium.
   // Without it the runner exits 2 after the offline tests passed, which shows as `not run`.
   { id: 'visual-pack', cmd: 'npm', args: ['test'], cwd: `${scripts}/visual-pack`, notRunExit: 2 },
