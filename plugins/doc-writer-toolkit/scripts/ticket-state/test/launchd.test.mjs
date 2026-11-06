@@ -55,9 +55,10 @@ test('AC-3: install writes one plist and loads it; uninstall unloads it and remo
   assert.match(text, /<key>StartInterval<\/key>\n {2}<integer>300<\/integer>/);
   assert.match(text, /<string>--quiet<\/string>/);
   assert.match(text, new RegExp(`<string>${settings.root}</string>`));
-  // Paths only: the token file's path and any key stay out of the plist; PATH holds node, claude, git and gh.
+  // Paths only: the token file's path and any key stay out of the plist; PATH holds node, claude, git, gh, and ffmpeg
+  // and ffprobe for the video gate.
   assert.ok(!/token|ANTHROPIC|TRELLO|TEST_TOKEN/i.test(text));
-  assert.match(text, /<key>PATH<\/key>\n {4}<string>\/opt\/node\/bin:\/opt\/claude\/bin:\/opt\/git\/bin:\/opt\/gh\/bin:\/usr\/bin:\/bin:\/usr\/sbin:\/sbin<\/string>/);
+  assert.match(text, /<key>PATH<\/key>\n {4}<string>\/opt\/node\/bin:\/opt\/claude\/bin:\/opt\/git\/bin:\/opt\/gh\/bin:\/opt\/ffmpeg\/bin:\/opt\/ffprobe\/bin:\/usr\/bin:\/bin:\/usr\/sbin:\/sbin<\/string>/);
   if (process.platform === 'darwin') assert.equal(spawnSync('/usr/bin/plutil', ['-lint', path.join(agentsDir, `${r.label}.plist`)]).status, 0, 'a valid plist');
 
   // Installing again replaces it: still one file, one job.
@@ -87,6 +88,11 @@ test('AC-3: install stops when claude, git or gh is missing (the runs need them)
   const settings = await settingsOf();
   const agentsDir = tmp('agents-');
   assert.throws(() => install(settings, { io: { ...io(agentsDir, []), which: (n) => (n === 'gh' ? null : `/bin/${n}`) } }), /not found on PATH: gh/);
+  // ffmpeg and ffprobe are not needed to install: missing, the agent installs, says so, and its PATH goes without them.
+  const noFfmpeg = install(settings, { io: { ...io(agentsDir, []), which: (n) => (['ffmpeg', 'ffprobe'].includes(n) ? null : `/opt/${n}/bin/${n}`) } });
+  assert.deepEqual([noFfmpeg.installed, noFfmpeg.optionalMissing], [true, ['ffmpeg', 'ffprobe']]);
+  assert.match(fs.readFileSync(noFfmpeg.file, 'utf8'), /<string>\/opt\/node\/bin:\/opt\/claude\/bin:\/opt\/git\/bin:\/opt\/gh\/bin:\/usr\/bin:/);
+  fs.rmSync(noFfmpeg.file);
   const failing = { ...io(agentsDir, []), launchctl: (args) => (args[0] === 'bootstrap' ? { status: 5, stdout: '', stderr: 'Bootstrap failed: 5: Input/output error' } : { status: 3, stdout: '', stderr: '' }) };
   assert.throws(() => install(settings, { io: failing }), /bootstrap failed: Bootstrap failed/);
   assert.deepEqual(fs.readdirSync(agentsDir), []);

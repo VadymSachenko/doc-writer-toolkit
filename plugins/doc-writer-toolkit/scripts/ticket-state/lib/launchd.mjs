@@ -17,6 +17,9 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const WATCHER = path.resolve(HERE, '..', 'watcher.mjs');
 export const LABEL_PREFIX = 'dev.doc-toolkit.ticket-flow';
 export const NEEDED = ['claude', 'git', 'gh'];
+// On the PATH when found, not needed to install: the video gate's cut (`video-parts`) runs them; without them, a stage
+// that cuts a video fails and says so.
+export const OPTIONAL = ['ffmpeg', 'ffprobe'];
 
 // The label: the host folder's name (ASCII) and a short hash of its absolute path, so two hosts with the same folder
 // name never share an agent, and the label is known from the path alone (an uninstall needs no settings).
@@ -68,13 +71,15 @@ export function agentFor(settings, { noop = false, io = {} } = {}) {
   const node = io.node ?? which('node') ?? process.execPath;
   const found = Object.fromEntries(NEEDED.map((n) => [n, which(n)]));
   const missing = NEEDED.filter((n) => !found[n]);
-  const dirs = [path.dirname(node), ...NEEDED.map((n) => found[n] && path.dirname(found[n])).filter(Boolean), '/usr/bin', '/bin', '/usr/sbin', '/sbin'];
+  const optional = Object.fromEntries(OPTIONAL.map((n) => [n, which(n)]));
+  const optionalMissing = OPTIONAL.filter((n) => !optional[n]);
+  const dirs = [path.dirname(node), ...[...NEEDED.map((n) => found[n]), ...OPTIONAL.map((n) => optional[n])].filter(Boolean).map((f) => path.dirname(f)), '/usr/bin', '/bin', '/usr/sbin', '/sbin'];
   const label = labelOf(settings.root, { noop });
   const args = [node, io.watcher ?? WATCHER, noop ? '--noop' : '--quiet', '--root', settings.root, ...(settings.file && !noop ? ['--settings', settings.file] : []), ...(found.claude && !noop ? ['--claude', found.claude] : [])];
   const logFile = path.join(watchDir(settings.state), noop ? 'launchd-noop.log' : 'launchd.log');
   const file = path.join(agentsDirOf(io), `${label}.plist`);
   const text = plistText({ label, programArguments: args, workingDirectory: settings.root, intervalSeconds: Math.round(settings.schedule.watchMinutes * 60), env: { PATH: [...new Set(dirs)].join(':'), HOME: io.home ?? os.homedir() }, logFile });
-  return { label, file, text, logFile, missing, programArguments: args };
+  return { label, file, text, logFile, missing, optionalMissing, programArguments: args };
 }
 
 const defaultLaunchctl = (args) => {
@@ -108,7 +113,7 @@ export function install(settings, { noop = false, io = {} } = {}) {
     fs.rmSync(agent.file, { force: true });
     throw new CliError(`launchctl bootstrap failed: ${boot.stderr.trim() || `exit ${boot.status}`}; the plist was removed`, { code: 1 });
   }
-  return { installed: true, noop, ...agentState(agent.label, agent.file, io), logFile: agent.logFile, programArguments: agent.programArguments, everySeconds: Math.round(settings.schedule.watchMinutes * 60) };
+  return { installed: true, noop, ...agentState(agent.label, agent.file, io), ...(agent.optionalMissing.length ? { optionalMissing: agent.optionalMissing } : {}), logFile: agent.logFile, programArguments: agent.programArguments, everySeconds: Math.round(settings.schedule.watchMinutes * 60) };
 }
 
 // The agents of a host: the one its label names, and any other of ours whose plist starts the watcher for this root

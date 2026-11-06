@@ -2,19 +2,21 @@
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { CliError, videoParts } from './lib/parts.mjs';
+import { CliError, hostRoot, videoParts } from './lib/parts.mjs';
 import { loadSettings } from '../ticket-state/lib/settings.mjs';
 
 const USAGE = `video-parts --work <folder> --video <file> [options]
 
 Cuts the sound of a ticket's video into parts of at most the ticket flow settings' video.partMinutes minutes, for the
-video gate: <work>/<video name>-parts/<video name>-part-01.m4a, -02, … (AAC). ffprobe and ffmpeg run with fixed
-arguments, never through a shell. The video must be inside the work folder, the work folder inside the host root;
-nothing is written outside the work folder. Prints the videos[] entry of the videoGate record: the video and each
-part's file, start and length (seconds) and transcript, every path from the host root.
+video gate: <work>/<video file name>-parts/<video file name>-part-01.m4a, -02, … (AAC). ffprobe and ffmpeg,
+found on the PATH, run with fixed arguments, never through a shell, on local files only. The host root is the folder
+it runs in; the work folder must be inside it, the video inside the work folder and a plain video or sound file (mp4,
+mov, m4a, mkv, webm, mp3, wav, ogg, flac, aac; no playlist). Nothing is written outside the work folder.
+Prints the videos[] entry of the videoGate record: the video and each part's file, start and length (seconds) and
+transcript, every path from the host root.
 
 Options
-  --root <dir>              the host repo (default: cwd)
+  --root <dir>              the host repo: only the folder it runs in, which is the default (a check)
   --settings <file>         the ticket flow settings file (default: as ticket-state finds it)
   --work <folder>           the ticket's work folder, from the host root (the host's rules name it)
   --video <file>            the video, from the host root, inside the work folder
@@ -23,8 +25,9 @@ Options
   --dry-run                 reads the duration and prints the parts; cuts nothing
   -h, --help                this text
 
-Exit codes: 0 done · 1 ffprobe or ffmpeg missing or failed, or a video with no sound · 2 bad usage, or a path
-outside the work folder or the host root (nothing written).
+Exit codes: 0 done · 1 ffprobe or ffmpeg missing or failed, a video with no sound, or not a plain video or sound file ·
+2 bad usage, a --root other than the folder it runs in, or a path outside the work folder or the host root (nothing
+run, nothing written).
 `;
 
 const OPTIONS = {
@@ -37,7 +40,7 @@ const OPTIONS = {
   help: { type: 'boolean', short: 'h' },
 };
 
-// `io.run` replaces the program runner in tests.
+// `io.run` replaces the program runner in tests, `io.cwd` the folder it runs in.
 export async function main(argv, io = {}) {
   const { stdout = process.stdout } = io;
   const { values, positionals } = parseArgs({ args: argv, options: OPTIONS, allowPositionals: true });
@@ -46,7 +49,9 @@ export async function main(argv, io = {}) {
     return 0;
   }
   if (positionals.length) throw new CliError(`unexpected argument '${positionals[0]}'.\n\n${USAGE}`);
-  const root = path.resolve(values.root ?? process.cwd());
+  // The host root is the folder it runs in, where a role session starts: a --root elsewhere is refused, so the parts
+  // land in the host's work folder and the record's paths name them.
+  const root = hostRoot(io.cwd ?? process.cwd(), values.root);
   const settings = await loadSettings({ root, settings: values.settings });
   const result = await videoParts({
     root,

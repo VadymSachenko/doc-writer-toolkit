@@ -373,7 +373,7 @@ test('the video gate: the writer runs video-parts by its path, from either root,
   assert.equal(verdict('ffmpeg -i "/hub/docs/x/.sources/call.mp4"', mediaLayer, denied), 'denied');
   for (const c of [`cd ${work} && ffmpeg -i call.mp4 a.m4a`, `cd ${work}; ffprobe call.mp4`]) assert.equal(verdictOfCall(c, mediaLayer, denied), 'denied', c);
   // A full path or another way in is allowed by no rule; nor is the script by another path, or with a preload.
-  for (const c of ['/opt/homebrew/bin/ffmpeg -i call.mp4 a.m4a', '/usr/local/bin/ffprobe call.mp4', './ffmpeg -i call.mp4 a.m4a', 'npx ffmpeg -i call.mp4 a.m4a', 'node scripts/video-parts/video-parts.mjs --work x --video x/v.mp4', `node ${ROOTS[0]}/scripts/video-parts/../tracker/../../x.mjs`, `node ${ROOTS[0]}/scripts/video-parts/video-parts.mjs.bak`, `node --require /tmp/x.js ${ROOTS[0]}/scripts/video-parts/video-parts.mjs`]) {
+  for (const c of ['/opt/homebrew/bin/ffmpeg -i call.mp4 a.m4a', '/usr/local/bin/ffprobe call.mp4', './ffmpeg -i call.mp4 a.m4a', 'npx ffmpeg -i call.mp4 a.m4a', 'node scripts/video-parts/video-parts.mjs --work x --video x/v.mp4', `node ${ROOTS[0]}/scripts/video-parts/../tracker/../../x.mjs`, `node ${ROOTS[0]}/scripts/video-parts/video-parts.mjs/../../x.mjs`, `node ${ROOTS[1]}/scripts/video-parts/video-parts.mjs/../../../../../tmp/mine.mjs --work x`, `node ${ROOTS[0]}/scripts/video-parts/video-parts.mjs.bak`, `node --require /tmp/x.js ${ROOTS[0]}/scripts/video-parts/video-parts.mjs`]) {
     assert.notEqual(verdict(c, wide, denied), 'allowed', c);
   }
   // Every role has the same denial.
