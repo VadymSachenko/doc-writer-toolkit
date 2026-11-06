@@ -115,7 +115,8 @@ jobs:
   # tests/requirements.txt, pinned as in sme-video-requirements.txt: no ffmpeg, no tesseract, no faster-whisper.
   # 3.9 is the Python the macOS venv of that skill runs on.
   sme-video-context:
-    runs-on: ubuntu-latest
+    # Pinned: Python 3.9, the oldest version this job tests, isn't available on newer images.
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
