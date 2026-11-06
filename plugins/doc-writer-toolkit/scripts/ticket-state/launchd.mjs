@@ -49,7 +49,7 @@ export async function main(argv, io = {}) {
     const settings = await loadSettings({ root, settings: values.settings });
     if (command === 'print') {
       const a = agentFor(settings, { noop, io });
-      result = { label: a.label, file: a.file, missing: a.missing, plist: a.text };
+      result = { label: a.label, file: a.file, missing: a.missing, optionalMissing: a.optionalMissing, plist: a.text };
     } else result = install(settings, { noop, io });
   }
   stdout.write(JSON.stringify({ ok: true, command, ...result }, null, 2) + '\n');
