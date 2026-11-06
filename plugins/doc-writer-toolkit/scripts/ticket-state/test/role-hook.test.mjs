@@ -6,9 +6,9 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { parseShell, segmentMatches } from '../lib/shell-words.mjs';
 import { HOOK_VARIABLE, commandsOfRules, hookSettings, refusalOf } from '../lib/role-hook.mjs';
-import { ROLE_HOOK, ROLE_SCRIPTS, briefFor, commandFor, downloadDirsFor, spawnClaude } from '../lib/runner.mjs';
+import { ROLE_HOOK, ROLE_SCRIPTS, TOOLS_DENIED, briefFor, commandFor, downloadDirsFor, spawnClaude } from '../lib/runner.mjs';
 import { ROLE_SESSION_VARIABLE, DOWNLOAD_DIRS_VARIABLE, TRACKER_TEST_VARIABLE } from '../lib/env.mjs';
-import { isBareGit, validateJobs } from '../lib/jobs.mjs';
+import { isBareGit, jobCommand, validateJobs } from '../lib/jobs.mjs';
 import { loadSettings, localOnly, sharedAtHead } from '../lib/settings.mjs';
 import { setLocal } from '../lib/setlocal.mjs';
 import { host, rawSettings, tmp } from './fakes.mjs';
@@ -330,6 +330,20 @@ test('spawnClaude: the child gets the session\'s markers, and never a billed var
   assert.equal(seen[HOOK_VARIABLE], '{}');
   assert.equal(seen.OWN, 'kept');
   assert.ok(!('ANTHROPIC_API_KEY' in seen) && !(TRACKER_TEST_VARIABLE in seen));
+});
+
+test('whole tools no stage uses are denied in every role; the ones stages use are not, and a host job keeps its own', () => {
+  const w = world();
+  for (const name of ['Workflow', 'CronCreate', 'CronDelete', 'RemoteTrigger', 'ScheduleWakeup', 'Artifact', 'ArtifactData', 'ArtifactComments', 'SendUserFile', 'PushNotification']) assert.ok(TOOLS_DENIED.includes(name), name);
+  for (const role of ['triage', 'writer', 'reviewer', 'translator']) {
+    const { args } = commandOf(role, w);
+    const after = args.slice(args.indexOf('--disallowedTools') + 1);
+    const denied = after.slice(0, after.findIndex((a) => a.startsWith('--')) >>> 0);
+    for (const name of TOOLS_DENIED) assert.ok(denied.includes(name), `${role} denies ${name}`);
+    for (const name of ['Agent', 'Task', 'Skill', 'Monitor', 'ToolSearch', 'SendMessage', 'TaskStop', 'Read', 'Grep', 'Glob', 'Bash']) assert.ok(!denied.includes(name), `${role} keeps ${name}`);
+  }
+  const job = jobCommand({ name: 'n', every: 60, run: { skill: 'notes' } }, { settings: w.settings, roots: ROOTS });
+  assert.ok(!job.args.includes('Workflow') && !job.args.includes('WebFetch'), 'a job: the toolkit doesn\'t know what it does');
 });
 
 // ---------------------------------------------------------------- settings: the rules come from the tracked file

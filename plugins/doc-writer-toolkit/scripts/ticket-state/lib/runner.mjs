@@ -117,7 +117,11 @@ const MEDIA_DENIED = ['Bash(ffmpeg:*)', 'Bash(ffprobe:*)'];
 // Moving or removing folders, which a broad host allow would reopen, and a browser lock made by hand (no holder, so
 // nothing frees it): a role takes and frees the lock only with browser-lock.mjs.
 const FOLDER_DENIED = ['Bash(mv:*)', 'Bash(rmdir:*)', 'Bash(mkdir *.playwright.lock*)', 'Bash(mkdir .playwright.lock*)'];
-export const ROLE_DENIED = [...new Set([...GIT_PLAIN_DENIED, ...GIT_OUTPUT_DENIED, ...CODE_DENIED, ...MEDIA_DENIED, ...FOLDER_DENIED, ...MCP_DENIED])];
+// Whole tools no stage uses that run or schedule work, or send something outside the session; the hook doesn't read them.
+// A name this CLI doesn't have is ignored (probed), so the list survives CLI updates. `Agent`/`Task` (the translator's
+// workers), `SendMessage`, `TaskStop`, `ListAgents`, `Monitor`, `Skill` and `ToolSearch` stay: stages or their skills use them.
+export const TOOLS_DENIED = ['Workflow', 'CronCreate', 'CronDelete', 'CronList', 'RemoteTrigger', 'ScheduleWakeup', 'PushNotification', 'DesignSync', 'EnterWorktree', 'ExitWorktree', 'WebFetch', 'WebSearch', 'Artifact', 'ArtifactData', 'ArtifactComments', 'SendUserFile'];
+export const ROLE_DENIED = [...new Set([...GIT_PLAIN_DENIED, ...GIT_OUTPUT_DENIED, ...CODE_DENIED, ...MEDIA_DENIED, ...FOLDER_DENIED, ...MCP_DENIED, ...TOOLS_DENIED])];
 // A skill job's session: the roles' git and code denials, and the file denials (`jobDenied`). Not the MCP denials: the
 // toolkit knows nothing about what a job does, and a host's job may well work on its tracker through MCP.
 export const jobDenied = (settings, roots = scriptRoots(settings)) => [...new Set([...JOB_DENIED, ...GIT_PLAIN_DENIED, ...GIT_OUTPUT_DENIED, ...CODE_DENIED, ...writeDeniedFor(settings, roots)])];
