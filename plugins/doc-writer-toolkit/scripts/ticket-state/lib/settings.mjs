@@ -10,7 +10,7 @@ import { validateJobs } from './jobs.mjs';
 // settings:` field of CLAUDE.md, or --settings) and the owner's local file next to it (`<name>.local.json`), merged key
 // by key at any depth (a local key wins). The tracker and forge scripts read the same files the same way.
 //
-// The shared file holds `state`, `tracker`, `forge`, `targets`, `noReviewLabel`, `appRepos`, `hostRules`, `hostJobs`.
+// The shared file holds `state`, `workFolder`, `tracker`, `forge`, `targets`, `noReviewLabel`, `appRepos`, `hostRules`, `hostJobs`.
 // The local file holds `mode`, `limits`, `schedule`, `roles`, `modelLadder`, `video` and `cleanup`. Defaults below.
 
 export const MODES = ['off', 'observe', 'on'];
@@ -149,11 +149,16 @@ export function validateSettings(merged, { root, stateRootDefault }) {
   if (!Array.isArray(cleanup.keep) || cleanup.keep.some((g) => typeof g !== 'string' || !g.trim())) fail('cleanup.keep must be a list of globs');
   if (cleanup.trashDir !== null && (typeof cleanup.trashDir !== 'string' || !cleanup.trashDir.trim())) fail('cleanup.trashDir must be a folder');
 
+  // A ticket's work folder, from the host root: a role session may write there (lib/runner.mjs, `writableFor`).
+  const workFolder = merged.workFolder ?? null;
+  if (workFolder !== null && (typeof workFolder !== 'string' || !workFolder.includes('<key>') || path.isAbsolute(workFolder) || workFolder.split(/[\\/]/).includes('..'))) fail('workFolder must be a path from the host root with <key> in it, such as "work/tickets/<key>"');
+
   const stateRel = typeof merged.state === 'string' && merged.state.trim() ? merged.state : stateRootDefault;
   return {
     root,
     state: path.resolve(root, stateRel),
     stateRel,
+    workFolder,
     mode,
     tracker,
     intake,

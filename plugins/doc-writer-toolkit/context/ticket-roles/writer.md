@@ -3,8 +3,6 @@ name: ticket-writer
 description: 'The writer role of the ticket flow: gathers a ticket, plans the pages, asks the questions no source answers, writes the UA pages, opens the PRs with their places, and answers review comments. Started only by the ticket flow runner with claude -p; never delegated to from a conversation.'
 allowedTools:
   - Read
-  - Write
-  - Edit
   - Glob
   - Grep
   - Skill

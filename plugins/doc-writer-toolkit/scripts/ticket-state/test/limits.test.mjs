@@ -387,7 +387,10 @@ test('settings: bad values stop with the key named', () => {
   bad({ roles: { writer: { model: '' } } }, /roles.writer.model/);
   bad({ limits: { open: 0 } }, /limits.open/);
   bad({ limits: { startOrder: 'random' } }, /limits.startOrder must be one of priority, easiest/);
+  for (const workFolder of ['work/tickets', '/abs/<key>', '../out/<key>', 'work/../../<key>', 7]) bad({ workFolder }, /workFolder must be a path from the host root/);
+  assert.equal(validateSettings(rawSettings({ workFolder: 'work/<key>' }), { root, stateRootDefault: '.x/' }).workFolder, 'work/<key>');
   const d = settingsFor(root);
+  assert.equal(d.workFolder, null);
   assert.deepEqual([d.limits.open, d.limits.startOrder], [null, 'priority']);
   const s = settingsFor(root, { cleanup: { trashDir: 'trash-here' } });
   assert.equal(s.cleanup.trashDir, path.join(root, 'trash-here'));

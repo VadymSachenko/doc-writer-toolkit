@@ -199,6 +199,7 @@ The keys the `ticket-state` scripts add to that file. The shared file is committ
 | Key | File | Value | If absent |
 |---|---|---|---|
 | `state` | shared | The git-ignored folder for the ledgers, locks, reports and run logs, relative to the repo root | `<Toolkit state root>/ticket-flow/` |
+| `workFolder` | shared | A ticket's work folder from the repo root, with `<key>` in it: a role session may write there | none: no such folder is writable |
 | `tracker.docLabels`, `tracker.quietHours`, `tracker.triageMarker`, `tracker.priority` | shared | The labels that confirm docs are needed; the quiet hours before triage; the triage comment's header; the priority labels | none, `2`, none, `high` and `low` |
 | `targets[].appLabel`, `.path`, `.uaRoot`, `.base` | shared | A target's app label, its repo's path from the host root, its UA content root, its base branch | `uaRoot` is required; `base` is `main` |
 | `hostRules`, `hostJobs` | shared | The host's rule files for the role sessions; the host's jobs the watcher starts (a watched list quiet for `quietHours`, or `every` minutes; a `script` or a `skill`) | none |

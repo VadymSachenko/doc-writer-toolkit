@@ -87,15 +87,15 @@ export const JOB_DENIED = [...new Set([...PUSH_DENIED, ...BRANCH_DENIED, ...bran
 
 // ------------------------------------------------------------------ what a role session may run
 
-// A role session loads every settings layer: the owner's (~/.claude/settings.json), the hub's project and local files,
-// and the runner's flags; a deny in any layer wins over an allow in any other. The owner's and the hub's layers allow
-// far more than a role needs (`git push:*`, `git fetch:*`, `git branch *`, `git stash:*`, `git mv *`,
-// `git cherry-pick *`, `python3 -c ' *`, `gh pr *`, unscoped Write and Edit, the tracker's MCP tools), so the runner
-// denies, in every role, what no stage runs. Mutating git commands in the plain spelling (a plain command runs in
+// A role session loads the hub's project and local files and the runner's flags, never the owner's user layer
+// (`ROLE_SETTING_SOURCES`); a deny in any layer wins over an allow in any other. The hub's layers allow far more than a
+// role needs (`git push:*`, `git fetch:*`, `git branch:*`, `git stash:*`, `git mv *`, `git cherry-pick *`,
+// `python3 -c ' *`, `gh pr *`), so the runner denies, in every role, what no stage runs, and these denials guard against
+// a mistake in a host's layer too. Mutating git commands in the plain spelling (a plain command runs in
 // whatever checkout the session's folder holds, the hub's own after a denied `cd`): the role's own changes go through
-// `git -C <worktree>` only. `git grep` runs a command (`-O<cmd>`, `--open-files-in-pager`); the Grep tool searches.
+// `git -C <worktree>` only. `git grep` runs a command (`-O<cmd>`, `--open-files-in-pager`), and so does `git ls-remote` (`--upload-pack=<cmd>`); the Grep tool searches.
 // `--output=<file>` (log, diff, show) writes a file past the Edit denials; git takes no shorter abbreviation of it.
-const GIT_PLAIN_DENIED = ['add', 'commit', 'grep', 'push', 'branch', 'fetch', 'stash', 'cherry-pick', 'mv', 'rm', 'clean', 'tag', 'remote', 'config', 'update-ref', 'reflog', 'gc', 'replace', 'notes', 'submodule', 'filter-branch', 'worktree add', 'worktree remove', 'worktree move', 'worktree prune', 'worktree lock', 'worktree unlock', 'checkout', 'switch', 'pull', 'reset', 'rebase', 'merge', 'restore', 'revert'].map((c) => `Bash(git ${c}:*)`);
+const GIT_PLAIN_DENIED = ['add', 'commit', 'grep', 'push', 'branch', 'fetch', 'stash', 'cherry-pick', 'mv', 'rm', 'clean', 'tag', 'remote', 'config', 'update-ref', 'reflog', 'gc', 'replace', 'notes', 'submodule', 'filter-branch', 'worktree add', 'worktree remove', 'worktree move', 'worktree prune', 'worktree lock', 'worktree unlock', 'ls-remote', 'checkout', 'switch', 'pull', 'reset', 'rebase', 'merge', 'restore', 'revert'].map((c) => `Bash(git ${c}:*)`);
 const GIT_OUTPUT_DENIED = ['Bash(git * --output=*)', 'Bash(git * --output *)'];
 // Code from a string, standard input or a file the session wrote: roles run only the toolkit's scripts by name
 // (`scriptRulesFor`). The interpreters a layer allows (`python3 -c ' *`, `python3 <a relative file>`), the shells, and
@@ -151,7 +151,7 @@ export function scriptRoots(settings, { home = os.homedir(), env = process.env }
   return [...new Set(roots.map((r) => path.resolve(r)))];
 }
 
-// Files a session may not write, whatever a layer allows (the owner's unscoped Write and Edit): what widens its own
+// Files a session may not write, whatever a layer allows (a hub's `Edit(**)`) or `writeAllowedFor` opens: what widens its own
 // rules or runs code on the next git command or session (the settings layers, `.git/` hooks and config), the toolkit's
 // scripts it may run, the ticket flow's own state (only `record` writes it; a session's files go in `<state>/tmp/`), and
 // the hub's protected build files, in any folder. Also what runs code later: a host's `CLAUDE*.md` (a `UI label source:
@@ -161,8 +161,8 @@ export function scriptRoots(settings, { home = os.homedir(), env = process.env }
 // `Edit(...)` deny covers Write too. A `.env` file is not read (a mistake guard: the scripts and Playwright's specs read
 // it as processes); `.env.example`, which holds no values, is. A deny can't except one name, so the denied ones are named.
 const ENV_FILES = ['.env', '.env.local', '.env.*.local', '.env.development', '.env.production', '.env.test', '.env.staging', '.env.dev', '.env.prod'];
+const abs = (p) => `//${String(p).replace(/^\/+/, '')}`;
 export function writeDeniedFor(settings, roots = []) {
-  const abs = (p) => `//${String(p).replace(/^\/+/, '')}`;
   const state = path.resolve(settings.state);
   const own = [settings.file, settings.localFile, settings.file ? settings.file.replace(/(\.json)?$/, '.local.json') : null].filter(Boolean).map((f) => path.resolve(settings.root, f));
   return [
@@ -216,10 +216,32 @@ export function checkoutDeniedFor(settings) {
   const holdsState = (root) => inside(root) && !path.relative(root, state).startsWith('.');
   return [...new Set(clones.flatMap((clone) => {
     const { ua, en } = contentRootsOf(clone);
-    const abs = (p) => `//${p.replace(/^\/+/, '')}`;
     const uaRoots = ua.map((r) => path.resolve(clone, r)).filter((r) => !holdsState(r));
     return [...uaRoots.flatMap((r) => [`Edit(${abs(r)}/${FIRST_CHAR}*)`, `Edit(${abs(r)}/${FIRST_CHAR}*/**)`]), ...en.map((r) => path.resolve(clone, r)).filter((r) => !inside(r)).map((r) => `Edit(${abs(r)}/**)`)];
   }))];
+}
+
+// Which settings layers a role session loads: the hub's (its CLAUDE.md, skills, plugin, hooks and rules), not the
+// owner's. The owner's layer allows Edit and Write with no scope and adds folders of its own, and no deny list can hold
+// those in. `--setting-sources` also decides CLAUDE.md and `.claude/skills/`: with `project` gone they go too.
+export const ROLE_SETTING_SOURCES = 'project,local';
+
+// A file-writing tool with no scope, in a role file or in `roles.<role>.allowedTools`: dropped, so that a session's
+// writes are only `writeAllowedFor`'s. A scoped rule an owner adds stays.
+const UNSCOPED_WRITE = /^(Edit|Write|MultiEdit|NotebookEdit)(\(\*{1,2}\))?$/;
+
+// The folders a session may write in with Write and Edit: the step's worktrees and the flow's `<state>/tmp/`; and, for
+// every role but triage, the work folder of each of the step's tickets (`workFolder` in the settings). `Edit(...)`
+// covers Write too.
+export function writableFor(step, settings) {
+  const keys = step.role === 'triage' || !settings.workFolder ? [] : step.keys.filter((k) => /^[\w-][\w.-]*$/.test(k));
+  return [...new Set([...(step.worktrees ?? []).map((t) => t.path), path.join(path.resolve(settings.state), 'tmp'), ...keys.map((k) => path.resolve(settings.root, settings.workFolder.replace('<key>', k)))])];
+}
+// A step with no worktree (the plan, a video's import) writes its evidence and its section plan in the `.sources/`
+// folders of the target clones (section-readiness, app-explorer, section-planner, convert-sme-input). Never the pages.
+export function writeAllowedFor(step, settings) {
+  const sources = step.role === 'triage' || step.worktrees?.length ? [] : [...new Set(settings.targets.map((t) => clonePath(settings, t)).filter(Boolean))].map((c) => `Edit(${abs(c)}/**/.sources/**)`);
+  return [...writableFor(step, settings).map((d) => `Edit(${abs(d)}/**)`), ...sources];
 }
 
 // ------------------------------------------------------------------ roles
@@ -297,6 +319,7 @@ export function briefFor(step, settings) {
     '',
     `Host repo: ${root}`,
     `The toolkit's scripts folder: ${path.join(PLUGIN_ROOT, 'scripts')}`,
+    `You may write with Write and Edit only in: ${writableFor(step, settings).join(', ')}${!step.worktrees?.length && step.role !== 'triage' ? ', and the `.sources/` folders of the target repos' : ''}. Every other write is denied.`,
     `Settings (merged): \`${ts} config ${at}\``,
     `The ticket now: \`${ts} status ${at} --ticket ${step.keys[0]}\``,
     rules ? `Host rules:\n${rules}` : null,
@@ -321,11 +344,12 @@ export function commandFor(step, settings, { model, agentsPath, claude = 'claude
   const role = settings.roles[step.role];
   const def = readRole(step.role, roleDir);
   // Every git rule in both spellings, plain and `git -C <worktree>` for each worktree of the step (lib/worktree.mjs); the
-  // toolkit's scripts by name; and the denials every role carries (`ROLE_DENIED`, `writeDeniedFor`).
-  const roleRules = [...def.allowedTools, ...(role.allowedTools ?? [])];
+  // toolkit's scripts by name; writes only in the step's own folders (`writeAllowedFor`); and the denials every role
+  // carries (`ROLE_DENIED`, `writeDeniedFor`), which guard against a mistake inside those folders and in a host's layer.
+  const roleRules = [...def.allowedTools, ...(role.allowedTools ?? [])].filter((r) => !UNSCOPED_WRITE.test(r));
   const trees = step.worktrees ?? [];
   const dirsOf = trees.map((t) => t.path);
-  const allowed = [...withGitC(roleRules, dirsOf), ...scriptRulesFor(roots), ...pushRulesFor(trees), ...fetchRulesFor(trees)];
+  const allowed = [...withGitC(roleRules, dirsOf), ...writeAllowedFor(step, settings), ...scriptRulesFor(roots), ...pushRulesFor(trees), ...fetchRulesFor(trees)];
   // A role that doesn't run Playwright doesn't get it from the hub's `npx playwright:*`.
   const noPlaywright = roleRules.some((r) => r.startsWith('Bash(npx playwright')) ? [] : ['Bash(npx playwright:*)'];
   const disallowed = [...new Set([...def.disallowedTools, ...(role.disallowedTools ?? []), ...PUSH_DENIED_PLAIN, ...BRANCH_DENIED, ...deniedFor(dirsOf), ...dirsOf.flatMap((d) => [`Bash(git -C ${d} branch:*)`, `Bash(git -C ${d} grep:*)`]), ...ROLE_DENIED, ...noPlaywright, ...scriptFlagsDenied(roots), ...writeDeniedFor(settings, roots), ...(trees.length ? checkoutDeniedFor(settings) : []), ...SETUP_DENIED])];
@@ -341,6 +365,7 @@ export function commandFor(step, settings, { model, agentsPath, claude = 'claude
     ...(role.effort ? ['--effort', role.effort] : []),
     '--max-turns', String(role.maxTurns ?? 100),
     ...(role.maxBudgetUsd !== undefined ? ['--max-budget-usd', String(role.maxBudgetUsd)] : []),
+    '--setting-sources', ROLE_SETTING_SOURCES,
     '--permission-prompts', 'none',
     '--output-format', 'json',
     ...(allowed.length ? ['--allowedTools', ...allowed] : []),

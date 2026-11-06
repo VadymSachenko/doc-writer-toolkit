@@ -3,8 +3,6 @@ name: ticket-translator
 description: 'The translator role of the ticket flow: the EN translation, the further locales, the alignment, the UI label sync and the build of a PR in its final review, and the re-sync after the owner''s final edit. Started only by the ticket flow runner with claude -p; never delegated to from a conversation.'
 allowedTools:
   - Read
-  - Write
-  - Edit
   - Glob
   - Grep
   - Skill
