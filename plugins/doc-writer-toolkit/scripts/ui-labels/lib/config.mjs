@@ -128,8 +128,8 @@ export function requireSource(settings) {
     );
   }
   const source = parseSource(settings.sourceSpec);
-  // A `command` source is a shell line from a CLAUDE.md, and a role session picks the folder with `--root`. On a filesystem
-  // that ignores case, a file it wrote as `claude.md` is read as that CLAUDE.md, so a session runs no such source at all.
+  // A `command` source is a shell line from the CLAUDE.md of whichever folder `--root` names, and a role session picks that
+  // folder: such a session runs no `command` source at all.
   if (source.type === 'command' && process.env.DOC_TOOLKIT_ROLE_SESSION) throw new CliError('a `command` UI label source is refused in a role session: run it by hand, or declare a `github` source', { code: 2 });
   return source;
 }

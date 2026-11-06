@@ -305,7 +305,7 @@ test('a role session carries the hook, its config and the markers; a hub\'s disa
     const s = JSON.parse(cmd.args[cmd.args.indexOf('--settings') + 1]);
     assert.equal(s.disableAllHooks, false, role);
     const hook = s.hooks.PreToolUse[0];
-    assert.equal(hook.matcher, 'Bash');
+    assert.equal(hook.matcher, 'Bash|Monitor', 'Monitor runs a command under the Bash rules');
     assert.ok(hook.hooks[0].command.includes(ROLE_HOOK));
     assert.match(hook.hooks[0].command, /\|\| exit 2$/);
     assert.ok(hook.hooks[0].timeout * 1000 > 20000, 'the CLI\'s timeout is far above the hook\'s own deadline');

@@ -292,9 +292,11 @@ export const shellQuote = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 // local layer would otherwise switch it off (probed: the flag layer wins). The CLI lets a command through when its hook
 // exits 1, crashes, is killed or prints something else, and only exit 2 or a deny stops it (probed), so `|| exit 2` turns
 // every failure into a refusal. A hook the CLI times out is let through, and the shell line dies with it (probed), so
-// `timeout` is far above the hook's own deadline (`role-hook.mjs`).
+// `timeout` is far above the hook's own deadline (`role-hook.mjs`). Monitor runs a shell command under the Bash rules, and
+// a hook on Bash alone doesn't see it (probed).
 export const HOOK_TIMEOUT_SECONDS = 120;
+export const HOOK_MATCHER = 'Bash|Monitor';
 export const hookSettings = (hookFile, node = process.execPath) => ({
   disableAllHooks: false,
-  hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: `${shellQuote(node)} ${shellQuote(hookFile)} || exit 2`, timeout: HOOK_TIMEOUT_SECONDS }] }] },
+  hooks: { PreToolUse: [{ matcher: HOOK_MATCHER, hooks: [{ type: 'command', command: `${shellQuote(node)} ${shellQuote(hookFile)} || exit 2`, timeout: HOOK_TIMEOUT_SECONDS }] }] },
 });
