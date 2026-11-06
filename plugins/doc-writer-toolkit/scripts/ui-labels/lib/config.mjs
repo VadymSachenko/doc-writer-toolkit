@@ -92,6 +92,8 @@ export function ticketsFromBranch(branch) {
 }
 
 export async function loadSettings(values) {
+  // A role session of the ticket flow (the runner sets the marker): `--source command …` would run a shell of its choosing.
+  if (process.env.DOC_TOOLKIT_ROLE_SESSION && values.source !== undefined) throw new CliError('--source is refused in a role session: the UI label source comes from the project\'s CLAUDE.md', { code: 2 });
   const root = path.resolve(values.root ?? process.cwd());
   const claude = await loadClaudeConfig(root);
   const pick = (flag, field) => values[flag] ?? claude[field];
@@ -125,7 +127,11 @@ export function requireSource(settings) {
       { code: 2, data: { missing: ['UI label source'] } },
     );
   }
-  return parseSource(settings.sourceSpec);
+  const source = parseSource(settings.sourceSpec);
+  // A `command` source is a shell line from a CLAUDE.md, and a role session picks the folder with `--root`. On a filesystem
+  // that ignores case, a file it wrote as `claude.md` is read as that CLAUDE.md, so a session runs no such source at all.
+  if (source.type === 'command' && process.env.DOC_TOOLKIT_ROLE_SESSION) throw new CliError('a `command` UI label source is refused in a role session: run it by hand, or declare a `github` source', { code: 2 });
+  return source;
 }
 
 // UA/EN root pairs. The unprefixed fields (`UA content root:`, `EN i18n root:`, `UA URL prefix:`, `Translation scope:`,

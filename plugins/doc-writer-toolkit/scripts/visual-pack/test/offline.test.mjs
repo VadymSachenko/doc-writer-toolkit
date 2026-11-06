@@ -122,6 +122,9 @@ test('settings: the range is required, the columns come from docusaurus.config, 
   assert.equal(o.playwrightFrom, '/somewhere');
   const f = await loadPackSettings({ root: dir, range, 'playwright-from': dir, out: 'sheet-out' }, { VISUAL_PACK_PLAYWRIGHT_FROM: '/somewhere' });
   assert.equal(f.playwrightFrom, dir, 'a flag beats the environment');
+  // In a role session (the runner's marker), the flag runs JavaScript from a folder of the session's choosing: refused.
+  await assert.rejects(loadPackSettings({ root: dir, range, 'playwright-from': dir }, { DOC_TOOLKIT_ROLE_SESSION: 'reviewer' }), (e) => e.exitCode === 2 && /--playwright-from/.test(e.message));
+  assert.equal((await loadPackSettings({ root: dir, range }, { DOC_TOOLKIT_ROLE_SESSION: 'reviewer' })).playwrightFrom, dir, 'the session\'s own default stays');
   assert.equal(f.outDir, path.join(dir, 'sheet-out'));
   await assert.rejects(loadPackSettings({ root: dir, range, viewport: 'wide' }), (e) => e.exitCode === 2);
   await assert.rejects(loadPackSettings({ root: dir, range, jobs: '0' }), (e) => e.exitCode === 2);

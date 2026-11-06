@@ -44,7 +44,7 @@ Options
   --attachment <id|name>, --out <file>, --overwrite
   --text <t>, --text-file <file|->   the text (a file, or - for stdin; stored exactly, U+200C kept)
   --desc <t>, --desc-file <file|->, --name <n>, --label <name> (repeatable), --unless-header <h>
-  --origin <url>          the tracker's API origin (tests: a local server)
+  --origin <url>          the tracker's API origin: only under DOC_TOOLKIT_TRACKER_TEST (the tests' local server)
   -h, --help              this text
 `;
 
@@ -89,6 +89,30 @@ function textOf(values, flag, io) {
   }
 }
 
+// In a role session (the runner sets the marker, and the folders) a download goes only into the ticket's work folder or
+// the flow's `tmp/`, whatever the links on the way: both sides are compared as real paths. Elsewhere, `--out` is free.
+function checkDownload(out, env) {
+  if (!env.DOC_TOOLKIT_ROLE_SESSION || out === undefined) return;
+  let dirs = [];
+  try {
+    dirs = JSON.parse(env.DOC_TOOLKIT_DOWNLOAD_DIRS).filter((d) => typeof d === 'string');
+  } catch {
+    /* no list: nothing is open */
+  }
+  const real = (p) => {
+    try {
+      return fs.realpathSync(p);
+    } catch {
+      return null;
+    }
+  };
+  const dest = path.resolve(out);
+  const parent = real(path.dirname(dest));
+  const open = parent && dirs.map(real).filter(Boolean).some((d) => parent === d || parent.startsWith(`${d}${path.sep}`));
+  if (!open) throw new CliError(`in a role session --out goes only in: ${dirs.join(', ') || 'no folder'} (the folder must exist); ${dest} isn't there`, { code: 2 });
+  if (fs.lstatSync(dest, { throwIfNoEntry: false })?.isSymbolicLink()) throw new CliError(`${dest} is a link: a download doesn't write through one`, { code: 2 });
+}
+
 // `io` carries everything the run touches, so tests can replace it: stdout, stderr, env, fetchImpl, sleep, adapter.
 export async function main(argv, io = {}) {
   const { stdout = process.stdout, env = process.env } = io;
@@ -104,6 +128,10 @@ export async function main(argv, io = {}) {
     throw new CliError(TAKES_CARD.includes(command) ? `${command} needs the card.\n\n${USAGE}` : `unexpected argument '${card}'`, { code: 2 });
   }
   if (rest.length) throw new CliError(`unexpected argument '${rest[0]}'`, { code: 2 });
+
+  // `--origin` sends the tracker's key and token to that origin: the tests' fake server, and nothing else.
+  if (values.origin !== undefined && !env.DOC_TOOLKIT_TRACKER_TEST) throw new CliError('--origin sends the tracker\'s key and token to that origin, so it works only under the tests\' marker', { code: 2 });
+  if (command === 'download-attachment') checkDownload(values.out, env);
 
   const root = path.resolve(values.root ?? process.cwd());
   const settings = await loadSettings({ root, settings: values.settings });

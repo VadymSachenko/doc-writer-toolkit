@@ -383,9 +383,9 @@ test('AC-3, AC-7: with the owner\'s and the hub\'s layers loaded, every plain-sp
   // Each stage's own commands, by role (the scripts from both roots: the runner's and the installed plugin's).
   const OWN = {
     triage: [`node ${ROOTS[0]}/scripts/tracker/tracker.mjs read-card abc`, `node ${ROOTS[0]}/scripts/ticket-state/ticket-state.mjs record 502 --stage triage`, `node ${ROOTS[0]}/scripts/ticket-state/ticket-state.mjs status --root /hub --ticket 502`, `node ${R}/scripts/ticket-state/ticket-state.mjs config --root /hub`, 'git log -1', 'ls docs'],
-    writer: [script('tracker/tracker.mjs', ' move abc --to inProgress'), script('forge/forge.mjs', ' open-pr --repo guide-docs'), script('ui-labels/ui-labels.mjs', ' check'), script('section-state/section-state.mjs', ' status docs/x'), script('ticket-state/ticket-state.mjs', ' record 502 --stage write'), `git -C ${WT} add -A`, `git -C ${WT} commit -m "Write the page"`, `git -C ${WT} push origin HEAD:refs/heads/ticket-71`, `git -C ${WT} fetch origin`, 'npx playwright test scenario.spec.ts', 'mkdir -p docs/x/.assets'],
-    reviewer: [script('doc-align/doc-align.mjs', ' a.md b.md'), script('visual-pack/visual-pack.mjs', ' --base main'), script('ui-labels/ui-labels.mjs', ' check --root /hub'), `git -C ${WT} diff origin/main`, `git -C ${WT} commit -m "Fix the style"`, `git -C ${WT} push origin HEAD:refs/heads/ticket-71`],
-    translator: [script('locale-sync/locale-sync.mjs', ' status'), script('screenshot-locales/screenshot-locales.mjs', ` pairs --root ${WT} --base origin/main`), 'npm run build', 'npx docusaurus build', `git -C ${WT} add -A`, `git -C ${WT} push origin HEAD:refs/heads/ticket-71`],
+    writer: [script('tracker/tracker.mjs', ' move abc --to inProgress'), script('forge/forge.mjs', ' open-pr --repo guide-docs'), script('ui-labels/ui-labels.mjs', ' check'), script('screenshot-locales/screenshot-locales.mjs', ' paths docs/x'), script('video-parts/video-parts.mjs', ' --root /hub'), script('ticket-state/browser-lock.mjs', ' take --root /hub'), script('ticket-state/ticket-state.mjs', ' record 502 --stage write'), `git -C ${WT} add -A`, `git -C ${WT} commit -m "Write the page"`, `git -C ${WT} push origin HEAD:refs/heads/ticket-71`, `git -C ${WT} fetch origin`, 'npx playwright test scenario.spec.ts', 'mkdir -p docs/x/.assets'],
+    reviewer: [script('visual-pack/visual-pack.mjs', ' --base main'), script('ticket-state/ticket-state.mjs', ' record 502 --stage uaReview'), `git -C ${WT} diff origin/main`, `git -C ${WT} commit -m "Fix the style"`, `git -C ${WT} push origin HEAD:refs/heads/ticket-71`],
+    translator: [script('locale-sync/locale-sync.mjs', ' status'), script('screenshot-locales/screenshot-locales.mjs', ` pairs --root ${WT} --base origin/main`), script('doc-align/doc-align.mjs', ' a.md b.md'), script('ui-labels/ui-labels.mjs', ' check --root /hub'), 'npm run build', 'npx docusaurus build', `git -C ${WT} add -A`, `git -C ${WT} push origin HEAD:refs/heads/ticket-71`],
   };
   const BAD = [
     // Plain-spelling changes, after a `cd` (the reviewer's four, and the rest).
@@ -540,8 +540,9 @@ test('the toolkit roots a session may run scripts from: the runner\'s, and each 
 });
 
 test('AC-5: a host job can\'t push, change a branch or fetch, in the plain or git -C spelling (unquoted), with a broad git allow list', () => {
-  const w = world({ extra: { hostJobs: [{ name: 'notes', every: 60, run: { skill: 'notes-writer', allowedTools: ['Bash(git:*)', 'Bash(git *)', 'Bash(git -C *)'] } }] } });
-  const { args } = jobCommand(w.settings.hostJobs[0], { settings: w.settings });
+  // Settings validation refuses a bare git prefix now (role-hook.test.mjs); the denials are still there under one that slips through.
+  const w = world();
+  const { args } = jobCommand({ name: 'notes', every: 60, run: { skill: 'notes-writer', allowedTools: ['Bash(git:*)', 'Bash(git *)', 'Bash(git -C *)'] } }, { settings: w.settings });
   const allowed = args.slice(args.indexOf('--allowedTools') + 1, args.indexOf('--disallowedTools'));
   const denied = args.slice(args.indexOf('--disallowedTools') + 1);
   for (const c of ['git branch -D other', 'git branch -m own own2', 'git -C /any branch -D other', 'git -C /any branch -m own own2', 'git fetch origin +refs/heads/main:refs/heads/other', 'git fetch origin main:other', 'git -C /any fetch origin main:other', 'git -C /any fetch', 'git push --force origin x', 'git -C /any push -f origin x',
