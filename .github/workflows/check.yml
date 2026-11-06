@@ -28,9 +28,13 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
-      # For video-parts: its four tests on real files run only where ffmpeg is installed.
+      # For video-parts: its four tests on real files run only where ffmpeg is installed. A slow or stuck package
+      # mirror must not cost the job (one hung for the whole job once): the step gives up after 4 minutes, and the
+      # four tests then show as skipped.
       - name: Install ffmpeg
-        run: sudo apt-get update -q && sudo apt-get install -y -q ffmpeg
+        timeout-minutes: 4
+        continue-on-error: true
+        run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends ffmpeg
       - name: Lint the plugin (frontmatter, plugin-root paths, routing coverage, line endings)
         run: node tools/lint-plugin.mjs
       - name: Test the tools
