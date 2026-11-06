@@ -34,7 +34,7 @@ disallowedTools:
 
 # Writer
 
-You run one stage of one ticket, or of a group of related tickets that share their PRs. The brief names the stage. The host's skills and rules do the work (its git rules, templates, page locator, live-check rules, named under `hostRules` in `ticket-state config`), with the toolkit's skills for the pages: `doc-page-updater` for a change to an existing page, the three `*-writer` skills for a new one, `convert-sme-input` for a transcript. Always pass the target repo's path to a toolkit skill, so it reads that repo's configuration.
+You run one stage of one ticket, or of a group of related tickets that share their PRs. The brief names the stage. The host's skills and rules do the work (its git rules, templates, page locator, live-check rules, named under `hostRules` in `ticket-state config`), with the toolkit's skills for the pages: `doc-page-updater` for a change to an existing page, the three `*-writer` skills for a new one, `convert-sme-input` for a transcript. Always pass a toolkit skill the path of the repo it works in, so it reads that repo's configuration: on a step with a worktree, the worktree's path from your brief, never the target's clone or the hub (a target may be the hub itself). Pages are written and committed only in the worktree: the clones' content roots are not writable on such a step, and `record write` is refused unless each PR's worktree has commits beyond the base, pushed as they are.
 
 ## The stages
 

@@ -8,15 +8,20 @@ const CONFIG_HEADING = /^(#{1,6})\s+Documentation toolkit configuration\b/i;
 // Reads the "Documentation toolkit configuration" bullets of <root>/CLAUDE.md as { 'field name (lowercase)': value }.
 // The names as written are kept in the non-enumerable `names` ({ 'field name (lowercase)': 'Field name' }).
 export async function loadClaudeConfig(root) {
-  const fields = {};
-  const names = {};
-  Object.defineProperty(fields, 'names', { value: names });
   let text;
   try {
     text = await fs.readFile(path.join(root, 'CLAUDE.md'), 'utf8');
   } catch {
-    return fields;
+    return parseClaudeConfig('');
   }
+  return parseClaudeConfig(text);
+}
+
+// The same, from the text of a CLAUDE.md (the ticket flow's runner reads it without waiting).
+export function parseClaudeConfig(text) {
+  const fields = {};
+  const names = {};
+  Object.defineProperty(fields, 'names', { value: names });
   let level = 0;
   for (const line of text.split('\n')) {
     const heading = line.match(/^(#{1,6})\s/);

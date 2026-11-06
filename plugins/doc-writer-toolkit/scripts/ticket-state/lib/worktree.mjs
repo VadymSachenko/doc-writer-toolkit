@@ -179,6 +179,27 @@ export function ensureWorktree(settings, pr) {
   return { repo: pr.repo, branch: pr.branch, base, path: wt, clone, head: tryRun(wt, ['rev-parse', 'HEAD']), push: `git -C ${wt} push origin HEAD:refs/heads/${pr.branch}`, linked, missing, notes, stuck };
 }
 
+// What a write left on one PR branch, checked in its worktree: commits beyond the base, and the branch on origin at the
+// worktree's head. Returns { head, ahead } or { error }. A worktree the write never touched, a commit made elsewhere (in
+// an owner's checkout), or a push of another head is not a written branch. No worktree on this machine: the check
+// can't run, so the write can't pass (the runner makes the worktree before the write).
+export function writtenIn(settings, pr) {
+  const wt = worktreePath(settings, pr);
+  if (!wt || !fs.existsSync(wt)) return { error: `no worktree of ${pr.repo} ${pr.branch} at ${wt ?? '(no targets[].path)'}: the pages are written and committed in the worktree the runner makes` };
+  const head = tryRun(wt, ['rev-parse', 'HEAD']);
+  if (!head) return { error: `${wt} is not a git worktree` };
+  const base = pr.base ?? targetOf(settings, pr)?.base ?? 'main';
+  const baseRef = hasRef(wt, `refs/remotes/origin/${base}`) ? `origin/${base}` : base;
+  const ahead = Number(tryRun(wt, ['rev-list', '--count', `${baseRef}..HEAD`]) ?? 0);
+  if (!ahead) return { error: `the worktree ${wt} has no commit beyond ${baseRef}: the pages were not committed there` };
+  const remote = tryRun(wt, ['ls-remote', 'origin', `refs/heads/${pr.branch}`]);
+  if (remote === null) return { error: `could not read ${pr.branch} from origin` };
+  const pushed = remote.split(/\s/)[0] || null;
+  if (!pushed) return { error: `${pr.branch} is not on origin: push it with git -C ${wt} push origin HEAD:refs/heads/${pr.branch}` };
+  if (pushed !== head) return { error: `origin has ${pr.branch} at ${pushed.slice(0, 7)}, the worktree is at ${head.slice(0, 7)}: push the worktree's head` };
+  return { head, ahead };
+}
+
 // The PRs a step's session works on: the step's PR, or every open PR of its tickets with a branch.
 export function prsForStep(step, ledgers) {
   if (!TREE_STAGES.includes(step.stage)) return [];

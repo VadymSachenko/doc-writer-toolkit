@@ -513,6 +513,39 @@ test('AC-3: a hand commit after ready for merge that changes only a UA image: th
   assert.match(JSON.stringify(l), new RegExp(`${UK_IMG.replace(/\./g, '\\.')} changed without`));
 });
 
+test('record write is done only when the worktree holds commits beyond the base, pushed as they are; never for a page written in an owner\'s checkout', async () => {
+  const c = card({ number: 1502, status: 'inProgress' });
+  const w = world({ cards: [c] });
+  const fx = withClone(w);
+  const entry = { repo: 'guide-docs', targets: ['guide'], review: 'sme', branch: 'ticket-80', base: 'main' };
+  ledger(w, c, { stages: { start: 'done', plan: 'done' }, prs: [entry] });
+  const tree = ensureWorktree(w.settings, entry);
+  const write = () => runRecord({ settings: w.settings, clients: w.clients(), key: '1502', stage: 'write', status: 'done', result: { prs: [{ repo: 'guide-docs', branch: 'ticket-80' }] }, now: NOW });
+  const refusedWith = (re) => assert.rejects(write(), (e) => e.refused === 'notWritten' && re.test(e.message));
+  // The plan's PRs are in the ledger, but a write names its own.
+  await assert.rejects(runRecord({ settings: w.settings, clients: w.clients(), key: '1502', stage: 'write', status: 'done', result: {}, now: NOW }), (e) => e.refused === 'noPr');
+  // The worktree as the runner made it: nothing written.
+  await refusedWith(/no commit beyond origin\/main/);
+  // The page written and committed in the owner's checkout instead: the worktree still holds nothing.
+  fx.clone.commit({ 'docs/x/new.md': '# Нова\n' }, 'Written in the clone');
+  await refusedWith(/no commit beyond origin\/main/);
+  // Committed in the worktree, not pushed.
+  fs.writeFileSync(path.join(tree.path, 'docs/x/new.md'), '# Нова\n');
+  const g = (...a) => execFileSync('git', ['-C', tree.path, ...a], { encoding: 'utf8' }).trim();
+  g('add', 'docs/x/new.md');
+  g('-c', 'user.email=s@example.com', '-c', 'user.name=Session', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'Write the page');
+  await refusedWith(/ticket-80 is not on origin/);
+  g('push', '-q', 'origin', 'HEAD:refs/heads/ticket-80');
+  await write();
+  assert.equal(read(w, '1502').stages.write.status, 'done');
+  // One more commit, not pushed: origin is behind the worktree.
+  commitIn(tree.path, 'docs/x/new.md', '# Нова\n\nЩе.\n');
+  await refusedWith(/push the worktree's head/);
+  // A PR with no worktree on this machine: the check can't run, so the write can't pass.
+  fs.rmSync(path.join(path.dirname(tree.path)), { recursive: true });
+  await refusedWith(/no worktree of guide-docs ticket-80/);
+});
+
 test('AC-3: record align with no worktree on this machine is refused, never skipped', async () => {
   const t = finalReviewTicket({ done: CHAIN.slice(0, 3) });
   assert.equal(fs.existsSync(t.wt), false);
