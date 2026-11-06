@@ -5,7 +5,6 @@ allowedTools:
   - Read
   - Glob
   - Grep
-  - Write
   - Bash(cd:*)
   - Bash(ls:*)
   - Bash(git log:*)

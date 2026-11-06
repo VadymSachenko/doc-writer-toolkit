@@ -557,6 +557,94 @@ test('AC-5: a host job can\'t push, change a branch or fetch, in the plain or gi
   assert.ok(!denied.some((r) => /^Bash\(.*\*.*:\*\)$/.test(r) && !/^Bash\([^*]*:\*\)$/.test(r)), 'no rule the CLI never matches');
 });
 
+test('a role session loads the hub\'s layers, not the owner\'s, and no plugin from the toolkit it runs', () => {
+  const { w } = busyWorld();
+  for (const role of ['triage', 'writer', 'reviewer', 'translator']) {
+    const { cmd } = rulesOf(role, w);
+    assert.equal(flag(cmd, '--setting-sources'), 'project,local', role);
+    assert.ok(!cmd.args.includes('--plugin-dir'), `${role}: the plugin comes from the hub's own enabledPlugins, at the version the hub installed`);
+  }
+});
+
+test('writes are an allow list: a role\'s worktrees and the state tmp/, with no unscoped file-writing rule', () => {
+  const unscoped = ['Write', 'Edit', 'Edit(**)', 'NotebookEdit', 'MultiEdit', 'Write(*)', 'Edit(//**)', 'Edit(/**)', 'Edit(~/**)', 'Edit(./**)', 'Write(//**)'];
+  const { w } = busyWorld({ roles: { writer: { allowedTools: [...unscoped, 'Edit(//owner/chose/this/**)'] } } });
+  for (const r of unscoped) assert.ok(!rulesOf('writer', w).allowed.includes(r), `${r} is dropped`);
+  const tmpRule = `Edit(/${path.join(w.settings.state, 'tmp')}/**)`;
+  for (const role of ['triage', 'writer', 'reviewer', 'translator']) {
+    assert.ok(!readRole(role).allowedTools.some((r) => /^(Edit|Write|MultiEdit|NotebookEdit)$/.test(r)), `${role}.md allows no file-writing tool by itself`);
+    const { allowed } = rulesOf(role, w);
+    assert.deepEqual(allowed.filter((r) => /^(Edit|Write|MultiEdit|NotebookEdit)$|^(Edit|Write)\(\*{1,2}\)$/.test(r)), [], `${role} has no unscoped write`);
+    assert.ok(allowed.includes(tmpRule), `${role} may write the state tmp/`);
+  }
+  assert.ok(rulesOf('writer', w).allowed.includes(`Edit(/${WT}/**)`));
+  assert.ok(rulesOf('translator', w).allowed.includes(`Edit(/${WT}/**)`));
+  assert.ok(rulesOf('writer', w).allowed.includes('Edit(//owner/chose/this/**)'), 'a scoped rule an owner adds stays');
+  assert.deepEqual(rulesOf('triage', w).allowed.filter((r) => r.startsWith('Edit(')), [tmpRule], 'triage writes only in tmp/');
+});
+
+test('writes: each ticket\'s work folder when the host declares one; a step with no worktree reaches the clones\' .sources/ and its own specs, never their pages', () => {
+  const { w } = busyWorld();
+  const settings = { ...w.settings, workFolder: 'work/tickets/<key>' };
+  const work = `Edit(/${path.join(w.root, 'work/tickets/502')}/**)`;
+  const at = (role, tree, keys = ['502']) => commandFor({ stage: 'x', role, keys, group: '502', worktrees: tree }, settings, { agentsPath: '/x/agents.json', roots: ROOTS }).args;
+  const edits = (args) => args.slice(args.indexOf('--allowedTools') + 1, args.indexOf('--disallowedTools')).filter((r) => r.startsWith('Edit('));
+  const clones = [...new Set(settings.targets.map((t) => path.resolve(settings.root, t.path)))];
+  const sources = clones.flatMap((c) => [`Edit(/${c}/**/.sources/**)`, `Edit(/${c}/screenshot-tests/_plan-502-*)`]);
+  assert.ok(sources.length > 0);
+  // On a worktree step: the worktree, tmp/ and the work folder, and no clone at all.
+  assert.ok(edits(at('reviewer', [TREE])).includes(work));
+  assert.deepEqual(edits(at('reviewer', [TREE])).filter((r) => r.includes('.sources') || r.includes('screenshot-tests')), []);
+  // With no worktree: the work folder and each clone's .sources/.
+  for (const r of [work, ...sources]) assert.ok(edits(at('writer', [])).includes(r), r);
+  assert.deepEqual(edits(at('triage', [])), [`Edit(/${path.join(settings.state, 'tmp')}/**)`], 'triage has no work folder, no .sources/ and no spec');
+  // A group: one folder per ticket. A key that isn't a plain name gets none.
+  assert.ok(edits(at('writer', [], ['502', '503'])).includes(`Edit(/${path.join(w.root, 'work/tickets/503')}/**)`));
+  assert.ok(!edits(at('writer', [], ['../..'])).some((r) => r.includes('tickets')));
+  // The brief says where.
+  const brief = briefFor({ stage: 'write', role: 'writer', keys: ['502'], worktrees: [TREE] }, settings);
+  assert.match(brief, new RegExp(`only in: ${WT}, .*/tmp, .*work/tickets/502\\.`));
+  assert.doesNotMatch(brief, /other write/, 'a host layer may allow more, so the brief says where to write, not what is refused');
+  assert.match(briefFor({ stage: 'plan', role: 'writer', keys: ['502'] }, settings), /and the `\.sources\/` folders of the target repos/);
+  assert.doesNotMatch(briefFor({ stage: 'triage', role: 'triage', keys: ['502'] }, settings), /\.sources\/` folders/);
+});
+
+test('a step with no worktree may create only its own specs: one rule per key per clone, the hub target included, and the brief names the file', () => {
+  const { w } = busyWorld();
+  const settings = { ...w.settings, targets: [...w.settings.targets, { ...w.settings.targets[0], id: 'the-hub', path: '.' }] };
+  const clones = [...new Set(settings.targets.map((t) => path.resolve(settings.root, t.path)))];
+  assert.ok(clones.includes(w.root), 'the hub is a target here');
+  const specs = (role, keys, tree = []) => {
+    const a = commandFor({ stage: 'plan', role, keys, group: 'g', worktrees: tree }, settings, { agentsPath: '/x/agents.json', roots: ROOTS }).args;
+    return a.slice(a.indexOf('--allowedTools') + 1, a.indexOf('--disallowedTools')).filter((r) => r.includes('screenshot-tests'));
+  };
+  assert.deepEqual(specs('writer', ['502']).sort(), clones.map((c) => `Edit(/${c}/screenshot-tests/_plan-502-*)`).sort());
+  // A group, and a key that is no number. A key that isn't a plain name gets no rule, and the brief offers no name for it.
+  assert.deepEqual(specs('writer', ['d98', '503', '../x', 'a*b', 'a/b']).sort(), clones.flatMap((c) => [`Edit(/${c}/screenshot-tests/_plan-d98-*)`, `Edit(/${c}/screenshot-tests/_plan-503-*)`]).sort());
+  assert.deepEqual(specs('writer', ['../x']), []);
+  assert.ok(!specs('writer', ['502']).some((r) => r.includes('screenshot-tests/**')), 'never the whole folder');
+  // Not triage, and not a step with a worktree, whose specs go in the worktree.
+  assert.deepEqual(specs('triage', ['502']), []);
+  assert.deepEqual(specs('writer', ['502'], [TREE]), []);
+  const brief = (step) => briefFor({ stage: 'plan', role: 'writer', ...step }, settings);
+  assert.match(brief({ keys: ['502'] }), /named `_plan-502-<what>\.spec\.ts`\. Use that name, import shared helpers from that folder rather than editing them/);
+  assert.match(brief({ keys: ['d98', '503'] }), /`_plan-d98-<what>\.spec\.ts` or `_plan-503-<what>\.spec\.ts`/);
+  assert.doesNotMatch(brief({ keys: ['../x'] }), /_plan-/);
+  assert.doesNotMatch(brief({ keys: ['502'], worktrees: [TREE] }), /_plan-/);
+  assert.doesNotMatch(briefFor({ stage: 'triage', role: 'triage', keys: ['502'] }, settings), /_plan-/);
+  assert.match(readRole('writer').prompt, /`_plan-<key>-<what>\.spec\.ts`/);
+});
+
+test('the deny lists stay as a mistake guard: what runs code later is denied inside a worktree the allow list opens, and git ls-remote is denied', () => {
+  const { w } = busyWorld();
+  for (const role of ['writer', 'reviewer', 'translator']) {
+    const { denied } = rulesOf(role, w);
+    for (const r of ['Edit(//**/.github/**)', 'Edit(//**/CLAUDE*.md)', 'Edit(//**/node_modules/**)', 'Edit(//**/package.json)', 'Edit(//**/package-lock.json)', 'Edit(//**/docusaurus.config.*)', 'Edit(//**/sidebars.*)', 'Edit(//**/playwright.config.*)', 'Edit(//**/.git/**)', 'Edit(//**/.claude/**)']) assert.ok(denied.includes(r), `${role} denies ${r}`);
+    assert.ok(denied.includes('Bash(git ls-remote:*)'), 'it runs a command: --upload-pack=<cmd>');
+    assert.ok(denied.includes(`Edit(/${w.settings.state}/*.md)`), 'the Markdown ledgers, which a state folder under a .sources/ would open');
+  }
+});
+
 test('the command line follows the role settings; the retry takes the next model up the ladder', () => {
   const { w } = busyWorld({ roles: { reviewer: { model: 'claude-haiku-5-5', effort: 'low', maxTurns: 30, maxBudgetUsd: 2, disallowedTools: ['WebFetch'] } } });
   const cmd = commandFor({ stage: 'uaReview', role: 'reviewer', keys: ['502'], group: '502' }, w.settings, { agentsPath: '/x/agents.json' });

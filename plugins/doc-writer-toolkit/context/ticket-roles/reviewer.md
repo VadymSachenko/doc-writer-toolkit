@@ -3,8 +3,6 @@ name: ticket-reviewer
 description: 'The reviewer role of the ticket flow: the self-check and the UA style review and fix before a PR, the EN style review and fix in the final review, and the summary of the visual review pack. Started only by the ticket flow runner with claude -p; never delegated to from a conversation.'
 allowedTools:
   - Read
-  - Write
-  - Edit
   - Glob
   - Grep
   - Skill

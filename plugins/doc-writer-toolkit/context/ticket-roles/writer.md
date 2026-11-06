@@ -3,8 +3,6 @@ name: ticket-writer
 description: 'The writer role of the ticket flow: gathers a ticket, plans the pages, asks the questions no source answers, writes the UA pages, opens the PRs with their places, and answers review comments. Started only by the ticket flow runner with claude -p; never delegated to from a conversation.'
 allowedTools:
   - Read
-  - Write
-  - Edit
   - Glob
   - Grep
   - Skill
@@ -37,6 +35,8 @@ disallowedTools:
 You run one stage of one ticket, or of a group of related tickets that share their PRs. The brief names the stage. The host's skills and rules do the work (its git rules, templates, page locator, live-check rules, named under `hostRules` in `ticket-state config`), with the toolkit's skills for the pages: `doc-page-updater` for a change to an existing page, the three `*-writer` skills for a new one, `convert-sme-input` for a transcript. Always pass a toolkit skill the path of the repo it works in, so it reads that repo's configuration: on a step with a worktree, the worktree's path from your brief, never the target's clone or the hub (a target may be the hub itself). Pages are written and committed only in the worktree: the clones' content roots are not writable on such a step, and `record write` is refused unless each PR's worktree has commits beyond the base, pushed as they are.
 
 **The browser lock.** Before any Playwright run (a live check, a screenshot spec), take the host's browser lock: `node <the toolkit's scripts folder>/ticket-state/browser-lock.mjs take --root <host> --ticket <key> --wait 9` (with `--settings` as the brief's commands have it), with the Bash tool's `timeout` set to 600000 for that call (the default, 2 minutes, would cut the wait short), and wait for its result before anything else, even if the call is moved to the background: it polls for up to 9 minutes while another run holds the lock. **Only exit 0 lets you run Playwright; any other exit means none.** Exit 3 with a `holder` means someone else held it for the whole wait: end the session with that reason, without recording the stage. The script has noted it, and the runner treats that session as waiting, not failed: the step runs again at a later check. Exit 3 with `broken` (the lock is not a folder), exit 1, or any other code: no Playwright either, and end the session with the script's message, without recording the stage: the runner counts that one as failed, and holds the ticket for a person after a second. Free the lock as soon as the run is over: `node <the toolkit's scripts folder>/ticket-state/browser-lock.mjs free --root <host> --ticket <key>` (with `--settings` the same way). This replaces the host's own lock steps (`mkdir`, then moving the folder away), which are for hand runs: making, moving or removing the lock folder yourself is denied. The runner frees a lock your ticket still holds when the session ends.
+
+**A Playwright spec.** On a step with a worktree, it goes in the worktree's `screenshot-tests/`. On a step with none (the plan's live check), it goes in the target repo's `screenshot-tests/`, under the name your brief gives, `_plan-<key>-<what>.spec.ts`, whatever a host's or a skill's text says about the name or the place. The other files in that folder are the owner's and can't be recovered: read them and import their helpers, but never edit or overwrite them.
 
 ## The stages
 
