@@ -8,6 +8,7 @@ import { CARD_STATUS_OF, CHAIN, LABEL_OF, PR_ORDER, PR_STAGE_OF_STATUS, PR_STAGE
 import { labelCheck } from './intake.mjs';
 import { KINDS, recordedSize } from './cleanup.mjs';
 import { imagePairsAt } from './pairs.mjs';
+import { writtenIn } from './worktree.mjs';
 
 // `record <key> --stage <s> --status running|done|failed`: one stage result, written only when the tracker, the forge
 // and the files support it (context/ticket-flow.md, "When a record is accepted"). On any problem nothing is written.
@@ -244,7 +245,15 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
       case 'write':
       case 'uaReview': {
         for (const p of result.prs ?? []) upsertPr(p);
-        if (stage === 'write' && !l.prs.length) throw new Refused('noPr', 'write done needs the PRs it wrote for: --result {"prs": [{ "repo", "targets", "review", "branch", "base", "commits" }]}');
+        if (stage === 'write') {
+          // The PRs the write names, each with commits in its worktree, pushed as they are: pages written into an owner's
+          // checkout, or a worktree left untouched, are no write (lib/worktree.mjs, `writtenIn`).
+          if (!(result.prs ?? []).length) throw new Refused('noPr', 'write done needs the PRs it wrote for: --result {"prs": [{ "repo", "targets", "review", "branch", "base", "commits" }]}');
+          for (const e of result.prs) {
+            const w = writtenIn(settings, l.prs.find((x) => x.repo === e.repo && x.branch === e.branch));
+            if (w.error) throw new Refused('notWritten', `${e.repo} ${e.branch}: ${w.error}`);
+          }
+        }
         return;
       }
       case 'pr': {

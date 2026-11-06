@@ -16,7 +16,8 @@ import { ROLES } from './settings.mjs';
 import { cleanupTicket } from './cleanup.mjs';
 import { removeClosedMarkdown } from './import.mjs';
 import { childEnv } from './env.mjs';
-import { ensureWorktree, prsForStep, worktreePath } from './worktree.mjs';
+import { clonePath, ensureWorktree, prsForStep, worktreePath } from './worktree.mjs';
+import { parseClaudeConfig } from '../../ui-labels/lib/config.mjs';
 
 // The daily run (design §7): finish first, then triage the quiet intake cards (mornings), then start ready groups while
 // the limits and the day's allowance allow. A script decides; each step that needs a model is one `claude -p` session
@@ -152,8 +153,10 @@ export function scriptRoots(settings, { home = os.homedir(), env = process.env }
 // the hub's protected build files, in any folder. Also what runs code later: a host's `CLAUDE*.md` (a `UI label source:
 // command …` line runs a shell), `.github/` (the host jobs' scripts, and workflows GitHub runs with the repo's secrets),
 // `node_modules/`, `.npmrc`, the owner's git config, shell startup files and `~/.ssh/`; and the ticket flow's settings
-// files wherever the host keeps them. An `Edit(...)` deny covers Write too. A `.env` file is not read (a mistake guard:
-// the scripts read it as processes).
+// files wherever the host keeps them; and the LaunchAgents folder, which starts what it names at the next login. An
+// `Edit(...)` deny covers Write too. A `.env` file is not read (a mistake guard: the scripts and Playwright's specs read
+// it as processes); `.env.example`, which holds no values, is. A deny can't except one name, so the denied ones are named.
+const ENV_FILES = ['.env', '.env.local', '.env.*.local', '.env.development', '.env.production', '.env.test', '.env.staging', '.env.dev', '.env.prod'];
 export function writeDeniedFor(settings, roots = []) {
   const abs = (p) => `//${String(p).replace(/^\/+/, '')}`;
   const state = path.resolve(settings.state);
@@ -162,14 +165,55 @@ export function writeDeniedFor(settings, roots = []) {
     'Edit(~/.claude/**)', 'Edit(~/.claude.json)', 'Edit(//**/.claude/**)', 'Edit(//**/.git/**)', 'Edit(//**/.git)',
     ...['package.json', 'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'docusaurus.config.*', 'sidebars.*', 'playwright.config.*', 'CLAUDE*.md', '.npmrc'].map((f) => `Edit(//**/${f})`),
     'Edit(//**/.github/**)', 'Edit(//**/node_modules/**)',
-    'Edit(~/.gitconfig)', 'Edit(~/.config/git/**)', 'Edit(~/.ssh/**)',
+    'Edit(~/.gitconfig)', 'Edit(~/.config/git/**)', 'Edit(~/.ssh/**)', 'Edit(~/Library/LaunchAgents/**)',
     ...['.zshrc', '.zshenv', '.zprofile', '.zlogin', '.bashrc', '.bash_profile', '.profile'].map((f) => `Edit(~/${f})`),
     ...[...new Set(own)].map((f) => `Edit(${abs(f)})`),
-    'Read(//**/.env)', 'Read(//**/.env.*)',
+    ...ENV_FILES.map((f) => `Read(//**/${f})`),
     ...roots.map((r) => `Edit(${abs(r)}/**)`),
     ...['tickets', 'locks', 'roles', 'watch', 'jobs', 'runs', 'reports'].map((d) => `Edit(${abs(path.join(state, d))}/**)`),
     ...['rearmed.json', 'roles-proposal.json'].map((f) => `Edit(${abs(path.join(state, f))})`),
   ];
+}
+
+// The content roots of an owner's checkout: each declared UA content root (`docs/` when none is declared), each EN
+// i18n root, and `i18n/`, where every further locale's root is. Read from the checkout's own CLAUDE.md.
+export function contentRootsOf(dir) {
+  let text = '';
+  try {
+    text = fs.readFileSync(path.join(dir, 'CLAUDE.md'), 'utf8');
+  } catch {
+    /* no CLAUDE.md: the defaults */
+  }
+  const c = parseClaudeConfig(text);
+  const clean = (p) => path.posix.normalize(String(p).replace(/\\/g, '/')).replace(/^\.\//, '').replace(/\/+$/, '') || '.';
+  const ua = Object.keys(c).filter((k) => /(^|\s)ua content root$/.test(k)).map((k) => clean(c[k]));
+  const en = Object.keys(c).filter((k) => /(^|\s)en i18n root$/.test(k)).map((k) => clean(c[k]));
+  return { ua: ua.length ? [...new Set(ua)] : ['docs'], en: [...new Set(['i18n', ...en])] };
+}
+
+// On a step with worktrees, the pages go into the worktrees, never into an owner's checkout: the target clones' content
+// roots are not writable (a relative path resolves against the hub, which may be a target too). A UA root keeps its
+// top-level dot folders writable, since a hub keeps its tickets' files and the flow's state in `<root>/.sources/`:
+// the CLI's rules have no working negated character class (`[!.]` and `[^.]` both match a dot), so the rule names the
+// first character a page or folder starts with, `[a-zA-Z0-9_-]`. A top-level name that starts with another character
+// is not covered, and neither is a root that holds the flow's state folder under such a name (the session writes its
+// files in `<state>/tmp/`); `record write` refuses a write the worktree doesn't hold either way.
+const FIRST_CHAR = '[a-zA-Z0-9_-]';
+export function checkoutDeniedFor(settings) {
+  const clones = [...new Set(settings.targets.map((t) => clonePath(settings, t)).filter(Boolean))];
+  const state = path.resolve(settings.state);
+  const inside = (root) => {
+    const rel = path.relative(root, state);
+    return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+  };
+  // Under a UA root, only a state folder under a name the rule covers (not a dot folder) is in the way.
+  const holdsState = (root) => inside(root) && !path.relative(root, state).startsWith('.');
+  return [...new Set(clones.flatMap((clone) => {
+    const { ua, en } = contentRootsOf(clone);
+    const abs = (p) => `//${p.replace(/^\/+/, '')}`;
+    const uaRoots = ua.map((r) => path.resolve(clone, r)).filter((r) => !holdsState(r));
+    return [...uaRoots.flatMap((r) => [`Edit(${abs(r)}/${FIRST_CHAR}*)`, `Edit(${abs(r)}/${FIRST_CHAR}*/**)`]), ...en.map((r) => path.resolve(clone, r)).filter((r) => !inside(r)).map((r) => `Edit(${abs(r)}/**)`)];
+  }))];
 }
 
 // ------------------------------------------------------------------ roles
@@ -278,7 +322,7 @@ export function commandFor(step, settings, { model, agentsPath, claude = 'claude
   const allowed = [...withGitC(roleRules, dirsOf), ...scriptRulesFor(roots), ...pushRulesFor(trees), ...fetchRulesFor(trees)];
   // A role that doesn't run Playwright doesn't get it from the hub's `npx playwright:*`.
   const noPlaywright = roleRules.some((r) => r.startsWith('Bash(npx playwright')) ? [] : ['Bash(npx playwright:*)'];
-  const disallowed = [...new Set([...def.disallowedTools, ...(role.disallowedTools ?? []), ...PUSH_DENIED_PLAIN, ...BRANCH_DENIED, ...deniedFor(dirsOf), ...dirsOf.flatMap((d) => [`Bash(git -C ${d} branch:*)`, `Bash(git -C ${d} grep:*)`]), ...ROLE_DENIED, ...noPlaywright, ...scriptFlagsDenied(roots), ...writeDeniedFor(settings, roots), ...SETUP_DENIED])];
+  const disallowed = [...new Set([...def.disallowedTools, ...(role.disallowedTools ?? []), ...PUSH_DENIED_PLAIN, ...BRANCH_DENIED, ...deniedFor(dirsOf), ...dirsOf.flatMap((d) => [`Bash(git -C ${d} branch:*)`, `Bash(git -C ${d} grep:*)`]), ...ROLE_DENIED, ...noPlaywright, ...scriptFlagsDenied(roots), ...writeDeniedFor(settings, roots), ...(trees.length ? checkoutDeniedFor(settings) : []), ...SETUP_DENIED])];
   // The folders a session may reach (`--add-dir`, and so `cd`): the step's worktrees; a step with none (triage, the plan)
   // reads the target clones instead.
   const dirs = [...new Set((trees.length ? dirsOf : settings.targets.map((t) => (t.path ? path.resolve(settings.root, t.path) : null))).filter((d) => d && d !== settings.root))];

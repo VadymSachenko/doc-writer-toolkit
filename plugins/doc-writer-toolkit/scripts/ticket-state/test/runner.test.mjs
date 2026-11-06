@@ -205,6 +205,17 @@ test('the roles: every role file has its frontmatter and allows no compound shel
   }
 });
 
+// The CLI's file rule forms, as the probes showed them: `**/` any folders, `**` anything, `*` within one name, and a
+// positive character class (`[a-z]`); a rule starts `//` for an absolute path.
+function fileDenied(tool, rules, file) {
+  return rules.some((r) => {
+    const m = new RegExp(`^${tool}\\(//(.*)\\)$`).exec(r);
+    if (!m) return false;
+    const re = m[1].match(/\*\*\/|\*\*|\*|\[[^\]]*\]|[^*[]+/g).map((x) => (x === '**/' ? '(?:.*/)?' : x === '**' ? '.*' : x === '*' ? '[^/]*' : x.startsWith('[') ? x : x.replace(/[.+?^${}()|\\]/g, '\\$&'))).join('');
+    return new RegExp(`^/${re}$`).test(file);
+  });
+}
+
 // The CLI's Bash rule forms, as the permission probes showed them: `x:*` a prefix, `*` elsewhere any text (a rule that
 // ends in `:*` after a middle `*` never matches), else the exact command.
 function matches(rule, cmd) {
@@ -327,10 +338,13 @@ test('AC-3, AC-7: with the owner\'s and the hub\'s layers loaded, every plain-sp
       'Edit(~/.claude/**)', 'Edit(~/.claude.json)', 'Edit(//**/.claude/**)', 'Edit(//**/.git/**)', 'Edit(//**/.git)', 'Edit(//**/package.json)', `Edit(//${ROOTS[0].slice(1)}/**)`, `Edit(//${ROOTS[1].slice(1)}/**)`,
       ...['tickets', 'locks', 'roles', 'watch', 'jobs', 'runs', 'reports'].map((d) => `Edit(${st(d)}/**)`), `Edit(${st('rearmed.json')})`, `Edit(${st('roles-proposal.json')})`,
       // What runs code later, and the flow's settings wherever they are.
-      'Edit(//**/.github/**)', 'Edit(//**/CLAUDE*.md)', 'Edit(//**/node_modules/**)', 'Edit(//**/.npmrc)', 'Edit(~/.gitconfig)', 'Edit(~/.config/git/**)', 'Edit(~/.ssh/**)', 'Edit(~/.zshrc)', 'Edit(~/.bash_profile)',
+      'Edit(//**/.github/**)', 'Edit(//**/CLAUDE*.md)', 'Edit(//**/node_modules/**)', 'Edit(//**/.npmrc)', 'Edit(~/.gitconfig)', 'Edit(~/.config/git/**)', 'Edit(~/.ssh/**)', 'Edit(~/Library/LaunchAgents/**)',
+      ...['.zshrc', '.zshenv', '.zprofile', '.zlogin', '.bashrc', '.bash_profile', '.profile'].map((f) => `Edit(~/${f})`),
       `Edit(//${path.resolve(w.settings.root, w.settings.file).slice(1)})`, `Edit(//${path.resolve(w.settings.root, w.settings.file).replace(/\.json$/, '.local.json').slice(1)})`,
-      'Read(//**/.env)', 'Read(//**/.env.*)',
     ]) assert.ok(denied.includes(e), `${role} denies ${e}`);
+    // .env files are not read; .env.example, which holds no values, is.
+    for (const f of ['.env', '.env.local', '.env.production.local', '.env.development', '.env.production', '.env.test', '.env.staging', '.env.dev', '.env.prod']) assert.ok(fileDenied('Read', denied, `/work/repo/${f}`), `${role} doesn't read ${f}`);
+    assert.ok(!fileDenied('Read', denied, '/work/repo/.env.example'), `${role} reads .env.example`);
     assert.ok(!denied.some((e) => e.includes(`${path.join(w.settings.state, 'tmp')}`)), `${role}: the session's own files in <state>/tmp stay writable`);
     // A layer that allows `node` itself (no layer does today): code from a string, standard input or a preload stays
     // denied, and the stage's scripts still run.
@@ -347,6 +361,31 @@ test('AC-3, AC-7: with the owner\'s and the hub\'s layers loaded, every plain-sp
   assert.deepEqual(plan.addDirs, [...new Set(w.settings.targets.filter((t) => t.path).map((t) => path.resolve(w.settings.root, t.path)))]);
   // A step with worktrees reaches them only, not the target clones (a `cd` outside the add-dirs is denied).
   assert.deepEqual(rulesOf('writer', w).addDirs, [WT]);
+});
+
+test('on a step with worktrees, the target clones\' content roots are not writable; their dot folders, the state and the worktree are', () => {
+  const { w } = busyWorld();
+  const clone = path.resolve(w.root, 'repos/guide-docs');
+  fs.mkdirSync(clone, { recursive: true });
+  fs.writeFileSync(path.join(clone, 'CLAUDE.md'), '# Site\n\n## Documentation toolkit configuration\n\n- **UA content root:** `docs/`\n- **EN i18n root:** `i18n/en/docusaurus-plugin-content-docs/current/`\n- **API reference UA content root:** `api/`\n- **API reference EN i18n root:** `i18n/en/docusaurus-plugin-content-docs-api/current/`\n\n## Other\n\n- **UA content root:** `ignored/`\n');
+  // The hub is a target too, its UA root the default `docs/`, with the flow's state in `docs/.sources/`.
+  w.settings.targets.push({ id: 'hub', repo: 'hub-docs', path: '.', review: 'sme', labels: {} });
+  w.settings.state = path.join(w.root, 'docs/.sources/ticket-pipeline');
+  const { denied } = rulesOf('writer', w);
+  const at = (base, rel) => path.join(base, rel);
+  for (const f of [at(clone, 'docs/a.md'), at(clone, 'docs/x/y.mdx'), at(clone, 'docs/x/.assets/a.png'), at(clone, 'docs/_category_.json'), at(clone, 'api/a.md'), at(clone, 'i18n/en/docusaurus-plugin-content-docs/current/a.md'), at(clone, 'i18n/de/docusaurus-plugin-content-docs/current/a.md'), at(w.root, 'docs/page.md'), at(w.root, 'docs/Zz-1/a.md')]) {
+    assert.ok(fileDenied('Edit', denied, f), `not writable: ${f}`);
+  }
+  for (const f of [at(w.root, 'docs/.sources/ticket-pipeline/tmp/comment.md'), at(w.root, 'docs/.sources/tickets/502/notes.md'), at(WT, 'docs/a.md'), at(w.root, 'README.md'), at(clone, 'ignored/a.md')]) {
+    assert.ok(!fileDenied('Edit', denied, f), `writable: ${f}`);
+  }
+  // A step with no worktree writes no page and gets no checkout rule.
+  assert.ok(!fileDenied('Edit', rulesOf('writer', w, []).denied, at(clone, 'docs/a.md')));
+  // A UA root that holds the state under a name the rule would cover stays writable (record write still checks).
+  w.settings.state = path.join(w.root, 'docs/pipeline');
+  const held = rulesOf('writer', w).denied;
+  assert.ok(!fileDenied('Edit', held, at(w.root, 'docs/pipeline/tmp/comment.md')));
+  assert.ok(fileDenied('Edit', held, at(clone, 'docs/a.md')), 'the other clones keep theirs');
 });
 
 test('the video gate: the writer runs video-parts by its path, from either root, and never ffmpeg or ffprobe itself, plain, after a cd or by a full path', () => {
@@ -402,7 +441,7 @@ test('the toolkit roots a session may run scripts from: the runner\'s, and each 
   assert.equal(verdict('node /c/doc-writer-toolkit/u1/scripts/../../../../tmp/x.mjs', rules, []), 'not allowed');
 });
 
-test('AC-5: a host job can\'t push, change a branch or fetch, in either spelling, whatever its own allow list', () => {
+test('AC-5: a host job can\'t push, change a branch or fetch, in the plain or git -C spelling (unquoted), with a broad git allow list', () => {
   const w = world({ extra: { hostJobs: [{ name: 'notes', every: 60, run: { skill: 'notes-writer', allowedTools: ['Bash(git:*)', 'Bash(git *)', 'Bash(git -C *)'] } }] } });
   const { args } = jobCommand(w.settings.hostJobs[0], { settings: w.settings });
   const allowed = args.slice(args.indexOf('--allowedTools') + 1, args.indexOf('--disallowedTools'));

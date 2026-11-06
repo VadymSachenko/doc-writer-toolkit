@@ -106,7 +106,10 @@ test('pr checks each PR is on the forge for its branch; the review kind sets the
   ledger(w, c, { stages: { start: 'done', plan: 'done' } });
   await usage(w, { key: '1240', stage: 'write', status: 'done', result: { prs: [{ repo: 'portal-docs', branch: 'x', targets: ['portal-ui', 'portal-api'] }] } }, /one review kind only/);
   await usage(w, { key: '1240', stage: 'write', status: 'done', result: { prs: [{ repo: 'elsewhere', branch: 'x' }] } }, /not a repository the targets name/);
-  await rec(w, { key: '1240', stage: 'write', status: 'done', result: { prs: [{ repo: 'guide-docs', branch: 'ticket-1240', targets: ['guide'], commits: ['1111111'] }, { repo: 'api-docs', branch: 'ticket-1240-api', targets: ['api'] }] } });
+  // No worktree on this machine: a write is never done without one (worktree.test.mjs has the worktree cases).
+  await refused(w, { key: '1240', stage: 'write', status: 'done', result: { prs: [{ repo: 'guide-docs', branch: 'ticket-1240', targets: ['guide'], commits: ['1111111'] }] } }, 'notWritten');
+  await refused(w, { key: '1240', stage: 'write', status: 'done', result: {} }, 'noPr');
+  ledger(w, c, { stages: { start: 'done', plan: 'done', write: 'done' }, prs: [{ repo: 'guide-docs', branch: 'ticket-1240', targets: ['guide'], review: 'sme', pipelineCommits: ['1111111'] }, { repo: 'api-docs', branch: 'ticket-1240-api', targets: ['api'], review: 'places' }] });
   await rec(w, { key: '1240', stage: 'uaReview', status: 'done' });
   await refused(w, { key: '1240', stage: 'pr', status: 'done', result: { prs: [{ branch: 'ticket-1240', number: 91 }, { branch: 'ticket-1240-api', number: 92 }] } }, 'noPr');
   await rec(w, { key: '1240', stage: 'pr', status: 'done', result: { prs: [{ branch: 'ticket-1240', number: 91 }, { branch: 'ticket-1240-api', number: 93 }], places: [{ id: 'p1', repo: 'api-docs', pr: 93, page: 'docs/a.md', line: 4, claim: 'c', why: 'codeOnly' }] } });
