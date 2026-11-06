@@ -8,6 +8,8 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/video-parts/video-parts.mjs --work <folder> -
 
 Run it from the host repo (or pass `--root`). It reads `video.partMinutes` from the ticket flow settings, found as `ticket-state` finds them (`--settings`, else the `Ticket flow settings:` field of the host's `CLAUDE.md`, else `.claude/ticket-flow.json`; the local file merged over it). Tests: `npm test` in this folder.
 
+A ticket flow role runs it by this path: the runner allows `node <scripts>/video-parts/video-parts.mjs` to every role and denies `ffmpeg` and `ffprobe` typed by hand (`scripts/ticket-state/`, "What a role session may run").
+
 ## What it does
 
 1. Checks the paths, on their real paths (links resolved): the work folder (`--work`, the ticket's folder the host's rules name, such as `docs/.sources/tickets/<key>/`) is inside the host root and is not the root; the video (`--video`) is a file inside the work folder; the parts folder `<work>/<video name>-parts/` is a folder or doesn't exist yet, never a link, and no part file in it is a link. Anything else stops it before anything runs (exit 2).

@@ -107,7 +107,10 @@ const CODE_DENIED = [
 // The tracker's and the browser's MCP tools: a role reaches the tracker only through `ticket-state record` and the
 // tracker script, and no stage drives a browser through MCP.
 const MCP_DENIED = ['mcp__claude_ai_Trello', 'mcp__trello', 'mcp__playwright'];
-export const ROLE_DENIED = [...new Set([...GIT_PLAIN_DENIED, ...GIT_OUTPUT_DENIED, ...CODE_DENIED, ...MCP_DENIED])];
+// `ffmpeg` and `ffprobe` by hand, which a layer may allow (an owner's has allowed single calls): a role cuts a video only
+// with `video-parts`, which runs them with fixed arguments on paths inside the ticket's work folder.
+const MEDIA_DENIED = ['Bash(ffmpeg:*)', 'Bash(ffprobe:*)'];
+export const ROLE_DENIED = [...new Set([...GIT_PLAIN_DENIED, ...GIT_OUTPUT_DENIED, ...CODE_DENIED, ...MEDIA_DENIED, ...MCP_DENIED])];
 // A skill job's session: the roles' git and code denials, and the file denials (`jobDenied`). Not the MCP denials: the
 // toolkit knows nothing about what a job does, and a host's job may well work on its tracker through MCP.
 export const jobDenied = (settings, roots = scriptRoots(settings)) => [...new Set([...JOB_DENIED, ...GIT_PLAIN_DENIED, ...GIT_OUTPUT_DENIED, ...CODE_DENIED, ...writeDeniedFor(settings, roots)])];
@@ -116,7 +119,7 @@ export const jobDenied = (settings, roots = scriptRoots(settings)) => [...new Se
 // only: its other commands are the owner's, and `set` would widen the next session's rules), from the toolkit the runner runs (the brief's
 // "scripts folder") and from the installed plugin the session's skills name (`${CLAUDE_PLUGIN_ROOT}`). A literal path
 // as a prefix rule: never a wildcard, which `../` would walk out of.
-export const NODE_SCRIPTS = ['ticket-state/ticket-state.mjs record', 'ticket-state/ticket-state.mjs status', 'ticket-state/ticket-state.mjs config', 'tracker/tracker.mjs', 'forge/forge.mjs', 'locale-sync/locale-sync.mjs', 'ui-labels/ui-labels.mjs', 'doc-align/doc-align.mjs', 'screenshot-locales/screenshot-locales.mjs', 'section-state/section-state.mjs', 'visual-pack/visual-pack.mjs'];
+export const NODE_SCRIPTS = ['ticket-state/ticket-state.mjs record', 'ticket-state/ticket-state.mjs status', 'ticket-state/ticket-state.mjs config', 'tracker/tracker.mjs', 'forge/forge.mjs', 'locale-sync/locale-sync.mjs', 'ui-labels/ui-labels.mjs', 'doc-align/doc-align.mjs', 'screenshot-locales/screenshot-locales.mjs', 'section-state/section-state.mjs', 'visual-pack/visual-pack.mjs', 'video-parts/video-parts.mjs'];
 export const scriptRulesFor = (roots = []) => [...new Set(roots.flatMap((r) => NODE_SCRIPTS.map((s) => `Bash(node ${path.join(r, 'scripts', s)}:*)`)))];
 // Script flags that run code: ui-labels' `--source 'command <cmd>'` (a shell) and visual-pack's `--playwright-from
 // <dir>` (JavaScript from that folder), denied first, last or between other words, as `--x v` and `--x=v`.
