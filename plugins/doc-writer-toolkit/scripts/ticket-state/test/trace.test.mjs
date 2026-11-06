@@ -9,6 +9,7 @@ import { snapshot } from './helpers.mjs';
 import { main } from '../ticket-state.mjs';
 import { newLedger, writeLedger } from '../lib/ledger.mjs';
 import { cleaner, isRefusal, slugOf } from '../lib/trace.mjs';
+import { ROLE_SESSION_VARIABLE } from '../lib/env.mjs';
 
 // `trace` on synthetic transcripts. Every run names its transcripts folder (`--transcripts`) or a throwaway
 // CLAUDE_CONFIG_DIR, so nothing here reads a real config folder. The invented secrets below must never reach the output.
@@ -364,4 +365,120 @@ test('as a program: plain text on stdout, exit 0; an unknown stage and a role se
   assert.match(role.stderr, /trace is for people/);
   const help = spawnSync(process.execPath, [CLI, '--help'], { encoding: 'utf8', env });
   assert.match(help.stdout, /trace <key>/);
+});
+
+// One test per form the mask knows. Each runs the form through the filter alone and checks the whole result: the value
+// goes, the name and the scheme stay, the rest of the line is as it was.
+const MASKED = [
+  ['an X-Api-Key header', 'curl -H "X-Api-Key: v-one" https://host.test', 'curl -H "X-Api-Key: ***" https://host.test'],
+  ['Authorization: Basic', 'curl -H "Authorization: Basic v-two" https://host.test', 'curl -H "Authorization: Basic ***" https://host.test'],
+  ['Authorization: token', 'curl -H "Authorization: token v-three" https://host.test', 'curl -H "Authorization: token ***" https://host.test'],
+  ['Authorization: Bearer (the scheme stays)', 'curl -H "Authorization: Bearer v-four" https://host.test', 'curl -H "Authorization: Bearer ***" https://host.test'],
+  ['a Bearer value outside a header', 'the header is Bearer v-five and more', 'the header is Bearer *** and more'],
+  ['a JSON password', `curl -d '{"password":"v-six"}' https://h`, `curl -d '{"password":***}' https://h`],
+  ['a JSON password with spaces', `curl -d '{"password":"v seven x"}' https://h`, `curl -d '{"password":***}' https://h`],
+  ['a JSON password inside an escaped string', 'curl -d "{\\"password\\":\\"v-eight\\"}" https://host.test', 'curl -d "{\\"password\\":\\"***\\"}" https://host.test'],
+  ['curl -u user:password', 'curl -u admin:v-nine https://host.test', 'curl -u *** https://host.test'],
+  ['a password in a URL', 'git clone https://bot:v-ten@host.example/x.git', 'git clone https://bot:***@host.example/x.git'],
+  ['passwd=', 'run passwd=v-eleven now', 'run passwd=*** now'],
+  ['pwd=', 'run pwd=v-twelve now', 'run pwd=*** now'],
+  ['--password followed by a short flag', 'tool --password -v run', 'tool --password *** run'],
+];
+for (const [name, input, expected] of MASKED) {
+  test(`mask: ${name}`, () => {
+    const clean = cleaner({ root: '/zz-root', targets: [] }, { toolkit: null });
+    assert.equal(clean(input, 500), expected);
+  });
+}
+
+test('mask: what is not a secret is left alone', () => {
+  const clean = cleaner({ root: '/zz-root', targets: [] }, { toolkit: null });
+  for (const same of ['git push -u origin ticket-trace', 'tool --no-secret-check --foo bar', 'ls -u /tmp', 'cd /h2 && pwd']) assert.equal(clean(same, 500), same);
+});
+
+test('mask: every printed place is covered (a command, a refusal, the last text, the plan), not only the command', async () => {
+  const w = setup({ plan: { pages: ['docs/a.md'], liveCheck: { reason: 'see "password": "e2e-four"' } }, runs: [{ session: 's1' }] });
+  write(path.join(w.transcripts, 's1.jsonl'), [
+    use(1, 'a', 'Bash', { command: 'curl -H "X-Api-Key: e2e-one" https://host.test' }),
+    use(2, 'b', 'Bash', { command: 'curl -u admin:e2e-two https://host.test' }),
+    result('b', 'Permission to use Bash with command curl -u admin:e2e-two https://h has been denied.', true),
+    text(3, 'I cloned https://bot:e2e-three@host.example/x.git and checked pwd=e2e-five'),
+  ]);
+  const { out } = await trace(w);
+  for (const leak of ['e2e-one', 'e2e-two', 'e2e-three', 'e2e-four', 'e2e-five']) assert.ok(!out.includes(leak), `${leak} is not printed`);
+  assert.match(out, /refused: Permission to use Bash with command curl -u \*\*\* https:\/\/h has been denied\./);
+});
+
+test('masking comes before the cut: a quoted secret that straddles character 200 is not left half shown', async () => {
+  const command = `echo ${'a'.repeat(170)} --password "pa-secret-straddle-${'b'.repeat(30)}"`;
+  assert.ok(command.indexOf('pa-secret') < 200 && command.length > 200 + 20, 'the fixture straddles the cut');
+  const clean = cleaner({ root: '/zz-root', targets: [] }, { toolkit: null });
+  const printed = clean(command, 200);
+  assert.ok(!printed.includes('pa-secr') && !printed.includes('bbbb'));
+  assert.match(printed, /--password \*\*\*$/);
+  const w = setup({ runs: [{ session: 's1' }] });
+  write(path.join(w.transcripts, 's1.jsonl'), [use(1, 'a', 'Bash', { command })]);
+  assert.ok(!(await trace(w)).out.includes('pa-secr'));
+});
+
+test('control characters are removed from every printed value: a transcript line, a last text, and the ledger fields', async () => {
+  const esc = '\u001b[2K\u001b[1A';
+  const w = setup({
+    runs: [{ session: 's1', model: `claude-opus${esc}`, effort: `high\u009b31m`, role: `writer\u0007`, trigger: `sched${esc}ule`, outcome: `done${esc}`, stage: 'plan', pr: `repo#1${esc}`, retryOf: `m${esc}`, start: `not a date${esc}` }],
+    extra: { card: { id: 'c1', url: `https://tracker.example/c/x${esc}`, name: 'n' } },
+  });
+  write(path.join(w.transcripts, 's1.jsonl'), [
+    use(1, 'a', 'Bash', { command: `echo ${esc}hidden\u0000 done` }),
+    result('a', `Permission to use Bash with command ${esc} has been denied.`, true),
+    text(2, `all ${esc}done\u0008\u0008`),
+  ]);
+  const { out } = await trace(w);
+  assert.doesNotMatch(out, /[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/, 'no control character but the newlines of the layout');
+  assert.match(out, /ran echo \[2K\[1Ahidden done$/m, 'the text stays, the escape characters go');
+  assert.match(out, /claude-opus\[2K\[1A/);
+  assert.match(out, /^Card: https:\/\/tracker\.example\/c\/x\[2K\[1A$/m);
+});
+
+test('a session id that starts with a dot is not a transcript name: ".." and ".hidden" print "transcript not found"', async () => {
+  const w = setup({ runs: [{ session: '..' }, { session: '.hidden' }, { session: '../x' }] });
+  write(path.join(w.transcripts, '...jsonl'), [use(1, 'a', 'Read', { file_path: 'LEAK-DOTS.md' })]);
+  write(path.join(w.transcripts, '.hidden.jsonl'), [use(1, 'a', 'Read', { file_path: 'LEAK-HIDDEN.md' })]);
+  const { out } = await trace(w);
+  assert.equal(out.match(/transcript not found \(no session recorded\)/g).length, 3);
+  assert.ok(!out.includes('LEAK-'));
+});
+
+test('a transcript that cannot be read is reported as unreadable, with no detail, and the report goes on', async () => {
+  const w = setup({ runs: [{ session: 's1' }, { session: 's2', stage: 'write' }] });
+  fs.mkdirSync(path.join(w.transcripts, 's1.jsonl'), { recursive: true });
+  write(path.join(w.transcripts, 's2.jsonl'), [use(1, 'a', 'Read', { file_path: 'fine.md' })]);
+  fs.mkdirSync(path.join(w.transcripts, 's2', 'subagents', 'bad.jsonl'), { recursive: true });
+  write(path.join(w.transcripts, 's2', 'subagents', 'good.jsonl'), [use(2, 'b', 'Read', { file_path: 'sub.md' })]);
+  const { out, code } = await trace(w);
+  assert.equal(code, 0);
+  assert.match(out, /^ {2}transcript unreadable$/m);
+  assert.match(out, /^ {2}subagent bad: transcript unreadable$/m);
+  assert.match(out, /read fine\.md$/m);
+  assert.match(out, /^ {4}\S+ read sub\.md$/m);
+  assert.match(out, /read 2, .*\(the session and its 1 subagent\(s\) together\)/);
+  assert.doesNotMatch(out, /EISDIR|EACCES|ENOENT|\bat \S+ \(/);
+});
+
+test('the role-session guard: any value of the variable refuses, before the ledger is read, and the error names the variable', async () => {
+  const w = setup({ runs: [{ session: 's1' }] });
+  write(path.join(w.transcripts, 's1.jsonl'), [use(1, 'a', 'Read', { file_path: 'plan.md' })]);
+  for (const value of ['writer', 'reviewer', '1', '']) {
+    let out = '';
+    // A key with no ledger would say "no ledger" if the ledger were read first.
+    for (const key of ['7', '99']) {
+      await assert.rejects(
+        main(['trace', key, '--root', w.root, '--transcripts', w.transcripts], { stdout: { write: (s) => (out += s) }, env: { [ROLE_SESSION_VARIABLE]: value, CLAUDE_CONFIG_DIR: w.config } }),
+        (e) => e.exitCode === 2 && e.message === `trace is for people: it is refused in a role session (${ROLE_SESSION_VARIABLE} is set)`,
+        `value '${value}', key ${key}`,
+      );
+    }
+    assert.equal(out, '', 'nothing printed');
+  }
+  // Without the variable the same call prints the trace.
+  assert.match((await trace(w)).out, /read plan\.md$/m);
 });

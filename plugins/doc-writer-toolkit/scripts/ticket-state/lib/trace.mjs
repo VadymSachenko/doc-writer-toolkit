@@ -105,17 +105,30 @@ const REFUSED = [
 ];
 export const isRefusal = (line) => REFUSED.some((re) => re.test(line));
 
-const SECRET = '[\\w.-]*(?:token|key|secret|password)[\\w.-]*';
+// What is masked is a best effort: the forms below, and no promise of more. The value goes, the name and the scheme stay.
+const NAME = '[\\w.-]*(?:token|key|secret|password|passwd|pwd)[\\w.-]*';
 const MASKS = [
-  [new RegExp(`(\\b${SECRET})=("[^"]*"|'[^']*'|[^\\s"']+)`, 'gi'), '$1=***'],
-  [new RegExp(`(--${SECRET})\\s+("[^"]*"|'[^']*'|(?!-)[^\\s"']+)`, 'gi'), '$1 ***'],
-  [/\bBearer\s+[\w.~+/=-]+/gi, 'Bearer ***'],
+  // NAME=value, NAME: value (a header), "NAME": "value"; a quoted value may hold spaces, an escaped quote ends a bare one.
+  [new RegExp(`(\\b${NAME}["']?(?:\\s*:\\s*|=))("[^"]*"|'[^']*')`, 'gi'), '$1***'],
+  [new RegExp(`(\\b${NAME}(?:\\\\?["'])?(?:\\s*:\\s*|=)(?:\\\\?["'])?)[^\\s"'\\\\,;&}]+`, 'gi'), '$1***'],
+  // --flag value, also a value that looks like a short flag (`--password -v`), but not the next long flag.
+  [new RegExp(`(--${NAME}\\s+)("[^"]*"|'[^']*'|(?!--)[^\\s"']+)`, 'gi'), '$1***'],
+  // An Authorization header with or without a scheme (Basic, token, Bearer, ...), and a Bearer value anywhere.
+  [/(\bAuthorization\s*:\s*\\?["']?(?:\w+\s+)?)[^\s"'\\]+/gi, '$1***'],
+  [/(\bBearer\s+)[\w.~+/=-]+/gi, '$1***'],
+  // curl's -u user:password, only a value with a colon, so `git push -u origin` is left alone.
+  [/(\s(?:-u|--user|--proxy-user)[\s=]+)("[^"]*:[^"]*"|'[^']*:[^']*'|[^\s"':]*:\S*)/g, '$1***'],
+  // https://user:password@host
+  [/(\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@"']+:)[^\s/@"']+(?=@)/gi, '$1***'],
 ];
+// C0 and C1 control characters but the whitespace ones, which the collapse below turns into single spaces.
+const CONTROL = /[\x00-\x08\x0E-\x1F\x7F-\x9F]/g;
 const OWN_FLAGS = /\s--(?:root|settings)(?:=\S+|\s+(?:"[^"]*"|'[^']*'|\S+))/g;
 const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-// The one filter every printed string goes through: our own --root and --settings dropped, secrets masked (before the
-// cut, so a cut never leaves half of one), then the paths, the longer first: a ticket worktree as `<wt:repo>` (a PR's
+// The one filter every printed value goes through, a ledger field as much as a command: control characters removed
+// (a terminal would act on them), our own --root and --settings dropped, secrets masked (before the cut, so a cut
+// never leaves half of one), then the paths, the longer first: a ticket worktree as `<wt:repo>` (a PR's
 // worktree is known down to its branch; elsewhere under a clone's `.worktrees/` the branch stays), the toolkit's own
 // install as `<toolkit>`, each target's clone as its folder's name, the host root as `.`; spaces collapsed, then cut.
 export function cleaner(settings, { prs = [], toolkit = TOOLKIT } = {}) {
@@ -135,7 +148,7 @@ export function cleaner(settings, { prs = [], toolkit = TOOLKIT } = {}) {
   pairs.set(settings.root, '.');
   const rules = [...pairs].sort((a, b) => b[0].length - a[0].length).map(([abs, name]) => [new RegExp(`${escape(abs)}(?![\\w-])`, 'g'), name]);
   return (text, limit) => {
-    let t = String(text ?? '').replace(OWN_FLAGS, '');
+    let t = String(text ?? '').replace(CONTROL, '').replace(OWN_FLAGS, '');
     for (const [re, to] of MASKS) t = t.replace(re, to);
     for (const [re, to] of rules) t = t.replace(re, to);
     t = t.replace(/\s+/g, ' ').trim();
@@ -145,7 +158,7 @@ export function cleaner(settings, { prs = [], toolkit = TOOLKIT } = {}) {
 
 const two = (n) => String(n).padStart(2, '0');
 const when = (v) => {
-  const d = new Date(v ?? NaN);
+  const d = new Date(typeof v === 'string' || typeof v === 'number' || v instanceof Date ? v : NaN);
   return Number.isNaN(d.getTime()) ? null : d;
 };
 const hms = (v) => {
@@ -154,7 +167,7 @@ const hms = (v) => {
 };
 const stamp = (v) => {
   const d = when(v);
-  return d ? `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${hms(d)}` : String(v ?? 'unknown');
+  return d ? `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${hms(d)}` : null;
 };
 const span = (ms) => {
   if (typeof ms !== 'number' || !Number.isFinite(ms)) return null;
@@ -213,6 +226,16 @@ function describe(t, clean) {
 
 export const countLine = (n) => [`read ${n.read}`, `searched ${n.search}`, `ran ${n.ran} (app ${n.app})`, `wrote ${n.wrote}`, `refused ${n.refused}`, `failed ${n.failed}`, ...['skill', 'agent', 'other'].filter((k) => n[k]).map((k) => `${k === 'skill' ? 'skills' : k === 'agent' ? 'agents' : 'other'} ${n[k]}`)].join(', ');
 
+// One transcript, or null when it can't be read (a folder, no permission, too large for one string). No detail is kept:
+// an error's text can name any path.
+function readSafely(file) {
+  try {
+    return readTranscript(file);
+  } catch {
+    return null;
+  }
+}
+
 // The text of `trace`. `transcripts` replaces the project folder (tests); else the config dir is CLAUDE_CONFIG_DIR or
 // ~/.claude.
 export function renderTrace({ settings, key, stage = null, transcripts = null, env = process.env, home = os.homedir() }) {
@@ -227,8 +250,8 @@ export function renderTrace({ settings, key, stage = null, transcripts = null, e
   const time = runs.reduce((s, r) => s + (typeof r.durationMs === 'number' ? r.durationMs : 0), 0);
   const cost = runs.reduce((s, r) => s + (typeof r.costUsd === 'number' ? r.costUsd * (typeof r.share === 'number' ? r.share : 1) : 0), 0);
   const out = [`Ticket ${key}`];
-  if (ledger.card?.url) out.push(`Card: ${ledger.card.url}`);
-  out.push(`Sessions: ${runs.length}${stage === null ? '' : `, ${picked.length} of stage ${stage} shown`}; total time ${span(time) ?? '0s'}; cost ${usd(cost)} (a shared session counts this ticket's share)`);
+  if (ledger.card?.url) out.push(`Card: ${clean(ledger.card.url, CUT.command)}`);
+  out.push(`Sessions: ${runs.length}${stage === null ? '' : `, ${picked.length} of stage ${clean(stage, 80)} shown`}; total time ${span(time) ?? '0s'}; cost ${usd(cost)} (a shared session counts this ticket's share)`);
   const pages = ledger.plan?.pages;
   if (Array.isArray(pages) && pages.length) out.push(`Plan pages: ${clean(pages.map(pageName).join(', '), CUT.list)}`);
   if (ledger.plan && ledger.plan.liveCheck !== undefined && ledger.plan.liveCheck !== null) out.push(`Live check: ${clean(shown(ledger.plan.liveCheck), CUT.list)}`);
@@ -239,20 +262,27 @@ export function renderTrace({ settings, key, stage = null, transcripts = null, e
   }
   out.push("A transcript holds the actions and the texts a session wrote, not the model's private reasoning, so this shows those and nothing more.");
 
-  if (stage !== null && !picked.length) out.push('', `No session of stage ${stage} in this ledger.`);
+  if (stage !== null && !picked.length) out.push('', `No session of stage ${clean(stage, 80)} in this ledger.`);
   for (const r of picked) {
-    out.push('', `Run ${r.seq ?? '?'}: ${[r.stage, r.role, r.model, r.effort && `effort ${r.effort}`, r.trigger && `trigger ${r.trigger}`].filter(Boolean).join(', ')}`);
-    const facts = [r.start && `start ${stamp(r.start)}`, span(r.durationMs), typeof r.turns === 'number' && `${r.turns} turns`, typeof r.costUsd === 'number' && `cost ${usd(r.costUsd)}`, r.outcome && `outcome ${r.outcome}`, r.pr && `PR ${r.pr}`, r.retryOf && `retry of ${r.retryOf}`, r.denials && `${r.denials} denied (the CLI's count)`].filter(Boolean);
+    // Every ledger field goes through `clean`: `record --run` writes them, and a terminal acts on control characters.
+    const f = (v) => (typeof v === 'string' || (typeof v === 'number' && Number.isFinite(v)) ? clean(v, 80) : '');
+    const head = [f(r.stage), f(r.role), f(r.model), f(r.effort) && `effort ${f(r.effort)}`, f(r.trigger) && `trigger ${f(r.trigger)}`].filter(Boolean);
+    out.push('', `Run ${f(r.seq) || '?'}: ${head.join(', ')}`);
+    const facts = [f(r.start) && `start ${stamp(r.start) ?? f(r.start)}`, span(r.durationMs), typeof r.turns === 'number' && Number.isFinite(r.turns) && `${r.turns} turns`, typeof r.costUsd === 'number' && Number.isFinite(r.costUsd) && `cost ${usd(r.costUsd)}`, f(r.outcome) && `outcome ${f(r.outcome)}`, f(r.pr) && `PR ${f(r.pr)}`, f(r.retryOf) && `retry of ${f(r.retryOf)}`, typeof r.denials === 'number' && r.denials > 0 && `${r.denials} denied (the CLI's count)`].filter(Boolean);
     out.push(`  ${facts.join(', ')}`);
-    const session = typeof r.session === 'string' && /^[\w.-]+$/.test(r.session) ? r.session : null;
+    const session = typeof r.session === 'string' && /^[A-Za-z0-9_][\w.-]*$/.test(r.session) ? r.session : null;
     const base = session && dirs.find((d) => fs.existsSync(path.join(d, `${session}.jsonl`)));
     if (!base) {
       out.push(`  transcript not found${session ? '' : ' (no session recorded)'}`);
       continue;
     }
+    const main = readSafely(path.join(base, `${session}.jsonl`));
+    if (!main) {
+      out.push('  transcript unreadable');
+      continue;
+    }
     out.push(`  session ${session}`);
     if (typeof r.share === 'number' && r.share > 0 && r.share < 1) out.push(`  shared by about ${Math.round(1 / r.share)} tickets: every action of the session is shown, not only this ticket's`);
-    const main = readTranscript(path.join(base, `${session}.jsonl`));
     const subDir = path.join(base, session, 'subagents');
     let subFiles = [];
     try {
@@ -260,16 +290,21 @@ export function renderTrace({ settings, key, stage = null, transcripts = null, e
     } catch {
       /* no subagents */
     }
-    const subs = subFiles.map((f) => {
-      const t = readTranscript(path.join(subDir, f));
-      return { name: f.slice(0, -'.jsonl'.length), t, ...describe(t, clean) };
+    const subs = subFiles.map((file) => {
+      const name = clean(file.slice(0, -'.jsonl'.length), 80);
+      const t = readSafely(path.join(subDir, file));
+      return t ? { name, t, ...describe(t, clean) } : { name, t: null };
     });
     const mine = describe(main, clean);
     const total = { ...mine.n };
-    for (const s of subs) for (const k of Object.keys(total)) total[k] += s.n[k];
-    out.push(`  ${countLine(total)}${subs.length ? ` (the session and its ${subs.length} subagent(s) together)` : ''}`);
+    for (const s of subs) if (s.t) for (const k of Object.keys(total)) total[k] += s.n[k];
+    out.push(`  ${countLine(total)}${subs.some((x) => x.t) ? ` (the session and its ${subs.filter((x) => x.t).length} subagent(s) together)` : ''}`);
     for (const l of mine.lines) out.push(`  ${l}`);
     for (const s of subs) {
+      if (!s.t) {
+        out.push(`  subagent ${s.name}: transcript unreadable`);
+        continue;
+      }
       out.push(`  subagent ${s.name}: ${countLine(s.n)}`);
       for (const l of s.lines) out.push(`    ${l}`);
       if (s.t.lastText) out.push(`    last text (subagent): ${clean(s.t.lastText, CUT.text)}`);
