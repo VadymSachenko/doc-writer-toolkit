@@ -71,6 +71,7 @@ export function setLocal({ settings, key, value, name, unset = false, now = Date
     return rearm({ settings, which: value, name, now });
   }
   if (!SETTABLE.test(String(key ?? ''))) throw new CliError(`'${key}' is not a key of the local settings file: mode, limits.*, schedule.*, roles.<role>.*, modelLadder, video.*, cleanup.*`, { code: 2 });
+  if (/^roles\.[a-z]+\.(allowedTools|disallowedTools)$/.test(key)) throw new CliError(`'${key}' is read only from the tracked settings file, at HEAD: change it there and commit`, { code: 2 });
   if (unset === (value !== undefined)) throw new CliError('set needs a value, or --unset to drop the key and take the default', { code: 2 });
   const localFile = localSettingsPath(settings.file);
   const shared = readJsonFile(settings.file, 'settings file');

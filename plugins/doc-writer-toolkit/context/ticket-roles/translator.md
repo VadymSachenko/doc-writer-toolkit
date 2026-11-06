@@ -14,6 +14,7 @@ allowedTools:
   - Bash(git diff:*)
   - Bash(git log:*)
   - Bash(git show:*)
+  - Bash(git rev-parse:*)
   - Bash(git worktree list:*)
   - Bash(git add:*)
   - Bash(git commit:*)

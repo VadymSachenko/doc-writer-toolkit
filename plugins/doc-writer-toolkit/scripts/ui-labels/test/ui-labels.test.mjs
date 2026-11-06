@@ -156,6 +156,21 @@ async function fixtureRepo() {
   return { dir, write };
 }
 
+test('in a role session (the runner\'s marker) --source and a `command` source are refused, wherever it is declared', async () => {
+  const { dir } = await fixtureRepo();
+  const env = { ...process.env, DOC_TOOLKIT_ROLE_SESSION: 'translator' };
+  const go = (...args) => run('node', [CLI, ...args], { cwd: dir, env }).then(() => 0, (e) => e.code);
+  const planted = path.join(dir, 'ran');
+  for (const args of [['import', '--source', `command touch ${planted} {locale}`], ['check', `--source=command touch ${planted} {locale}`]]) assert.equal(await go(...args), 2, args.join(' '));
+  assert.equal(await go('import'), 2, "the CLAUDE.md's own command source");
+  assert.equal(await go('check'), 2);
+  assert.ok(!(await fs.stat(planted).then(() => true, () => false)), 'nothing ran');
+  // With no marker, the owner's run works as before.
+  assert.equal((await cli(dir, 'import')).code, 0);
+  // A `github` source and the commands that need no source go on in a role session.
+  assert.equal(await go('lookup', 'Зберегти'), 0);
+});
+
 test('import → change → check → import → sync (fixture repo, command adapter)', async () => {
   const { dir, write } = await fixtureRepo();
 

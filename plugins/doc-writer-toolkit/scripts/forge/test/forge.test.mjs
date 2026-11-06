@@ -251,6 +251,27 @@ test('prActivity: reviews, threads with their comments, conversation comments an
   assert.equal(a.pr.headCommit, HEAD7);
 });
 
+test('prActivity: a bot author is marked, whichever way the forge tells it; the queries ask for the type', async () => {
+  // GraphQL gives a bot's login without `[bot]`, so the type is what catches it; a login with the suffix counts too.
+  const person = (id, login, typename) => ({ id: `IC_${id}`, databaseId: id, author: { __typename: typename, login }, body: 'a preview is ready', createdAt: '2026-11-04T09:40:00Z', updatedAt: '2026-11-04T09:40:00Z' });
+  const comments = fixture('gql-comments');
+  comments.data.repository.pullRequest.comments.nodes = [person(801, 'netlify', 'Bot'), person(802, 'dependabot[bot]', 'User'), person(803, 'pat', 'User')];
+  const reviews = fixture('gql-reviews');
+  reviews.data.repository.pullRequest.reviews.nodes[0].author = { __typename: 'Bot', login: 'github-actions' };
+  const threads = fixture('gql-threads');
+  threads.data.repository.pullRequest.reviewThreads.nodes[0].comments.nodes[0].author = { __typename: 'Bot', login: 'coderabbitai' };
+  const { forge, calls } = setup({ routes: { 'graphql PrReviews': reviews, 'graphql PrThreads': threads, 'graphql PrComments': comments } });
+  const a = await forge.prActivity({ repo: 'guide-docs', number: 7 });
+  assert.deepEqual(a.comments.map((c) => [c.author, c.authorBot === true]), [['netlify', true], ['dependabot[bot]', true], ['pat', false]]);
+  assert.equal(a.reviews.find((r) => r.author === 'github-actions').authorBot, true);
+  assert.equal(a.reviews.filter((r) => r.authorBot).length, 1);
+  assert.equal(a.threads[0].comments[0].authorBot, true);
+  assert.equal(a.threads[0].comments[1].authorBot, undefined);
+  const asked = calls.filter((c) => c.kind === 'graphql' && /query Pr(Reviews|Threads|Comments)/.test(c.query));
+  assert.equal(asked.length, 3);
+  for (const c of asked) assert.match(c.query, /author \{ __typename login \}/);
+});
+
 test('prActivity: with a time, only what was posted or edited since, and which comments are new', async () => {
   const { forge } = setup({ routes: { 'graphql PrReviews': fixture('gql-reviews'), 'graphql PrThreads': fixture('gql-threads'), 'graphql PrComments': fixture('gql-comments') } });
   const a = await forge.prActivity({ repo: 'guide-docs', number: 7, since: '2026-11-04T09:11:00Z' });
