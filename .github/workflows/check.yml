@@ -28,6 +28,9 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
+      # For video-parts: its four tests on real files run only where ffmpeg is installed.
+      - name: Install ffmpeg
+        run: sudo apt-get update -q && sudo apt-get install -y -q ffmpeg
       - name: Lint the plugin (frontmatter, plugin-root paths, routing coverage, line endings)
         run: node tools/lint-plugin.mjs
       - name: Test the tools
@@ -69,7 +72,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: npm test
         working-directory: plugins/doc-writer-toolkit/scripts/ticket-state
-      # The cut of a real tiny video runs where the runner has ffmpeg, and is skipped otherwise.
+      # The four tests on real files run with the ffmpeg installed above.
       - name: Test video-parts
         if: ${{ !cancelled() }}
         run: npm test

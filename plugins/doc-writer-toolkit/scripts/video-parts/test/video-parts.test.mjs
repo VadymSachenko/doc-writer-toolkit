@@ -174,6 +174,20 @@ test('two videos with one stem keep their own parts folders: the second cut leav
   assert.equal(fs.readFileSync(path.join(h.root, mp4.video.parts[0].file), 'utf8'), 'the mp4 part');
 });
 
+test('two videos of one name in two folders of the work folder keep their own parts folders, each next to its video', async () => {
+  const h = host();
+  for (const d of ['a', 'b']) {
+    fs.mkdirSync(path.join(h.root, h.work, d));
+    fs.writeFileSync(path.join(h.root, h.work, d, 'same.mp4'), 'x');
+  }
+  const a = await videoParts({ root: h.root, work: h.work, video: `${h.work}/a/same.mp4`, partSeconds: 1800, run: fakeRun({ duration: 100 }).run });
+  fs.writeFileSync(path.join(h.root, a.video.parts[0].file), 'the a part');
+  const b = await videoParts({ root: h.root, work: h.work, video: `${h.work}/b/same.mp4`, partSeconds: 1800, run: fakeRun({ duration: 100 }).run });
+  assert.deepEqual([a.video.parts[0].file, b.video.parts[0].file], [`${h.work}/a/same.mp4-parts/same.mp4-part-01.m4a`, `${h.work}/b/same.mp4-parts/same.mp4-part-01.m4a`]);
+  assert.equal(fs.readFileSync(path.join(h.root, a.video.parts[0].file), 'utf8'), 'the a part');
+  assert.equal(fs.existsSync(path.join(h.root, h.work, 'same.mp4-parts')), false);
+});
+
 test('at the cut, a part file that became a link is refused before ffmpeg runs; a part ffmpeg did not write fails the run', async () => {
   const h = host();
   const outside = tmp();

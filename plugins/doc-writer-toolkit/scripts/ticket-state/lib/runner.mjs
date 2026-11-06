@@ -17,6 +17,7 @@ import { cleanupTicket } from './cleanup.mjs';
 import { removeClosedMarkdown } from './import.mjs';
 import { childEnv } from './env.mjs';
 import { ensureWorktree, prsForStep, worktreePath } from './worktree.mjs';
+import { freeBrowserLock } from './browser-lock.mjs';
 
 // The daily run (design §7): finish first, then triage the quiet intake cards (mornings), then start ready groups while
 // the limits and the day's allowance allow. A script decides; each step that needs a model is one `claude -p` session
@@ -119,7 +120,7 @@ export const jobDenied = (settings, roots = scriptRoots(settings)) => [...new Se
 // only: its other commands are the owner's, and `set` would widen the next session's rules), from the toolkit the runner runs (the brief's
 // "scripts folder") and from the installed plugin the session's skills name (`${CLAUDE_PLUGIN_ROOT}`). A literal path
 // as a prefix rule: never a wildcard, which `../` would walk out of.
-export const NODE_SCRIPTS = ['ticket-state/ticket-state.mjs record', 'ticket-state/ticket-state.mjs status', 'ticket-state/ticket-state.mjs config', 'tracker/tracker.mjs', 'forge/forge.mjs', 'locale-sync/locale-sync.mjs', 'ui-labels/ui-labels.mjs', 'doc-align/doc-align.mjs', 'screenshot-locales/screenshot-locales.mjs', 'section-state/section-state.mjs', 'visual-pack/visual-pack.mjs', 'video-parts/video-parts.mjs'];
+export const NODE_SCRIPTS = ['ticket-state/ticket-state.mjs record', 'ticket-state/ticket-state.mjs status', 'ticket-state/ticket-state.mjs config', 'tracker/tracker.mjs', 'forge/forge.mjs', 'locale-sync/locale-sync.mjs', 'ui-labels/ui-labels.mjs', 'doc-align/doc-align.mjs', 'screenshot-locales/screenshot-locales.mjs', 'section-state/section-state.mjs', 'visual-pack/visual-pack.mjs', 'video-parts/video-parts.mjs', 'ticket-state/browser-lock.mjs'];
 export const scriptRulesFor = (roots = []) => [...new Set(roots.flatMap((r) => NODE_SCRIPTS.map((s) => `Bash(node ${path.join(r, 'scripts', s)}:*)`)))];
 // Script flags that run code: ui-labels' `--source 'command <cmd>'` (a shell) and visual-pack's `--playwright-from
 // <dir>` (JavaScript from that folder), denied first, last or between other words, as `--x v` and `--x=v`.
@@ -808,6 +809,13 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
           res = await (io.spawnClaude ?? spawnClaude)(cmd, io.claudeEnv ? { env: io.claudeEnv } : {});
         } finally {
           clearInterval(renew);
+          // The browser lock a session took (`browser-lock.mjs`) and didn't free, crashed or not: freed now, so the next
+          // Playwright run doesn't wait for it. A lock another ticket or a hand run holds stays.
+          try {
+            if (freeBrowserLock(settings.state, { tickets: step.keys }).freed) say({ kind: 'browserLock', group: step.group, stage: step.stage, outcome: 'freed', note: 'the session ended holding the browser lock' });
+          } catch {
+            // a lock that isn't a folder is left alone
+          }
         }
         usage = (await readUsage()) ?? usage;
         const r = parseResult(res.stdout) ?? {};

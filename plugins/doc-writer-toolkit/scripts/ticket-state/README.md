@@ -293,6 +293,15 @@ Every `claude` the runner and the watcher start gets an environment without `ANT
 
 The plist holds absolute paths (node, the watcher in the plugin's folder as installed, the host) and a PATH with `claude`, `git`, `gh`, and `ffmpeg` and `ffprobe` when found (the video gate's cut, `scripts/video-parts/`): install again after the plugin or one of them moves, or after installing `ffmpeg`.
 
+## The browser lock
+
+`browser-lock.mjs take|free|status --ticket <key> [--wait <minutes>]` serialises Playwright runs on the host's folder `<state>/.playwright.lock`, the one a hand run takes with `mkdir` and moves away when done. No role allows `mv` or `rmdir`, and `rm` is denied, so a session takes and frees the lock only through this script, which every role may run by its path (`NODE_SCRIPTS`).
+
+- `take` makes the folder with a `holder.json` naming the ticket. While another ticket or a hand run holds it, it waits up to `--wait` minutes (default 10), then exits 3. Its own lock is taken again at once.
+- A lock older than `STALE_MINUTES` (60), by its holder's time or, for a hand run's empty folder, the folder's, is taken over: a holder that crashed never keeps it.
+- `free` removes the folder only when this ticket holds it; a lock another ticket or a hand run holds stays (exit 3). A lock that isn't a folder (a file, a link) is never touched.
+- When a session ends, failed, timed out or done, the runner frees a lock one of the step's tickets still holds, and writes `browserLock` `freed` in the run log.
+
 ## `status` output
 
 `tickets[]`: `key`, `group`, `ledger` (`present` or `absent`), `priority`, `createdAt`, `mode`, `startedBy`, `stage` (the last recorded), `card`, `state`, `next` (the first of `steps`, or null; with `waits` and `prior` after a failed session), `steps`, `gate` (`who`, `why`), `mismatch`, `notes`, `prs` (each with `id`, `stage`, `state`, `labels`, `head`, `next`, and `approvalStale`, the UA pages changed after the approval), `counts` (`inProgress`, `waiting` or null), `counted`, `locked` (with `derivedState`), `hand`, and after a failed session `failed` (`stage`, `pr`, `at`, `sessions`, and `acted` or `held`) and `held` (a ready ticket's failed start too); at the daily session cap `capped` (`stage`, `pr`, `sessions`) and `held`. A start step in `next` names its origin (`startedBy`), with `byHand` for a card a person moved into work or `again` for a recorded start that goes on. Then `intake`, `groups` (with `failedStart` when a member's start failed: `held`, `waits`, `sessions`, `at`), `wip` (`inProgress`, `waiting`, `open`, `openKeys`, `limits`, `manual`), `allowance` (`day`, `cap`, `used`, `remaining`, `inWork`, `inWorkUnknown`), `estimates`, `startable` (with `prior`, the failed start sessions so far, when there are some; in `easiest` order with `sizeRank`, `repoCount` and `pageCount`), `notStarted` (with `reasons`), `notTickets`, `locks`, and `requests` (what was sent to the tracker and the forge, by method; `writes` is empty).
@@ -305,7 +314,8 @@ The plist holds absolute paths (node, the watcher in the plugin's folder as inst
 
 | | |
 |---|---|
-| `ticket-state.mjs`, `runner.mjs`, `watcher.mjs`, `launchd.mjs` | The four CLIs. |
+| `ticket-state.mjs`, `runner.mjs`, `watcher.mjs`, `launchd.mjs`, `browser-lock.mjs` | The five CLIs. |
+| `lib/browser-lock.mjs` | The host's browser lock ("The browser lock"). |
 | `lib/rule.mjs` | The next-step rule: one ticket's state, steps, gate and mismatches. |
 | `lib/status.mjs`, `lib/world.mjs` | The snapshot: ledgers, the tracker, the forge, git (read only). |
 | `lib/record.mjs`, `lib/handover.mjs`, `lib/import.mjs` | The only writers of a ledger (`import`: the Markdown ledgers, and their removal). |

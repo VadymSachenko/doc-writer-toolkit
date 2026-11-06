@@ -7,6 +7,7 @@ import { ledger, read, snapshot, world } from './helpers.mjs';
 import { makeClients } from '../lib/world.mjs';
 import { runRecord } from '../lib/record.mjs';
 import { lockOf } from '../lib/locks.mjs';
+import { browserLockState, takeBrowserLock } from '../lib/browser-lock.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
 import { BRANCH_DENIED, PLUGIN_ROOT, PUSH_DENIED, PUSH_DENIED_PLAIN, ROLE_DIR, scriptRoots, scriptRulesFor, agentsFile, briefFor, collectSteps, commandFor, nextModelUp, proposeRoles, readRole, runDaily } from '../lib/runner.mjs';
 import { localDate } from '../lib/report.mjs';
@@ -126,6 +127,33 @@ test('a scheduled run: the session records its stage; a session that does not is
   const log = fs.readFileSync(path.join(w.settings.state, 'runs', `${date}.jsonl`), 'utf8').trim().split('\n').map((x) => JSON.parse(x));
   assert.deepEqual(log.filter((e) => e.kind === 'retry').map((e) => [e.stage, e.from, e.to]), [['plan', 'claude-sonnet-5-5', 'claude-opus-5-5']]);
   assert.ok(fs.existsSync(path.join(w.settings.state, 'roles', 'agents.json')));
+});
+
+test('the browser lock a session took is freed when the session ends, failed or not; another ticket\'s lock stays', async () => {
+  for (const other of [false, true]) {
+    const { w } = busyWorld({ ...estimates, limits: { ...estimates.limits, stepsPerTicket: 1 } });
+    fs.rmSync(path.join(w.settings.state, 'tickets', '502.json'));
+    w.tracker.cards.splice(1, 1);
+    if (other) takeBrowserLock(w.settings.state, { ticket: '777', now: NOW });
+    const seen = [];
+    // The session takes the lock for its ticket (or finds it held), then dies without recording or freeing it.
+    const spawnClaude = async () => {
+      seen.push(takeBrowserLock(w.settings.state, { ticket: '501', now: NOW }).taken);
+      return { code: 1, stdout: '' };
+    };
+    const out = await runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: () => usageAt(5), now: () => NOW, spawnClaude }, options: {} });
+    assert.ok(seen.length >= 1, 'a session ran');
+    assert.deepEqual(out.starts.map((s) => s.steps.map((x) => x.outcome)), [['failed']]);
+    const lock = browserLockState(w.settings.state, NOW);
+    const log = fs.readFileSync(path.join(w.settings.state, 'runs', `${localDate(NOW)}.jsonl`), 'utf8').trim().split('\n').map((x) => JSON.parse(x));
+    if (other) {
+      assert.deepEqual([seen.every((t) => t === false), lock.holder?.ticket], [true, '777'], 'another ticket\'s lock stays');
+      assert.equal(log.filter((e) => e.kind === 'browserLock').length, 0);
+    } else {
+      assert.deepEqual([seen[0], lock.held], [true, false], 'freed after the session');
+      assert.deepEqual(log.filter((e) => e.kind === 'browserLock').map((e) => [e.stage, e.outcome]).slice(0, 1), [['start', 'freed']]);
+    }
+  }
 });
 
 test('the guard: at the allowance by now, no model step starts, and the report says why', async () => {
@@ -378,6 +406,15 @@ test('the video gate: the writer runs video-parts by its path, from either root,
   }
   // Every role has the same denial.
   for (const role of ['triage', 'reviewer', 'translator']) assert.ok(['Bash(ffmpeg:*)', 'Bash(ffprobe:*)'].every((r) => rulesOf(role, w).denied.includes(r)), role);
+});
+
+test('the browser lock: the writer takes and frees it with the script, from either root, and can\'t remove or move the folder itself', () => {
+  const { w } = busyWorld();
+  const { allowed, denied } = rulesOf('writer', w);
+  const wide = [...allowed, ...LAYERS];
+  for (const r of ROOTS) for (const c of ['take', 'free', 'status']) assert.equal(verdict(`node ${r}/scripts/ticket-state/browser-lock.mjs ${c} --root /hub --ticket 502`, wide, denied), 'allowed', `${r}: ${c}`);
+  const lock = path.join(w.settings.state, '.playwright.lock');
+  for (const c of [`rm -rf ${lock}`, `rmdir ${lock}`, `mv ${lock} /tmp/x`, `mv ${lock} ${lock}.old`, `node ${ROOTS[0]}/scripts/ticket-state/browser-lock.mjs/../../x.mjs`, 'node scripts/ticket-state/browser-lock.mjs free --ticket 502']) assert.notEqual(verdict(c, wide, denied), 'allowed', c);
 });
 
 test('the toolkit roots a session may run scripts from: the runner\'s, and each install of the plugin the hub loads', () => {
