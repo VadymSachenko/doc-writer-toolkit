@@ -13,6 +13,7 @@ allowedTools:
   - Bash(git diff:*)
   - Bash(git log:*)
   - Bash(git show:*)
+  - Bash(git rev-parse:*)
   - Bash(git ls-tree:*)
   - Bash(git worktree list:*)
   - Bash(git add:*)

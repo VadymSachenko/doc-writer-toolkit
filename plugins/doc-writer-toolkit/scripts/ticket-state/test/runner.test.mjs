@@ -49,7 +49,10 @@ test('the dry run prints the plan and each claude command line, and writes and s
   assert.equal(flag(cmd, '--output-format'), 'json');
   assert.equal(flag(cmd, '--max-turns'), '200');
   assert.ok(cmd.args.includes('--allowedTools') && cmd.args.includes('--disallowedTools'));
-  assert.deepEqual(cmd.args.filter((a, i) => cmd.args[i - 1] === '--add-dir'), ['repos/guide-docs', 'repos/api-docs', 'repos/portal-docs'].map((p) => path.join(w.root, p)));
+  // The target clones, then the toolkit roots a session reads its scripts from.
+  const added = cmd.args.filter((a, i) => cmd.args[i - 1] === '--add-dir');
+  assert.deepEqual(added.slice(0, 3), ['repos/guide-docs', 'repos/api-docs', 'repos/portal-docs'].map((p) => path.join(w.root, p)));
+  assert.ok(added.includes(PLUGIN_ROOT));
   assert.match(briefOf(cmd), /record 502 --root .* --stage plan --status done --result <json>/);
   // The morning triage: one session for the due cards, highest priority first; the start of the ready group.
   assert.deepEqual([out.triage.stage, out.triage.keys, out.triage.model, out.triage.effort], ['triage', ['503'], 'claude-sonnet-5-5', 'medium']);
@@ -383,9 +386,9 @@ test('AC-3, AC-7: with the owner\'s and the hub\'s layers loaded, every plain-sp
   // Each stage's own commands, by role (the scripts from both roots: the runner's and the installed plugin's).
   const OWN = {
     triage: [`node ${ROOTS[0]}/scripts/tracker/tracker.mjs read-card abc`, `node ${ROOTS[0]}/scripts/ticket-state/ticket-state.mjs record 502 --stage triage`, `node ${ROOTS[0]}/scripts/ticket-state/ticket-state.mjs status --root /hub --ticket 502`, `node ${R}/scripts/ticket-state/ticket-state.mjs config --root /hub`, 'git log -1', 'ls docs'],
-    writer: [script('tracker/tracker.mjs', ' move abc --to inProgress'), script('forge/forge.mjs', ' open-pr --repo guide-docs'), script('ui-labels/ui-labels.mjs', ' check'), script('section-state/section-state.mjs', ' status docs/x'), script('ticket-state/ticket-state.mjs', ' record 502 --stage write'), `git -C ${WT} add -A`, `git -C ${WT} commit -m "Write the page"`, `git -C ${WT} push origin HEAD:refs/heads/ticket-71`, `git -C ${WT} fetch origin`, 'npx playwright test scenario.spec.ts', 'mkdir -p docs/x/.assets'],
-    reviewer: [script('doc-align/doc-align.mjs', ' a.md b.md'), script('visual-pack/visual-pack.mjs', ' --base main'), script('ui-labels/ui-labels.mjs', ' check --root /hub'), `git -C ${WT} diff origin/main`, `git -C ${WT} commit -m "Fix the style"`, `git -C ${WT} push origin HEAD:refs/heads/ticket-71`],
-    translator: [script('locale-sync/locale-sync.mjs', ' status'), script('screenshot-locales/screenshot-locales.mjs', ` pairs --root ${WT} --base origin/main`), 'npm run build', 'npx docusaurus build', `git -C ${WT} add -A`, `git -C ${WT} push origin HEAD:refs/heads/ticket-71`],
+    writer: [script('tracker/tracker.mjs', ' move abc --to inProgress'), script('forge/forge.mjs', ' open-pr --repo guide-docs'), script('ui-labels/ui-labels.mjs', ' check'), script('screenshot-locales/screenshot-locales.mjs', ' paths docs/x'), script('video-parts/video-parts.mjs', ' --root /hub'), script('ticket-state/browser-lock.mjs', ' take --root /hub'), script('ticket-state/ticket-state.mjs', ' record 502 --stage write'), `git -C ${WT} add -A`, `git -C ${WT} commit -m "Write the page"`, `git -C ${WT} push origin HEAD:refs/heads/ticket-71`, `git -C ${WT} fetch origin`, 'npx playwright test scenario.spec.ts', 'mkdir -p docs/x/.assets'],
+    reviewer: [script('visual-pack/visual-pack.mjs', ' --base main'), script('ticket-state/ticket-state.mjs', ' record 502 --stage uaReview'), `git -C ${WT} diff origin/main`, `git -C ${WT} commit -m "Fix the style"`, `git -C ${WT} push origin HEAD:refs/heads/ticket-71`],
+    translator: [script('locale-sync/locale-sync.mjs', ' status'), script('screenshot-locales/screenshot-locales.mjs', ` pairs --root ${WT} --base origin/main`), script('doc-align/doc-align.mjs', ' a.md b.md'), script('ui-labels/ui-labels.mjs', ' check --root /hub'), 'npm run build', 'npx docusaurus build', `git -C ${WT} add -A`, `git -C ${WT} push origin HEAD:refs/heads/ticket-71`],
   };
   const BAD = [
     // Plain-spelling changes, after a `cd` (the reviewer's four, and the rest).
@@ -441,9 +444,9 @@ test('AC-3, AC-7: with the owner\'s and the hub\'s layers loaded, every plain-sp
   // A step with no worktree changes no repo: no plain add or commit; it reads the target clones (its --add-dir).
   const plan = rulesOf('writer', w, []);
   for (const c of ['git add -A', 'git commit -m x']) assert.equal(verdict(c, [...plan.allowed, ...LAYERS], plan.denied), 'denied', `plan: ${c}`);
-  assert.deepEqual(plan.addDirs, [...new Set(w.settings.targets.filter((t) => t.path).map((t) => path.resolve(w.settings.root, t.path)))]);
-  // A step with worktrees reaches them only, not the target clones (a `cd` outside the add-dirs is denied).
-  assert.deepEqual(rulesOf('writer', w).addDirs, [WT]);
+  assert.deepEqual(plan.addDirs, [...new Set(w.settings.targets.filter((t) => t.path).map((t) => path.resolve(w.settings.root, t.path))), ...ROOTS]);
+  // A step with worktrees reaches them and the toolkit roots, not the target clones (a `cd` outside the add-dirs is denied).
+  assert.deepEqual(rulesOf('writer', w).addDirs, [WT, ...ROOTS]);
 });
 
 test('on a step with worktrees, the target clones\' content roots are not writable; their dot folders, the state and the worktree are', () => {
@@ -540,8 +543,9 @@ test('the toolkit roots a session may run scripts from: the runner\'s, and each 
 });
 
 test('AC-5: a host job can\'t push, change a branch or fetch, in the plain or git -C spelling (unquoted), with a broad git allow list', () => {
-  const w = world({ extra: { hostJobs: [{ name: 'notes', every: 60, run: { skill: 'notes-writer', allowedTools: ['Bash(git:*)', 'Bash(git *)', 'Bash(git -C *)'] } }] } });
-  const { args } = jobCommand(w.settings.hostJobs[0], { settings: w.settings });
+  // Settings validation refuses a bare git prefix now (role-hook.test.mjs); the denials are still there under one that slips through.
+  const w = world();
+  const { args } = jobCommand({ name: 'notes', every: 60, run: { skill: 'notes-writer', allowedTools: ['Bash(git:*)', 'Bash(git *)', 'Bash(git -C *)'] } }, { settings: w.settings });
   const allowed = args.slice(args.indexOf('--allowedTools') + 1, args.indexOf('--disallowedTools'));
   const denied = args.slice(args.indexOf('--disallowedTools') + 1);
   for (const c of ['git branch -D other', 'git branch -m own own2', 'git -C /any branch -D other', 'git -C /any branch -m own own2', 'git fetch origin +refs/heads/main:refs/heads/other', 'git fetch origin main:other', 'git -C /any fetch origin main:other', 'git -C /any fetch', 'git push --force origin x', 'git -C /any push -f origin x',

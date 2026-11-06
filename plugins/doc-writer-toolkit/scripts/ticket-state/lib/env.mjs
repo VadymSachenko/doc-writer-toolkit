@@ -16,6 +16,20 @@ export function childEnv(env = process.env, extra = {}) {
   return out;
 }
 
+// The markers of a role session (lib/runner.mjs `sessionEnv`). The scripts read them by these names to refuse their
+// dangerous flags on their own: the role, and where the tracker may save a download. `TRACKER_TEST_VARIABLE` opens the
+// tracker's `--origin`, which sends its key and token to that origin, for its tests; a session never inherits it.
+export const ROLE_SESSION_VARIABLE = 'DOC_TOOLKIT_ROLE_SESSION';
+export const DOWNLOAD_DIRS_VARIABLE = 'DOC_TOOLKIT_DOWNLOAD_DIRS';
+export const TRACKER_TEST_VARIABLE = 'DOC_TOOLKIT_TRACKER_TEST';
+
+// The environment of a role session's `claude`: `childEnv`, its markers, and no test marker.
+export function sessionChildEnv(env = process.env, session = {}) {
+  const out = childEnv(env, session);
+  delete out[TRACKER_TEST_VARIABLE];
+  return out;
+}
+
 // The names (never the values) of the billed variables `env` holds.
 export const billedIn = (env = process.env) => BILLED_VARIABLES.filter((k) => env[k] !== undefined && env[k] !== '');
 

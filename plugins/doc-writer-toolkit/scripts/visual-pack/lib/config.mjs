@@ -54,6 +54,8 @@ export async function resolveColumns(settings) {
 }
 
 export async function loadPackSettings(values, env = process.env) {
+  // A role session of the ticket flow (the runner sets the marker): JavaScript from a folder of its choosing.
+  if (env.DOC_TOOLKIT_ROLE_SESSION && values['playwright-from'] !== undefined) throw new CliError('--playwright-from is refused in a role session: it runs JavaScript from that folder', { code: 2 });
   if (!values.range) {
     throw new CliError('--range <git range> is required: the commits whose pages to show, such as origin/main...HEAD.', { code: 2, data: { missing: ['--range'] } });
   }

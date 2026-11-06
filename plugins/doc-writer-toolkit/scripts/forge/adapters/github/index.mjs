@@ -40,7 +40,7 @@ const Q = {
     repository(owner: $owner, name: $name) { pullRequest(number: $number) {
       reviews(first: 100, after: $after) {
         pageInfo { hasNextPage endCursor }
-        nodes { id databaseId author { login } state body submittedAt commit { oid } }
+        nodes { id databaseId author { __typename login } state body submittedAt commit { oid } }
       }
     } }
   }`,
@@ -52,7 +52,7 @@ const Q = {
           id isResolved isOutdated path line
           comments(first: 100) {
             pageInfo { hasNextPage }
-            nodes { id databaseId author { login } body createdAt updatedAt path line replyTo { databaseId } pullRequestReview { databaseId } }
+            nodes { id databaseId author { __typename login } body createdAt updatedAt path line replyTo { databaseId } pullRequestReview { databaseId } }
           }
         }
       }
@@ -62,7 +62,7 @@ const Q = {
     repository(owner: $owner, name: $name) { pullRequest(number: $number) {
       comments(first: 100, after: $after) {
         pageInfo { hasNextPage endCursor }
-        nodes { id databaseId author { login } body createdAt updatedAt }
+        nodes { id databaseId author { __typename login } body createdAt updatedAt }
       }
     } }
   }`,
@@ -94,6 +94,8 @@ export function patchLines(patch) {
 }
 
 const login = (u) => u?.login ?? null;
+// GraphQL gives a bot's login without `[bot]` (`netlify`, `github-actions`), so its type says it; REST logins carry the suffix.
+const authorBot = (u) => (u?.__typename === 'Bot' || /\[bot\]$/.test(u?.login ?? '') ? { authorBot: true } : {});
 
 function reviewRequestOf(node) {
   const r = node?.requestedReviewer;
@@ -134,6 +136,7 @@ const commentOf = (n) => ({
   id: n.databaseId,
   nodeId: n.id,
   author: login(n.author),
+  ...authorBot(n.author),
   body: n.body,
   createdAt: n.createdAt,
   updatedAt: n.updatedAt,
@@ -225,7 +228,7 @@ export function createGithubAdapter(gh, { owner, pageSize = PAGE }) {
       const nodes = await pages('PrReviews', Q.reviews, vars(repo, { number }), (d) => must(d.repository?.pullRequest, `PR #${number}`).reviews);
       return nodes
         .filter((r) => r.state !== 'PENDING')
-        .map((r) => ({ id: r.databaseId, nodeId: r.id, author: login(r.author), state: r.state, body: r.body ?? '', submittedAt: r.submittedAt ?? null, commit: r.commit?.oid ?? null }));
+        .map((r) => ({ id: r.databaseId, nodeId: r.id, author: login(r.author), ...authorBot(r.author), state: r.state, body: r.body ?? '', submittedAt: r.submittedAt ?? null, commit: r.commit?.oid ?? null }));
     },
 
     async threads({ repo, number }) {

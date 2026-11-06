@@ -15,9 +15,10 @@ import { appendRunLog, localDate, readRunLog, renderReport, writeReport } from '
 import { ROLES } from './settings.mjs';
 import { cleanupTicket } from './cleanup.mjs';
 import { removeClosedMarkdown } from './import.mjs';
-import { childEnv } from './env.mjs';
+import { DOWNLOAD_DIRS_VARIABLE, ROLE_SESSION_VARIABLE, childEnv, sessionChildEnv } from './env.mjs';
 import { clonePath, ensureWorktree, prsForStep, worktreePath } from './worktree.mjs';
 import { BUSY_NAME, LOCK_NAME, busyEnded, freeBrowserLock } from './browser-lock.mjs';
+import { HOOK_VARIABLE, commandsOfRules, hookSettings } from './role-hook.mjs';
 import { parseClaudeConfig } from '../../ui-labels/lib/config.mjs';
 
 // The daily run (design §7): finish first, then triage the quiet intake cards (mornings), then start ready groups while
@@ -28,6 +29,7 @@ import { parseClaudeConfig } from '../../ui-labels/lib/config.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const PLUGIN_ROOT = path.resolve(HERE, '../../..');
 const SCRIPT = path.join(PLUGIN_ROOT, 'scripts', 'ticket-state', 'ticket-state.mjs');
+export const ROLE_HOOK = path.join(PLUGIN_ROOT, 'scripts', 'ticket-state', 'role-hook.mjs');
 export const ROLE_DIR = path.join(PLUGIN_ROOT, 'context', 'ticket-roles');
 // A git allow rule in the `git -C <worktree>` spelling, for each worktree the runner made for the step: the literal
 // path, as a prefix rule (`Bash(git -C /x/wt status:*)`). Never a wildcard path: `Bash(git -C * status *)` would also
@@ -51,6 +53,13 @@ export const pushRulesFor = (trees = []) => [...new Set(trees.map((t) => `Bash(g
 // worktree shares. A role fetches only as `git -C <worktree> fetch origin`, or `… fetch origin <branch>` for the
 // worktree's branch and base (the default refspec updates only `origin/*`); every plain fetch is denied (`ROLE_DENIED`).
 export const fetchRulesFor = (trees = []) => [...new Set(trees.flatMap((t) => [`Bash(git -C ${t.path} fetch origin)`, ...[t.branch, t.base].filter(Boolean).map((b) => `Bash(git -C ${t.path} fetch origin ${b})`)]))];
+// `ls-remote` the same way, literal and exact, since `--upload-pack=<cmd>` runs a command: what the branch or base is on origin now.
+export const lsRemoteRulesFor = (trees = []) => [...new Set(trees.flatMap((t) => [t.branch, t.base].filter(Boolean).map((b) => `Bash(git -C ${t.path} ls-remote origin ${b})`)))];
+
+// A step with no worktree (triage, the plan) reads the target clones and the hub in the `git -C <folder>` spelling too: the
+// role's own read rules, for these reads only, never `add` or `commit`.
+const CLONE_READS = /^Bash\(git (log|show|ls-tree|status|diff)(:\*)?\)$/;
+export const cloneReadRules = (rules, dirs = []) => rules.filter((r) => CLONE_READS.test(r)).flatMap((r) => gitCFor(r, dirs));
 
 // Denied in every role, whatever its file says: a push that could drop someone else's commits (the owner pushes to the
 // same branches by hand), skip the hooks, or delete a branch, in both spellings: plain, and `git -C <worktree>` for each
@@ -115,7 +124,13 @@ const MEDIA_DENIED = ['Bash(ffmpeg:*)', 'Bash(ffprobe:*)'];
 // Moving or removing folders, which a broad host allow would reopen, and a browser lock made by hand (no holder, so
 // nothing frees it): a role takes and frees the lock only with browser-lock.mjs.
 const FOLDER_DENIED = ['Bash(mv:*)', 'Bash(rmdir:*)', 'Bash(mkdir *.playwright.lock*)', 'Bash(mkdir .playwright.lock*)'];
-export const ROLE_DENIED = [...new Set([...GIT_PLAIN_DENIED, ...GIT_OUTPUT_DENIED, ...CODE_DENIED, ...MEDIA_DENIED, ...FOLDER_DENIED, ...MCP_DENIED])];
+// Whole tools no stage needs that run or schedule work, or send something outside the session; the hook doesn't read them.
+// `ScheduleWakeup` a session has used (a pilot's `locales` orchestrator, 4 times), but it doesn't need it: a session with a
+// background worker that got no wakeup finished when the worker reported.
+// A name this CLI doesn't have is ignored (probed), so the list survives CLI updates. `Agent`/`Task` (the translator's
+// workers), `SendMessage`, `TaskStop`, `ListAgents`, `Monitor`, `Skill` and `ToolSearch` stay: stages or their skills use them.
+export const TOOLS_DENIED = ['Workflow', 'CronCreate', 'CronDelete', 'CronList', 'RemoteTrigger', 'ScheduleWakeup', 'PushNotification', 'DesignSync', 'EnterWorktree', 'ExitWorktree', 'WebFetch', 'WebSearch', 'Artifact', 'ArtifactData', 'ArtifactComments', 'SendUserFile'];
+export const ROLE_DENIED = [...new Set([...GIT_PLAIN_DENIED, ...GIT_OUTPUT_DENIED, ...CODE_DENIED, ...MEDIA_DENIED, ...FOLDER_DENIED, ...MCP_DENIED, ...TOOLS_DENIED])];
 // A skill job's session: the roles' git and code denials, and the file denials (`jobDenied`). Not the MCP denials: the
 // toolkit knows nothing about what a job does, and a host's job may well work on its tracker through MCP.
 export const jobDenied = (settings, roots = scriptRoots(settings)) => [...new Set([...JOB_DENIED, ...GIT_PLAIN_DENIED, ...GIT_OUTPUT_DENIED, ...CODE_DENIED, ...writeDeniedFor(settings, roots)])];
@@ -125,7 +140,19 @@ export const jobDenied = (settings, roots = scriptRoots(settings)) => [...new Se
 // "scripts folder") and from the installed plugin the session's skills name (`${CLAUDE_PLUGIN_ROOT}`). A literal path
 // as a prefix rule: never a wildcard, which `../` would walk out of.
 export const NODE_SCRIPTS = ['ticket-state/ticket-state.mjs record', 'ticket-state/ticket-state.mjs status', 'ticket-state/ticket-state.mjs config', 'tracker/tracker.mjs', 'forge/forge.mjs', 'locale-sync/locale-sync.mjs', 'ui-labels/ui-labels.mjs', 'doc-align/doc-align.mjs', 'screenshot-locales/screenshot-locales.mjs', 'section-state/section-state.mjs', 'visual-pack/visual-pack.mjs', 'video-parts/video-parts.mjs', 'ticket-state/browser-lock.mjs'];
-export const scriptRulesFor = (roots = []) => [...new Set(roots.flatMap((r) => NODE_SCRIPTS.map((s) => `Bash(node ${path.join(r, 'scripts', s)}:*)`)))];
+// Each role's own, from what its stages and the skills it runs call. Triage reads and answers cards and writes nothing else;
+// the writer's skills run the UI label check and the screenshot paths; the translator's run the locale pipeline and the
+// alignment check; the reviewer builds the visual pack. The last two read a PR's base with `forge pr-state`, which neither
+// `status` nor the brief gives. A role's list narrows only: a script not in it has no rule, and
+// the role's hook refuses it however it is spelled.
+const STATE_SCRIPTS = ['ticket-state/ticket-state.mjs record', 'ticket-state/ticket-state.mjs status', 'ticket-state/ticket-state.mjs config'];
+export const ROLE_SCRIPTS = {
+  triage: [...STATE_SCRIPTS, 'tracker/tracker.mjs'],
+  writer: [...STATE_SCRIPTS, 'ticket-state/browser-lock.mjs', 'tracker/tracker.mjs', 'forge/forge.mjs', 'ui-labels/ui-labels.mjs', 'screenshot-locales/screenshot-locales.mjs', 'video-parts/video-parts.mjs'],
+  reviewer: [...STATE_SCRIPTS, 'visual-pack/visual-pack.mjs', 'forge/forge.mjs pr-state'],
+  translator: [...STATE_SCRIPTS, 'locale-sync/locale-sync.mjs', 'ui-labels/ui-labels.mjs', 'doc-align/doc-align.mjs', 'screenshot-locales/screenshot-locales.mjs', 'forge/forge.mjs pr-state'],
+};
+export const scriptRulesFor = (roots = [], role = null) => [...new Set(roots.flatMap((r) => (role ? ROLE_SCRIPTS[role] : NODE_SCRIPTS).map((s) => `Bash(node ${path.join(r, 'scripts', s)}:*)`)))];
 // Script flags that run code: ui-labels' `--source 'command <cmd>'` (a shell) and visual-pack's `--playwright-from
 // <dir>` (JavaScript from that folder), denied first, last or between other words, as `--x v` and `--x=v`.
 const SCRIPT_FLAGS = { 'ui-labels/ui-labels.mjs': ['--source'], 'visual-pack/visual-pack.mjs': ['--playwright-from'] };
@@ -240,6 +267,11 @@ const plainKeys = (step) => step.keys.filter((k) => /^[\w-][\w.-]*$/.test(k));
 export function writableFor(step, settings) {
   const keys = step.role === 'triage' || !settings.workFolder ? [] : plainKeys(step);
   return [...new Set([...(step.worktrees ?? []).map((t) => t.path), path.join(path.resolve(settings.state), 'tmp'), ...keys.map((k) => path.resolve(settings.root, settings.workFolder.replace('<key>', k)))])];
+}
+// Where `tracker download-attachment --out` may save in a role session: the ticket's work folder and the state `tmp/`.
+export function downloadDirsFor(step, settings) {
+  const keys = step.role === 'triage' || !settings.workFolder ? [] : plainKeys(step);
+  return [path.join(path.resolve(settings.state), 'tmp'), ...keys.map((k) => path.resolve(settings.root, settings.workFolder.replace('<key>', k)))];
 }
 // A step with no worktree (the plan, a video's import) writes its evidence and its section plan in the `.sources/`
 // folders of the target clones (section-readiness, app-explorer, section-planner, convert-sme-input). Never the pages.
@@ -358,13 +390,16 @@ export function commandFor(step, settings, { model, agentsPath, claude = 'claude
   const roleRules = [...def.allowedTools, ...(role.allowedTools ?? [])].filter((r) => !UNSCOPED_WRITE.test(r));
   const trees = step.worktrees ?? [];
   const dirsOf = trees.map((t) => t.path);
-  const allowed = [...withGitC(roleRules, dirsOf), ...writeAllowedFor(step, settings), ...scriptRulesFor(roots), ...pushRulesFor(trees), ...fetchRulesFor(trees)];
+  const readDirs = trees.length ? [] : [...new Set(settings.targets.map((t) => clonePath(settings, t)).filter(Boolean))];
+  const allowed = [...new Set([...withGitC(roleRules, dirsOf), ...cloneReadRules(roleRules, readDirs), ...writeAllowedFor(step, settings), ...scriptRulesFor(roots, step.role), ...pushRulesFor(trees), ...fetchRulesFor(trees), ...lsRemoteRulesFor(trees)])];
   // A role that doesn't run Playwright doesn't get it from the hub's `npx playwright:*`.
   const noPlaywright = roleRules.some((r) => r.startsWith('Bash(npx playwright')) ? [] : ['Bash(npx playwright:*)'];
   const disallowed = [...new Set([...def.disallowedTools, ...(role.disallowedTools ?? []), ...PUSH_DENIED_PLAIN, ...BRANCH_DENIED, ...deniedFor(dirsOf), ...dirsOf.flatMap((d) => [`Bash(git -C ${d} branch:*)`, `Bash(git -C ${d} grep:*)`]), ...ROLE_DENIED, ...noPlaywright, ...scriptFlagsDenied(roots), ...writeDeniedFor(settings, roots), ...(trees.length ? checkoutDeniedFor(settings) : []), ...SETUP_DENIED])];
   // The folders a session may reach (`--add-dir`, and so `cd`): the step's worktrees; a step with none (triage, the plan)
   // reads the target clones instead.
-  const dirs = [...new Set((trees.length ? dirsOf : settings.targets.map((t) => (t.path ? path.resolve(settings.root, t.path) : null))).filter((d) => d && d !== settings.root))];
+  // The toolkit roots too, so `ls` works where a session reads its scripts: probed, this loads no further skill or plugin,
+  // and `writeDeniedFor` keeps them closed to Write and the hook to `mkdir`.
+  const dirs = [...new Set([...(trees.length ? dirsOf : settings.targets.map((t) => (t.path ? path.resolve(settings.root, t.path) : null))), ...roots].filter((d) => d && d !== settings.root))];
   const args = [
     '-p',
     briefFor(step, settings),
@@ -375,20 +410,43 @@ export function commandFor(step, settings, { model, agentsPath, claude = 'claude
     '--max-turns', String(role.maxTurns ?? 100),
     ...(role.maxBudgetUsd !== undefined ? ['--max-budget-usd', String(role.maxBudgetUsd)] : []),
     '--setting-sources', ROLE_SETTING_SOURCES,
+    // The hook that reads each Bash command as a shell would (lib/role-hook.mjs), on top of the rules below.
+    '--settings', JSON.stringify(hookSettings(ROLE_HOOK)),
     '--permission-prompts', 'none',
     '--output-format', 'json',
     ...(allowed.length ? ['--allowedTools', ...allowed] : []),
     ...(disallowed.length ? ['--disallowedTools', ...disallowed] : []),
     ...dirs.flatMap((d) => ['--add-dir', d]),
   ];
-  return { bin: claude, args, cwd: settings.root, role: step.role, model: model ?? role.model, effort: role.effort ?? null };
+  return { bin: claude, args, cwd: settings.root, role: step.role, model: model ?? role.model, effort: role.effort ?? null, env: sessionEnv(step, settings, { roots, roleRules, trees }) };
+}
+
+// The environment a role session gets from the runner, which it can't change: a session has no way to set a variable for
+// its own commands (the hook refuses an assignment, and `env`, `export` and `unset`). The hook's config, and the markers the
+// scripts read to refuse their dangerous flags on their own (`ui-labels --source`, `visual-pack --playwright-from`, and
+// the tracker's `download-attachment --out` outside these folders).
+export function sessionEnv(step, settings, { roots, roleRules, trees }) {
+  const has = (prefix) => roleRules.some((r) => r.startsWith(prefix));
+  const config = {
+    role: step.role,
+    trees: trees.map((t) => ({ path: path.resolve(t.path), branch: t.branch, base: t.base ?? null })),
+    roots,
+    scripts: ROLE_SCRIPTS[step.role] ?? [],
+    write: writableFor(step, settings),
+    sources: step.role === 'triage' || trees.length ? [] : [...new Set(settings.targets.map((t) => clonePath(settings, t)).filter(Boolean))],
+    playwright: has('Bash(npx playwright'),
+    docusaurus: has('Bash(npx docusaurus'),
+    npmRun: has('Bash(npm run'),
+    commands: commandsOfRules(roleRules),
+  };
+  return { [ROLE_SESSION_VARIABLE]: step.role, [DOWNLOAD_DIRS_VARIABLE]: JSON.stringify(downloadDirsFor(step, settings)), [HOOK_VARIABLE]: JSON.stringify(config) };
 }
 
 // Runs one session; resolves { code, stdout, stderr }.
 // The child gets no API key or auth token (`lib/env.mjs`), so the plan pays.
-export function spawnClaude({ bin, args, cwd }, { timeoutMs = 4 * 3600 * 1000, env = process.env } = {}) {
+export function spawnClaude({ bin, args, cwd, env: session = {} }, { timeoutMs = 4 * 3600 * 1000, env = process.env } = {}) {
   return new Promise((resolve) => {
-    const child = spawn(bin, args, { cwd, env: childEnv(env), stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(bin, args, { cwd, env: sessionChildEnv(env, session), stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => child.kill('SIGTERM'), timeoutMs);
@@ -616,7 +674,7 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
   const observe = settings.mode === 'observe' && !dryRun;
   const planOnly = dryRun || observe;
   const date = localDate(clock());
-  const out = { mode: settings.mode, dryRun, observe, trigger, morning, named, planned: [], ran: [], triage: null, starts: [], guard: [], notes: [] };
+  const out = { mode: settings.mode, dryRun, observe, trigger, morning, named, planned: [], ran: [], triage: null, starts: [], guard: [], notes: [...(settings.settingsNotes ?? [])] };
   const log = [];
   const say = (e) => log.push({ at: new Date(clock()).toISOString(), ...e });
   if (settings.mode === 'off') {
