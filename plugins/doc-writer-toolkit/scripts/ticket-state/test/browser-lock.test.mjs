@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { host, tmp } from './fakes.mjs';
-import { HOLDER, STALE_MINUTES, browserLockDir, browserLockState, freeBrowserLock, takeBrowserLock } from '../lib/browser-lock.mjs';
+import { HOLDER, STALE_MINUTES, browserLockDir, browserLockState, busyDir, busyEnded, freeBrowserLock, noteBusy, takeBrowserLock } from '../lib/browser-lock.mjs';
 import { loadSettings } from '../lib/settings.mjs';
 import { main } from '../browser-lock.mjs';
 
@@ -73,10 +73,59 @@ test('the CLI: take waits while another ticket holds it, free frees only its own
   // Still held at the end of the wait: exit 3, nothing changed.
   const held = await run(['take', '--ticket', '503', '--wait', '1'], { now: () => clock, sleep: async (ms) => (clock += ms) });
   assert.deepEqual([held.code, held.json.ok, held.json.holder.ticket], [3, false, '502']);
+  // The give-up is noted for the runner, which treats the session as waiting; a take that went through notes nothing.
+  assert.deepEqual(fs.readdirSync(busyDir(state)), ['503.json']);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(busyDir(state), '503.json'), 'utf8')).holder.ticket, '502');
   assert.deepEqual([(await run(['free', '--ticket', '503'])).code, (await run(['status'])).json.holder.ticket], [3, '502']);
   assert.equal((await run(['free', '--ticket', '502'])).code, 0);
   assert.equal((await run(['status'])).json.held, false);
   await assert.rejects(run(['take']), /--ticket <key> is required/);
   await assert.rejects(run(['take', '--ticket', '501', '--wait', '600']), /--wait takes minutes from 0 to 60/);
   await assert.rejects(run(['remove', '--ticket', '501']), /take, free or status/);
+});
+
+test('two takers of one stale lock: the one that finds it already removed goes on, and only one of them takes it', () => {
+  const state = tmp();
+  const dir = browserLockDir(state);
+  fs.mkdirSync(dir);
+  const mtime = fs.statSync(dir).mtimeMs;
+  const late = mtime + STALE_MINUTES * MIN;
+  // Both read the lock as stale; the first removes and takes it before the second gets to remove it.
+  const realLstat = fs.lstatSync;
+  let raced = false;
+  fs.lstatSync = (p, ...rest) => {
+    if (!raced && p === dir && /\bat remove \(/.test(new Error().stack)) {
+      raced = true;
+      fs.rmSync(dir, { recursive: true }); // the other taker's removal
+    }
+    return realLstat(p, ...rest);
+  };
+  try {
+    assert.equal(takeBrowserLock(state, { ticket: '501', now: late }).taken, true, 'no ENOENT: the second taker goes on to mkdir');
+  } finally {
+    fs.lstatSync = realLstat;
+  }
+  assert.ok(raced);
+  assert.equal(takeBrowserLock(state, { ticket: '502', now: late }).taken, false, 'one holder');
+});
+
+test('busy notes: read once, only from the session\'s own time, and a broken lock writes none', async () => {
+  const state = tmp();
+  noteBusy(state, { ticket: '501', holder: { by: 'hand' }, now: T0 });
+  noteBusy(state, { ticket: '502', holder: { by: 'hand' }, now: T0 - MIN });
+  assert.deepEqual(busyEnded(state, { tickets: ['501', '502', '503'], since: T0 }), ['501'], 'a note from before the session is not its own');
+  assert.deepEqual(fs.readdirSync(busyDir(state)), [], 'both notes were removed');
+  assert.deepEqual(busyEnded(state, { tickets: ['501'], since: T0 }), [], 'read once');
+  fs.mkdirSync(path.join(busyDir(state), '503.json'));
+  assert.deepEqual(busyEnded(state, { tickets: ['503'], since: T0 }), [], 'not a note');
+  assert.throws(() => noteBusy(state, { ticket: '../x', now: T0 }), /--ticket <key> is required/);
+
+  const root = host();
+  const { state: st } = await loadSettings({ root });
+  fs.mkdirSync(st, { recursive: true });
+  fs.symlinkSync(tmp(), browserLockDir(st));
+  let out = '';
+  assert.equal(await main(['take', '--ticket', '501', '--wait', '0', '--root', root], { stdout: { write: (x) => (out += x) } }), 3);
+  assert.match(JSON.parse(out).broken, /not a folder/);
+  assert.equal(fs.existsSync(busyDir(st)), false, 'a broken lock is not waiting: it needs a person');
 });

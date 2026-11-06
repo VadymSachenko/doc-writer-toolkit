@@ -11,6 +11,10 @@ export const LOCK_NAME = '.playwright.lock';
 export const HOLDER = 'holder.json';
 export const STALE_MINUTES = 60;
 export const browserLockDir = (state) => path.join(state, LOCK_NAME);
+// Where `take` notes that it gave up on a lock someone else held, one file per ticket: the runner reads it when the
+// session ends and treats the step as waiting, not failed. Sessions may not write here (the role's Edit denials).
+export const BUSY_NAME = '.playwright-busy';
+export const busyDir = (state) => path.join(state, BUSY_NAME);
 const KEY = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 /** The lock now: not held; held, with its holder (`by: 'pipeline'` and a ticket, or none for a hand run's), since when and whether stale; or broken (not a folder: never touched). */
@@ -38,7 +42,13 @@ const checkTicket = (ticket) => {
 };
 
 function remove(dir) {
-  const st = fs.lstatSync(dir);
+  let st;
+  try {
+    st = fs.lstatSync(dir);
+  } catch (e) {
+    if (e.code === 'ENOENT') return; // another taker removed the stale lock first
+    throw e;
+  }
   if (!st.isDirectory()) throw new Error(`${dir} is not a folder: it is left alone`);
   fs.rmSync(dir, { recursive: true, force: true });
 }
@@ -72,4 +82,28 @@ export function freeBrowserLock(state, { tickets }) {
   if (s.holder?.by !== 'pipeline' || !tickets.includes(s.holder.ticket)) return { freed: false, holder: s.holder ?? { by: 'hand' }, since: s.since };
   remove(browserLockDir(state));
   return { freed: true };
+}
+
+/** `take` gave up: someone else held the lock for the whole wait. Noted for the runner (`busyEnded`). */
+export function noteBusy(state, { ticket, holder, now = Date.now() }) {
+  checkTicket(ticket);
+  fs.mkdirSync(busyDir(state), { recursive: true });
+  fs.writeFileSync(path.join(busyDir(state), `${ticket}.json`), JSON.stringify({ ticket, at: new Date(now).toISOString(), holder: holder ?? null }) + '\n');
+}
+
+/** The tickets among `tickets` whose `take` gave up at or after `since` (ms); every note of theirs is removed. */
+export function busyEnded(state, { tickets, since }) {
+  const out = [];
+  for (const t of tickets) {
+    const f = path.join(busyDir(state), `${t}.json`);
+    let note = null;
+    try {
+      note = JSON.parse(fs.readFileSync(f, 'utf8'));
+    } catch {
+      continue;
+    }
+    fs.rmSync(f, { force: true });
+    if (Date.parse(note.at) >= since) out.push(t);
+  }
+  return out;
 }

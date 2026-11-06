@@ -295,12 +295,13 @@ The plist holds absolute paths (node, the watcher in the plugin's folder as inst
 
 ## The browser lock
 
-`browser-lock.mjs take|free|status --ticket <key> [--wait <minutes>]` serialises Playwright runs on the host's folder `<state>/.playwright.lock`, the one a hand run takes with `mkdir` and moves away when done. No role allows `mv` or `rmdir`, and `rm` is denied, so a session takes and frees the lock only through this script, which every role may run by its path (`NODE_SCRIPTS`).
+`browser-lock.mjs take|free|status --ticket <key> [--wait <minutes>]` serialises Playwright runs on the host's folder `<state>/.playwright.lock`, the one a hand run takes with `mkdir` and moves away when done. Every role is denied `mv`, `rmdir`, `rm` and a `mkdir` of the lock folder, even where a host layer allows them, and the Edit and Write tools on the lock folder and on `<state>/.playwright-busy`, so a session takes and frees the lock only through this script, which every role may run by its path (`NODE_SCRIPTS`): it can't make a lock with no holder or forge one.
 
-- `take` makes the folder with a `holder.json` naming the ticket. While another ticket or a hand run holds it, it waits up to `--wait` minutes (default 10), then exits 3. Its own lock is taken again at once.
+- `take` makes the folder with a `holder.json` naming the ticket. While another ticket or a hand run holds it, it waits up to `--wait` minutes (default 10; a session passes 9, under its Bash tool's 10-minute limit), then exits 3 and writes a busy note, `<state>/.playwright-busy/<ticket>.json`. Its own lock is taken again at once. Two takers of one stale lock don't crash: the one that finds it already removed goes on, and the folder's `mkdir` lets only one of them take it.
 - A lock older than `STALE_MINUTES` (60), by its holder's time or, for a hand run's empty folder, the folder's, is taken over: a holder that crashed never keeps it.
 - `free` removes the folder only when this ticket holds it; a lock another ticket or a hand run holds stays (exit 3). A lock that isn't a folder (a file, a link) is never touched.
 - When a session ends, failed, timed out or done, the runner frees a lock one of the step's tickets still holds, and writes `browserLock` `freed` in the run log.
+- A session that ended with a busy note from its own time is waiting, not failed: the run is logged with `outcome` `busy`, the stage isn't recorded `failed`, no failure is counted, no bigger model is tried and the ticket isn't held; the step runs again at a later check. The roles proposal leaves such runs out. A session still counts toward `limits.sessionsPerStageDay`, so a lock held all day ends in the daily cap. A broken lock (not a folder) writes no note: that session fails as any other.
 
 ## `status` output
 

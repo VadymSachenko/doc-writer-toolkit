@@ -4,7 +4,7 @@ import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { CliError } from './lib/errors.mjs';
 import { loadSettings } from './lib/settings.mjs';
-import { STALE_MINUTES, browserLockDir, browserLockState, freeBrowserLock, takeBrowserLock } from './lib/browser-lock.mjs';
+import { STALE_MINUTES, browserLockDir, browserLockState, freeBrowserLock, noteBusy, takeBrowserLock } from './lib/browser-lock.mjs';
 
 const USAGE = `browser-lock take|free|status --ticket <key> [--wait <minutes>] [--root <dir>] [--settings <file>]
 
@@ -12,13 +12,14 @@ The host's browser lock, <state>/.playwright.lock, for a pipeline session's Play
 after. A hand run keeps the host's own procedure on the same folder (mkdir, then move it away), so the two never run
 at once.
 
-  take    takes it for the ticket; waits up to --wait minutes (default 10) while someone else holds it. A lock older
-          than ${STALE_MINUTES} minutes is taken over. Exit 3 when it is still held after the wait.
+  take    takes it for the ticket; waits up to --wait minutes (default 10; a session passes 9, under its tool's
+          10-minute limit) while someone else holds it. A lock older than ${STALE_MINUTES} minutes is taken over. Exit 3
+          when it is still held after the wait: noted for the runner, which counts the session as waiting, not failed.
   free    frees it when this ticket holds it. A lock someone else holds stays (exit 3). The runner also frees a lock a
           session's ticket still holds when the session ends.
   status  who holds it, since when, and whether it is stale.
 
-Exit codes: 0 done · 2 bad usage · 3 held by someone else.
+Exit codes: 0 done · 1 an unexpected error · 2 bad usage · 3 held by someone else, or the lock is not a folder.
 `;
 
 const OPTIONS = { root: { type: 'string' }, settings: { type: 'string' }, ticket: { type: 'string' }, wait: { type: 'string' }, help: { type: 'boolean', short: 'h' } };
@@ -52,6 +53,8 @@ export async function main(argv, io = {}) {
     for (;;) {
       const r = takeBrowserLock(settings.state, { ticket: values.ticket, now: now() });
       if (r.taken || r.broken || now() >= until) {
+        // Held by someone else for the whole wait: noted, so the runner counts the session as waiting, not failed.
+        if (!r.taken && !r.broken) noteBusy(settings.state, { ticket: values.ticket, holder: r.holder, now: now() });
         print({ ok: Boolean(r.taken), lock, ...r });
         return r.taken ? 0 : 3;
       }
