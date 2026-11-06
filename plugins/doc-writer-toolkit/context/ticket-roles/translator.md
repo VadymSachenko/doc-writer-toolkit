@@ -8,7 +8,6 @@ allowedTools:
   - Glob
   - Grep
   - Skill
-  - Bash(node:*)
   - Bash(npm run:*)
   - Bash(npx docusaurus:*)
   - Bash(cd:*)
@@ -17,7 +16,6 @@ allowedTools:
   - Bash(git diff:*)
   - Bash(git log:*)
   - Bash(git show:*)
-  - Bash(git fetch origin)
   - Bash(git worktree list:*)
   - Bash(git add:*)
   - Bash(git commit:*)

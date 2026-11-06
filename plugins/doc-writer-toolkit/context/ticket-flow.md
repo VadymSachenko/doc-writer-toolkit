@@ -61,7 +61,7 @@ A pure function of the ledger and the world. First match wins:
 
 **After ready for merge**, a hand commit runs `resync`, then `visualPack` again if it changed an image, then `readyForMerge` for the new head.
 
-**The ticket worktree.** The runner, not a role, makes the worktree a session works in: one per PR branch, beside the target's clone, detached at the branch's head, with the clone's `node_modules` (and any other name in `targets[].links`, such as `.env`) linked and excluded. The brief names it and the push command. No role makes or removes a worktree, links a file, or installs packages; each role's git rules hold in both spellings, plain and `git -C <worktree>` for the worktree the brief names, and the only push allowed is the brief's. A worktree with unsaved work is kept after the merge and reported.
+**The ticket worktree.** The runner, not a role, makes the worktree a session works in: one per PR branch, beside the target's clone, detached at the branch's head, with the clone's `node_modules` (and any other name in `targets[].links`, such as `.env`) linked and excluded. The brief names it and the push command. No role makes or removes a worktree, links a file, or installs packages; a role changes a repo only as `git -C <worktree>` for the worktree the brief names (a plain read also runs after a `cd` to it), the only push allowed is the brief's, and every plain add, commit, push, fetch or branch change, every interpreter string or script of the session's own, and every write that would run code later is denied, whatever the owner's or the hub's settings allow. A worktree with unsaved work is kept after the merge and reported.
 
 ## The ledger
 
