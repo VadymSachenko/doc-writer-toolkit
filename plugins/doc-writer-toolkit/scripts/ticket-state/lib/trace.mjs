@@ -1,9 +1,11 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { CliError } from './errors.mjs';
 import { readLedger } from './ledger.mjs';
 import { PR_STAGES, TICKET_STAGES } from './stages.mjs';
+import { clonePath, worktreePath } from './worktree.mjs';
 
 // `trace <key>`: what the sessions of one ticket did, stage by stage, read from the ledger's runs and the transcripts
 // the CLI keeps (`<config dir>/projects/<slug>/<session>.jsonl`, and a session's subagents beside it). For a person
@@ -11,6 +13,8 @@ import { PR_STAGES, TICKET_STAGES } from './stages.mjs';
 // written. It prints actions and the texts a session wrote, never a tool's result or a Write's content: the private
 // reasoning of the model is not in a transcript, and a result can hold any file or command output.
 
+// The plugin folder this script is installed in (scripts/ticket-state/lib, three levels down).
+const TOOLKIT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const CUT = { command: 200, reason: 160, text: 400, list: 400 };
 const STAGES = new Set([...TICKET_STAGES, ...PR_STAGES]);
 const WROTE = new Set(['Write', 'Edit', 'NotebookEdit', 'MultiEdit']);
@@ -111,11 +115,23 @@ const OWN_FLAGS = /\s--(?:root|settings)(?:=\S+|\s+(?:"[^"]*"|'[^']*'|\S+))/g;
 const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 // The one filter every printed string goes through: our own --root and --settings dropped, secrets masked (before the
-// cut, so a cut never leaves half of one), the host root as `.` and each target's clone as its folder's name (the
-// longer path first), spaces collapsed, then cut.
-export function cleaner(settings) {
+// cut, so a cut never leaves half of one), then the paths, the longer first: a ticket worktree as `<wt:repo>` (a PR's
+// worktree is known down to its branch; elsewhere under a clone's `.worktrees/` the branch stays), the toolkit's own
+// install as `<toolkit>`, each target's clone as its folder's name, the host root as `.`; spaces collapsed, then cut.
+export function cleaner(settings, { prs = [], toolkit = TOOLKIT } = {}) {
   const pairs = new Map();
-  for (const t of settings.targets ?? []) if (t.path) pairs.set(path.resolve(settings.root, t.path), path.basename(path.resolve(settings.root, t.path)));
+  for (const pr of prs) {
+    const wt = worktreePath(settings, pr);
+    if (wt) pairs.set(wt, `<wt:${pr.repo}>`);
+  }
+  for (const t of settings.targets ?? []) {
+    const clone = clonePath(settings, t);
+    if (!clone) continue;
+    const trees = path.join(path.dirname(clone), '.worktrees', path.basename(clone));
+    if (!pairs.has(trees)) pairs.set(trees, `<wt:${t.repo}>`);
+    pairs.set(clone, path.basename(clone));
+  }
+  if (toolkit) pairs.set(toolkit, '<toolkit>');
   pairs.set(settings.root, '.');
   const rules = [...pairs].sort((a, b) => b[0].length - a[0].length).map(([abs, name]) => [new RegExp(`${escape(abs)}(?![\\w-])`, 'g'), name]);
   return (text, limit) => {
@@ -205,7 +221,7 @@ export function renderTrace({ settings, key, stage = null, transcripts = null, e
   const runs = (ledger.runs ?? []).map((r, i) => ({ r, i })).sort((a, b) => (a.r.seq ?? 0) - (b.r.seq ?? 0) || a.i - b.i).map((x) => x.r);
   if (stage !== null && !STAGES.has(stage) && !runs.some((r) => r.stage === stage)) throw new CliError(`unknown stage '${stage}'. Stages: ${[...STAGES].join(', ')}`, { code: 2 });
   const picked = stage === null ? runs : runs.filter((r) => r.stage === stage);
-  const clean = cleaner(settings);
+  const clean = cleaner(settings, { prs: ledger.prs ?? [] });
   const dirs = transcriptDirs({ root: settings.root, transcripts, env, home });
 
   const time = runs.reduce((s, r) => s + (typeof r.durationMs === 'number' ? r.durationMs : 0), 0);

@@ -170,6 +170,39 @@ test('paths: the host root becomes ".", a target clone its folder name, a siblin
   assert.ok(!out.includes(`${root}/`));
 });
 
+test('a ticket worktree prints as <wt:repo>, before the clone and the root are shortened', async () => {
+  const prs = [{ repo: 'guide-docs', targets: ['guide'], branch: 'ticket-7' }, { repo: 'portal-docs', targets: ['portal-ui'], branch: 'ticket/7' }];
+  const w = setup({ runs: [{ session: 's1' }], extra: { prs } });
+  const { root } = w;
+  write(path.join(w.transcripts, 's1.jsonl'), [
+    use(1, 'a', 'Read', { file_path: `${root}/repos/.worktrees/guide-docs/ticket-7/docs/a.md` }),
+    use(2, 'b', 'Bash', { command: `cd ${root}/repos/.worktrees/portal-docs/ticket/7 && git status` }),
+    use(3, 'c', 'Read', { file_path: `${root}/repos/.worktrees/guide-docs/other-branch/x.md` }),
+    use(4, 'd', 'Read', { file_path: `${root}/repos/guide-docs/docs/a.md` }),
+    use(5, 'e', 'Read', { file_path: `${root}/repos/.worktrees/guide-docs-extra/y.md` }),
+  ]);
+  const { out } = await trace(w);
+  assert.match(out, /read <wt:guide-docs>\/docs\/a\.md$/m);
+  assert.match(out, /ran cd <wt:portal-docs> && git status$/m);
+  assert.match(out, /read <wt:guide-docs>\/other-branch\/x\.md$/m, 'a worktree the ledger does not know keeps its branch');
+  assert.match(out, /read guide-docs\/docs\/a\.md$/m, 'the clone itself is still its folder name');
+  assert.match(out, /read \.\/repos\/\.worktrees\/guide-docs-extra\/y\.md$/m, 'a folder that only starts like one is left alone');
+});
+
+test("the toolkit's own install prints as <toolkit>, also when it sits inside the host root", async () => {
+  const TK = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+  const w = setup({ runs: [{ session: 's1' }] });
+  write(path.join(w.transcripts, 's1.jsonl'), [
+    use(1, 'a', 'Bash', { command: `node ${TK}/scripts/tracker/tracker.mjs comment 123 --text-file notes.md` }),
+    use(2, 'b', 'Read', { file_path: `${TK}-live/scripts/x.mjs` }),
+  ]);
+  const { out } = await trace(w);
+  assert.match(out, /ran node <toolkit>\/scripts\/tracker\/tracker\.mjs comment 123 --text-file notes\.md$/m);
+  assert.ok(out.includes(`read ${TK}-live/scripts/x.mjs`), 'a sibling folder with the same start is left alone');
+  const clean = cleaner({ root: '/h', targets: [] }, { toolkit: '/h/plugins/tk' });
+  assert.equal(clean('/h/plugins/tk/scripts/a.mjs and /h/docs/b.md', 200), '<toolkit>/scripts/a.mjs and ./docs/b.md');
+});
+
 test('a missing transcript, and a run with no session, print the ledger facts and "transcript not found"', async () => {
   const w = setup({ runs: [{ session: 'gone-session', stage: 'plan' }, { stage: 'write', session: null, outcome: 'failed' }] });
   const { out, code } = await trace(w);
