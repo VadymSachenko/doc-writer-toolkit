@@ -225,6 +225,18 @@ function fileWords(name, words) {
   return args;
 }
 
+// The toolkit roots are add-dirs so that `ls` works in them, which would also let a `cd` in: from there a relative path
+// the hook reads against the starting folder would land in the root. No work needs a shell standing there.
+function checkCd(words, cfg, cwd) {
+  for (const w of words.slice(1)) {
+    if (w.value.startsWith('-')) continue;
+    if (w.glob) return `cd with a glob: ${w.value}`;
+    const dir = path.resolve(cwd ?? '/', w.value.replace(/^~(?=\/|$)/, process.env.HOME ?? '~'));
+    if ((cfg.roots ?? []).some((r) => inside(dir, r))) return `a cd into the toolkit (${dir}): run its scripts by their literal path, and read it with ls, Read or Glob`;
+  }
+  return null;
+}
+
 function checkSimple(words, cfg, cwd) {
   const first = words[0];
   if (/^[A-Za-z_][A-Za-z0-9_]*\+?=/.test(first.value)) return `an environment assignment (${first.value.split('=')[0]}=…)`;
@@ -252,6 +264,8 @@ function checkSimple(words, cfg, cwd) {
       return checkNpm(words, cfg);
     case 'mkdir':
       return checkMkdir(words, cfg, cwd);
+    case 'cd':
+      return checkCd(words, cfg, cwd);
     case 'find': {
       const bad = words.slice(1).find((w) => FIND_WRITES.has(w.value));
       return bad ? `find ${bad.value} (it writes a file, removes one or runs a command)` : null;
@@ -290,6 +304,8 @@ export function refusalOf(command, cfg, { cwd } = {}) {
   const parsed = parseShell(command);
   if (parsed.error) return `${parsed.error}: a command this hook can't read without running it. One plain command per call`;
   if (!parsed.commands.length) return 'an empty command';
+  // A second `cd` starts from the first one's folder, which the hook doesn't follow.
+  if (parsed.commands.filter((c) => c.words[0]?.value === 'cd').length > 1) return 'two cd in one call. One plain command per call';
   for (const c of parsed.commands) {
     for (const r of c.redirects) {
       const why = checkRedirect(r);

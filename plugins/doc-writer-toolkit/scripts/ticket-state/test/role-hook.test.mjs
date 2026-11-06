@@ -403,6 +403,22 @@ test('reads the first layer lacked: rev-parse in the worktree roles, the role\'s
   }
 });
 
+test('no cd into a toolkit root, so the roots being add-dirs opens no write there: same call or its own, plan step or worktree step', () => {
+  const w = world({ extra: { workFolder: 'work/tickets/<key>' } });
+  const R = ROOTS[0];
+  for (const tree of [[], undefined]) {
+    const cmd = commandOf('writer', w, tree);
+    const cfg = JSON.parse(cmd.env[HOOK_VARIABLE]);
+    const at = { cwd: w.settings.root };
+    for (const c of [`cd ${R}`, `cd ${R}/scripts/forge`, `cd -P ${R}`, `cd ${R} && mkdir -p .doc-toolkit/x`, `cd ${R} && mkdir -p ${path.relative(w.settings.root, w.settings.state)}/x`, `cd ${R.slice(0, -2)}*`, `cd ${path.dirname(WT)} && cd x`]) assert.ok(refusalOf(c, cfg, at), c);
+    assert.ok(refusalOf('cd ../toolkit', cfg, { cwd: path.join(path.dirname(R), 'other') }), 'relative, from the shell\'s folder');
+    assert.equal(refusalOf(`ls ${R}/scripts`, cfg, at), null);
+    assert.equal(refusalOf(`node ${R}/scripts/ticket-state/ticket-state.mjs status`, cfg, at), null);
+    assert.equal(refusalOf(`cd ${WT}`, cfg, at), null);
+    assert.equal(refusalOf('cd docs', cfg, at), null);
+  }
+});
+
 test('a bot\'s comment or review on a PR is not new: it starts no session, whichever way its author is told', () => {
   const pr = { repo: 'guide-docs', number: 7 };
   const at = '2026-11-05T10:00:00Z';
