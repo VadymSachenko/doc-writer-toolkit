@@ -232,19 +232,23 @@ export const ROLE_SETTING_SOURCES = 'project,local';
 // writes are only `writeAllowedFor`'s. A scoped rule an owner adds stays.
 const UNSCOPED_WRITE = /^(Edit|Write|MultiEdit|NotebookEdit)(\((\/{0,2}|~\/|\.\/)\*{1,2}\))?$/;
 
+// A key goes into a path and a rule only as a plain name.
+const plainKeys = (step) => step.keys.filter((k) => /^[\w-][\w.-]*$/.test(k));
 // The folders a session may write in with Write and Edit: the step's worktrees and the flow's `<state>/tmp/`; and, for
 // every role but triage, the work folder of each of the step's tickets (`workFolder` in the settings). `Edit(...)`
 // covers Write too.
 export function writableFor(step, settings) {
-  const keys = step.role === 'triage' || !settings.workFolder ? [] : step.keys.filter((k) => /^[\w-][\w.-]*$/.test(k));
+  const keys = step.role === 'triage' || !settings.workFolder ? [] : plainKeys(step);
   return [...new Set([...(step.worktrees ?? []).map((t) => t.path), path.join(path.resolve(settings.state), 'tmp'), ...keys.map((k) => path.resolve(settings.root, settings.workFolder.replace('<key>', k)))])];
 }
 // A step with no worktree (the plan, a video's import) writes its evidence and its section plan in the `.sources/`
-// folders of the target clones (section-readiness, app-explorer, section-planner, convert-sme-input), and the live
-// check's Playwright spec in their `screenshot-tests/`: a spec file is the only way a role drives a browser. Never the pages.
+// folders of the target clones (section-readiness, app-explorer, section-planner, convert-sme-input). Never the pages.
+// Its live check needs a Playwright spec, the only way a role drives a browser, in a clone's `screenshot-tests/`. That
+// folder holds an owner's hand-written specs, git-ignored and so past recovery: a session creates only its own,
+// `_plan-<key>-<what>.spec.ts`, one rule per key of the step.
 export function writeAllowedFor(step, settings) {
   const clones = step.role === 'triage' || step.worktrees?.length ? [] : [...new Set(settings.targets.map((t) => clonePath(settings, t)).filter(Boolean))];
-  return [...writableFor(step, settings).map((d) => `Edit(${abs(d)}/**)`), ...clones.flatMap((c) => [`Edit(${abs(c)}/**/.sources/**)`, `Edit(${abs(c)}/screenshot-tests/**)`])];
+  return [...writableFor(step, settings).map((d) => `Edit(${abs(d)}/**)`), ...clones.flatMap((c) => [`Edit(${abs(c)}/**/.sources/**)`, ...plainKeys(step).map((k) => `Edit(${abs(c)}/screenshot-tests/_plan-${k}-*)`)])];
 }
 
 // ------------------------------------------------------------------ roles
@@ -308,6 +312,7 @@ export function briefFor(step, settings) {
   const keys = step.keys.join(', ');
   const rules = Object.entries(settings.hostRules ?? {}).map(([k, v]) => `- ${k}: ${v}`).join('\n');
   const cardOf = (key) => step.cards?.find((c) => c.key === key);
+  const noWorktree = !step.worktrees?.length && step.role !== 'triage';
   // A start's origin, as the runner recorded it before the session (`startOrigin`): the session records the same.
   const recordLine = (key) =>
     `${ts} record ${key} ${at} --stage ${step.stage}${step.pr ? ` --pr ${step.pr}` : ''} --status done${step.stage === 'start' || step.stage === 'triage' ? ` --card ${cardOf(key)?.shortLink ?? '<card>'}` : ''}${step.stage === 'start' ? ` --started-by ${startOrigin(step)}` : ''} --result ${step.stage === 'start' && step.group ? `'{"group":"${step.group}"}'` : '<json>'}`;
@@ -322,7 +327,8 @@ export function briefFor(step, settings) {
     '',
     `Host repo: ${root}`,
     `The toolkit's scripts folder: ${path.join(PLUGIN_ROOT, 'scripts')}`,
-    `Write your files with Write and Edit only in: ${writableFor(step, settings).join(', ')}${!step.worktrees?.length && step.role !== 'triage' ? ', and the `.sources/` and `screenshot-tests/` folders of the target repos' : ''}.`,
+    `Write your files with Write and Edit only in: ${writableFor(step, settings).join(', ')}${noWorktree ? ', and the `.sources/` folders of the target repos' : ''}.`,
+    noWorktree && plainKeys(step).length ? `A Playwright spec on this step goes in the target repo's \`screenshot-tests/\`, named ${plainKeys(step).map((k) => `\`_plan-${k}-<what>.spec.ts\``).join(' or ')}. Use that name, import shared helpers from that folder rather than editing them, and run it from that repo (\`cd\` there as a call of its own, then \`npx playwright test screenshot-tests/<file>\`).` : null,
     `Settings (merged): \`${ts} config ${at}\``,
     `The ticket now: \`${ts} status ${at} --ticket ${step.keys[0]}\``,
     rules ? `Host rules:\n${rules}` : null,
