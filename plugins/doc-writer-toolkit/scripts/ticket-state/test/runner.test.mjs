@@ -567,7 +567,9 @@ test('a role session loads the hub\'s layers, not the owner\'s, and no plugin fr
 });
 
 test('writes are an allow list: a role\'s worktrees and the state tmp/, with no unscoped file-writing rule', () => {
-  const { w } = busyWorld({ roles: { writer: { allowedTools: ['Write', 'Edit(**)', 'NotebookEdit', 'MultiEdit', 'Write(*)', 'Edit(//owner/chose/this/**)'] } } });
+  const unscoped = ['Write', 'Edit', 'Edit(**)', 'NotebookEdit', 'MultiEdit', 'Write(*)', 'Edit(//**)', 'Edit(/**)', 'Edit(~/**)', 'Edit(./**)', 'Write(//**)'];
+  const { w } = busyWorld({ roles: { writer: { allowedTools: [...unscoped, 'Edit(//owner/chose/this/**)'] } } });
+  for (const r of unscoped) assert.ok(!rulesOf('writer', w).allowed.includes(r), `${r} is dropped`);
   const tmpRule = `Edit(/${path.join(w.settings.state, 'tmp')}/**)`;
   for (const role of ['triage', 'writer', 'reviewer', 'translator']) {
     assert.ok(!readRole(role).allowedTools.some((r) => /^(Edit|Write|MultiEdit|NotebookEdit)$/.test(r)), `${role}.md allows no file-writing tool by itself`);
@@ -612,6 +614,7 @@ test('the deny lists stay as a mistake guard: what runs code later is denied ins
     const { denied } = rulesOf(role, w);
     for (const r of ['Edit(//**/.github/**)', 'Edit(//**/CLAUDE*.md)', 'Edit(//**/node_modules/**)', 'Edit(//**/package.json)', 'Edit(//**/package-lock.json)', 'Edit(//**/docusaurus.config.*)', 'Edit(//**/sidebars.*)', 'Edit(//**/playwright.config.*)', 'Edit(//**/.git/**)', 'Edit(//**/.claude/**)']) assert.ok(denied.includes(r), `${role} denies ${r}`);
     assert.ok(denied.includes('Bash(git ls-remote:*)'), 'it runs a command: --upload-pack=<cmd>');
+    assert.ok(denied.includes(`Edit(/${w.settings.state}/*.md)`), 'the Markdown ledgers, which a state folder under a .sources/ would open');
   }
 });
 

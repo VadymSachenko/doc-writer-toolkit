@@ -178,6 +178,8 @@ export function writeDeniedFor(settings, roots = []) {
     // The browser lock and the busy notes go only through browser-lock.mjs: no holder-less lock, no forged holder.
     ...[LOCK_NAME, BUSY_NAME].map((d) => `Edit(${abs(path.join(state, d))})`),
     ...['rearmed.json', 'roles-proposal.json'].map((f) => `Edit(${abs(path.join(state, f))})`),
+    // The Markdown ledgers from before the JSON ones: `import` reads them, and a state folder may sit under a `.sources/`.
+    `Edit(${abs(state)}/*.md)`,
   ];
 }
 
@@ -228,7 +230,7 @@ export const ROLE_SETTING_SOURCES = 'project,local';
 
 // A file-writing tool with no scope, in a role file or in `roles.<role>.allowedTools`: dropped, so that a session's
 // writes are only `writeAllowedFor`'s. A scoped rule an owner adds stays.
-const UNSCOPED_WRITE = /^(Edit|Write|MultiEdit|NotebookEdit)(\(\*{1,2}\))?$/;
+const UNSCOPED_WRITE = /^(Edit|Write|MultiEdit|NotebookEdit)(\((\/{0,2}|~\/|\.\/)\*{1,2}\))?$/;
 
 // The folders a session may write in with Write and Edit: the step's worktrees and the flow's `<state>/tmp/`; and, for
 // every role but triage, the work folder of each of the step's tickets (`workFolder` in the settings). `Edit(...)`
