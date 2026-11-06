@@ -583,28 +583,29 @@ test('writes are an allow list: a role\'s worktrees and the state tmp/, with no 
   assert.deepEqual(rulesOf('triage', w).allowed.filter((r) => r.startsWith('Edit(')), [tmpRule], 'triage writes only in tmp/');
 });
 
-test('writes: each ticket\'s work folder when the host declares one; a step with no worktree reaches the clones\' .sources/, never their pages', () => {
+test('writes: each ticket\'s work folder when the host declares one; a step with no worktree reaches the clones\' .sources/ and screenshot-tests/, never their pages', () => {
   const { w } = busyWorld();
   const settings = { ...w.settings, workFolder: 'work/tickets/<key>' };
   const work = `Edit(/${path.join(w.root, 'work/tickets/502')}/**)`;
   const at = (role, tree, keys = ['502']) => commandFor({ stage: 'x', role, keys, group: '502', worktrees: tree }, settings, { agentsPath: '/x/agents.json', roots: ROOTS }).args;
   const edits = (args) => args.slice(args.indexOf('--allowedTools') + 1, args.indexOf('--disallowedTools')).filter((r) => r.startsWith('Edit('));
   const clones = [...new Set(settings.targets.map((t) => path.resolve(settings.root, t.path)))];
-  const sources = clones.map((c) => `Edit(/${c}/**/.sources/**)`);
+  const sources = clones.flatMap((c) => [`Edit(/${c}/**/.sources/**)`, `Edit(/${c}/screenshot-tests/**)`]);
   assert.ok(sources.length > 0);
   // On a worktree step: the worktree, tmp/ and the work folder, and no clone at all.
   assert.ok(edits(at('reviewer', [TREE])).includes(work));
-  assert.deepEqual(edits(at('reviewer', [TREE])).filter((r) => r.includes('.sources')), []);
+  assert.deepEqual(edits(at('reviewer', [TREE])).filter((r) => r.includes('.sources') || r.includes('screenshot-tests')), []);
   // With no worktree: the work folder and each clone's .sources/.
   for (const r of [work, ...sources]) assert.ok(edits(at('writer', [])).includes(r), r);
-  assert.deepEqual(edits(at('triage', [])), [`Edit(/${path.join(settings.state, 'tmp')}/**)`], 'triage has no work folder and no .sources/');
+  assert.deepEqual(edits(at('triage', [])), [`Edit(/${path.join(settings.state, 'tmp')}/**)`], 'triage has no work folder, no .sources/ and no spec');
   // A group: one folder per ticket. A key that isn't a plain name gets none.
   assert.ok(edits(at('writer', [], ['502', '503'])).includes(`Edit(/${path.join(w.root, 'work/tickets/503')}/**)`));
   assert.ok(!edits(at('writer', [], ['../..'])).some((r) => r.includes('tickets')));
   // The brief says where.
   const brief = briefFor({ stage: 'write', role: 'writer', keys: ['502'], worktrees: [TREE] }, settings);
-  assert.match(brief, new RegExp(`only in: ${WT}, .*/tmp, .*work/tickets/502\\. Every other write is denied`));
-  assert.match(briefFor({ stage: 'plan', role: 'writer', keys: ['502'] }, settings), /and the `\.sources\/` folders of the target repos/);
+  assert.match(brief, new RegExp(`only in: ${WT}, .*/tmp, .*work/tickets/502\\.`));
+  assert.doesNotMatch(brief, /other write/, 'a host layer may allow more, so the brief says where to write, not what is refused');
+  assert.match(briefFor({ stage: 'plan', role: 'writer', keys: ['502'] }, settings), /and the `\.sources\/` and `screenshot-tests\/` folders of the target repos/);
   assert.doesNotMatch(briefFor({ stage: 'triage', role: 'triage', keys: ['502'] }, settings), /\.sources\/` folders/);
 });
 

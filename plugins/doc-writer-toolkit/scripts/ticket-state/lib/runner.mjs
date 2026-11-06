@@ -240,10 +240,11 @@ export function writableFor(step, settings) {
   return [...new Set([...(step.worktrees ?? []).map((t) => t.path), path.join(path.resolve(settings.state), 'tmp'), ...keys.map((k) => path.resolve(settings.root, settings.workFolder.replace('<key>', k)))])];
 }
 // A step with no worktree (the plan, a video's import) writes its evidence and its section plan in the `.sources/`
-// folders of the target clones (section-readiness, app-explorer, section-planner, convert-sme-input). Never the pages.
+// folders of the target clones (section-readiness, app-explorer, section-planner, convert-sme-input), and the live
+// check's Playwright spec in their `screenshot-tests/`: a spec file is the only way a role drives a browser. Never the pages.
 export function writeAllowedFor(step, settings) {
-  const sources = step.role === 'triage' || step.worktrees?.length ? [] : [...new Set(settings.targets.map((t) => clonePath(settings, t)).filter(Boolean))].map((c) => `Edit(${abs(c)}/**/.sources/**)`);
-  return [...writableFor(step, settings).map((d) => `Edit(${abs(d)}/**)`), ...sources];
+  const clones = step.role === 'triage' || step.worktrees?.length ? [] : [...new Set(settings.targets.map((t) => clonePath(settings, t)).filter(Boolean))];
+  return [...writableFor(step, settings).map((d) => `Edit(${abs(d)}/**)`), ...clones.flatMap((c) => [`Edit(${abs(c)}/**/.sources/**)`, `Edit(${abs(c)}/screenshot-tests/**)`])];
 }
 
 // ------------------------------------------------------------------ roles
@@ -321,7 +322,7 @@ export function briefFor(step, settings) {
     '',
     `Host repo: ${root}`,
     `The toolkit's scripts folder: ${path.join(PLUGIN_ROOT, 'scripts')}`,
-    `You may write with Write and Edit only in: ${writableFor(step, settings).join(', ')}${!step.worktrees?.length && step.role !== 'triage' ? ', and the `.sources/` folders of the target repos' : ''}. Every other write is denied.`,
+    `Write your files with Write and Edit only in: ${writableFor(step, settings).join(', ')}${!step.worktrees?.length && step.role !== 'triage' ? ', and the `.sources/` and `screenshot-tests/` folders of the target repos' : ''}.`,
     `Settings (merged): \`${ts} config ${at}\``,
     `The ticket now: \`${ts} status ${at} --ticket ${step.keys[0]}\``,
     rules ? `Host rules:\n${rules}` : null,
