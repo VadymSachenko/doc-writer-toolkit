@@ -132,6 +132,33 @@ test('a scheduled run: the session records its stage; a session that does not is
   assert.ok(fs.existsSync(path.join(w.settings.state, 'roles', 'agents.json')));
 });
 
+test('a plan session that ends by asking is done, not a failure: no retry on a bigger model, and the ticket waits for the answer', async () => {
+  const { w, ready } = busyWorld({ ...estimates, roles: { writer: { model: 'claude-sonnet-5-5' } }, limits: { ...estimates.limits, stepsPerTicket: 3 } });
+  fs.rmSync(path.join(w.settings.state, 'tickets', '502.json'));
+  w.tracker.cards.splice(1, 1);
+  const calls = [];
+  const spawnClaude = async (cmd) => {
+    const stage = /Stage `(\w+)`/.exec(briefOf(cmd))[1];
+    calls.push([stage, flag(cmd, '--model')]);
+    const clients = w.clients();
+    if (stage === 'start') {
+      ready.placeId = LISTS.inProgress.id;
+      await runRecord({ settings: w.settings, clients, key: '501', stage: 'start', status: 'done', card: ready.shortLink, result: { group: '501' }, now: NOW });
+    }
+    if (stage === 'plan') {
+      ready.placeId = LISTS.blocked.id;
+      await runRecord({ settings: w.settings, clients, key: '501', stage: 'questions', status: 'done', result: { questions: [{ id: 'q1', kind: 'fit', text: 'the block lists something else' }] }, now: NOW });
+    }
+    return { code: 0, stdout: RESULT() };
+  };
+  await runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: () => usageAt(5), now: () => NOW, spawnClaude }, options: {} });
+  assert.deepEqual(calls, [['start', 'claude-sonnet-5-5'], ['plan', 'claude-sonnet-5-5']]);
+  const l = read(w, '501');
+  assert.equal(l.stage, 'questions');
+  assert.equal(l.stages.plan, undefined);
+  assert.deepEqual(l.runs.map((r) => [r.stage, r.outcome]), [['start', 'done'], ['plan', 'done']]);
+});
+
 test('the browser lock a session took is freed when the session ends, failed or not; another ticket\'s lock stays', async () => {
   for (const other of [false, true]) {
     const { w } = busyWorld({ ...estimates, limits: { ...estimates.limits, stepsPerTicket: 1 } });
