@@ -679,9 +679,55 @@ function hostRoot(overrides = {}) {
 
 async function cli(args, { root, fake, env = { TEST_TRACKER_KEY: KEY, TEST_TRACKER_TOKEN: TOKEN } } = {}) {
   let out = '';
-  const code = await main([...args, '--root', root, '--origin', fake.origin], { stdout: { write: (s) => void (out += s) }, env, sleep: async () => {} });
+  const code = await main([...args, '--root', root, '--origin', fake.origin], { stdout: { write: (s) => void (out += s) }, env: { DOC_TOOLKIT_TRACKER_TEST: '1', ...env }, sleep: async () => {} });
   return { code, json: JSON.parse(out), out };
 }
+
+test('--origin sends the key and token elsewhere, so it works only under the tests\' marker', async () => {
+  const fake = await startFake();
+  const root = hostRoot();
+  let requests = 0;
+  try {
+    const env = { TEST_TRACKER_KEY: KEY, TEST_TRACKER_TOKEN: TOKEN };
+    await assert.rejects(main(['statuses', '--root', root, '--origin', fake.origin], { stdout: { write: () => {} }, env, fetchImpl: async () => { requests += 1; throw new Error('no call'); }, sleep: async () => {} }), (e) => e.exitCode === 2 && /--origin/.test(e.message) && !e.message.includes(TOKEN));
+    assert.equal(requests, 0, 'nothing is sent');
+    await assert.rejects(main(['statuses', '--root', root, '--origin=https://attacker.example'], { stdout: { write: () => {} }, env, sleep: async () => {} }), (e) => e.exitCode === 2);
+    assert.equal((await cli(['statuses'], { root, fake })).code, 0, 'with the marker, the tests\' own server');
+  } finally {
+    await fake.close();
+  }
+});
+
+test('in a role session a download goes only in the work folder or tmp/, as real paths and never through a link; elsewhere --out is free', async () => {
+  const fake = await startFake();
+  const root = hostRoot();
+  const base = fs.realpathSync(tmp());
+  const work = path.join(base, 'work');
+  const scratch = path.join(base, 'tmp');
+  const outside = path.join(base, 'outside');
+  for (const d of [work, scratch, outside, path.join(work, 'sub')]) fs.mkdirSync(d);
+  fs.symlinkSync(outside, path.join(work, 'away'));
+  fs.symlinkSync(path.join(outside, 'target'), path.join(work, 'link.bin'));
+  const att = ['--attachment', '5f00000000000000000e0003'];
+  const env = { TEST_TRACKER_KEY: KEY, TEST_TRACKER_TOKEN: TOKEN, DOC_TOOLKIT_ROLE_SESSION: 'writer', DOC_TOOLKIT_DOWNLOAD_DIRS: JSON.stringify([work, scratch]) };
+  const go = (out, over = env, more = []) => cli(['download-attachment', 'Doin0003', ...att, '--out', out, ...more], { root, fake, env: over });
+  try {
+    assert.equal((await go(path.join(work, 'a.bin'))).json.bytes, 5);
+    assert.equal((await go(path.join(work, 'sub', 'b.bin'))).json.bytes, 5);
+    assert.equal((await go(path.join(scratch, 'c.bin'))).json.bytes, 5);
+    for (const out of [path.join(outside, 'x.bin'), path.join(work, 'away', 'x.bin'), path.join(work, '..', 'outside', 'x.bin'), path.join(root, '.claude', 'settings.local.json'), `${work}-sibling/x.bin`]) {
+      await assert.rejects(go(out), (e) => e.exitCode === 2 && /role session/.test(e.message), out);
+      assert.ok(!fs.existsSync(path.join(outside, 'x.bin')));
+    }
+    await assert.rejects(go(path.join(work, 'link.bin'), env, ['--overwrite']), (e) => e.exitCode === 2 && /link/.test(e.message));
+    assert.ok(!fs.existsSync(path.join(outside, 'target')));
+    for (const dirs of [undefined, 'not json', '[]']) await assert.rejects(go(path.join(work, 'd.bin'), { ...env, DOC_TOOLKIT_DOWNLOAD_DIRS: dirs }), (e) => e.exitCode === 2, `no folders: ${dirs}`);
+    const owner = { TEST_TRACKER_KEY: KEY, TEST_TRACKER_TOKEN: TOKEN };
+    assert.equal((await go(path.join(outside, 'mine.bin'), owner)).json.bytes, 5, 'the owner\'s run has no such limit');
+  } finally {
+    await fake.close();
+  }
+});
 
 test('cli: every command prints JSON with ok, and not one byte of output holds a credential', async () => {
   const fake = await startFake();
@@ -762,11 +808,11 @@ test('cli: a refusal exits 2 with a JSON error and its rule; missing credentials
   const fake = await startFake();
   const root = hostRoot();
   try {
-    const env = { ...process.env, TEST_TRACKER_KEY: KEY, TEST_TRACKER_TOKEN: TOKEN };
+    const env = { ...process.env, DOC_TOOLKIT_TRACKER_TEST: '1', TEST_TRACKER_KEY: KEY, TEST_TRACKER_TOKEN: TOKEN };
     const refused = await run('node', [CLI, 'list-cards', '--status', 'drafts', '--root', root, '--origin', fake.origin], { env }).catch((e) => e);
     assert.equal(refused.code, 2);
     assert.deepEqual(JSON.parse(refused.stdout), { ok: false, error: "'drafts' is never listed: the settings mark it neverRead", refused: 'neverRead', status: 'drafts' });
-    const bare = { ...process.env };
+    const bare = { ...process.env, DOC_TOOLKIT_TRACKER_TEST: '1' };
     delete bare.TEST_TRACKER_KEY;
     delete bare.TEST_TRACKER_TOKEN;
     const missing = await run('node', [CLI, 'statuses', '--root', root, '--origin', fake.origin], { env: bare }).catch((e) => e);

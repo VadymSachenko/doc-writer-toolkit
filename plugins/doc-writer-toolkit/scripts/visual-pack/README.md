@@ -50,7 +50,7 @@ Declared in the `Documentation toolkit configuration` block of `<root>/CLAUDE.md
 
 Other flags: `--root <dir>` (default: the working folder), `--build-dir <dir>`, `--out <dir>`, `--viewport <WxH>` (default `1280x800`), `--max-height <px>` (default `8000`), `--jobs <n>` (pages captured at once, default `4`), `--timeout <ms>` (per page, default `30000`), `--dry-run` (list the pages and their URLs; no build, no browser), `--json`, `-h`.
 
-**Where Playwright is.** `--playwright-from <dir>`, or the environment variable `VISUAL_PACK_PLAYWRIGHT_FROM`, names a folder whose `node_modules` holds Playwright. The default is the docs repo itself. The script loads Playwright from there (`playwright`, then `playwright-core`, then `@playwright/test`), so it needs no dependency of its own.
+**Where Playwright is.** `--playwright-from <dir>`, or the environment variable `VISUAL_PACK_PLAYWRIGHT_FROM`, names a folder whose `node_modules` holds Playwright. The default is the docs repo itself. The script loads Playwright from there (`playwright`, then `playwright-core`, then `@playwright/test`), so it needs no dependency of its own. With `DOC_TOOLKIT_ROLE_SESSION` set (a ticket flow role session; the runner sets it), the flag is refused, since it runs JavaScript from that folder.
 
 ## Output
 

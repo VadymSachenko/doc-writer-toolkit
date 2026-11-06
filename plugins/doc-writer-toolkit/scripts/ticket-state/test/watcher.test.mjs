@@ -909,7 +909,7 @@ test('a watch job neither runs nor re-arms while its board can not be read; afte
 });
 
 test('a skill job carries every push denial the roles carry, whatever its own allow list', () => {
-  const w = world({ extra: { hostJobs: [{ name: 'notes', every: 60, run: { skill: 'notes-writer', allowedTools: ['Bash(git push:*)', 'Bash(git:*)'] } }, { name: 'plain', every: 60, run: { skill: 'notes-writer' } }] } });
+  const w = world({ extra: { hostJobs: [{ name: 'notes', every: 60, run: { skill: 'notes-writer', allowedTools: ['Bash(git push:*)', 'Bash(git status:*)'] } }, { name: 'plain', every: 60, run: { skill: 'notes-writer' } }] } });
   for (const job of w.settings.hostJobs) {
     const { args } = jobCommand(job, { settings: w.settings });
     const denied = args.slice(args.indexOf('--disallowedTools') + 1);

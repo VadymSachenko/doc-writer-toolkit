@@ -13,6 +13,8 @@ import { jobDenied } from './runner.mjs';
 
 const ARRIVALS = new Set(['createCard', 'copyCard', 'moveCardToBoard', 'convertToCardFromCheckItem']);
 const isObject = (v) => v && typeof v === 'object' && !Array.isArray(v);
+// `Bash`, `Bash(*)`, `Bash(git)`, `Bash(git:*)`, `Bash(git *)`, `Bash(git*)`, `Bash(git -C *)`, `Bash(git -C *:*)`.
+export const isBareGit = (rule) => /^Bash(\(\s*(\*|\*:\*|git\s*(:\*|\*|\s\*|\s+-C\s+\*.*)?)\s*\))?$/.test(String(rule).trim());
 
 export function validateJobs(jobs, root = null) {
   if (!Array.isArray(jobs)) throw new CliError('ticket flow settings: hostJobs must be a list', { code: 2 });
@@ -38,6 +40,9 @@ export function validateJobs(jobs, root = null) {
     }
     if (j.run.args !== undefined && !(typeof j.run.args === 'string' || (Array.isArray(j.run.args) && j.run.args.every((a) => typeof a === 'string')))) fail('.run.args must be text or a list of texts');
     if (j.run.allowedTools !== undefined && (!Array.isArray(j.run.allowedTools) || j.run.allowedTools.some((x) => typeof x !== 'string'))) fail('.run.allowedTools must be a list of rules');
+    // A skill job's rule that opens all of git, or all of Bash: a deny can't hold that in, since quoting gets past a deny.
+    const bare = (j.run.allowedTools ?? []).find(isBareGit);
+    if (bare && typeof j.run.skill === 'string') fail(`.run.allowedTools has ${bare}: name the git subcommands the job runs, such as Bash(git status:*)`);
     if (j.timeoutMinutes !== undefined && !(typeof j.timeoutMinutes === 'number' && j.timeoutMinutes > 0)) fail('.timeoutMinutes must be a number > 0');
     return { ...j, timeoutMinutes: j.timeoutMinutes ?? 120 };
   });

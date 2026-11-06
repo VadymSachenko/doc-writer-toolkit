@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { loadClaudeConfig } from '../../ui-labels/lib/config.mjs';
 import { deepMerge, localSettingsPath, readJsonFile, settingsFile, validateTracker } from '../../tracker/lib/settings.mjs';
 import { validateForge } from '../../forge/lib/settings.mjs';
@@ -7,11 +8,13 @@ import { DEFAULT_KEEP } from './cleanup.mjs';
 import { validateJobs } from './jobs.mjs';
 
 // The ticket flow settings: the shared file the host commits (`.claude/ticket-flow.json`, or the `Ticket flow
-// settings:` field of CLAUDE.md, or --settings) and the owner's local file next to it (`<name>.local.json`), merged key
-// by key at any depth (a local key wins). The tracker and forge scripts read the same files the same way.
+// settings:` field of CLAUDE.md, or --settings), read at HEAD (`trustedShared`), and the owner's local file next to it
+// (`<name>.local.json`), merged key by key at any depth (a local key wins), for the local file's keys only (`localOnly`).
+// The tracker and forge scripts read the same files, as they stand and with no such limit.
 //
-// The shared file holds `state`, `workFolder`, `tracker`, `forge`, `targets`, `noReviewLabel`, `appRepos`, `hostRules`, `hostJobs`.
-// The local file holds `mode`, `limits`, `schedule`, `roles`, `modelLadder`, `video` and `cleanup`. Defaults below.
+// The shared file holds `state`, `workFolder`, `tracker`, `forge`, `targets`, `noReviewLabel`, `appRepos`, `hostRules`, `hostJobs`,
+// and each role's tool rules (`roles.<role>.allowedTools`, `disallowedTools`).
+// The local file holds `mode`, `limits`, `schedule`, `roles` (no tool rules), `modelLadder`, `video` and `cleanup`. Defaults below.
 
 export const MODES = ['off', 'observe', 'on'];
 export const ROLES = ['triage', 'writer', 'reviewer', 'translator'];
@@ -177,16 +180,60 @@ export function validateSettings(merged, { root, stateRootDefault }) {
   };
 }
 
+// The shared file as the host's repo has it at HEAD, or null when it isn't tracked there (no repo, a file outside it, a
+// file never committed). A session can't move HEAD in the hub: its commits land only in a worktree, on a ticket branch.
+export function sharedAtHead(root, file) {
+  const rel = path.relative(root, path.resolve(root, file));
+  if (rel.startsWith('..') || path.isAbsolute(rel)) return null;
+  const run = spawnSync('git', ['-C', root, 'show', `HEAD:./${rel.split(path.sep).join('/')}`], { encoding: 'utf8', maxBuffer: 16 << 20, stdio: ['ignore', 'pipe', 'ignore'] });
+  if (run.status !== 0) return null;
+  try {
+    return JSON.parse(run.stdout);
+  } catch {
+    return null;
+  }
+}
+
+// What the local file may set: only its own keys, and of a role only what shapes the session's cost. A local file is
+// git-ignored, so a session that got to write one would otherwise widen the next session's rules (`roles.*.allowedTools`,
+// `workFolder`, `targets`, `state`, `hostJobs`).
+export const LOCAL_KEYS = ['mode', 'limits', 'schedule', 'roles', 'modelLadder', 'video', 'cleanup'];
+const ROLE_RULE_KEYS = ['allowedTools', 'disallowedTools'];
+export function localOnly(local) {
+  const ignored = Object.keys(local ?? {}).filter((k) => k !== 'schemaVersion' && !LOCAL_KEYS.includes(k));
+  const out = Object.fromEntries(Object.entries(local ?? {}).filter(([k]) => LOCAL_KEYS.includes(k)));
+  if (isObject(out.roles)) out.roles = withoutRoleRules(out.roles, (r, k) => ignored.push(`roles.${r}.${k}`));
+  return { local: out, ignored };
+}
+function withoutRoleRules(roles, onDrop = () => {}) {
+  return Object.fromEntries(Object.entries(roles).map(([r, v]) => {
+    if (!isObject(v)) return [r, v];
+    for (const k of ROLE_RULE_KEYS) if (v[k] !== undefined) onDrop(r, k);
+    return [r, Object.fromEntries(Object.entries(v).filter(([k]) => !ROLE_RULE_KEYS.includes(k)))];
+  }));
+}
+
+// `shared`, the tracked file at HEAD where there is one, so an uncommitted edit counts for nothing, a session's above all.
+// With none, the working file still gives the flow its settings, but no role's tool rules: nothing vouches for them.
+export function trustedShared(root, file, working) {
+  const head = sharedAtHead(root, file);
+  if (head) return { shared: head, notes: JSON.stringify(head) === JSON.stringify(working) ? [] : [`${path.relative(root, file)} has uncommitted changes: they count once committed`] };
+  const roles = isObject(working.roles) ? withoutRoleRules(working.roles) : undefined;
+  return { shared: { ...working, ...(roles ? { roles } : {}) }, notes: [`${path.relative(root, file)} isn't tracked at HEAD: no role tool rules are read from it`] };
+}
+
 export async function loadSettings({ root, settings: flag }) {
   const file = await settingsFile(root, flag);
-  const shared = readJsonFile(file, 'settings file');
-  if (!shared) throw new CliError(`no settings file at ${file}. Declare 'Ticket flow settings:' in CLAUDE.md or pass --settings.`, { code: 2 });
+  const working = readJsonFile(file, 'settings file');
+  if (!working) throw new CliError(`no settings file at ${file}. Declare 'Ticket flow settings:' in CLAUDE.md or pass --settings.`, { code: 2 });
+  const { shared, notes } = trustedShared(root, file, working);
   const localFile = localSettingsPath(file);
   const local = readJsonFile(localFile, 'local settings file');
+  const { local: kept, ignored } = localOnly(local);
   const claude = await loadClaudeConfig(root);
   const stateRootDefault = path.join(claude['toolkit state root'] || '.doc-toolkit/', 'ticket-flow/');
-  const settings = validateSettings(deepMerge(shared, local ?? {}), { root, stateRootDefault });
-  return { ...settings, file, localFile: local ? localFile : null };
+  const settings = validateSettings(deepMerge(shared, kept), { root, stateRootDefault });
+  return { ...settings, file, localFile: local ? localFile : null, settingsNotes: [...notes, ...(ignored.length ? [`${path.relative(root, localFile)} sets ${ignored.join(', ')}: ignored, these are read only from the tracked file`] : [])] };
 }
 
 // What `config` prints: the merged values a skill reads, with the paths resolved. No credential value: only the names
