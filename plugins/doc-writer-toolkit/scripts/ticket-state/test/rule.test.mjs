@@ -329,7 +329,8 @@ test('a failed step waits until a person acts after it: a move, a comment, a PR 
   ledger(w, c.waits, { ...answers, ...failedRun(c.waits) });
   ledger(w, c.commented, { ...answers, ...failedRun(c.commented) });
   ledger(w, c.posted, { ...answers, ...failedRun(c.posted), posted: { card: ['posted-1'], pr: [] } });
-  ledger(w, c.held, { ...answers, ...failedRun(c.held, { failures: 2 }) });
+  // A session that ended on a busy browser lock after them changes nothing: still held.
+  ledger(w, c.held, { ...answers, runs: [...failedRun(c.held, { failures: 2 }).runs, { seq: 10, stage: 'answers', outcome: 'busy', start: at }] });
   // The card left in Blocked by the failed session's own move would be in the mark; here a person moved it on since.
   ledger(w, c.moved, { ...answers, ...failedRun(c.moved, {}, mark(c.moved, { list: LISTS.blocked.id })) });
   const base = { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' };

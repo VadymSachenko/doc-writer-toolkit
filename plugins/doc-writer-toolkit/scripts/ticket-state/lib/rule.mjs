@@ -198,9 +198,10 @@ export function actedAfter(l, w, mark) {
 }
 
 // The ticket's last session, when it failed at the stage the ticket would run now: how many sessions failed in a row,
-// and whether a person acted since the last of them.
+// and whether a person acted since the last of them. A session that ended on a busy browser lock (`busy`) is neither a
+// failure nor a success: the one before it counts.
 function failedStep(l, w, steps) {
-  const last = (l.runs ?? []).at(-1);
+  const last = (l.runs ?? []).findLast((r) => r.outcome !== 'busy');
   const s = steps[0];
   if (!s || last?.outcome !== 'failed' || !last.after || last.stage !== s.stage || (last.pr ?? null) !== (s.pr ?? null)) return null;
   const sessions = last.failures ?? 1;

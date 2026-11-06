@@ -7,6 +7,7 @@ import { ledger, read, snapshot, world } from './helpers.mjs';
 import { makeClients } from '../lib/world.mjs';
 import { runRecord } from '../lib/record.mjs';
 import { lockOf } from '../lib/locks.mjs';
+import { browserLockState, noteBusy, takeBrowserLock } from '../lib/browser-lock.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
 import { BRANCH_DENIED, PLUGIN_ROOT, PUSH_DENIED, PUSH_DENIED_PLAIN, ROLE_DIR, scriptRoots, scriptRulesFor, agentsFile, briefFor, collectSteps, commandFor, nextModelUp, proposeRoles, readRole, runDaily } from '../lib/runner.mjs';
 import { localDate } from '../lib/report.mjs';
@@ -128,6 +129,88 @@ test('a scheduled run: the session records its stage; a session that does not is
   assert.ok(fs.existsSync(path.join(w.settings.state, 'roles', 'agents.json')));
 });
 
+test('the browser lock a session took is freed when the session ends, failed or not; another ticket\'s lock stays', async () => {
+  for (const other of [false, true]) {
+    const { w } = busyWorld({ ...estimates, limits: { ...estimates.limits, stepsPerTicket: 1 } });
+    fs.rmSync(path.join(w.settings.state, 'tickets', '502.json'));
+    w.tracker.cards.splice(1, 1);
+    if (other) takeBrowserLock(w.settings.state, { ticket: '777', now: NOW });
+    const seen = [];
+    // The session takes the lock for its ticket (or finds it held), then dies without recording or freeing it.
+    const spawnClaude = async () => {
+      seen.push(takeBrowserLock(w.settings.state, { ticket: '501', now: NOW }).taken);
+      return { code: 1, stdout: '' };
+    };
+    const out = await runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: () => usageAt(5), now: () => NOW, spawnClaude }, options: {} });
+    assert.ok(seen.length >= 1, 'a session ran');
+    assert.deepEqual(out.starts.map((s) => s.steps.map((x) => x.outcome)), [['failed']]);
+    const lock = browserLockState(w.settings.state, NOW);
+    const log = fs.readFileSync(path.join(w.settings.state, 'runs', `${localDate(NOW)}.jsonl`), 'utf8').trim().split('\n').map((x) => JSON.parse(x));
+    if (other) {
+      assert.deepEqual([seen.every((t) => t === false), lock.holder?.ticket], [true, '777'], 'another ticket\'s lock stays');
+      assert.equal(log.filter((e) => e.kind === 'browserLock').length, 0);
+    } else {
+      assert.deepEqual([seen[0], lock.held], [true, false], 'freed after the session');
+      assert.deepEqual(log.filter((e) => e.kind === 'browserLock').map((e) => [e.stage, e.outcome]).slice(0, 1), [['start', 'freed']]);
+    }
+  }
+});
+
+test('a session that ended on a busy browser lock waits: twice in a row, no failure counted, no bigger model, no hold', async () => {
+  const { w, ready } = busyWorld({ ...estimates, roles: { writer: { model: 'claude-sonnet-5-5' } }, limits: { ...estimates.limits, stepsPerTicket: 2 } });
+  fs.rmSync(path.join(w.settings.state, 'tickets', '502.json'));
+  w.tracker.cards.splice(1, 1);
+  takeBrowserLock(w.settings.state, { ticket: '777', now: NOW });
+  const calls = [];
+  const spawnClaude = async (cmd) => {
+    const stage = /Stage `(\w+)`/.exec(briefOf(cmd))[1];
+    calls.push([stage, flag(cmd, '--model')]);
+    if (stage === 'start') {
+      ready.placeId = LISTS.inProgress.id;
+      await runRecord({ settings: w.settings, clients: w.clients(), key: '501', stage: 'start', status: 'done', card: ready.shortLink, result: { group: '501' }, now: NOW });
+    } else {
+      // `browser-lock.mjs take` gave up on the lock ticket 777 holds; the session ends without recording.
+      const r = takeBrowserLock(w.settings.state, { ticket: '501', now: NOW });
+      noteBusy(w.settings.state, { ticket: '501', holder: r.holder, now: NOW });
+    }
+    return { code: 0, stdout: RESULT() };
+  };
+  const run = () => runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: () => usageAt(5), now: () => NOW, spawnClaude }, options: {} });
+  const first = await run();
+  assert.deepEqual(first.starts.map((s) => s.steps.map((x) => [x.stage, x.outcome])), [[['start', 'done'], ['plan', 'busy']]]);
+  await run();
+  assert.deepEqual(calls, [['start', 'claude-sonnet-5-5'], ['plan', 'claude-sonnet-5-5'], ['plan', 'claude-sonnet-5-5']], 'once a check, never the next model up');
+  const l = read(w, '501');
+  assert.deepEqual(l.runs.filter((r) => r.stage === 'plan').map((r) => [r.outcome, r.model, r.failures ?? null, r.retryOf ?? null]), [['busy', 'claude-sonnet-5-5', null, null], ['busy', 'claude-sonnet-5-5', null, null]]);
+  assert.notEqual(l.stages.plan?.status, 'failed', 'the stage is not recorded failed');
+  const t = await w.one('501');
+  assert.deepEqual([t.held ?? false, t.failed ?? null, t.next?.stage, t.next?.prior ?? null], [false, null, 'plan', null]);
+  assert.deepEqual(fs.readdirSync(path.join(w.settings.state, '.playwright-busy')), [], 'the notes were read');
+  assert.equal(proposeRoles([l], w.settings, NOW).proposals.length, 0);
+});
+
+test('a start session that ended on a busy browser lock leaves its start running, not failed: the next check starts it again on the same model', async () => {
+  const { w } = busyWorld({ ...estimates, roles: { writer: { model: 'claude-sonnet-5-5' } } });
+  fs.rmSync(path.join(w.settings.state, 'tickets', '502.json'));
+  w.tracker.cards.splice(1, 1);
+  takeBrowserLock(w.settings.state, { ticket: '777', now: NOW });
+  const calls = [];
+  const spawnClaude = async (cmd) => {
+    calls.push([/Stage `(\w+)`/.exec(briefOf(cmd))[1], flag(cmd, '--model')]);
+    noteBusy(w.settings.state, { ticket: '501', holder: takeBrowserLock(w.settings.state, { ticket: '501', now: NOW }).holder, now: NOW });
+    return { code: 0, stdout: RESULT() };
+  };
+  const run = () => runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: () => usageAt(5), now: () => NOW, spawnClaude }, options: {} });
+  await run();
+  assert.equal(read(w, '501').stages.start.status, 'running', 'the runner\'s own `running` stays: not recorded failed');
+  await run();
+  assert.deepEqual(calls, [['start', 'claude-sonnet-5-5'], ['start', 'claude-sonnet-5-5']]);
+  const l = read(w, '501');
+  assert.deepEqual(l.runs.map((r) => [r.stage, r.outcome, r.failures ?? null, r.retryOf ?? null]), [['start', 'busy', null, null], ['start', 'busy', null, null]]);
+  const t = await w.one('501');
+  assert.deepEqual([t.held ?? false, t.failed ?? null], [false, null]);
+});
+
 test('the guard: at the allowance by now, no model step starts, and the report says why', async () => {
   const { w } = busyWorld();
   const out = await runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: () => usageAt(45), now: () => NOW, spawnClaude: () => assert.fail('the guard stops it') }, options: {} });
@@ -234,7 +317,7 @@ const LAYERS = [
   'Bash(git status)', 'Bash(git status *)', 'Bash(git diff:*)', 'Bash(git log:*)', 'Bash(git show:*)', 'Bash(git add:*)', 'Bash(git add *)', 'Bash(git commit:*)', 'Bash(git commit *)',
   'Bash(git branch:*)', 'Bash(git branch *)', 'Bash(git checkout:*)', 'Bash(git checkout *)', 'Bash(git switch:*)', 'Bash(git fetch:*)', 'Bash(git fetch *)', 'Bash(git pull:*)',
   'Bash(git push:*)', 'Bash(git stash:*)', 'Bash(git mv *)', 'Bash(git cherry-pick *)', 'Bash(git merge *)', 'Bash(git rev-list *)',
-  'Bash(gh pr *)', 'Bash(gh auth *)', 'Bash(gh label:*)', 'Bash(ls:*)', 'Bash(cat:*)', 'Bash(find:*)', 'Bash(mkdir:*)', 'Bash(npx playwright:*)', 'Bash(npx playwright *)',
+  'Bash(gh pr *)', 'Bash(gh auth *)', 'Bash(gh label:*)', 'Bash(ls:*)', 'Bash(cat:*)', 'Bash(find:*)', 'Bash(mkdir:*)', 'Bash(rmdir:*)', 'Bash(npx playwright:*)', 'Bash(npx playwright *)',
   "Bash(python3 -c ' *)", 'Bash(python3 rebuild_catalog.py)', 'Bash(CORPUS=/corpus *)', 'Bash(node_modules/.bin/playwright test *)',
 ];
 const WT = '/work/.worktrees/guide-docs/ticket-71';
@@ -419,6 +502,21 @@ test('the video gate: the writer runs video-parts by its path, from either root,
   for (const role of ['triage', 'reviewer', 'translator']) assert.ok(['Bash(ffmpeg:*)', 'Bash(ffprobe:*)'].every((r) => rulesOf(role, w).denied.includes(r)), role);
 });
 
+test('the browser lock: the writer takes and frees it with the script, from either root, and can\'t remove or move the folder itself', () => {
+  const { w } = busyWorld();
+  const { allowed, denied } = rulesOf('writer', w);
+  const wide = [...allowed, ...LAYERS];
+  for (const r of ROOTS) for (const c of ['take', 'free', 'status']) assert.equal(verdict(`node ${r}/scripts/ticket-state/browser-lock.mjs ${c} --root /hub --ticket 502`, wide, denied), 'allowed', `${r}: ${c}`);
+  const lock = path.join(w.settings.state, '.playwright.lock');
+  for (const c of [`rm -rf ${lock}`, `rmdir ${lock}`, `mv ${lock} /tmp/x`, `mv ${lock} ${lock}.old`, `node ${ROOTS[0]}/scripts/ticket-state/browser-lock.mjs/../../x.mjs`, 'node scripts/ticket-state/browser-lock.mjs free --ticket 502']) assert.notEqual(verdict(c, wide, denied), 'allowed', c);
+  // A lock with no holder, or a forged holder: denied even where a host layer allows `mkdir`, `mv` and `rmdir` outright.
+  const loose = [...wide, 'Bash(mkdir:*)', 'Bash(mv:*)', 'Bash(rmdir:*)'];
+  for (const c of [`mkdir ${lock}`, `mkdir -p ${lock}`, 'mkdir .playwright.lock', 'mkdir -p .playwright.lock', `mv /tmp/x ${lock}`, `rmdir ${lock}`, 'mv a b', 'rmdir x']) assert.equal(verdict(c, loose, denied), 'denied', c);
+  assert.equal(verdict('mkdir -p .sources/frames', loose, denied), 'allowed', 'other folders stay as the host has them');
+  const st = (f) => `//${path.join(w.settings.state, f).slice(1)}`;
+  for (const d of ['.playwright.lock', '.playwright-busy']) for (const e of [`Edit(${st(d)})`, `Edit(${st(d)}/**)`]) assert.ok(denied.includes(e), e);
+});
+
 test('the toolkit roots a session may run scripts from: the runner\'s, and each install of the plugin the hub loads', () => {
   const { w } = busyWorld();
   const home = tmp('home-');
@@ -476,7 +574,9 @@ test('the command line follows the role settings; the retry takes the next model
 test('the weekly roles proposal: frequent retries propose the next model; many clean steps at high effort propose medium', () => {
   const { w } = busyWorld();
   const run = (role, extra = {}) => ({ role, start: ago(24), outcome: 'done', ...extra });
-  const ledgers = [{ runs: [...Array.from({ length: 5 }, () => run('reviewer')), run('reviewer', { retryOf: 'claude-sonnet-5-5' }), run('reviewer', { retryOf: 'claude-sonnet-5-5' }), ...Array.from({ length: 10 }, () => run('translator')), run('triage', { start: ago(24 * 9) })] }];
+  const ledgers = [{ runs: [...Array.from({ length: 5 }, () => run('reviewer')), run('reviewer', { retryOf: 'claude-sonnet-5-5' }), run('reviewer', { retryOf: 'claude-sonnet-5-5' }), ...Array.from({ length: 10 }, () => run('translator')),
+    // Sessions that ended on a busy browser lock say nothing about the model: they neither dilute the retries nor count as failed.
+    run('reviewer', { outcome: 'busy' }), run('reviewer', { outcome: 'busy' }), run('translator', { outcome: 'busy' }), run('triage', { start: ago(24 * 9) })] }];
   const p = proposeRoles(ledgers, w.settings, NOW);
   assert.deepEqual(p.proposals.map((x) => [x.role, x.change]), [['reviewer', 'model claude-sonnet-5-5 → claude-opus-5-5'], ['translator', 'effort high → medium']]);
 });

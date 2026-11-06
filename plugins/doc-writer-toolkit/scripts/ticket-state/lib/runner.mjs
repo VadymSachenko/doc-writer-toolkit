@@ -17,6 +17,7 @@ import { cleanupTicket } from './cleanup.mjs';
 import { removeClosedMarkdown } from './import.mjs';
 import { childEnv } from './env.mjs';
 import { clonePath, ensureWorktree, prsForStep, worktreePath } from './worktree.mjs';
+import { BUSY_NAME, LOCK_NAME, busyEnded, freeBrowserLock } from './browser-lock.mjs';
 import { parseClaudeConfig } from '../../ui-labels/lib/config.mjs';
 
 // The daily run (design §7): finish first, then triage the quiet intake cards (mornings), then start ready groups while
@@ -111,7 +112,10 @@ const MCP_DENIED = ['mcp__claude_ai_Trello', 'mcp__trello', 'mcp__playwright'];
 // `ffmpeg` and `ffprobe` by hand, which a layer may allow (an owner's has allowed single calls): a role cuts a video only
 // with `video-parts`, which runs them with fixed arguments on paths inside the ticket's work folder.
 const MEDIA_DENIED = ['Bash(ffmpeg:*)', 'Bash(ffprobe:*)'];
-export const ROLE_DENIED = [...new Set([...GIT_PLAIN_DENIED, ...GIT_OUTPUT_DENIED, ...CODE_DENIED, ...MEDIA_DENIED, ...MCP_DENIED])];
+// Moving or removing folders, which a broad host allow would reopen, and a browser lock made by hand (no holder, so
+// nothing frees it): a role takes and frees the lock only with browser-lock.mjs.
+const FOLDER_DENIED = ['Bash(mv:*)', 'Bash(rmdir:*)', 'Bash(mkdir *.playwright.lock*)', 'Bash(mkdir .playwright.lock*)'];
+export const ROLE_DENIED = [...new Set([...GIT_PLAIN_DENIED, ...GIT_OUTPUT_DENIED, ...CODE_DENIED, ...MEDIA_DENIED, ...FOLDER_DENIED, ...MCP_DENIED])];
 // A skill job's session: the roles' git and code denials, and the file denials (`jobDenied`). Not the MCP denials: the
 // toolkit knows nothing about what a job does, and a host's job may well work on its tracker through MCP.
 export const jobDenied = (settings, roots = scriptRoots(settings)) => [...new Set([...JOB_DENIED, ...GIT_PLAIN_DENIED, ...GIT_OUTPUT_DENIED, ...CODE_DENIED, ...writeDeniedFor(settings, roots)])];
@@ -120,7 +124,7 @@ export const jobDenied = (settings, roots = scriptRoots(settings)) => [...new Se
 // only: its other commands are the owner's, and `set` would widen the next session's rules), from the toolkit the runner runs (the brief's
 // "scripts folder") and from the installed plugin the session's skills name (`${CLAUDE_PLUGIN_ROOT}`). A literal path
 // as a prefix rule: never a wildcard, which `../` would walk out of.
-export const NODE_SCRIPTS = ['ticket-state/ticket-state.mjs record', 'ticket-state/ticket-state.mjs status', 'ticket-state/ticket-state.mjs config', 'tracker/tracker.mjs', 'forge/forge.mjs', 'locale-sync/locale-sync.mjs', 'ui-labels/ui-labels.mjs', 'doc-align/doc-align.mjs', 'screenshot-locales/screenshot-locales.mjs', 'section-state/section-state.mjs', 'visual-pack/visual-pack.mjs', 'video-parts/video-parts.mjs'];
+export const NODE_SCRIPTS = ['ticket-state/ticket-state.mjs record', 'ticket-state/ticket-state.mjs status', 'ticket-state/ticket-state.mjs config', 'tracker/tracker.mjs', 'forge/forge.mjs', 'locale-sync/locale-sync.mjs', 'ui-labels/ui-labels.mjs', 'doc-align/doc-align.mjs', 'screenshot-locales/screenshot-locales.mjs', 'section-state/section-state.mjs', 'visual-pack/visual-pack.mjs', 'video-parts/video-parts.mjs', 'ticket-state/browser-lock.mjs'];
 export const scriptRulesFor = (roots = []) => [...new Set(roots.flatMap((r) => NODE_SCRIPTS.map((s) => `Bash(node ${path.join(r, 'scripts', s)}:*)`)))];
 // Script flags that run code: ui-labels' `--source 'command <cmd>'` (a shell) and visual-pack's `--playwright-from
 // <dir>` (JavaScript from that folder), denied first, last or between other words, as `--x v` and `--x=v`.
@@ -170,7 +174,9 @@ export function writeDeniedFor(settings, roots = []) {
     ...[...new Set(own)].map((f) => `Edit(${abs(f)})`),
     ...ENV_FILES.map((f) => `Read(//**/${f})`),
     ...roots.map((r) => `Edit(${abs(r)}/**)`),
-    ...['tickets', 'locks', 'roles', 'watch', 'jobs', 'runs', 'reports'].map((d) => `Edit(${abs(path.join(state, d))}/**)`),
+    ...['tickets', 'locks', 'roles', 'watch', 'jobs', 'runs', 'reports', LOCK_NAME, BUSY_NAME].map((d) => `Edit(${abs(path.join(state, d))}/**)`),
+    // The browser lock and the busy notes go only through browser-lock.mjs: no holder-less lock, no forged holder.
+    ...[LOCK_NAME, BUSY_NAME].map((d) => `Edit(${abs(path.join(state, d))})`),
     ...['rearmed.json', 'roles-proposal.json'].map((f) => `Edit(${abs(path.join(state, f))})`),
   ];
 }
@@ -549,7 +555,8 @@ export function proposeRoles(ledgers, settings, now = Date.now()) {
   const since = new Date(now - 7 * 86400000).toISOString();
   const proposals = [];
   for (const role of ROLES) {
-    const runs = ledgers.flatMap((l) => l.runs ?? []).filter((r) => r.role === role && String(r.start ?? '') >= since);
+    // A session that ended on a busy browser lock says nothing about the model: left out.
+    const runs = ledgers.flatMap((l) => l.runs ?? []).filter((r) => r.role === role && r.outcome !== 'busy' && String(r.start ?? '') >= since);
     if (!runs.length) continue;
     const steps = runs.filter((r) => !r.retryOf).length;
     const retried = runs.filter((r) => r.retryOf).length;
@@ -852,19 +859,33 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
           res = await (io.spawnClaude ?? spawnClaude)(cmd, io.claudeEnv ? { env: io.claudeEnv } : {});
         } finally {
           clearInterval(renew);
+          // The browser lock a session took (`browser-lock.mjs`) and didn't free, crashed or not: freed now, so the next
+          // Playwright run doesn't wait for it. A lock another ticket or a hand run holds stays.
+          try {
+            if (freeBrowserLock(settings.state, { tickets: step.keys }).freed) say({ kind: 'browserLock', group: step.group, stage: step.stage, outcome: 'freed', note: 'the session ended holding the browser lock' });
+          } catch {
+            // a lock that isn't a folder is left alone
+          }
         }
         usage = (await readUsage()) ?? usage;
         const r = parseResult(res.stdout) ?? {};
         const after = usage?.week?.percent ?? null;
-        const outcome = await gateOf(step, seqBefore);
-        if (outcome !== 'done') failures += 1;
+        // A session whose `browser-lock.mjs take` gave up on a lock someone else held: waiting, not failed.
+        const busy = busyEnded(settings.state, { tickets: step.keys, since: Date.parse(start) }).length > 0;
+        const outcome = await gateOf(step, seqBefore, { busy });
+        if (outcome === 'failed') failures += 1;
         // What the ticket looks like now the session is over, so its own unrecorded writes never count as a person's.
-        const marks = outcome === 'done' || !ledgered ? {} : await marksOf(step);
-        const run = { stage: step.stage, role: step.role, model, effort: cmd.effort, trigger: manual ? 'manual' : trigger, start, durationMs: r.durationMs, turns: r.turns, costUsd: r.costUsd, tokens: r.tokens, weekPercent: { before, after }, session: r.session, outcome, share: Number((1 / step.keys.length).toFixed(4)), ...(attempt ? { retryOf: settings.roles[step.role].model } : {}), ...(r.denials ? { denials: r.denials } : {}), ...(outcome === 'done' ? {} : { failures }) };
+        const marks = outcome !== 'failed' || !ledgered ? {} : await marksOf(step);
+        const run = { stage: step.stage, role: step.role, model, effort: cmd.effort, trigger: manual ? 'manual' : trigger, start, durationMs: r.durationMs, turns: r.turns, costUsd: r.costUsd, tokens: r.tokens, weekPercent: { before, after }, session: r.session, outcome, share: Number((1 / step.keys.length).toFixed(4)), ...(attempt ? { retryOf: settings.roles[step.role].model } : {}), ...(r.denials ? { denials: r.denials } : {}), ...(outcome === 'failed' ? { failures } : {}) };
         for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, run: JSON.stringify({ ...run, ...(marks[k] ? { after: marks[k] } : {}) }), pr: step.pr, now: clock() }).catch(() => {});
         const entry = { kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, role: step.role, model, exit: res.code, ...(r.denials ? { denials: r.denials } : {}) };
         if (outcome === 'done') {
           say({ ...entry, outcome });
+          return { ...pick(step), model, outcome };
+        }
+        // No failure counted, no bigger model, no hold: the step runs again at a later check.
+        if (outcome === 'busy') {
+          say({ ...entry, outcome, note: 'the browser lock was held by someone else: runs again at a later check' });
           return { ...pick(step), model, outcome };
         }
         const up = nextModelUp(model, settings.modelLadder);
@@ -910,8 +931,8 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
   }
 
   // Whether the session passed its gate: every ticket recorded the stage done after the session began. A stage left
-  // `running` is recorded failed for it.
-  async function gateOf(step, seqBefore) {
+  // `running` is recorded failed for it, unless the session ended on a busy browser lock (`busy`), which only waits.
+  async function gateOf(step, seqBefore, { busy = false } = {}) {
     let ok = true;
     for (const k of step.keys) {
       const l = readLedger(settings.state, k);
@@ -924,11 +945,11 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
         }
       })() : l.stages?.[step.stage];
       if (rec?.status === 'running') {
-        await runRecord({ settings, clients, key: k, stage: step.stage, status: 'failed', pr: step.pr, note: 'the session ended without recording the stage', now: clock() }).catch(() => {});
+        if (!busy) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'failed', pr: step.pr, note: 'the session ended without recording the stage', now: clock() }).catch(() => {});
         ok = false;
       } else if (!rec || rec.status !== 'done' || rec.seq <= (seqBefore.get(k) ?? 0)) ok = false;
     }
-    return ok ? 'done' : 'failed';
+    return ok ? 'done' : busy ? 'busy' : 'failed';
   }
 }
 

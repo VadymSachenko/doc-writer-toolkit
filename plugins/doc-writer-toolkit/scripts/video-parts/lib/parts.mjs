@@ -85,7 +85,7 @@ export function hostRoot(cwd, given) {
 
 /**
  * The checked, real paths: the host root, the ticket's work folder inside it (not the root itself), the video file
- * inside the work folder, and the parts folder `<work>/<video file name>-parts/` (a folder or nothing; never a link), with
+ * inside the work folder, and the parts folder `<video file name>-parts/` next to the video (a folder or nothing; never a link), with
  * each of its `parts` (file names) a plain file or nothing, so that ffmpeg never writes through a link. The parts
  * folder takes the video's whole file name, so two videos never share one.
  */
@@ -101,7 +101,8 @@ export function checkPaths({ root, work, video, parts = [] }) {
   if (!within(workReal, videoReal)) throw new CliError(`the video ${video} is not inside the work folder ${path.relative(rootReal, workReal)}`);
   if (!fs.statSync(videoReal).isFile()) throw new CliError(`the video ${video} is not a file`);
   const name = path.basename(videoReal);
-  const outDir = path.join(workReal, `${name}-parts`);
+  // Next to the video, so two videos of one name in two folders of the work folder never share one.
+  const outDir = path.join(path.dirname(videoReal), `${name}-parts`);
   let st = null;
   try {
     st = fs.lstatSync(outDir);

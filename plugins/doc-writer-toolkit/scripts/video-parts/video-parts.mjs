@@ -8,7 +8,7 @@ import { loadSettings } from '../ticket-state/lib/settings.mjs';
 const USAGE = `video-parts --work <folder> --video <file> [options]
 
 Cuts the sound of a ticket's video into parts of at most the ticket flow settings' video.partMinutes minutes, for the
-video gate: <work>/<video file name>-parts/<video file name>-part-01.m4a, -02, … (AAC). ffprobe and ffmpeg,
+video gate: <video file name>-parts/<video file name>-part-01.m4a, -02, … (AAC), next to the video. ffprobe and ffmpeg,
 found on the PATH, run with fixed arguments, never through a shell, on local files only. The host root is the folder
 it runs in; the work folder must be inside it, the video inside the work folder and a plain video or sound file (mp4,
 mov, m4a, mkv, webm, mp3, wav, ogg, flac, aac; no playlist). Nothing is written outside the work folder.
