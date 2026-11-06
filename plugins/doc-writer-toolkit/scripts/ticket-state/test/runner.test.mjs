@@ -306,7 +306,7 @@ const LAYERS = [
   'Bash(git status)', 'Bash(git status *)', 'Bash(git diff:*)', 'Bash(git log:*)', 'Bash(git show:*)', 'Bash(git add:*)', 'Bash(git add *)', 'Bash(git commit:*)', 'Bash(git commit *)',
   'Bash(git branch:*)', 'Bash(git branch *)', 'Bash(git checkout:*)', 'Bash(git checkout *)', 'Bash(git switch:*)', 'Bash(git fetch:*)', 'Bash(git fetch *)', 'Bash(git pull:*)',
   'Bash(git push:*)', 'Bash(git stash:*)', 'Bash(git mv *)', 'Bash(git cherry-pick *)', 'Bash(git merge *)', 'Bash(git rev-list *)',
-  'Bash(gh pr *)', 'Bash(gh auth *)', 'Bash(gh label:*)', 'Bash(ls:*)', 'Bash(cat:*)', 'Bash(find:*)', 'Bash(mkdir:*)', 'Bash(npx playwright:*)', 'Bash(npx playwright *)',
+  'Bash(gh pr *)', 'Bash(gh auth *)', 'Bash(gh label:*)', 'Bash(ls:*)', 'Bash(cat:*)', 'Bash(find:*)', 'Bash(mkdir:*)', 'Bash(rmdir:*)', 'Bash(npx playwright:*)', 'Bash(npx playwright *)',
   "Bash(python3 -c ' *)", 'Bash(python3 rebuild_catalog.py)', 'Bash(CORPUS=/corpus *)', 'Bash(node_modules/.bin/playwright test *)',
 ];
 const WT = '/work/.worktrees/guide-docs/ticket-71';

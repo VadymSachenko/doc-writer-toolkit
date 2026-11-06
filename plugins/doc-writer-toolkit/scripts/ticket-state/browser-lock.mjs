@@ -12,8 +12,8 @@ The host's browser lock, <state>/.playwright.lock, for a pipeline session's Play
 after. A hand run keeps the host's own procedure on the same folder (mkdir, then move it away), so the two never run
 at once.
 
-  take    takes it for the ticket; waits up to --wait minutes (default 10; a session passes 9, under its tool's
-          10-minute limit) while someone else holds it. A lock older than ${STALE_MINUTES} minutes is taken over. Exit 3
+  take    takes it for the ticket; waits up to --wait minutes (default 10; a session passes 9 and gives
+          the call its tool's longest timeout, 10 minutes) while someone else holds it. A lock older than ${STALE_MINUTES} minutes is taken over. Exit 3
           when it is still held after the wait: noted for the runner, which counts the session as waiting, not failed.
   free    frees it when this ticket holds it. A lock someone else holds stays (exit 3). The runner also frees a lock a
           session's ticket still holds when the session ends.

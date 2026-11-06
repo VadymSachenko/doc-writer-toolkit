@@ -71,6 +71,8 @@ export function takeBrowserLock(state, { ticket, now = Date.now() }) {
     return { taken: false, holder: t.holder ?? { by: 'hand' }, since: t.since };
   }
   fs.writeFileSync(path.join(dir, HOLDER), JSON.stringify({ by: 'pipeline', ticket, at: new Date(now).toISOString() }) + '\n');
+  // A busy note from an earlier give-up in the same session no longer holds: the session got the lock after all.
+  fs.rmSync(path.join(busyDir(state), `${ticket}.json`), { force: true });
   return { taken: true, ...(s.held && !ours ? { tookOver: { ...(s.holder ?? { by: 'hand' }), since: s.since } } : {}) };
 }
 

@@ -116,6 +116,9 @@ test('busy notes: read once, only from the session\'s own time, and a broken loc
   assert.deepEqual(busyEnded(state, { tickets: ['501', '502', '503'], since: T0 }), ['501'], 'a note from before the session is not its own');
   assert.deepEqual(fs.readdirSync(busyDir(state)), [], 'both notes were removed');
   assert.deepEqual(busyEnded(state, { tickets: ['501'], since: T0 }), [], 'read once');
+  noteBusy(state, { ticket: '504', holder: { by: 'hand' }, now: T0 });
+  assert.equal(takeBrowserLock(state, { ticket: '504', now: T0 }).taken, true);
+  assert.deepEqual(busyEnded(state, { tickets: ['504'], since: T0 }), [], 'a later take that went through removes the give-up\'s note');
   fs.mkdirSync(path.join(busyDir(state), '503.json'));
   assert.deepEqual(busyEnded(state, { tickets: ['503'], since: T0 }), [], 'not a note');
   assert.throws(() => noteBusy(state, { ticket: '../x', now: T0 }), /--ticket <key> is required/);
