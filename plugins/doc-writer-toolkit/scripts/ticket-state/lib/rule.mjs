@@ -302,7 +302,8 @@ function derive(l, w) {
     // The card stands where the least advanced PR is. If the pipeline left it elsewhere, it moves it. Back from In
     // translation with every PR ready for merge: the chain is done, and the card says so.
     const expected = CARD_STATUS_OF[PR_ORDER[least]];
-    if (expected && expected !== status && card.list?.id === l.left?.list?.id && !out.steps.some((s) => s.stage === 'move' && !s.pr)) {
+    // Never into In translation by itself: only a person's move (or the other card of the same PR, lib/runner.mjs) goes there.
+    if (expected && expected !== status && expected !== 'translation' && card.list?.id === l.left?.list?.id && !out.steps.some((s) => s.stage === 'move' && !s.pr)) {
       out.steps.unshift(step('move', { to: expected, card: true, ...(status === 'translation' && PR_ORDER[least] === 'readyForMerge' ? { ready: true } : {}) }));
     }
     // A place from the code with no reference at a commit: its comment is posted, so the record stood; it is reported.
