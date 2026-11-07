@@ -64,6 +64,17 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
   const waitingOwner = st.tickets.filter((t) => t.held || ['questions', 'planGate', 'ownerBlock', 'paused', 'reworkWait', 'finalReview'].includes(t.state));
   out.push('## Waiting for you', '', list(waitingOwner.map((t) => `${link(t)}${cardName(t)}: ${t.state}${t.gate?.why ? `, ${t.gate.why}` : ''}`)), '');
 
+  // Per PR in the owner's queue, whether the writer recommends an expert review and why (the `pr` record). The owner
+  // decides: moving the card to the review status calls the expert; nothing waits on it.
+  const experts = [];
+  for (const t of st.tickets) {
+    for (const p of t.prs ?? []) {
+      if (p.stage !== 'finalReview' || !p.expertReview) continue;
+      experts.push(`${p.url ? `[${p.id}](${p.url})` : p.id} (${link(t)}): ${p.expertReview.recommended ? 'an expert review is recommended' : 'no expert review is recommended'}: ${p.expertReview.why}`);
+    }
+  }
+  out.push('## Expert review, your call', '', list(experts), '');
+
   const places = [];
   const check = [];
   const ready = [];

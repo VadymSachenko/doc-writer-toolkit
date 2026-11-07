@@ -100,7 +100,7 @@ test('the plan gate keeps the plan hash; a changed plan is a new gate, not an ap
   assert.ok(read(w, '1230').plan.sectionPlan.approved);
 });
 
-test('pr checks each PR is on the forge for its branch; the review kind sets the PR stage', async () => {
+test('pr checks each PR is on the forge for its branch and needs the expert review recommendation; every PR goes to the owner\'s queue, whatever its review kind', async () => {
   const c = card({ number: 1240, status: 'inProgress' });
   const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 91, head: 'ticket-1240', labels: ['in expert review'] }), pr({ repo: 'api-docs', number: 92, head: 'other-branch' }), pr({ repo: 'api-docs', number: 93, head: 'ticket-1240-api' })] });
   ledger(w, c, { stages: { start: 'done', plan: 'done' } });
@@ -111,10 +111,15 @@ test('pr checks each PR is on the forge for its branch; the review kind sets the
   await refused(w, { key: '1240', stage: 'write', status: 'done', result: {} }, 'noPr');
   ledger(w, c, { stages: { start: 'done', plan: 'done', write: 'done' }, prs: [{ repo: 'guide-docs', branch: 'ticket-1240', targets: ['guide'], review: 'sme', pipelineCommits: ['1111111'] }, { repo: 'api-docs', branch: 'ticket-1240-api', targets: ['api'], review: 'places' }] });
   await rec(w, { key: '1240', stage: 'uaReview', status: 'done' });
-  await refused(w, { key: '1240', stage: 'pr', status: 'done', result: { prs: [{ branch: 'ticket-1240', number: 91 }, { branch: 'ticket-1240-api', number: 92 }] } }, 'noPr');
-  await rec(w, { key: '1240', stage: 'pr', status: 'done', result: { prs: [{ branch: 'ticket-1240', number: 91 }, { branch: 'ticket-1240-api', number: 93 }], places: [{ id: 'p1', repo: 'api-docs', pr: 93, page: 'docs/a.md', line: 4, claim: 'c', why: 'codeOnly' }] } });
+  await refused(w, { key: '1240', stage: 'pr', status: 'done', result: { prs: [{ branch: 'ticket-1240', number: 91, expertReview: { recommended: false, why: 'every fact is from the code and the UI' } }, { branch: 'ticket-1240-api', number: 92, expertReview: { recommended: false, why: 'every fact is from the code and the UI' } }] } }, 'noPr');
+  await usage(w, { key: '1240', stage: 'pr', status: 'done', result: { prs: [{ branch: 'ticket-1240', number: 91 }, { branch: 'ticket-1240-api', number: 93, expertReview: { recommended: false, why: 'every fact is from the code and the UI' } }] } }, /each PR needs "expertReview".*\(ticket-1240\)/);
+  await usage(w, { key: '1240', stage: 'pr', status: 'done', result: { prs: [{ branch: 'ticket-1240', number: 91, expertReview: { recommended: 'yes', why: 'x' } }, { branch: 'ticket-1240-api', number: 93, expertReview: { recommended: false, why: 'every fact is from the code and the UI' } }] } }, /expertReview/);
+  await usage(w, { key: '1240', stage: 'pr', status: 'done', result: { prs: [{ branch: 'ticket-1240', number: 91, expertReview: { recommended: true, why: ' ' } }, { branch: 'ticket-1240-api', number: 93, expertReview: { recommended: false, why: 'every fact is from the code and the UI' } }] } }, /expertReview/);
+  const out = await rec(w, { key: '1240', stage: 'pr', status: 'done', result: { prs: [{ branch: 'ticket-1240', number: 91, expertReview: { recommended: true, why: 'two open questions for the expert: the limit and the fee' } }, { branch: 'ticket-1240-api', number: 93, expertReview: { recommended: false, why: 'every fact is from the code and the UI' } }], places: [{ id: 'p1', repo: 'api-docs', pr: 93, page: 'docs/a.md', line: 4, claim: 'c', why: 'codeOnly' }] } });
+  assert.equal(out.warnings, undefined, 'no PR had a review request');
   const l = read(w, '1240');
-  assert.deepEqual(l.prs.map((p) => [p.repo, p.number, p.review, p.stage, p.label]), [['guide-docs', 91, 'sme', 'smeReview', 'in expert review'], ['api-docs', 93, 'places', 'finalReview', null]]);
+  assert.deepEqual(l.prs.map((p) => [p.repo, p.number, p.review, p.stage]), [['guide-docs', 91, 'sme', 'finalReview'], ['api-docs', 93, 'places', 'finalReview']]);
+  assert.deepEqual(l.prs.map((p) => [p.expertReview.recommended, p.expertReview.why]), [[true, 'two open questions for the expert: the limit and the fee'], [false, 'every fact is from the code and the UI']]);
   assert.deepEqual(l.prs[0].pipelineCommits, ['1111111']);
 });
 

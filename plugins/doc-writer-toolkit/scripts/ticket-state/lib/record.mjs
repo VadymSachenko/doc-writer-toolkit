@@ -60,7 +60,7 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
 
   let ledger = readLedger(settings.state, key);
   // The tracker client is made on first use: a record refused before it needs the tracker needs no credentials.
-  const tracker = { findCards: (a) => clients.tracker.findCards(a), readCard: (a) => clients.tracker.readCard(a) };
+  const tracker = { findCards: (a) => clients.tracker.findCards(a), readCard: (a) => clients.tracker.readCard(a), hasMember: (a) => clients.tracker.hasMember(a) };
   const cardNow = async (ref) => {
     const r = await tracker.findCards({ link: ref });
     if (!r.cards[0]) throw new Refused('card', `the tracker has no card ${ref}`);
@@ -140,6 +140,10 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         if (result.verdict === 'needs-info' && result.reason === 'noAppLabel') {
           const check = labelCheck(await tracker.readCard({ card: card.id }), settings, null);
           if (check.settled) throw new Refused('textSettles', `the card has no app label, but its text names ${check.targets.join(', ')}: triage it from the text`, { targets: check.targets });
+        }
+        // The owner on every card the triage moves into the ready status (`tracker.owner`).
+        if (card.status === 'ready' && settings.tracker.owner && !(await tracker.hasMember({ card: card.id, member: 'owner' })).on) {
+          throw new Refused('member', `the card is in the ready status without the owner (${settings.tracker.owner}) on it: \`tracker.mjs add-member <card> --member owner\` first`);
         }
         l.triage = { ...result, at, priority: card.priority ?? 'medium' };
         l.priority = card.priority ?? 'medium';
@@ -262,7 +266,14 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
       }
       case 'pr': {
         const entries = result.prs ?? [];
-        if (!entries.length) throw new CliError('pr needs --result {"prs": [{ "branch", "number", "url" }], "places": [...]}', { code: 2 });
+        if (!entries.length) throw new CliError('pr needs --result {"prs": [{ "branch", "number", "url", "expertReview" }], "places": [...]}', { code: 2 });
+        // Whether the writer recommends an expert review, and why: the owner decides; nothing waits on it.
+        for (const e of entries) {
+          const x = e.expertReview;
+          if (!x || typeof x.recommended !== 'boolean' || typeof x.why !== 'string' || !x.why.trim()) {
+            throw new CliError(`pr: each PR needs "expertReview": { "recommended": true|false, "why": "<the open questions for the expert, or the facts not found in the code or the UI; or why none is needed>" } (${e.branch})`, { code: 2 });
+          }
+        }
         for (const e of entries) {
           const p = l.prs.find((x) => x.branch === e.branch && (!e.repo || x.repo === e.repo));
           if (!p) throw new CliError(`no PR entry for the branch ${e.branch}; the write record names the branches`, { code: 2 });
@@ -276,6 +287,9 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
           p.label = (st.labels ?? []).find((x) => Object.values(targetOf(p)?.labels ?? {}).some((y) => y.toLowerCase() === x.toLowerCase())) ?? null;
           addAll(p.reviewersRequested, e.reviewersRequested);
           addAll(p.pipelineCommits, e.commits);
+          p.expertReview = { recommended: e.expertReview.recommended, why: e.expertReview.why.trim(), at };
+          const asked = (st.reviewRequests ?? []).map((r) => r.login ?? r.team ?? r).filter((r) => !p.reviewersRequested.map(String).includes(String(r)));
+          if (asked.length) warnings.push(`${p.repo}#${p.number} has review requests (${asked.join(', ')}): every PR opens with no reviewer, and the expert is called by a person's move`);
         }
         // The places' comments are posted before this record, so a place from the code with no reference at a commit is
         // not refused (a retry would post them again): the record stands, the session is told, and `status` reports it.
@@ -284,9 +298,10 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
           if (noRef) warnings.push(`place ${place.id ?? '?'} is from the code and has no reference with repo, path, lines and commit`);
           l.places.push({ state: 'open', at, ...place, pr: Number(place.pr), ...(noRef ? { noRef: true } : {}) });
         }
+        // Every PR to the owner's queue, whatever its review kind: the owner reads first and calls the expert if needed.
         for (const e of entries) {
           const p = l.prs.find((x) => x.branch === e.branch && (!e.repo || x.repo === e.repo));
-          p.stage = p.review === 'sme' ? 'smeReview' : 'finalReview';
+          p.stage = 'finalReview';
         }
         return;
       }
@@ -325,6 +340,8 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
           if (p.number && followsMove(p.stage, from, to)) {
             // The only UA approve: a person's move to `translation`. A later word change in UA is reported.
             if (to === 'translation') p.approval = { head: (await clients.forge.prState({ repo: p.repo, number: p.number })).headCommit, at, from: p.stage, by: 'person' };
+            // Who a move into or out of the review took along: a pending request then moves no card back (row 9).
+            if (to === 'smeReview' || p.stage === 'smeReview') addAll(p.reviewersRequested, ((await clients.forge.prState({ repo: p.repo, number: p.number })).reviewRequests ?? []).map((r) => r.login ?? r.team ?? r));
             p.stage = PR_STAGE_OF_STATUS[to];
             const label = targetOf(p)?.labels?.[LABEL_OF[p.stage]];
             if (label) p.label = label;

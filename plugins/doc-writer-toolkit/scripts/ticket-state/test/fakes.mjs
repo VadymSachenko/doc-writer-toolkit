@@ -206,7 +206,11 @@ export function forgeAdapter({ prs = [], activity = {}, changed = {}, events = {
     },
     updatePr: async (a) => void log.push(['updatePr', a]),
     addAssignees: async (a) => void log.push(['addAssignees', a]),
-    requestReviewers: async (a) => void log.push(['requestReviewers', a]),
+    requestReviewers: async (a) => {
+      log.push(['requestReviewers', a]);
+      const p = get(a);
+      p.reviewRequests = [...p.reviewRequests, ...a.logins.map((login) => ({ login }))];
+    },
     createReview: async () => {
       throw new Error('not in these tests');
     },

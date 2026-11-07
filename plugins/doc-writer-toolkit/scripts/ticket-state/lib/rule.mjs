@@ -84,7 +84,7 @@ const GATES = {
   planGate: { who: 'owner', why: 'the section plan: moving the card back approves it' },
   reworkWait: { who: 'owner', why: 'a person moved the card back to In progress' },
   smeReview: { who: 'reviewer', why: 'the review, then a person moves the card' },
-  finalReview: { who: 'owner', why: "the owner's read of the UA: comments first, then the card to In translation, or a reviewer requested" },
+  finalReview: { who: 'owner', why: "the owner's read of the UA: comments first, then the card to In translation, or to the review status to call the expert" },
   readyForMerge: { who: 'owner', why: 'the final edit and the merge' },
   ownerBlock: { who: 'owner', why: "the owner's own block" },
   paused: { who: 'owner', why: 'a person moved the card back to the ready status' },
@@ -242,7 +242,7 @@ function derive(l, w) {
     const merged = Boolean(pr.merged) || world?.state === 'merged';
     return { pr, world, merged, closed: world?.state === 'closed', stage: merged ? 'merged' : pr.stage };
   });
-  out.prs = prs.map((p) => ({ id: prId(p.pr), repo: p.pr.repo, number: p.pr.number, url: p.pr.url ?? p.world?.url ?? null, review: p.pr.review, stage: p.stage, state: p.merged ? 'merged' : p.world?.state ?? null, labels: p.world?.labels ?? null, head: p.world?.headCommit ?? null, next: null }));
+  out.prs = prs.map((p) => ({ id: prId(p.pr), repo: p.pr.repo, number: p.pr.number, url: p.pr.url ?? p.world?.url ?? null, review: p.pr.review, stage: p.stage, state: p.merged ? 'merged' : p.world?.state ?? null, labels: p.world?.labels ?? null, head: p.world?.headCommit ?? null, expertReview: p.pr.expertReview ?? null, next: null }));
   const view = (p) => out.prs.find((x) => x.id === prId(p.pr));
 
   if (l.stages?.close?.status === 'done') {
@@ -446,9 +446,10 @@ function prStep(l, p, w, out, prs) {
       out.mismatch.push(`${id}: ${changed.length} UA page(s) changed after the approval at ${String(pr.approval.head).slice(0, 7)}: the review saw another text`);
     } else if (changed) v.approvalStale = 0;
   }
-  // Row 9: a person asked a reviewer on a `places` PR in the owner's queue. A request the move already took along (a
-  // reviewer who hasn't answered when a person moved the card back) doesn't move it again.
-  if (p.stage === 'finalReview' && pr.review === 'places' && newReviewRequests(pr, world).length) return step('move', { pr: id, to: 'smeReview' });
+  // Row 9: a person asked a reviewer on a PR in the owner's queue, of either review kind: the card goes to the review,
+  // and the target's card members onto it (lib/experts.mjs). A request a move already took along (a reviewer who hasn't
+  // answered when a person moved the card back) doesn't move it again.
+  if (p.stage === 'finalReview' && newReviewRequests(pr, world).length) return step('move', { pr: id, to: 'smeReview' });
   // Row 11.
   if (world.newComments?.length) {
     const owner = world.newComments.filter((c) => c.by === 'owner').length;
