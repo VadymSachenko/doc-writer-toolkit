@@ -8,7 +8,7 @@ import { ledger, read, world } from './helpers.mjs';
 import { runDaily } from '../lib/runner.mjs';
 import { runRecord } from '../lib/record.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
-import { codeTreePath, ensureCodeTree, ensureWorktree, listWorktrees, canon, prsForStep, worktreePath } from '../lib/worktree.mjs';
+import { codeTreePath, codeTreesRoot, ensureCodeTree, ensureWorktree, listWorktrees, canon, prsForStep, worktreePath } from '../lib/worktree.mjs';
 import { commandFor } from '../lib/runner.mjs';
 import { spentOf } from '../lib/limits.mjs';
 import { writeLedger } from '../lib/ledger.mjs';
@@ -668,21 +668,25 @@ function codeRepo(w) {
   return { clone, h1, advance, app: { repo: 'code-repo', path: 'repos/code-repo', base: 'main', url: 'https://code.example/org/code-repo' } };
 }
 
-test('a code repo is read at the commit fetched now: the checkout follows origin, the old clone stays as it was', async () => {
+test('a code repo is read at the commit fetched now, one checkout per commit: the old clone and an earlier session\'s checkout stay as they were', async () => {
   const w = world();
   const code = codeRepo(w);
   const h2 = code.advance('const attempts = 4\n');
   const a = ensureCodeTree(w.settings, code.app);
   assert.equal(a.error, undefined);
   assert.equal(a.commit, h2);
-  assert.equal(a.path, codeTreePath(w.settings, code.app));
+  assert.equal(a.path, codeTreePath(w.settings, code.app, h2));
+  assert.ok(a.path.startsWith(codeTreesRoot(w.settings, code.app)));
   assert.equal(fs.readFileSync(path.join(a.path, 'services/queue.go'), 'utf8'), 'const attempts = 4\n');
   assert.equal(fs.readFileSync(path.join(code.clone.dir, 'services/queue.go'), 'utf8'), 'const attempts = 10\n', 'the clone keeps its own files');
   assert.equal(code.clone.g('rev-parse', 'HEAD'), code.h1);
   const h3 = code.advance('const attempts = 3\n');
   const b = ensureCodeTree(w.settings, code.app);
   assert.equal(b.commit, h3);
+  assert.notEqual(b.path, a.path);
   assert.equal(fs.readFileSync(path.join(b.path, 'services/queue.go'), 'utf8'), 'const attempts = 3\n');
+  assert.equal(fs.readFileSync(path.join(a.path, 'services/queue.go'), 'utf8'), 'const attempts = 4\n', 'a session still reading the first one is not moved under');
+  assert.equal(ensureCodeTree(w.settings, code.app).path, b.path, 'the same commit: the same checkout');
 });
 
 test('a code repo that can\'t be fetched or isn\'t there is said, and stops nothing', async () => {
@@ -700,7 +704,7 @@ test('a writer\'s session gets the checkout and the commit; every role is denied
   const w = world();
   w.settings.appRepos = [{ repo: 'code-repo', path: 'repos/code-repo', base: 'main', url: 'https://code.example/org/code-repo' }];
   const clone = path.join(w.settings.root, 'repos/code-repo');
-  const tree = codeTreePath(w.settings, w.settings.appRepos[0]);
+  const tree = codeTreePath(w.settings, w.settings.appRepos[0], 'c0ffee1');
   const step = { stage: 'plan', role: 'writer', keys: ['1'], group: '1', codeTrees: [{ repo: 'code-repo', path: tree, commit: 'c0ffee1', url: 'https://code.example/org/code-repo', notes: [] }] };
   const cmd = commandFor(step, w.settings, { model: 'm', agentsPath: '/a.json', roots: [] });
   const brief = briefOf(cmd);
@@ -709,7 +713,7 @@ test('a writer\'s session gets the checkout and the commit; every role is denied
   const after = (flag) => cmd.args.slice(cmd.args.indexOf(flag) + 1);
   assert.ok(cmd.args.includes(tree), 'the checkout is an added folder');
   assert.ok(after('--disallowedTools').includes(`Read(//${clone.replace(/^\/+/, '')}/**)`), 'the clone is denied');
-  assert.ok(after('--disallowedTools').includes(`Edit(//${tree.replace(/^\/+/, '')}/**)`), 'the checkout is read only');
+  assert.ok(after('--disallowedTools').includes(`Edit(//${codeTreesRoot(w.settings, w.settings.appRepos[0]).replace(/^\/+/, '')}/**)`), 'the checkouts are read only');
   assert.ok(after('--allowedTools').includes(`Bash(git -C ${tree} show:*)`));
   const translator = commandFor({ stage: 'build', role: 'translator', keys: ['1'], group: '1', pr: 'x#1', worktrees: [] }, w.settings, { model: 'm', agentsPath: '/a.json', roots: [] });
   assert.ok(!translator.args.includes(tree));

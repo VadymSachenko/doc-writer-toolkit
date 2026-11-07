@@ -16,7 +16,7 @@ import { ROLES } from './settings.mjs';
 import { cleanupTicket } from './cleanup.mjs';
 import { removeClosedMarkdown } from './import.mjs';
 import { DOWNLOAD_DIRS_VARIABLE, ROLE_SESSION_VARIABLE, childEnv, sessionChildEnv } from './env.mjs';
-import { clonePath, codeTreePath, ensureCodeTree, ensureWorktree, prsForStep, worktreePath } from './worktree.mjs';
+import { clonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureWorktree, prsForStep, worktreePath } from './worktree.mjs';
 import { BUSY_NAME, LOCK_NAME, busyEnded, freeBrowserLock } from './browser-lock.mjs';
 import { HOOK_VARIABLE, commandsOfRules, hookSettings } from './role-hook.mjs';
 import { parseClaudeConfig } from '../../ui-labels/lib/config.mjs';
@@ -385,7 +385,7 @@ function worktreeLines(trees) {
 // What the brief says about the code the session may read: the checkout at the commit the runner just fetched.
 function codeLines(trees) {
   return [
-    'Code repos, each a read-only checkout at the commit the runner fetched for this session. Read code only here, with Read and Grep: the clones themselves are denied, since a clone\'s files may be old. A fact from the code carries its reference when you read it: repo, path, lines and the commit below.',
+    'Code repos, each a read-only checkout at the commit the runner fetched for this session. Read code only here, with Read and Grep, never in a clone, whose files may be weeks old (Read and Grep are denied there). A fact from the code carries its reference when you read it: repo, path, lines and the commit below.',
     ...trees.map((t) => (t.error ? `- ${t.repo}: not available (${t.error}). A fact only this code could answer stays a marker.` : `- ${t.repo}: ${t.path}, commit ${t.commit}${t.url ? `; a link to lines: ${t.url}/blob/${t.commit}/<path>#L<from>-L<to>` : ''}.${t.notes?.length ? ` Note: ${t.notes.join('; ')}.` : ''}`)),
   ].join('\n');
 }
@@ -393,7 +393,7 @@ function codeLines(trees) {
 // The roles that read code as evidence.
 const CODE_ROLES = new Set(['writer', 'reviewer']);
 // Every role is denied the clones' own files, and writing in the checkouts: a clone's working tree may be weeks old.
-const codeDenied = (settings) => (settings.appRepos ?? []).flatMap((a) => [`Read(${abs(path.resolve(settings.root, a.path))}/**)`, `Edit(${abs(path.resolve(settings.root, a.path))}/**)`, `Edit(${abs(codeTreePath(settings, a))}/**)`]);
+const codeDenied = (settings) => [...new Set((settings.appRepos ?? []).flatMap((a) => [`Read(${abs(path.resolve(settings.root, a.path))}/**)`, `Edit(${abs(path.resolve(settings.root, a.path))}/**)`, `Edit(${abs(codeTreesRoot(settings, a))}/**)`]))];
 
 export function commandFor(step, settings, { model, agentsPath, claude = 'claude', roleDir = ROLE_DIR, roots = scriptRoots(settings) }) {
   const role = settings.roles[step.role];
@@ -779,7 +779,7 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
     }
     // The worktrees a live run would make or bring up to date: named, nothing made.
     const trees = prsForStep(step, step.keys.map((k) => readLedger(settings.state, k))).map((p) => ({ repo: p.repo, branch: p.branch, path: worktreePath(settings, p), push: `git -C ${worktreePath(settings, p)} push origin HEAD:refs/heads/${p.branch}` }));
-    const codeTrees = CODE_ROLES.has(step.role) ? (settings.appRepos ?? []).map((a) => ({ repo: a.repo, path: codeTreePath(settings, a), commit: '<fetched at the run>', url: a.url })) : [];
+    const codeTrees = CODE_ROLES.has(step.role) ? (settings.appRepos ?? []).map((a) => ({ repo: a.repo, path: codeTreePath(settings, a, '<commit>'), commit: '<fetched at the run>', url: a.url })) : [];
     const cmd = commandFor({ ...step, worktrees: trees, codeTrees }, settings, { model: settings.roles[step.role].model, agentsPath: path.join(settings.state, 'roles', 'agents.json'), claude });
     const held = guardReason();
     return { ...pick(step), runs: `claude -p as ${agentName(step.role)}`, model: cmd.model, effort: cmd.effort, ...(trees.length ? { worktrees: trees.map((t) => t.path) } : {}), ...(held ? { guard: `a live run would not start it: ${held}` } : {}), command: [cmd.bin, ...cmd.args] };

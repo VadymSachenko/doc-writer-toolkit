@@ -179,30 +179,35 @@ export function ensureWorktree(settings, pr) {
   return { repo: pr.repo, branch: pr.branch, base, path: wt, clone, head: tryRun(wt, ['rev-parse', 'HEAD']), push: `git -C ${wt} push origin HEAD:refs/heads/${pr.branch}`, linked, missing, notes, stuck };
 }
 
-// A code repo a session reads as evidence (`appRepos`): a read-only checkout, detached at the base as fetched just now,
-// beside the docs worktrees, so a read can't come from an old clone (the runner denies the clone's own files, the brief
-// names the commit). The clone gets only a fetch and a worktree registration. Returns { repo, path, commit, url, notes };
-// a clone that isn't here, or a checkout that can't be made, comes back with `error`, and the session still runs.
-export const codeTreePath = (settings, app) => path.join(path.dirname(path.resolve(settings.root, app.path)), '.worktrees', app.repo, '_code');
+// A code repo a session reads as evidence (`appRepos`): a read-only checkout at the base as fetched just now, one per
+// commit and never moved, so two sessions that started at different commits each read their own (the runner denies the
+// clone's own files to Read and Grep; the brief names the commit). The clone gets only a fetch and a worktree
+// registration; the checkouts stay, one per commit a session read. Returns { repo, path, commit, url, notes }; a clone
+// that isn't here, or a checkout that can't be made, comes back with `error`, and the session still runs.
+export const codeTreesRoot = (settings, app) => path.join(path.dirname(path.resolve(settings.root, app.path)), '.worktrees', '_code');
+export const codeTreePath = (settings, app, commit) => path.join(codeTreesRoot(settings, app), app.repo, String(commit).slice(0, 12));
 export function ensureCodeTree(settings, app) {
   const clone = path.resolve(settings.root, app.path);
-  const wt = codeTreePath(settings, app);
-  const out = { repo: app.repo, base: app.base, clone, path: wt, url: app.url, commit: null, notes: [] };
+  const out = { repo: app.repo, base: app.base, clone, path: null, url: app.url, commit: null, notes: [] };
   if (!fs.existsSync(clone)) return { ...out, error: `the clone ${clone} is not on this machine` };
   if (tryRun(clone, ['fetch', '-q', 'origin', `+refs/heads/${app.base}:refs/remotes/origin/${app.base}`]) === null) out.notes.push(`could not fetch ${app.base} from origin: this commit may be old, so say so next to each fact read from it`);
   const commit = tryRun(clone, ['rev-parse', '--verify', '-q', `refs/remotes/origin/${app.base}^{commit}`]);
   if (!commit) return { ...out, error: `no origin/${app.base} in ${clone}` };
+  const wt = codeTreePath(settings, app, commit);
   try {
     const registered = listWorktrees(clone).find((x) => canon(x.path) === canon(wt));
-    if (!registered || registered.prunable || !fs.existsSync(wt)) {
+    if (!registered || registered.prunable || !fs.existsSync(wt) || tryRun(wt, ['rev-parse', 'HEAD']) !== commit) {
+      if (fs.existsSync(wt) && fs.readdirSync(wt).length && !registered) return { ...out, path: wt, error: `${wt} exists and is not a checkout of ${app.repo}` };
       tryRun(clone, ['worktree', 'prune']);
-      fs.mkdirSync(path.dirname(wt), { recursive: true });
-      run(clone, ['worktree', 'add', '-q', '--detach', wt, commit]);
-    } else if (tryRun(wt, ['rev-parse', 'HEAD']) !== commit) run(wt, ['checkout', '-q', '--force', '--detach', commit]);
+      if (!registered || registered.prunable || !fs.existsSync(wt)) {
+        fs.mkdirSync(path.dirname(wt), { recursive: true });
+        run(clone, ['worktree', 'add', '-q', '--detach', wt, commit]);
+      } else return { ...out, path: wt, error: `${wt} is not at ${commit.slice(0, 12)}` };
+    }
   } catch (e) {
-    return { ...out, error: `the checkout at ${wt}: ${gitError(e)}` };
+    return { ...out, path: wt, error: `the checkout at ${wt}: ${gitError(e)}` };
   }
-  return { ...out, commit };
+  return { ...out, path: wt, commit };
 }
 
 // What a write left on one PR branch, checked in its worktree: commits beyond the base, and the branch on origin at the
