@@ -11,6 +11,7 @@ import { rearmJob } from './rearm.mjs';
 import { ALERT_MS, HOLD_MS, WINDOW_MS, advance, pauseMs, readFeed, readSource, sourcesOf, ticketsOf, watchDir, writeFeed } from './feed.mjs';
 import { jobCommand, jobDue, jobEnv, listChanges, listMatcher, spawnJob, updateWatchState, writeJobLog } from './jobs.mjs';
 import { notificationsOf, notify } from './notify.mjs';
+import { progressAfterCheck } from './progress.mjs';
 
 // One check of the watcher (design §5, D-048), started by launchd every few minutes. No model call of its own:
 //   1. read every source since its cursor; a check that finds nothing ends here, with no status, no runner, no claude;
@@ -323,6 +324,7 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
       next.checkedAt = iso(clock());
       writeFeed(settings.state, next);
       appendRunLog(settings.state, today, log);
+      progressAfterCheck({ settings, now: clock(), notify: io.notify });
     }
     out.log = log;
     out.quiet = !fresh.length && !wanted.length && !out.morning && !out.errors.length && !out.jobs.some((j) => j.due !== false) && out.sources.every((s) => s.outcome !== 'failed' && s.outcome !== 'gap');

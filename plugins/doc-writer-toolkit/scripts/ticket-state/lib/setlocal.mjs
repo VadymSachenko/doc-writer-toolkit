@@ -10,7 +10,7 @@ import { checkKey, readLedger } from './ledger.mjs';
 // limits, the schedule, the roles, the video gate, the cleanup. The shared file is never touched. The merged result is
 // checked as every script checks it before the file is written (temp file, then rename); a bad value writes nothing.
 
-const SETTABLE = /^(mode|modelLadder|limits\.[A-Za-z]+(\.[A-Za-z]+)?|schedule\.[A-Za-z]+|roles\.(triage|writer|reviewer|translator)\.[A-Za-z]+|video\.[A-Za-z]+|cleanup\.[A-Za-z]+)$/;
+const SETTABLE = /^(mode|modelLadder|limits\.[A-Za-z]+(\.[A-Za-z]+)?|schedule\.[A-Za-z]+|roles\.(triage|writer|reviewer|translator)\.[A-Za-z]+|video\.[A-Za-z]+|cleanup\.[A-Za-z]+|progress\.[A-Za-z]+)$/;
 
 const getPath = (obj, key) => key.split('.').reduce((o, k) => (o && typeof o === 'object' ? o[k] : undefined), obj);
 function setPath(obj, key, value) {
@@ -70,7 +70,7 @@ export function setLocal({ settings, key, value, name, unset = false, now = Date
     if (unset) throw new CliError('set retry takes no --unset', { code: 2 });
     return rearm({ settings, which: value, name, now });
   }
-  if (!SETTABLE.test(String(key ?? ''))) throw new CliError(`'${key}' is not a key of the local settings file: mode, limits.*, schedule.*, roles.<role>.*, modelLadder, video.*, cleanup.*`, { code: 2 });
+  if (!SETTABLE.test(String(key ?? ''))) throw new CliError(`'${key}' is not a key of the local settings file: mode, limits.*, schedule.*, roles.<role>.*, modelLadder, video.*, cleanup.*, progress.*`, { code: 2 });
   if (/^roles\.[a-z]+\.(allowedTools|disallowedTools)$/.test(key)) throw new CliError(`'${key}' is read only from the tracked settings file, at HEAD: change it there and commit`, { code: 2 });
   if (unset === (value !== undefined)) throw new CliError('set needs a value, or --unset to drop the key and take the default', { code: 2 });
   const localFile = localSettingsPath(settings.file);

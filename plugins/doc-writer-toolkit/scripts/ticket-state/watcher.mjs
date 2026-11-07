@@ -7,6 +7,7 @@ import { loadSettings } from './lib/settings.mjs';
 import { makeClients } from './lib/world.mjs';
 import { prepareEnv } from './lib/env.mjs';
 import { runCheck } from './lib/watch.mjs';
+import { notify } from './lib/notify.mjs';
 
 const USAGE = `watcher [options]
 
@@ -69,7 +70,7 @@ export async function main(argv, io = {}) {
   const { notes, claudeEnv } = prepareEnv(settings, env);
   const dryRun = Boolean(values['dry-run']);
   const clients = makeClients({ settings, env, dryRun, io: { ...io, ...(values.origin ? { trackerOrigin: values.origin } : {}) } });
-  const out = await runCheck({ settings, clients, io: { ...io, claudeEnv }, options: { dryRun, claude: values.claude ?? 'claude', notes } });
+  const out = await runCheck({ settings, clients, io: { notify, ...io, claudeEnv }, options: { dryRun, claude: values.claude ?? 'claude', notes } });
   if (values.quiet) {
     if (!out.quiet) stdout.write(oneLine(out) + '\n');
   } else stdout.write(JSON.stringify({ ok: true, command: 'watch', ...out, requests: clients.requests(), caught: clients.caught() }, null, 2) + '\n');
