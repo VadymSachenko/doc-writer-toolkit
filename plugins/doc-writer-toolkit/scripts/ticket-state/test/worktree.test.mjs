@@ -463,14 +463,16 @@ async function afterReady(files) {
   const h2 = t.handEdit(files);
   t.forgePr.headCommit = h2;
   const stages = [];
+  const briefs = {};
   const spawnClaude = async (cmd) => {
     const stage = stageOf(cmd);
     stages.push(stage);
+    briefs[stage] = briefOf(cmd);
     await runRecord({ settings: t.w.settings, clients: t.w.clients(), key: '1501', stage, pr: 'guide-docs#71', status: 'done', head: h2, result: {}, now: NOW });
     return { code: 0, stdout: RESULT, stderr: '' };
   };
   const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1501'] } });
-  return { t, h2, out, stages, l: read(t.w, '1501') };
+  return { t, h2, out, stages, briefs, l: read(t.w, '1501') };
 }
 
 test('AC-4: a hand commit that changes an image after ready for merge: the re-sync, the visual pack, then ready again', async () => {
@@ -485,8 +487,9 @@ test('AC-4: a hand commit that changes an image after ready for merge: the re-sy
 });
 
 test('AC-4: a hand commit that changes only text after ready for merge: the re-sync, then ready again, with no pack', async () => {
-  const { h2, out, l } = await afterReady({ 'docs/x/index.md': '# Сторінка\n\nВиправлений абзац.\n' });
+  const { t, h2, out, l, briefs } = await afterReady({ 'docs/x/index.md': '# Сторінка\n\nВиправлений абзац.\n' });
   assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['resync', 'done'], ['readyForMerge', 'done']]);
+  assert.ok(briefs.resync.includes(`UA changed since ready for merge at ${t.h1}: re-sync the blocks changed in ${t.h1}..${h2}.`), "the session's brief names the range");
   assert.notEqual(l.prs[0].chain.visualPack.head, h2);
   assert.equal(l.prs[0].readyForMerge.at(-1).head, h2);
 });

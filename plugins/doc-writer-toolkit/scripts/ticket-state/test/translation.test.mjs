@@ -191,6 +191,20 @@ test('half an approve can\'t happen: a move to In translation from Blocked takes
   assert.deepEqual(steps(t), ['translate guide-docs#60', 'translate api-docs#61']);
 });
 
+test('a PR with no number yet isn\'t taken by the move to In translation, and the card goes back to it', async () => {
+  const c = card({ number: 531, status: 'inProgress' });
+  const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 63, head: 'a', headCommit: HEAD })] });
+  ledger(w, c, { stages: BASE, prs: [
+    { repo: 'guide-docs', number: 63, branch: 'a', targets: ['guide'], review: 'sme', stage: 'smeReview' },
+    { repo: 'api-docs', branch: 'd', targets: ['api'], review: 'places', stage: 'writing' },
+  ] });
+  moved(c, 'translation');
+  await runRecord({ settings: w.settings, clients: w.clients(), key: '531', stage: 'follow', status: 'done', to: 'translation', now: NOW });
+  const l = read(w, '531');
+  assert.deepEqual(l.prs.map((p) => [p.stage, p.approval?.by ?? null]), [['translation', 'person'], ['writing', null]]);
+  assert.ok(steps(await w.one('531')).includes('move -> inProgress'), 'the half not written yet holds the card');
+});
+
 test('a ledger at finalReview from before the change waits for a person\'s move, a half-run chain and a stage left running too', async () => {
   const c = { half: card({ number: 509, status: 'finalReview' }), running: card({ number: 510, status: 'finalReview' }) };
   const w = world({ cards: Object.values(c), prs: [pr({ repo: 'guide-docs', number: 32, headCommit: HEAD }), pr({ repo: 'guide-docs', number: 33, headCommit: HEAD })] });
