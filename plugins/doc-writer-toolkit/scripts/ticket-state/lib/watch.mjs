@@ -3,14 +3,15 @@ import path from 'node:path';
 import { computeStatus } from './status.mjs';
 import { makeGit } from './world.mjs';
 import { readLedgersApart } from './ledger.mjs';
-import { runDaily, readUsageFromClaude, parseResult } from './runner.mjs';
+import { runDaily, readUsageFromClaude, parseResult, readyGroupsOf } from './runner.mjs';
+import { parseStartHours } from './settings.mjs';
 import { allowanceOf } from './allowance.mjs';
 import { appendRunLog, localDate } from './report.mjs';
 import { latestRearm, readRearm } from './setlocal.mjs';
 import { rearmJob } from './rearm.mjs';
 import { ALERT_MS, HOLD_MS, WINDOW_MS, advance, pauseMs, readFeed, readSource, sourcesOf, ticketsOf, watchDir, writeFeed } from './feed.mjs';
 import { jobCommand, jobDue, jobEnv, listChanges, listMatcher, spawnJob, updateWatchState, writeJobLog } from './jobs.mjs';
-import { notificationsOf, notify } from './notify.mjs';
+import { notificationsOf, notify, startedOf } from './notify.mjs';
 
 // One check of the watcher (design §5, D-048), started by launchd every few minutes. No model call of its own:
 //   1. read every source since its cursor; a check that finds nothing ends here, with no status, no runner, no claude;
@@ -18,7 +19,10 @@ import { notificationsOf, notify } from './notify.mjs';
 //   2. map the new events to the host jobs' watched lists, and 3. to tickets through the ledgers;
 //   4. once a day after `schedule.morning`, the morning run (triage, finishing, starts) instead of step 5;
 //   5. `ticket-state status` for the tickets that changed; the runner finishes those that have a next step, each once;
-//   then the cursors, written after the hand-off; 6. the host jobs that are due; 7. the notifications.
+//   then the cursors, written after the hand-off;
+//   5b. inside `limits.startHours`, a start pass (triage, then starts, as a scheduled run) once per change of what a
+//   start depends on: a slot freed, a new ready group or intake card due, a new day (see startPassOf);
+//   6. the host jobs that are due; 7. the notifications.
 // An error in one part is caught there, reported and notified, and the rest of the check goes on.
 // One check at a time: a lock in `<state>/watch/active/`, freed when its process is gone.
 
@@ -76,6 +80,75 @@ export function nextMorning(ms, hhmm) {
   if (d.getTime() <= ms) d.setDate(d.getDate() + 1);
   return d.getTime();
 }
+
+// ------------------------------------------------------------------ the start pass
+
+// Whether a time is inside `limits.startHours`, local time: only then does the watcher triage and start between
+// morning runs. Following open tickets goes on at any hour.
+export function inStartHours(ms, spec) {
+  const h = parseStartHours(spec) ?? parseStartHours('10-22');
+  const m = localMinutes(ms);
+  return m >= h.from && m < h.to;
+}
+
+// When the start hours that hold `ms` end (ms), local time.
+export function startHoursEnd(ms, spec) {
+  const h = parseStartHours(spec) ?? parseStartHours('10-22');
+  const d = new Date(ms);
+  d.setHours(0, h.to, 0, 0);
+  return d.getTime();
+}
+
+// What a start depends on, as one look at the flow saw it: the date, the open tickets, the ready groups (a group whose
+// start failed waits apart, lib/limits.mjs) and the intake cards due for triage. The allowance is not in it: a pass
+// stopped by the day's allowance runs again only after one of these changes, or on the next day.
+export function startPrint({ date, openKeys = [], ready = [], intakeDue = [] }) {
+  const sorted = (xs) => [...(xs ?? [])].map(String).sort();
+  return { date, open: sorted(openKeys), ready: sorted(ready), intakeDue: sorted(intakeDue) };
+}
+const printOfStatus = (st, date) => startPrint({ date, openKeys: st.wip?.openKeys, ready: readyGroupsOf(st), intakeDue: (st.intake?.due ?? []).map((c) => c.key) });
+const printOfSummary = (s, date) => (s?.wip ? startPrint({ date, openKeys: s.wip.openKeys, ready: s.ready, intakeDue: s.intakeDue }) : null);
+
+const gone = (a = [], b = []) => a.filter((x) => !b.includes(x));
+
+// The intake cards due now that weren't at the last look: the only ones a watcher pass triages. A card whose triage
+// failed stays due, so it waits for the next morning run, or for a person (a comment puts it back in its quiet hours,
+// and it is new once due again).
+export function newlyDue(last, now) {
+  return last ? gone(now.intakeDue, last.intakeDue) : [...now.intakeDue];
+}
+
+// Why a start pass is due, from the print the last look left and the one seen now; null when nothing changed that
+// could let a start or a triage happen. Only these count: a ticket no longer open, a group newly ready, an intake card
+// newly due, a new date. The open tickets growing, a ready group gone, a card back in its quiet hours: none.
+export function changeOf(last, now) {
+  if (!last) return 'no start pass yet';
+  if (last.date !== now.date) return 'a new day';
+  const why = [];
+  const left = gone(last.open, now.open);
+  if (left.length) why.push(`a slot freed: ${left.join(', ')} no longer open`);
+  const ready = gone(now.ready, last.ready);
+  if (ready.length) why.push(`newly ready: ${ready.join(', ')}`);
+  const due = newlyDue(last, now);
+  if (due.length) why.push(`due for triage: ${due.join(', ')}`);
+  return why.length ? why.join('; ') : null;
+}
+
+// Why no group can start now, whatever the allowance, from the counts alone (each one a condition `startable` holds
+// to as well), or null.
+export function noRoomOf(wip) {
+  const l = wip?.limits ?? {};
+  if (l.open !== null && l.open !== undefined && wip.open >= l.open) return `${wip.open} open (${(wip.openKeys ?? []).join(', ')}) of ${l.open}`;
+  if (typeof l.inProgress === 'number' && wip.inProgress >= l.inProgress) return `${wip.inProgress} in progress of ${l.inProgress}`;
+  if (typeof l.waiting === 'number' && wip.waiting >= l.waiting) return `${wip.waiting} waiting of ${l.waiting}`;
+  return null;
+}
+
+// A start pass that failed before its first step is tried again after this long, not at every check.
+export const RETRY_MS = 30 * 60 * 1000;
+
+// A card that came into, or changed in, the ready or the intake list of the flow's board.
+const START_STATUSES = new Set(['ready', 'intake']);
 
 const errorText = (e) => String(e?.message ?? e).split('\n')[0].slice(0, 300);
 const HOUR = 3600 * 1000;
@@ -191,6 +264,7 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
     // 3. Tickets. A ledger file that doesn't read is reported, and its ticket kept in `pending` (its events can't be
     // mapped without it); the others map as usual.
     let keys = new Map();
+    let unmapped = [];
     const wanted = [...(feed.pending ?? [])];
     const want = (k) => !wanted.includes(k) && wanted.push(k);
     try {
@@ -201,6 +275,7 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
       }
       const mapped = ticketsOf(fresh, ledgers);
       keys = mapped.keys;
+      unmapped = mapped.unmapped;
       out.unmapped = mapped.unmapped.length;
       for (const k of keys.keys()) want(k);
       // A `set retry` since the last check: the tickets whose last session failed, or that hit the cap, are looked at.
@@ -220,6 +295,8 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
     const board = out.sources.find((x) => x.name === `board:${settings.tracker.board}`);
     const offline = board && (board.outcome === 'failed' || board.outcome === 'gap');
     const morningDue = next.morning?.lastDate !== today && afterMorning;
+    // The status this check read for the tickets that changed (every ticket's counts are in it), for the start pass.
+    let seen = null;
     if (morningDue && offline) out.notes.push(`the morning run waits: the board can't be read in this check (${board.error})`);
     next.pending = [];
     if (morningDue && !offline) {
@@ -236,6 +313,8 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
         begun = Boolean(progress.begun);
       }
       if (begun) next.morning = { lastDate: today, at: iso(clock()), ...(out.errors.some((x) => x.part === 'the morning run') ? { error: out.errors.at(-1).error } : {}) };
+      // The morning run is the day's first start pass: what it left is what the watcher's next pass compares with.
+      if (begun) next.starts = { date: today, at: iso(clock()), by: 'morning', print: printOfSummary(out.morning?.after, today), nextDueAt: out.morning?.after?.intakeQuietAt ?? null, deferred: null, outcome: out.morning ? 'the morning run' : 'the morning run failed part way' };
     } else if (wanted.length) {
       let st = null;
       try {
@@ -245,6 +324,7 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
         next.pending = wanted;
       }
       if (st) {
+        seen = st;
         out.tickets = st.tickets.map((t) => ({ key: t.key, state: t.state, next: t.next ? t.next.stage : null, locked: Boolean(t.locked), hand: Boolean(t.hand), events: (keys.get(t.key) ?? []).length, ...(t.next?.waits ? { waits: t.next.waits } : {}), ...(t.held ? { held: t.gate.why } : {}) }));
         out.capped = st.tickets.filter((t) => t.capped).map((t) => ({ key: t.key, ...t.capped, why: t.gate.why }));
         // A failed step that waits for a person is not handed on: the runner would read /usage for nothing. A start is
@@ -268,6 +348,18 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
 
     // The cursors move: every event was handed on, or its ticket is in `pending`.
     if (!dryRun) writeFeed(settings.state, next);
+
+    // 5b. The start pass: only once today's morning run has run, and not in the check that ran it. Today is the date
+    // the check began on, so a check that began before `schedule.morning` and ran past it leaves the day's first
+    // starts to the morning run, and so do start hours that begin before it.
+    if (!morningDue && next.morning?.lastDate === today) {
+      try {
+        out.startPass = await startPassOf();
+      } catch (e) {
+        failed('the start pass', e);
+      }
+      if (!out.startPass) delete out.startPass;
+    }
 
     // 6. Host jobs. A watch job whose board wasn't read in this check neither runs nor changes: it hasn't seen the list.
     // A disarmed job re-arms when the reads that failed with it read again, or by `set retry job <name>`; an alert held
@@ -311,7 +403,7 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
     // 7. Notifications, once a day per reason; a caught error goes to the run log once a day too.
     if (!dryRun) {
       for (const k of Object.keys(next.notified ?? {})) if (!k.includes(today)) delete next.notified[k];
-      for (const n of notificationsOf({ morning: out.morning, run: out.run, jobs: [...out.jobs, ...heldAlerts], errors: out.errors, capped: out.capped ?? [], today })) {
+      for (const n of notificationsOf({ morning: out.morning, run: out.run, startPass: out.startPass, jobs: [...out.jobs, ...heldAlerts], errors: out.errors, capped: out.capped ?? [], today })) {
         if (next.notified?.[n.key]) continue;
         const r = (io.notify ?? notify)(n, io.notifyIo ?? {});
         (next.notified ??= {})[n.key] = iso(clock());
@@ -325,8 +417,81 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
       appendRunLog(settings.state, today, log);
     }
     out.log = log;
-    out.quiet = !fresh.length && !wanted.length && !out.morning && !out.errors.length && !out.jobs.some((j) => j.due !== false) && out.sources.every((s) => s.outcome !== 'failed' && s.outcome !== 'gap');
+    out.quiet = !fresh.length && !wanted.length && !out.morning && !out.startPass && !out.errors.length && !out.jobs.some((j) => j.due !== false) && out.sources.every((s) => s.outcome !== 'failed' && s.outcome !== 'gap');
     return out;
+
+    // The start pass between morning runs: the runner's triage and starts, as a scheduled run makes them (the same
+    // limits, allowance and start order), once per change of what a start depends on (`startPrint`). The memory is
+    // `starts` in the feed: the print the last pass (the morning run's or this one's) left, a change seen when no pass
+    // could run (`deferred`), and when the next intake card is due (`nextDueAt`). A check reads the status for it only
+    // when this check read one anyway (tickets changed), or something may have changed: a card in the ready or intake
+    // list, a new day, an intake card due, a change deferred. Inside `limits.startHours` only; outside them a change is
+    // kept for the first check inside them (the morning run takes it over).
+    async function startPassOf() {
+      const last = feed.starts ?? null;
+      const cardMoved = unmapped.some((e) => e.board === settings.tracker.board && START_STATUSES.has(e.statusAfter ?? e.status));
+      const dueAgain = Boolean(last?.nextDueAt) && checkStart >= Date.parse(last.nextDueAt);
+      // The hours at this moment, not at the check's start: the watcher's own run may have taken past their end.
+      if (!inStartHours(clock(), settings.limits.startHours) || offline) {
+        // A new date alone is no change to keep: the first check inside the hours looks at a new day anyway.
+        const why = cardMoved ? 'a card changed in the ready or intake list' : seen && last?.print ? changeOf({ ...last.print, date: today }, printOfStatus(seen, today)) : null;
+        if (why && !last?.deferred) next.starts = { ...(last ?? {}), deferred: why };
+        return null;
+      }
+      // A pass that failed before its first step (or its status read) is tried again after RETRY_MS, not at every check.
+      if (last?.retryAt && clock() < Date.parse(last.retryAt)) return null;
+      const retryLater = (why) => ({ ...(last ?? {}), deferred: last?.deferred ?? why, retryAt: iso(clock() + RETRY_MS) });
+      if (!seen && !last?.deferred && last?.date === today && !dueAgain && !cardMoved) return null;
+      let view = seen;
+      if (!view) {
+        try {
+          view = await computeStatus({ settings, clients, now: checkStart, only: [], git: io.git ?? makeGit(settings) });
+        } catch (e) {
+          next.starts = retryLater('the status could not be read');
+          throw e;
+        }
+      }
+      const print = printOfStatus(view, today);
+      const nextDueAt = view.intake?.waiting?.[0]?.quietAt ?? null;
+      // A morning run that failed part way left no print: what this check sees is the day's from now on.
+      if (last && !last.print && last.date === today) {
+        next.starts = { ...last, print, nextDueAt, deferred: null };
+        return null;
+      }
+      const why = changeOf(last?.print ?? null, print);
+      if (!why) {
+        // Nothing that could let a start happen; what was seen is the view the next change is measured from.
+        if (last) next.starts = { ...last, print, nextDueAt, deferred: null, retryAt: null };
+        return null;
+      }
+      const base = { date: today, at: iso(checkStart), by: 'watcher', print, nextDueAt, deferred: null, retryAt: null };
+      // Only the intake cards newly due are triaged here; nothing to triage, and nothing that could start whatever the
+      // allowance: no runner, no /usage.
+      const triageKeys = newlyDue(last?.print ?? null, print);
+      const noRoom = triageKeys.length ? null : !print.ready.length ? 'no ready ticket' : noRoomOf(view.wip);
+      if (noRoom) {
+        next.starts = { ...base, outcome: `not run: ${noRoom}` };
+        return { why, ran: false, skipped: noRoom };
+      }
+      if (!dryRun) {
+        next.starts = { ...base, outcome: 'running' };
+        writeFeed(settings.state, next);
+      }
+      say({ kind: 'watch', what: 'the start pass', outcome: 'handed', note: why });
+      const progress = {};
+      try {
+        // No triage and no further start once the hours end while the pass runs; a started group's chain goes on.
+        const startUntil = startHoursEnd(clock(), settings.limits.startHours);
+        const r = await run({ settings, clients, io: runnerIo, options: { dryRun, trigger: 'schedule', startPass: true, startUntil, triageKeys, claude, progress } });
+        const started = startedOf(r);
+        next.starts = { ...base, at: iso(clock()), print: printOfSummary(r.after, today) ?? print, nextDueAt: r.after?.intakeQuietAt ?? nextDueAt, outcome: started.length ? `started ${started.map((s) => s.keys.join(', ')).join('; ')}` : 'started nothing' };
+        return { why, ran: true, run: r };
+      } catch (e) {
+        // One that failed before its first step is tried again after RETRY_MS; one that failed part way counts.
+        next.starts = progress.begun ? { ...base, outcome: `failed: ${errorText(e)}` } : { ...retryLater(why), deferred: why };
+        throw e;
+      }
+    }
 
     // A due host job: run in mode on only; a skill job is a model call, so the guard holds it like a scheduled step.
     async function runJob(job, state) {

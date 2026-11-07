@@ -22,7 +22,8 @@ import { BUSY_NAME, LOCK_NAME, busyEnded, freeBrowserLock } from './browser-lock
 import { HOOK_VARIABLE, commandsOfRules, hookSettings } from './role-hook.mjs';
 import { parseClaudeConfig } from '../../ui-labels/lib/config.mjs';
 
-// The daily run (design §7): finish first, then triage the quiet intake cards (mornings), then start ready groups while
+// The daily run (design §7): finish first, then triage the quiet intake cards (mornings, and the watcher's start pass
+// when a slot frees), then start ready groups while
 // the limits and the day's allowance allow. A script decides; each step that needs a model is one `claude -p` session
 // in one role, with that role's model and effort from the settings. A dry run prints the plan and the command lines
 // and changes nothing.
@@ -727,15 +728,26 @@ export function proposeRoles(ledgers, settings, now = Date.now()) {
 export async function runDaily({ settings, clients, io = {}, options = {} }) {
   // `progress.begun` turns true once the run starts its first step: a caller can tell a run that failed before doing
   // anything (safe to start again) from one that failed part way.
+  // `startPass`: the watcher's start pass when a slot frees between morning runs (lib/watch.mjs): a scheduled run with
+  // no finishing (the watcher's own run finishes the tickets that changed), the triage of the due intake cards, then
+  // the starts, within the same limits and order as any scheduled run. A waiting failed start stays waiting.
   const { dryRun = false, morning = false, trigger = 'schedule', named = [], claude = 'claude', progress = {} } = options;
+  const startPass = Boolean(options.startPass) && trigger === 'schedule' && !morning;
   const clock = io.now ?? Date.now;
+  // `startUntil` (ms): the end of the watcher's start hours. A start pass triages nothing and starts no further group
+  // from then on; a group it started goes on with its next steps, as after any scheduled start.
+  const startUntil = startPass && Number.isFinite(options.startUntil) ? options.startUntil : null;
+  // `triageKeys`: the intake cards a start pass may triage (those newly due since the watcher's last look). An intake
+  // card has no ledger, so a failed triage holds nothing: without this a pass would try it again at every change.
+  const triageKeys = startPass && Array.isArray(options.triageKeys) ? options.triageKeys.map(String) : null;
+  const hoursOver = () => startUntil !== null && clock() >= startUntil;
   const manual = trigger === 'manual';
   // A failed step that waits for a person runs again once at the next morning run, or when the owner runs it by hand.
   const retryWaiting = manual || morning;
   const observe = settings.mode === 'observe' && !dryRun;
   const planOnly = dryRun || observe;
   const date = localDate(clock());
-  const out = { mode: settings.mode, dryRun, observe, trigger, morning, named, planned: [], ran: [], triage: null, starts: [], guard: [], notes: [...(settings.settingsNotes ?? [])] };
+  const out = { mode: settings.mode, dryRun, observe, trigger, morning, ...(startPass ? { startPass } : {}), named, planned: [], ran: [], triage: null, starts: [], guard: [], notes: [...(settings.settingsNotes ?? [])] };
   const log = [];
   const say = (e) => log.push({ at: new Date(clock()).toISOString(), ...e });
   if (settings.mode === 'off') {
@@ -799,17 +811,17 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
     return { ...pick(step), runs: `claude -p as ${agentName(step.role)}`, model: cmd.model, effort: cmd.effort, ...(trees.length ? { worktrees: trees.map((t) => t.path) } : {}), ...(held ? { guard: `a live run would not start it: ${held}` } : {}), command: [cmd.bin, ...cmd.args] };
   };
 
-  const finishing = collectSteps(st, { named, includeStart: manual && named.length > 0, retryWaiting });
+  const finishing = startPass ? [] : collectSteps(st, { named, includeStart: manual && named.length > 0, retryWaiting });
   if (planOnly) {
     out.planned.push(...finishing.map(describe));
   } else {
     await pool(finishing, sessionNear() ? 1 : settings.limits.parallel, (step) => advance(step));
   }
 
-  // Mornings: triage every intake card quiet for its hours, high priority first, in one session. A manual run that
-  // names tickets triages only those.
-  if (morning) {
-    const due = st.intake.due.filter((c) => !manual || !named.length || named.includes(c.key)).slice(0, settings.limits.triageBatch);
+  // Mornings and the watcher's start pass: triage every intake card quiet for its hours, high priority first, in one
+  // session. A manual run that names tickets triages only those.
+  if (morning || (startPass && !hoursOver())) {
+    const due = st.intake.due.filter((c) => (!manual || !named.length || named.includes(c.key)) && (!triageKeys || triageKeys.includes(String(c.key)))).slice(0, settings.limits.triageBatch);
     if (due.length) {
       const step = { stage: 'triage', role: 'triage', keys: due.map((c) => c.key), group: null, cards: due.map((c) => ({ key: c.key, url: c.card.url, shortLink: c.card.shortLink, priority: c.priority })) };
       if (planOnly) out.triage = describe(step);
@@ -825,12 +837,18 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
   // failed carries its failed sessions so far (`prior`): a second failure holds it for the owner.
   const cardsOf = (keys) => keys.map((k) => st.tickets.find((t) => t.key === k)).filter(Boolean).map((t) => ({ key: t.key, url: t.card?.url, shortLink: t.card?.shortLink, priority: t.priority }));
   const startOf = (g, startedBy) => ({ stage: 'start', role: 'writer', group: g.group, keys: g.keys, priority: g.priority, startedBy, cards: cardsOf(g.keys), ...(g.prior ? { prior: g.prior } : {}) });
-  // The watcher's run finishes the tickets it names; it starts no ready group (the morning run does).
+  // The watcher's run finishes the tickets it names; it starts no ready group (the morning run does, and so does the
+  // watcher's start pass, a scheduled run).
   if (trigger === 'schedule') {
     if (planOnly) {
       out.starts = st.startable.map((g) => describe(startOf(g, 'schedule')));
     } else {
-      while (st.startable.length && guard('start')) {
+      while (st.startable.length) {
+        if (hoursOver()) {
+          out.notes.push(`the start hours ended at ${new Date(startUntil).toISOString()}: no further start in this pass`);
+          break;
+        }
+        if (!guard('start')) break;
         const g = st.startable.find((x) => !x.keys.some((k) => tried.has(k)));
         if (!g) break;
         for (const k of g.keys) tried.add(k);
@@ -1140,7 +1158,13 @@ function weeklyProposal(settings, ledgers, now, write) {
 const pick = (s) => ({ stage: s.stage, role: s.role ?? null, group: s.group ?? null, keys: s.keys, ...(s.pr ? { pr: s.pr } : {}), ...(s.to ? { to: s.to } : {}), priority: s.priority ?? null });
 
 function summary(st) {
-  return { wip: st.wip, allowance: st.allowance, tickets: st.tickets.length, startable: st.startable.map((g) => g.group), intakeDue: st.intake.due.map((c) => c.key) };
+  // `ready`: the ready groups a scheduled run could start but for the limits (a group whose start failed waits apart);
+  // `intakeQuietAt`: when the next intake card still inside its quiet hours becomes due. The watcher's start pass reads both.
+  return { wip: st.wip, allowance: st.allowance, tickets: st.tickets.length, startable: st.startable.map((g) => g.group), ready: readyGroupsOf(st), intakeDue: st.intake.due.map((c) => c.key), intakeQuietAt: st.intake.waiting?.[0]?.quietAt ?? null };
+}
+
+export function readyGroupsOf(st) {
+  return (st.groups ?? []).filter((g) => !g.failedStart).map((g) => g.group).sort();
 }
 
 async function pool(items, size, fn) {
