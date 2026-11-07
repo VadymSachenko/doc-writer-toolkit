@@ -65,6 +65,7 @@ Role defaults: triage `claude-sonnet-5-5` medium, writer `claude-opus-5-5` high,
 | `config` | The merged settings as the skills read them; credentials by variable name only. |
 | `intake` | The intake cards: `due` (quiet for `quietHours`, highest priority first, then the oldest) and `waiting` (with `quietAt`). |
 | `report` | Writes the report `<state>/reports/<date>.md` (`--print`: to stdout instead). |
+| `trace <key>` | What the sessions of one ticket did, stage by stage, as plain text for a person reviewing a PR (see "`trace`"). Reads the ledger and the transcripts; writes nothing and sends nothing, no tracker and no forge. Refused in a role session. |
 | `import` | Brings in a host's Markdown ledgers from before the JSON ones (`<from>/<key>.md`, one `name: value` line per fact, default `--from` the state folder): each becomes `<state>/tickets/<key>.json` holding every line (see "The import"). A file with no card URL or no stage line is not a ledger: listed, left as it is. Closed tickets' Markdown is removed after the check; open ones stay. `--dry-run` lists it all and writes nothing. |
 | `set <key> <value>` | Sets one key of the owner's local file: `mode`, `limits.*`, `schedule.*`, `roles.<role>.*` (not `allowedTools` or `disallowedTools`, refused: they are read from the shared file at HEAD), `modelLadder`, `video.*`, `cleanup.*`. The value is read as JSON when it parses (`1`, `null`, `["a"]`), else as text (`on`, `06:30`). The merged settings are checked before the file is written (to a temp file, then renamed); a bad value or a key of the shared file writes nothing (exit 2). `--unset` drops the key, so the default applies. Prints `before`, `after` and `changed`. This is what a request in plain words ("one at a time", "pause the pipeline") turns into. No setting re-arms a held step. `set retry <key>` (or `set retry all`) does, and only that: it gives a held or waiting step of that ticket (or of every ticket) one more try, and lifts the day's session cap; its time goes to `<state>/rearmed.json`, the settings files stay as they are. A key with no ledger is refused (exit 2). `set retry job <name>` re-arms a host job the watcher disarmed: it runs at its next due check (a name that isn't in `hostJobs` is refused, exit 2). |
 
@@ -81,7 +82,8 @@ The runner takes no command.
 | `--ticket <key>` | `status`: only these tickets in `tickets` (repeatable); the counts still cover all. |
 | `--usage-file <file\|->` | `status`, `report`: the text of `claude -p /usage` (or its parsed JSON), for the day's allowance. |
 | `--read-usage` | `status`, `report`: run `claude -p /usage` for it. |
-| `--stage <s>`, `--status <s>` | `record`: the stage and its status. `lock`: the stage the lock is taken for. |
+| `--stage <s>`, `--status <s>` | `record`: the stage and its status. `lock`: the stage the lock is taken for. `trace`: only that stage's runs (an unknown stage name is exit 2). |
+| `--transcripts <dir>` | `trace`: the folder of `<session>.jsonl` files, in place of `<config dir>/projects/<slug>/` (tests). |
 | `--pr <repo>#<n>` | `record`: the PR of a PR stage (or `<repo>:<branch>` before it has a number). |
 | `--to <status\|stage>` | `record move` / `follow`: the status (the card) or, with `--pr`, the PR stage. `handover`: `pipeline` or `hand`. |
 | `--head <sha>` | `record`: the branch head a chain stage, `readyForMerge` or `resync` saw (after its own push). |
@@ -97,7 +99,7 @@ The runner takes no command.
 | `--size <word>=<size>` | `import`: what a size word of the Markdown ledgers means (`edit`, `newPage` or `newSection`); repeatable. A word with none is listed in `misses`. |
 | `--dry-run` | `import`: lists what it would import and remove; writes and moves nothing. |
 
-`--from`, `--size` and `--dry-run` are `import`'s only: any other command refuses them (exit 2), so `set mode off --dry-run` writes nothing.
+`--from`, `--size` and `--dry-run` are `import`'s only, `--transcripts` is `trace`'s only: any other command refuses them (exit 2), so `set mode off --dry-run` writes nothing.
 | `--origin <url>` | The tracker's API origin (tests). |
 
 `runner.mjs`:
@@ -355,13 +357,29 @@ The plist holds absolute paths (node, the watcher in the plugin's folder as inst
 - When a session ends, failed, timed out or done, the runner frees a lock one of the step's tickets still holds, and writes `browserLock` `freed` in the run log.
 - A session that ended with a busy note from its own time is waiting, not failed: the run is logged with `outcome` `busy`, the stage isn't recorded `failed`, no failure is counted, no bigger model is tried and the ticket isn't held; the step runs again at a later check. The roles proposal leaves such runs out. A session still counts toward `limits.sessionsPerStageDay`, so a lock held all day ends in the daily cap. A broken lock (not a folder) writes no note: that session fails as any other.
 
+## `trace`
+
+`trace <key> [--root <hub>] [--settings <file>] [--stage <name>]` answers one question a reviewer can't answer from a PR: did the unattended sessions of this ticket go to the app, or copy the ticket? It reads the ticket's ledger (`runs[]`, `plan`, `card`) and the transcript of each run, `<claude config dir>/projects/<slug>/<session>.jsonl` (the config dir is `CLAUDE_CONFIG_DIR`, else `~/.claude`; the slug is the host root with every `/` and `.` as `-`), and prints plain text, with no model and no JSON mode. It writes nothing and does not build the live world of `status`: no tracker, no forge.
+
+- **Header:** the ticket key, the card link, the number of sessions, their total time and cost (a shared session counts the ticket's `share`), the plan's pages and live-check decision, and, when the settings declare `workFolder`, the file names in the ticket's work folder.
+- **One section per run,** in `seq` order: stage, role, model, effort, trigger, start (local time), duration, turns, cost, outcome, then a count line (`read 12, searched 3, ran 20 (app 1), wrote 5, refused 0, failed 1`; `app` is counted inside `ran`; skills, agents and other tools are added when there are some) and one line per action, `HH:MM:SS <kind> <what>`. Kinds: `read`, `search` (Grep, Glob), `ran` (Bash, Monitor), `app` (a Bash command with `playwright` in it), `wrote` (Write, Edit, NotebookEdit: the path only), `skill`, `agent`, `other` (the tool's name). A line with no timestamp shows `--:--:--`.
+- **After an action whose result was an error:** `refused: <first line>` for a permission or hook refusal, `failed` and nothing else for any other error. Then the session's last text block, cut to 400 characters.
+- **Subagents:** a session's `<session>/subagents/*.jsonl` are printed under the run, each marked `subagent <id>`, and counted in the run's count line.
+- **A shared session** (triage handles several tickets; the run's `share` is below 1) prints all its actions, with a note of about how many tickets it handled. Lines are not attributed to a ticket.
+- **A run with no `session`, or whose transcript is gone** (the CLI removes old ones) prints its ledger facts and `transcript not found`; that is not an error. A transcript that exists but can't be read (a folder, no permission, too large for one string) prints `transcript unreadable`, with no detail, and the report goes on; a session id that is not a plain file name (it starts with a dot, say) is treated as no session. The transcript is read whole into memory; streaming is not done.
+- **`--stage <name>`** prints only that stage's runs. A name that is no stage is exit 2. No ledger for the key is exit 2.
+
+What it never prints: a tool's result (apart from the first line of a refusal), the content of a Write or an Edit. Paths are shortened (a ticket worktree as `<wt:repo>`, the toolkit's own install, the plugin folder this script sits in, as `<toolkit>`, each `targets[].path` as its folder's name, the host root as `.`), `--root` and `--settings` are dropped from commands, a command is cut at 200 characters, and control characters (C0 and C1, the escape sequences of a terminal) are removed from everything it prints, the ledger's fields included. Masking is best effort: it covers the forms it knows and promises no more. Those are the value of a flag, `NAME=value`, `NAME: value` (a header) or `"NAME": "value"` whose name has `token`, `key`, `secret`, `password`, `passwd` or `pwd` in it, an `Authorization` header (the scheme stays), a `Bearer` value, `-u user:password`, and the password of `scheme://user:password@host`; each is shown as `***`, and the cut comes after the masking. A secret in any other shape is printed as it is. A transcript holds the actions and the texts a session wrote, not the model's private reasoning, so the command shows those and nothing more.
+
+`trace` is for people. When `DOC_TOOLKIT_ROLE_SESSION` is set in the environment it refuses (exit 2): a role session has no reason to read other sessions' transcripts.
+
 ## `status` output
 
 `tickets[]`: `key`, `group`, `ledger` (`present` or `absent`), `priority`, `createdAt`, `mode`, `startedBy`, `stage` (the last recorded), `card`, `state`, `next` (the first of `steps`, or null; with `waits` and `prior` after a failed session), `steps`, `gate` (`who`, `why`), `mismatch`, `notes`, `prs` (each with `id`, `stage`, `state`, `labels`, `head`, `next`, and `approvalStale`, the UA pages changed after the approval), `counts` (`inProgress`, `waiting` or null), `counted`, `locked` (with `derivedState`), `hand`, and after a failed session `failed` (`stage`, `pr`, `at`, `sessions`, and `acted` or `held`) and `held` (a ready ticket's failed start too); at the daily session cap `capped` (`stage`, `pr`, `sessions`) and `held`. A start step in `next` names its origin (`startedBy`), with `byHand` for a card a person moved into work or `again` for a recorded start that goes on. Then `intake`, `groups` (with `failedStart` when a member's start failed: `held`, `waits`, `sessions`, `at`), `wip` (`inProgress`, `waiting`, `open`, `openKeys`, `limits`, `manual`), `allowance` (`day`, `cap`, `used`, `remaining`, `inWork`, `inWorkUnknown`), `estimates`, `startable` (with `prior`, the failed start sessions so far, when there are some; in `easiest` order with `sizeRank`, `repoCount` and `pageCount`), `notStarted` (with `reasons`), `notTickets`, `locks`, and `requests` (what was sent to the tracker and the forge, by method; `writes` is empty).
 
 ## Exit codes
 
-`0` ok · `1` a record or a lock refused (nothing written; `refused` in the JSON), or a call to the tracker or the forge failed · `2` bad usage or configuration (an unknown command too, as in the `tracker` and `forge` scripts). On `1` and `2` stdout holds `{"ok": false, "error": …}` and the message goes to stderr.
+`0` ok · `1` a record or a lock refused (nothing written; `refused` in the JSON), or a call to the tracker or the forge failed · `2` bad usage or configuration (an unknown command too, as in the `tracker` and `forge` scripts); for `trace` also an unknown stage, no ledger for the key and a role session. On `1` and `2` stdout holds `{"ok": false, "error": …}` and the message goes to stderr.
 
 ## Files
 
@@ -376,6 +394,7 @@ The plist holds absolute paths (node, the watcher in the plugin's folder as inst
 | `lib/ids.mjs`, `lib/cleanup.mjs` | The id-only predicate; the cleanup after the merge. |
 | `lib/worktree.mjs`, `lib/pairs.mjs` | The ticket worktrees (made, linked, removed); the UA → EN image check of `record align`. |
 | `lib/runner.mjs`, `lib/report.mjs`, `lib/locks.mjs` | The daily run, the report, the locks. |
+| `lib/trace.mjs` | `trace`: the transcripts' actions per run (read only). |
 | `lib/watch.mjs`, `lib/feed.mjs`, `lib/jobs.mjs`, `lib/rearm.mjs`, `lib/notify.mjs` | The watcher's check, its sources and cursor, the host jobs and their re-arm, the notifications. |
 | `lib/launchd.mjs`, `lib/env.mjs`, `lib/setlocal.mjs` | The LaunchAgent; the environment of every `claude` (no API key, the sign-in token); `set`. |
 | `lib/ledger.mjs`, `lib/stages.mjs`, `lib/settings.mjs`, `lib/errors.mjs` | The ledger file, the stage vocabulary, the settings, the errors. |

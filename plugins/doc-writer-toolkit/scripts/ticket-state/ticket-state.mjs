@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -15,6 +16,8 @@ import { localDate, readRunLog, renderReport, writeReport } from './lib/report.m
 import { readUsageFromClaude } from './lib/runner.mjs';
 import { setLocal } from './lib/setlocal.mjs';
 import { runImport } from './lib/import.mjs';
+import { renderTrace } from './lib/trace.mjs';
+import { ROLE_SESSION_VARIABLE } from './lib/env.mjs';
 
 const USAGE = `ticket-state <command> [<key>] [options]
 
@@ -38,6 +41,12 @@ Commands
                             modelLadder, video.*, cleanup.*), checked before it is written; --unset drops it.
                             'set retry <key|all>' gives a held or waiting step one more try (no setting does);
                             'set retry job <name>' re-arms a host job the watcher disarmed.
+  trace <key>               What the sessions of one ticket did, stage by stage, as plain text for a person: the ledger's runs
+                            and, for each, the actions in its transcript (read, searched, ran, app, wrote, skill, agent, other),
+                            with a refused or failed marker, the session's last text and its subagents' actions. Tool results and
+                            written content are never printed, secrets are masked. A transcript holds actions and written texts,
+                            not the model's private reasoning. For people only: refused when DOC_TOOLKIT_ROLE_SESSION is set.
+                            Reads the ledger and the transcripts; writes nothing, no tracker, no forge.
   import                    The Markdown ledgers from before the JSON ones (<from>/<key>.md, default the state
                             folder), each into a JSON ledger holding every line; closed tickets' Markdown removed
                             once checked (to the Trash, or deleted with cleanup.mode delete); open ones kept.
@@ -49,6 +58,9 @@ Options
   --ticket <key>            status: only these tickets in the output (repeatable); the counts still cover all
   --usage-file <file|->     status, report: the text of 'claude -p /usage', for the day's allowance
   --read-usage              status, report: run 'claude -p /usage' for it
+  --stage <s>               trace: only that stage's runs (an unknown stage name is refused, exit 2)
+  --transcripts <dir>       trace: the folder of <session>.jsonl files, instead of <claude config dir>/projects/<slug>/
+                            (the config dir is CLAUDE_CONFIG_DIR or ~/.claude; the slug is the host root with / and . as -)
   --stage <s>, --status <running|done|failed>, --pr <repo>#<n>, --to <status|stage>, --head <sha>,
   --result <json>, --result-file <file|->, --run <json>, --note <text>, --card <ref>,
   --started-by <schedule|manual>                              record
@@ -67,6 +79,7 @@ const OPTIONS = {
   'usage-file': { type: 'string' },
   'read-usage': { type: 'boolean' },
   stage: { type: 'string' },
+  transcripts: { type: 'string' },
   status: { type: 'string' },
   pr: { type: 'string' },
   to: { type: 'string' },
@@ -90,10 +103,10 @@ const OPTIONS = {
   help: { type: 'boolean', short: 'h' },
 };
 
-const COMMANDS = ['status', 'record', 'handover', 'lock', 'unlock', 'config', 'intake', 'report', 'set', 'import'];
-const TAKES_KEY = ['record', 'handover'];
+const COMMANDS = ['status', 'record', 'handover', 'lock', 'unlock', 'config', 'intake', 'report', 'set', 'import', 'trace'];
+const TAKES_KEY = ['record', 'handover', 'trace'];
 // Options of one command only: refused on any other (exit 2), so `set mode off --dry-run` writes nothing.
-const ONLY = { from: ['import'], size: ['import'], 'dry-run': ['import'] };
+const ONLY = { from: ['import'], size: ['import'], 'dry-run': ['import'], transcripts: ['trace'] };
 
 export function usageOf(values, io = {}) {
   if (values['usage-file'] !== undefined) {
@@ -137,6 +150,8 @@ export async function main(argv, io = {}) {
     return 0;
   }
   if (!COMMANDS.includes(command)) throw new CliError(`unknown command '${command}'.\n\n${USAGE}`, { code: 2 });
+  // A role session runs `record` here, so only `trace` refuses: it reads other sessions' transcripts, which a role has no reason to.
+  if (command === 'trace' && env[ROLE_SESSION_VARIABLE] !== undefined) throw new CliError(`trace is for people: it is refused in a role session (${ROLE_SESSION_VARIABLE} is set)`, { code: 2 });
   for (const [option, commands] of Object.entries(ONLY)) {
     if (values[option] !== undefined && !commands.includes(command)) throw new CliError(`--${option} is an option of ${commands.join(', ')} only, not of ${command}`, { code: 2 });
   }
@@ -156,6 +171,11 @@ export async function main(argv, io = {}) {
 
   const root = path.resolve(values.root ?? process.cwd());
   const settings = await loadSettings({ root, settings: values.settings });
+  // Plain text, and not the live world: no tracker, no forge, nothing written.
+  if (command === 'trace') {
+    stdout.write(renderTrace({ settings, key, stage: values.stage ?? null, transcripts: values.transcripts ?? null, env, home: io.home ?? os.homedir() }));
+    return 0;
+  }
   const now = io.now ? io.now() : Date.now();
   const clients = makeClients({ settings, env, io: { ...io, ...(values.origin ? { trackerOrigin: values.origin } : {}) } });
   let result;
