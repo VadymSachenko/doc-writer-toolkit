@@ -74,7 +74,7 @@ const GATE_WHY = {
   smeReview: 'the expert review, then a person moves the card',
   reworkWait: 'a person moved the card back to In progress',
   finalReview: 'comments first, then the card to In translation, or to the review status to call the expert',
-  readyForMerge: 'then the merge',
+  readyForMerge: 'the final edit and the merge',
 };
 const GATE_ACTION = {
   questions: 'answer the questions on the card',
@@ -142,6 +142,14 @@ const gateRow = (label, g) => `- ${g.who === 'owner' ? '👉' : '⏸'} ${label} 
 // shows as running, not as a wait.
 const busyAt = (flights, g) => flights.some((f) => f.keys?.includes(g.key) && (!g.pr || !f.pr || f.pr === g.pr));
 
+// Whether the expert was called for this PR: a review request the `pr` record did not bring. The writer's own
+// `reviewersRequested` is in that record's result; the ones a person's move to the review status added later (`follow`,
+// `move`, lib/record.mjs) are not. A target with no reviewers on the forge leaves no such trace: then nothing tells it.
+function calledOf(l, p) {
+  const own = new Set((l.stages?.pr?.result?.prs ?? []).filter((e) => e?.branch === p.branch).flatMap((e) => e.reviewersRequested ?? []).map(String));
+  return (p.reviewersRequested ?? []).some((r) => !own.has(String(r)));
+}
+
 function ticketBlock(l, { flights, stale, now }) {
   const gates = gatesOf(l).filter((g) => !busyAt(flights, g));
   const st = l.stages ?? {};
@@ -183,10 +191,11 @@ function ticketBlock(l, { flights, stale, now }) {
     // when a move took the PR there and back (a review request on the PR alone, from the `pr` record, is not that).
     const sme = gates.find((x) => x.kind === 'smeReview' && x.pr === id);
     const asked = (p.reviewersRequested ?? []).length > 0;
+    const called = calledOf(l, p);
     const recommended = p.expertReview?.recommended ? oneLine(p.expertReview.why, 140) : null;
     if (p.stage === 'smeReview') add({ text: sme ? gateRow('Expert review', sme) : '- ⏸ Expert review' });
-    else if (asked && (p.steps?.move || p.steps?.follow)) add({ text: '- ✅ Expert review', done: true });
-    else if (asked || recommended) add({ text: `- ⬜ Expert review — ${recommended ? `recommended: ${recommended}` : 'requested, not called'}${rank >= idx('translation') ? ' (not called)' : ''}` });
+    else if (called) add({ text: '- ✅ Expert review', done: true });
+    else if (asked || recommended) add({ text: `- ⬜ Expert review — ${recommended ? `recommended: ${recommended}${rank >= idx('translation') ? ' (not called)' : ''}` : 'requested, not called'}` });
     // The chain; a stage made stale by a change in UA, and every later one, goes back to not done.
     const overlay = stale.get(`${l.key}|${id}`);
     const from = overlay ? CHAIN.indexOf(overlay.stage) : -1;
@@ -216,7 +225,7 @@ const KIND = { morning: 'the morning run', startPass: 'a start pass', schedule: 
 
 // The last start pass of the watcher (`feed.starts`), when it didn't run or started nothing, or is waiting: the reason.
 function startLine(starts, startHours) {
-  if (!starts) return null;
+  if (!starts || starts.by === 'morning') return null;
   const at = starts.at ? ` (${hhmm(starts.at)})` : '';
   const outcome = String(starts.outcome ?? '');
   if (starts.retryAt && Date.parse(starts.retryAt) > Date.parse(starts.at ?? 0)) return `- ⏸ Start pass${at}: retry at ${hhmm(starts.retryAt)}${starts.deferred ? ` — ${oneLine(starts.deferred, 120)}` : ''}`;

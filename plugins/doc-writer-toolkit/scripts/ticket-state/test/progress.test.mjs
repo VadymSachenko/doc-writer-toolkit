@@ -388,15 +388,19 @@ const expertRow = (text) => text.split('\n').find((x) => x.includes('Expert revi
 test('the expert row follows the stage and the history, not the review kind', () => {
   // An sme PR at the owner's read, nobody asked: no expert row, and never a tick.
   assert.equal(expertRow(render([mk('901', { stages: READY, prs: [prAt('finalReview')] })])), null);
-  // A review request that came with the `pr` record alone is not a review: not done.
-  const requested = expertRow(render([mk('902', { stages: READY, prs: [prAt('finalReview', { reviewersRequested: ['expert-login'] })] })]));
+  // The shape the records leave: the `pr` record's result names the requests that came with it; a person's move to the
+  // review adds the expert's (lib/record.mjs). A request the `pr` record brought is not a review: not done.
+  const withResult = () => ({ ...READY, pr: rec(6, 'done', { result: { prs: [{ branch: 'e', number: 20, reviewersRequested: ['pr-record-login'] }] } }) });
+  const requested = expertRow(render([mk('902', { stages: withResult(), prs: [prAt('finalReview', { reviewersRequested: ['pr-record-login'] })] })]));
   assert.match(requested, /^- ⬜ Expert review — requested, not called$/);
+  const late = expertRow(render([mk('908', { stages: withResult(), prs: [prAt('translation', { reviewersRequested: ['pr-record-login'] })] })]));
+  assert.match(late, /^- ⬜ Expert review — requested, not called$/, 'no doubled wording');
   // A places PR the owner sent to the expert: the wait is the reviewer's.
-  const places = render([mk('903', { stages: READY, prs: [prAt('smeReview', { review: 'places', reviewersRequested: ['expert-login'] })] })]);
+  const places = render([mk('903', { stages: withResult(), prs: [prAt('smeReview', { review: 'places', reviewersRequested: ['pr-record-login', 'expert-login'] })] })]);
   assert.match(expertRow(places), /^- ⏸ Expert review — waits for the reviewer/);
   assert.ok(places.indexOf('Your read of the UA') < places.indexOf('Expert review'), "after the owner's read");
-  // A PR that went to the review and came back by a move: done.
-  const back = render([mk('904', { stages: READY, prs: [prAt('finalReview', { reviewersRequested: ['expert-login'], steps: { move: rec(9, 'done') } })] })]);
+  // A PR a person's move took to the review and back: the expert's request is in the PR, not in the `pr` record: done.
+  const back = render([mk('904', { stages: withResult(), prs: [prAt('finalReview', { reviewersRequested: ['pr-record-login', 'expert-login'] })] })]);
   assert.equal(expertRow(back), '- ✅ Expert review');
   // Only a recommendation: not done, with the reason; the owner's line names it too.
   const text = render([mk('905', { stages: READY, prs: [prAt('finalReview', { expertReview: { recommended: true, why: 'the role rights are not in the code' } })] })]);
@@ -426,6 +430,9 @@ test('the start pass: the reason a pass started nothing, from the feed, under th
   assert.match(text(), /- ❌ Start pass .*: failed: the status could not be read/);
   // A pass that started something, or is running, adds no line; a feed that does not read does not drop the file.
   put({ date: '2026-11-10', at: at(NOW), outcome: 'started 801' });
+  assert.doesNotMatch(text(), /Start pass/);
+  // The morning run's own record is the morning run, not a start pass.
+  put({ date: '2026-11-10', at: at(NOW), by: 'morning', outcome: 'started nothing' });
   assert.doesNotMatch(text(), /Start pass/);
   fs.writeFileSync(path.join(w.settings.state, 'watch', 'feed.json'), '{ not json');
   assert.match(text(), /^# Ticket flow progress/);
