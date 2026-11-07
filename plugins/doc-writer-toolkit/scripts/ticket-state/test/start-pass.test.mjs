@@ -70,7 +70,7 @@ const morningLeft = (date, open, ready, intakeDue = []) => ({ date, at: `${date}
 
 // A check with the real runner for the start pass (its start session a stand-in), and a recorded stand-in for the
 // watcher's own run and the morning run. No real notification: `notify` records.
-function checker(w, { cards = {}, week = 7 } = {}) {
+function checker(w, { cards = {}, week = 7, finishTakes = 0 } = {}) {
   const calls = { runs: [], sessions: [], notes: [], usage: 0 };
   let clock = NOW;
   const spawnClaude = async (cmd) => {
@@ -91,7 +91,10 @@ function checker(w, { cards = {}, week = 7 } = {}) {
         git: quietGit,
         runDaily: async (a) => {
           calls.runs.push(a.options);
-          if (!a.options.startPass) return { mode: w.settings.mode, named: a.options.named ?? [], ran: [], starts: [], guard: [] };
+          if (!a.options.startPass) {
+            if (!a.options.morning) clock += finishTakes; // the watcher's own run, as long as its sessions take
+            return { mode: w.settings.mode, named: a.options.named ?? [], ran: [], starts: [], guard: [] };
+          }
           return runDaily({ ...a, io: { ...a.io, now: () => clock, readUsage: () => (calls.usage++, usageAt(week)), spawnClaude, ensureWorktree: () => assert.fail('a start has no worktree') } });
         },
         readUsage: () => assert.fail('the watcher reads no /usage of its own'),
@@ -158,6 +161,43 @@ test('AC-1: the same merge at 23:00 starts nothing through the night; the change
   assert.equal(passes().length, 0, 'not a start pass as well');
   const memory = readFeed(w.settings.state).starts;
   assert.deepEqual([memory.by, memory.date, memory.deferred], ['morning', '2026-11-11', null]);
+});
+
+test("AC-1: a check that starts at 21:50 and whose own run ends at 22:10 starts nothing: the hours are read when the pass would run", async () => {
+  const { w, cards, merge } = flow();
+  seed(w, AT('21:40'), { starts: morningLeft('2026-11-10', ['801'], ['502']) });
+  const { check, calls, passes } = checker(w, { cards, finishTakes: 20 * MIN });
+  merge(AT('21:45'));
+  const out = await check(AT('21:50'));
+  assert.deepEqual(calls.runs.map((r) => r.named), [['801']], "the watcher's own run follows the merged ticket");
+  assert.deepEqual([out.startPass, passes().length, calls.sessions.length, calls.usage], [undefined, 0, 0, 0]);
+  assert.match(readFeed(w.settings.state).starts.deferred, /a slot freed: 801 no longer open/);
+});
+
+test('AC-1: a start pass stops starting when the start hours end during it; the group it started goes on', async () => {
+  const w = world({ extra: { limits: { estimates: { edit: 4 }, open: 2 } } });
+  const cards = {};
+  for (const n of [501, 502]) {
+    cards[n] = card({ number: n, status: 'ready' });
+    w.tracker.cards.push(cards[n]);
+    ledger(w, cards[n], { stages: { triage: 'done' }, triage: { verdict: 'docs-required', targets: ['guide'], size: 'edit' } });
+  }
+  let clock = AT('21:50');
+  const sessions = [];
+  const spawnClaude = async (cmd) => {
+    const [stage, key] = keyOfBrief(cmd);
+    sessions.push(`${stage} ${key}`);
+    clock += 10 * MIN;
+    if (stage !== 'start') return { code: 1, stdout: '', stderr: 'not this test' };
+    cards[key].placeId = LISTS.inProgress.id;
+    await runRecord({ settings: w.settings, clients: w.clients(), key, stage: 'start', status: 'done', card: cards[key].shortLink, startedBy: originOf(cmd), result: { group: key }, now: clock });
+    return { code: 0, stdout: RESULT };
+  };
+  const out = await runDaily({ settings: w.settings, clients: w.clients(), io: { now: () => clock, readUsage: () => usageAt(7), spawnClaude }, options: { trigger: 'schedule', startPass: true, startUntil: AT('22:00') } });
+  assert.deepEqual(sessions, ['start 501', 'plan 501'], 'one start, its chain goes on; no second start after 22:00');
+  assert.ok(out.notes.includes('the start hours ended at 2026-11-10T22:00:00.000Z: no further start in this pass'), out.notes.join('\n'));
+  // 502 could still start: only the end of the hours held it.
+  assert.deepEqual((await w.status({ usage: usageAt(7) })).startable.map((g) => g.group), ['502']);
 });
 
 test('AC-2: with no ready ticket, a freed slot looks once and runs no runner; later events on other tickets look no more', async () => {

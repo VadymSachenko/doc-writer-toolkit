@@ -91,6 +91,14 @@ export function inStartHours(ms, spec) {
   return m >= h.from && m < h.to;
 }
 
+// When the start hours that hold `ms` end (ms), local time.
+export function startHoursEnd(ms, spec) {
+  const h = parseStartHours(spec) ?? parseStartHours('10-22');
+  const d = new Date(ms);
+  d.setHours(0, h.to, 0, 0);
+  return d.getTime();
+}
+
 // What a start depends on, as one look at the flow saw it: the date, the open tickets, the ready groups (a group whose
 // start failed waits apart, lib/limits.mjs) and the intake cards due for triage. The allowance is not in it: a pass
 // stopped by the day's allowance runs again only after one of these changes, or on the next day.
@@ -409,8 +417,10 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
       const last = feed.starts ?? null;
       const cardMoved = unmapped.some((e) => e.board === settings.tracker.board && START_STATUSES.has(e.statusAfter ?? e.status));
       const dueAgain = Boolean(last?.nextDueAt) && checkStart >= Date.parse(last.nextDueAt);
-      if (!inStartHours(checkStart, settings.limits.startHours) || offline) {
-        const why = cardMoved ? 'a card changed in the ready or intake list' : seen && last?.print ? changeOf(last.print, printOfStatus(seen, today)) : null;
+      // The hours at this moment, not at the check's start: the watcher's own run may have taken past their end.
+      if (!inStartHours(clock(), settings.limits.startHours) || offline) {
+        // A new date alone is no change to keep: the first check inside the hours looks at a new day anyway.
+        const why = cardMoved ? 'a card changed in the ready or intake list' : seen && last?.print ? changeOf({ ...last.print, date: today }, printOfStatus(seen, today)) : null;
         if (why && !last?.deferred) next.starts = { ...(last ?? {}), deferred: why };
         return null;
       }
@@ -451,7 +461,9 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
       say({ kind: 'watch', what: 'the start pass', outcome: 'handed', note: why });
       const progress = {};
       try {
-        const r = await run({ settings, clients, io: runnerIo, options: { dryRun, trigger: 'schedule', startPass: true, claude, progress } });
+        // No triage and no further start once the hours end while the pass runs; a started group's chain goes on.
+        const startUntil = startHoursEnd(clock(), settings.limits.startHours);
+        const r = await run({ settings, clients, io: runnerIo, options: { dryRun, trigger: 'schedule', startPass: true, startUntil, claude, progress } });
         const started = startedOf(r);
         next.starts = { ...base, at: iso(clock()), print: printOfSummary(r.after, today) ?? print, nextDueAt: r.after?.intakeQuietAt ?? nextDueAt, outcome: started.length ? `started ${started.map((s) => s.keys.join(', ')).join('; ')}` : 'started nothing' };
         return { why, ran: true, run: r };

@@ -726,6 +726,10 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
   const { dryRun = false, morning = false, trigger = 'schedule', named = [], claude = 'claude', progress = {} } = options;
   const startPass = Boolean(options.startPass) && trigger === 'schedule' && !morning;
   const clock = io.now ?? Date.now;
+  // `startUntil` (ms): the end of the watcher's start hours. A start pass triages nothing and starts no further group
+  // from then on; a group it started goes on with its next steps, as after any scheduled start.
+  const startUntil = startPass && Number.isFinite(options.startUntil) ? options.startUntil : null;
+  const hoursOver = () => startUntil !== null && clock() >= startUntil;
   const manual = trigger === 'manual';
   // A failed step that waits for a person runs again once at the next morning run, or when the owner runs it by hand.
   const retryWaiting = manual || morning;
@@ -805,7 +809,7 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
 
   // Mornings and the watcher's start pass: triage every intake card quiet for its hours, high priority first, in one
   // session. A manual run that names tickets triages only those.
-  if (morning || startPass) {
+  if (morning || (startPass && !hoursOver())) {
     const due = st.intake.due.filter((c) => !manual || !named.length || named.includes(c.key)).slice(0, settings.limits.triageBatch);
     if (due.length) {
       const step = { stage: 'triage', role: 'triage', keys: due.map((c) => c.key), group: null, cards: due.map((c) => ({ key: c.key, url: c.card.url, shortLink: c.card.shortLink, priority: c.priority })) };
@@ -828,7 +832,12 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
     if (planOnly) {
       out.starts = st.startable.map((g) => describe(startOf(g, 'schedule')));
     } else {
-      while (st.startable.length && guard('start')) {
+      while (st.startable.length) {
+        if (hoursOver()) {
+          out.notes.push(`the start hours ended at ${new Date(startUntil).toISOString()}: no further start in this pass`);
+          break;
+        }
+        if (!guard('start')) break;
         const g = st.startable.find((x) => !x.keys.some((k) => tried.has(k)));
         if (!g) break;
         for (const k of g.keys) tried.add(k);
