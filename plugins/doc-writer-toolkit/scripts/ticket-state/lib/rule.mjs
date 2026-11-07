@@ -472,7 +472,7 @@ function handAfterReady(pr, p, w, target, head, commits, out) {
   const id = prId(pr);
   if (pr.readyForMerge.at(-1).head === head) return null;
   const synced = pr.steps?.resync?.status === 'done' && pr.steps.resync.head === head;
-  if (!synced) return step('resync', { pr: id, head, commits });
+  if (!synced) return step('resync', { pr: id, head, since: pr.readyForMerge.at(-1).head, commits });
   const pack = pr.chain?.visualPack;
   if (pack?.head && pack.head !== head) {
     const images = w.git?.imagesChanged?.(target, pack.head, head) ?? null;

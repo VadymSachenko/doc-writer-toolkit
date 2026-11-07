@@ -64,9 +64,10 @@ export const LABEL_OF = { writing: 'inProgress', reworkWait: 'inProgress', smeRe
 export const PR_STAGE_OF_STATUS = { inProgress: 'reworkWait', smeReview: 'smeReview', finalReview: 'finalReview', translation: 'translation' };
 
 // Whether a PR at this stage follows a person's move of the card. The PRs at the card's stage do. A move to `translation`
-// approves the whole ticket, so a PR already waiting at `finalReview` goes too, if the card came from a less advanced
-// status (one card can't approve half a ticket).
-export const followsMove = (stage, from, to) => Boolean(PR_STAGE_OF_STATUS[to]) && (CARD_STATUS_OF[stage] === from || (to === 'translation' && stage === 'finalReview'));
+// approves the whole ticket from wherever the card stood, so every PR below ready for merge goes (one card can't approve
+// half a ticket: a PR left behind would pull the card back while the other's chain runs); a ready or merged one stays.
+const below = (stage, of) => PR_ORDER.includes(stage) && PR_ORDER.indexOf(stage) < PR_ORDER.indexOf(of);
+export const followsMove = (stage, from, to) => Boolean(PR_STAGE_OF_STATUS[to]) && (to === 'translation' ? below(stage, 'readyForMerge') : CARD_STATUS_OF[stage] === from);
 
 // Ticket states and what they count as (design §1, §7).
 export const IN_PROGRESS = ['planning', 'writing'];

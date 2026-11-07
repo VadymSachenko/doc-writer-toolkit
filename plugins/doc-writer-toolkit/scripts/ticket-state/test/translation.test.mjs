@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { LISTS, NOW, ago, card, pr } from './fakes.mjs';
 import { ledger, read, world } from './helpers.mjs';
-import { runDaily } from '../lib/runner.mjs';
+import { briefFor, runDaily } from '../lib/runner.mjs';
 import { runRecord } from '../lib/record.mjs';
 import { runHandover } from '../lib/handover.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
@@ -153,6 +153,44 @@ test('a PR with two cards: moving either is the approve, and the other card come
   assert.deepEqual([read(w, '507').prs[0].stage, read(w, '508').prs[0].stage], ['finalReview', 'finalReview']);
 });
 
+test('a PR with two cards: a move to In translation from review, from rework and from Blocked takes the other card along', async () => {
+  for (const [status, stage, n] of [['smeReview', 'smeReview', 0], ['inProgress', 'reworkWait', 1], ['blocked', 'questions', 2]]) {
+    const a = card({ number: 520 + 2 * n, status });
+    const b = card({ number: 521 + 2 * n, status });
+    const w = world({ cards: [a, b], prs: [pr({ repo: 'guide-docs', number: 50 + n, headCommit: HEAD })] });
+    for (const c of [a, b]) ledger(w, c, { stages: BASE, group: `${a.number}-${b.number}`, prs: [{ repo: 'guide-docs', number: 50 + n, targets: ['guide'], review: 'sme', stage }] });
+    moved(a, 'translation');
+    let seen = null;
+    await run(w, async () => {
+      seen = [b.placeId, read(w, String(b.number)).prs[0].stage];
+      return { code: 1, stdout: '', stderr: 'stop here' };
+    }, { named: [String(a.number), String(b.number)] });
+    assert.deepEqual(seen, [LISTS.translation.id, 'translation'], `from ${status}`);
+    assert.equal(read(w, String(a.number)).prs[0].stage, 'translation', `from ${status}`);
+  }
+});
+
+test('half an approve can\'t happen: a move to In translation from Blocked takes every open PR below ready, and the card stays', async () => {
+  const c = card({ number: 530, status: 'blocked' });
+  const prs = [pr({ repo: 'guide-docs', number: 60, head: 'a', headCommit: HEAD }), pr({ repo: 'api-docs', number: 61, head: 'b', headCommit: HEAD }), pr({ repo: 'api-docs', number: 62, head: 'c', headCommit: HEAD })];
+  const w = world({ cards: [c], prs });
+  const ready = [{ head: HEAD, at: ago(5) }];
+  ledger(w, c, { stages: BASE, prs: [
+    { repo: 'guide-docs', number: 60, branch: 'a', targets: ['guide'], review: 'sme', stage: 'questions' },
+    { repo: 'api-docs', number: 61, branch: 'b', targets: ['api'], review: 'places', stage: 'smeReview' },
+    { repo: 'api-docs', number: 62, branch: 'c', targets: ['api'], review: 'places', stage: 'readyForMerge', chain: chainDone(), readyForMerge: ready },
+  ] });
+  moved(c, 'translation');
+  assert.deepEqual(steps(await w.one('530')), ['follow -> translation']);
+  await runRecord({ settings: w.settings, clients: w.clients(), key: '530', stage: 'follow', status: 'done', to: 'translation', now: NOW });
+  const l = read(w, '530');
+  assert.deepEqual(l.prs.map((p) => p.stage), ['translation', 'translation', 'readyForMerge'], 'a ready one stays');
+  assert.deepEqual(l.prs.map((p) => p.approval?.by ?? null), ['person', 'person', null]);
+  const t = await w.one('530');
+  assert.ok(!t.steps.some((s) => s.stage === 'move'), `the card isn't pulled back while the chain runs: ${steps(t)}`);
+  assert.deepEqual(steps(t), ['translate guide-docs#60', 'translate api-docs#61']);
+});
+
 test('a ledger at finalReview from before the change waits for a person\'s move, a half-run chain and a stage left running too', async () => {
   const c = { half: card({ number: 509, status: 'finalReview' }), running: card({ number: 510, status: 'finalReview' }) };
   const w = world({ cards: Object.values(c), prs: [pr({ repo: 'guide-docs', number: 32, headCommit: HEAD }), pr({ repo: 'guide-docs', number: 33, headCommit: HEAD })] });
@@ -229,6 +267,11 @@ test('a UA change after ready for merge re-syncs, whoever made it: an answer to 
   const st = await w.status();
   const by = Object.fromEntries(st.tickets.map((t) => [t.key, t]));
   assert.deepEqual(steps(by['515']), ['resync guide-docs#41'], 'the pipeline\'s own commit, UA changed: the chain\'s languages catch up');
+  const resync = by['515'].steps[0];
+  assert.equal(resync.since, old, 'the step names the ready head');
+  assert.equal(resync.head, HEAD);
+  assert.equal(resync.commits, 0, 'no hand commit: the pipeline made the change');
+  assert.match(briefFor({ ...resync, role: 'translator', keys: ['515'] }, w.settings), new RegExp(`UA changed since ready for merge at ${old}: re-sync the blocks changed in ${old}\\.\\.${HEAD}\\.`));
   assert.deepEqual(by['516'].steps, [], 'an id-only change keeps it ready');
   assert.deepEqual(by['517'].steps, [], 'UA untouched');
   assert.deepEqual(steps(by['518']), ['readyForMerge guide-docs#44'], 'synced: ready for the new head');

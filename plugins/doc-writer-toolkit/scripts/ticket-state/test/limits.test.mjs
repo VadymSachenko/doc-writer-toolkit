@@ -389,6 +389,9 @@ test('settings: bad values stop with the key named', () => {
   bad({ limits: { startOrder: 'random' } }, /limits.startOrder must be one of priority, easiest/);
   for (const workFolder of ['work/tickets', '/abs/<key>', '../out/<key>', 'work/../../<key>', 7]) bad({ workFolder }, /workFolder must be a path from the host root/);
   assert.equal(validateSettings(rawSettings({ workFolder: 'work/<key>' }), { root, stateRootDefault: '.x/' }).workFolder, 'work/<key>');
+  bad({ appRepos: [{ repo: 'code', path: '../code', base: 'main' }] }, /appRepos\[0\]\.url is required/);
+  bad({ appRepos: [{ repo: 'code', path: '', url: 'https://code.example/org/code' }] }, /appRepos\[0\]\.path must be the owner's clone/);
+  assert.deepEqual(validateSettings(rawSettings({ appRepos: [{ repo: 'code', url: 'https://code.example/org/code/' }] }), { root, stateRootDefault: '.x/' }).appRepos, [{ repo: 'code', path: null, base: 'main', url: 'https://code.example/org/code' }], 'no owner\'s clone: nothing to deny');
   const d = settingsFor(root);
   assert.equal(d.workFolder, null);
   assert.deepEqual([d.limits.open, d.limits.startOrder], [null, 'priority']);

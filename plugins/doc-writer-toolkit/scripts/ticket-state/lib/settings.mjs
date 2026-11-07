@@ -71,17 +71,18 @@ const num = (v, where, { min = 0 } = {}) => {
   return v;
 };
 
-// The code repos a session may read as evidence: { repo, path (the clone, from the host root), base, url }. The runner
-// fetches each before a writer's or a reviewer's session and gives it a read-only checkout at the fetched commit
-// (`ensureCodeTree`, lib/worktree.mjs).
+// The code repos a session may read as evidence: { repo, url (its https address), base, path (the owner's clone, from
+// the host root, optional: denied to every session) }. The runner clones each from `url` into the state folder once,
+// fetches it before a writer's or a reviewer's session, and gives the session a read-only checkout at the fetched commit
+// (`ensureCodeTree`, lib/worktree.mjs). The owner's clone is never touched.
 function validateAppRepos(raw) {
-  if (!Array.isArray(raw)) fail('appRepos must be a list of { repo, path, base, url }');
+  if (!Array.isArray(raw)) fail('appRepos must be a list of { repo, url, base, path }');
   return raw.map((r, i) => {
-    if (!isObject(r)) fail(`appRepos[${i}] must be { repo, path, base, url }`);
+    if (!isObject(r)) fail(`appRepos[${i}] must be { repo, url, base, path }`);
     if (typeof r.repo !== 'string' || !/^[^/\\\s]+$/.test(r.repo) || r.repo === '.' || r.repo === '..') fail(`appRepos[${i}].repo must be the repo's plain name`);
-    if (typeof r.path !== 'string' || !r.path.trim()) fail(`appRepos[${i}].path is required (the clone, from the host root)`);
-    if (r.url !== undefined && (typeof r.url !== 'string' || !/^https:\/\//.test(r.url))) fail(`appRepos[${i}].url must be the repo's https address`);
-    return { repo: r.repo, path: r.path, base: typeof r.base === 'string' && r.base.trim() ? r.base : 'main', url: r.url ? r.url.replace(/\/+$/, '') : null };
+    if (r.path !== undefined && (typeof r.path !== 'string' || !r.path.trim())) fail(`appRepos[${i}].path must be the owner's clone, from the host root`);
+    if (typeof r.url !== 'string' || !/^https:\/\//.test(r.url)) fail(`appRepos[${i}].url is required: the repo's https address, which the runner clones it from`);
+    return { repo: r.repo, path: r.path ?? null, base: typeof r.base === 'string' && r.base.trim() ? r.base : 'main', url: r.url.replace(/\/+$/, '') };
   });
 }
 

@@ -224,7 +224,7 @@ export function rawSettings(extra = {}) {
       neverRead: ['drafts'],
       transitions: [
         ['intake', 'ready'], ['intake', 'outOfScope'], ['intake', 'done'], ['ready', 'inProgress'], ['inProgress', 'blocked'], ['blocked', 'inProgress'],
-        ['inProgress', 'smeReview'], ['inProgress', 'finalReview'], ['smeReview', 'blocked'], ['smeReview', 'finalReview'], ['finalReview', 'smeReview'], ['finalReview', 'translation'], ['finalReview', 'done'], ['translation', 'finalReview'], ['translation', 'inProgress'], ['translation', 'smeReview'], ['translation', 'done'],
+        ['inProgress', 'smeReview'], ['inProgress', 'finalReview'], ['smeReview', 'blocked'], ['smeReview', 'finalReview'], ['finalReview', 'smeReview'], ['finalReview', 'translation'], ['finalReview', 'done'], ['translation', 'finalReview'], ['translation', 'inProgress'], ['translation', 'smeReview'], ['translation', 'done'], ['translation', 'outOfScope'], ['smeReview', 'translation'], ['inProgress', 'translation'], ['blocked', 'translation'],
       ],
       labels: { needsInfo: 'needs info' },
       docLabels: ['Guide', 'Api', 'Docs', 'Portal UI', 'Portal API'],

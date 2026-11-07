@@ -117,7 +117,8 @@ const shareRepo = (a, b, repos) => {
 };
 
 // A page as triage writes it (`<repo> <path> — <block>`) or as the older ledgers have it ({ repo, path }): its repo and
-// path, without the block. Null for a path with no repo, or a bare file name: nothing says that two of those are one page.
+// path, without the block. A key needs both: `guide-docs a.md` and { repo, path: 'a.md' } have one, while a path with
+// no repo (`docs/a.md`, `a.md`, { path }) gets none, since nothing says which repo it is in, so it matches no page.
 export function pageKey(p) {
   if (p && typeof p === 'object') return p.repo && p.path ? `${p.repo} ${p.path}` : null;
   const [head] = String(p ?? '').split(/\s+[—–-]\s+/);

@@ -8,7 +8,7 @@ import { ledger, read, world } from './helpers.mjs';
 import { runDaily } from '../lib/runner.mjs';
 import { runRecord } from '../lib/record.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
-import { codeTreePath, codeTreesRoot, ensureCodeTree, ensureWorktree, listWorktrees, canon, prsForStep, worktreePath } from '../lib/worktree.mjs';
+import { codeClonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureWorktree, listWorktrees, canon, prsForStep, worktreePath } from '../lib/worktree.mjs';
 import { commandFor } from '../lib/runner.mjs';
 import { spentOf } from '../lib/limits.mjs';
 import { writeLedger } from '../lib/ledger.mjs';
@@ -593,10 +593,10 @@ test('after the chain: the card goes back to the owner\'s queue with one comment
   assert.equal(l.posted.card.length, 1, "the comment is the pipeline's own");
   assert.deepEqual((await t.w.one('1501')).steps, []);
 
-  // A person moves the finished card on again: follow, ready again, the card back. No session.
+  // A person moves the finished card on again: follow (the ready PR stays ready), the card back. No session.
   t.c.placeId = LISTS.translation.id;
   out = await go();
-  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['follow', 'done'], ['readyForMerge', 'done'], ['move', 'done']]);
+  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['follow', 'done'], ['move', 'done']]);
   assert.equal(t.c.placeId, LISTS.finalReview.id);
   l = read(t.w, '1501');
   assert.equal(l.prs[0].stage, 'readyForMerge');
@@ -665,39 +665,56 @@ function codeRepo(w) {
     og('push', '-q', 'origin', 'main');
     return og('rev-parse', 'HEAD');
   };
-  return { clone, h1, advance, app: { repo: 'code-repo', path: 'repos/code-repo', base: 'main', url: 'https://code.example/org/code-repo' } };
+  return { bare, clone, h1, advance, app: { repo: 'code-repo', path: 'repos/code-repo', base: 'main', url: 'https://code.example/org/code-repo' } };
 }
 
-test('a code repo is read at the commit fetched now, one checkout per commit: the old clone and an earlier session\'s checkout stay as they were', async () => {
+test('a code repo is read at the commit fetched now, in the runner\'s own clone; one checkout per commit, the others removed only when no other session runs; the owner\'s clone is never touched', async () => {
   const w = world();
   const code = codeRepo(w);
+  const owner = () => [code.clone.g('rev-parse', 'HEAD'), code.clone.g('rev-parse', 'refs/remotes/origin/main'), listWorktrees(code.clone.dir).length];
+  const before = owner();
   const h2 = code.advance('const attempts = 4\n');
-  const a = ensureCodeTree(w.settings, code.app);
+  const a = ensureCodeTree(w.settings, code.app, { remote: code.bare });
   assert.equal(a.error, undefined);
   assert.equal(a.commit, h2);
   assert.equal(a.path, codeTreePath(w.settings, code.app, h2));
-  assert.ok(a.path.startsWith(codeTreesRoot(w.settings, code.app)));
+  assert.equal(a.clone, codeClonePath(w.settings, code.app));
+  assert.ok(a.path.startsWith(codeTreesRoot(w.settings)) && a.clone.startsWith(path.resolve(w.settings.state)), 'under the state folder');
+  assert.equal(execFileSync('git', ['-C', a.clone, 'rev-parse', '--is-bare-repository'], { encoding: 'utf8' }).trim(), 'true', 'no working tree to read stale files from');
   assert.equal(fs.readFileSync(path.join(a.path, 'services/queue.go'), 'utf8'), 'const attempts = 4\n');
-  assert.equal(fs.readFileSync(path.join(code.clone.dir, 'services/queue.go'), 'utf8'), 'const attempts = 10\n', 'the clone keeps its own files');
-  assert.equal(code.clone.g('rev-parse', 'HEAD'), code.h1);
+  assert.equal(fs.readFileSync(path.join(code.clone.dir, 'services/queue.go'), 'utf8'), 'const attempts = 10\n', 'the owner\'s clone keeps its own files');
+
+  // Another session runs: a new commit gets its own checkout, and the first one stays.
   const h3 = code.advance('const attempts = 3\n');
-  const b = ensureCodeTree(w.settings, code.app);
+  const b = ensureCodeTree(w.settings, code.app, { remote: code.bare, othersRunning: true });
   assert.equal(b.commit, h3);
   assert.notEqual(b.path, a.path);
   assert.equal(fs.readFileSync(path.join(b.path, 'services/queue.go'), 'utf8'), 'const attempts = 3\n');
   assert.equal(fs.readFileSync(path.join(a.path, 'services/queue.go'), 'utf8'), 'const attempts = 4\n', 'a session still reading the first one is not moved under');
-  assert.equal(ensureCodeTree(w.settings, code.app).path, b.path, 'the same commit: the same checkout');
+  assert.deepEqual(b.removed, []);
+
+  // No other session: only the checkout this one needs stays.
+  const c = ensureCodeTree(w.settings, code.app, { remote: code.bare });
+  assert.equal(c.path, b.path, 'the same commit: the same checkout');
+  assert.deepEqual(c.removed.map(canon), [canon(a.path)]);
+  assert.ok(!fs.existsSync(a.path));
+  assert.ok(fs.existsSync(path.join(b.path, 'services/queue.go')));
+  assert.deepEqual(owner(), before, 'no fetch, no worktree, no prune in the owner\'s clone');
 });
 
-test('a code repo that can\'t be fetched or isn\'t there is said, and stops nothing', async () => {
+test('a code repo that can\'t be fetched, cloned, or has no url is said, and stops nothing', async () => {
   const w = world();
   const code = codeRepo(w);
-  code.clone.g('remote', 'set-url', 'origin', '/nowhere/at/all.git');
-  const a = ensureCodeTree(w.settings, code.app);
-  assert.equal(a.commit, code.h1);
+  const first = ensureCodeTree(w.settings, code.app, { remote: code.bare });
+  execFileSync('git', ['-C', first.clone, 'remote', 'set-url', 'origin', '/nowhere/at/all.git']);
+  code.advance('const attempts = 2\n');
+  const a = ensureCodeTree(w.settings, code.app, { remote: code.bare });
+  assert.equal(a.commit, code.h1, 'the commit fetched last time');
   assert.match(a.notes.join(' '), /could not fetch main/);
-  const gone = ensureCodeTree(w.settings, { repo: 'other', path: 'repos/other', base: 'main', url: null });
-  assert.match(gone.error, /not on this machine/);
+  const none = ensureCodeTree(w.settings, { repo: 'other', path: null, base: 'main', url: null });
+  assert.match(none.error, /no url for other/);
+  const bad = ensureCodeTree(w.settings, { repo: 'gone', path: null, base: 'main', url: 'https://code.example/org/gone' }, { remote: '/nowhere/at/all.git' });
+  assert.match(bad.error, /could not clone gone/);
 });
 
 test('a writer\'s session gets the checkout and the commit; every role is denied the clone\'s own files', () => {
@@ -713,7 +730,7 @@ test('a writer\'s session gets the checkout and the commit; every role is denied
   const after = (flag) => cmd.args.slice(cmd.args.indexOf(flag) + 1);
   assert.ok(cmd.args.includes(tree), 'the checkout is an added folder');
   assert.ok(after('--disallowedTools').includes(`Read(//${clone.replace(/^\/+/, '')}/**)`), 'the clone is denied');
-  assert.ok(after('--disallowedTools').includes(`Edit(//${codeTreesRoot(w.settings, w.settings.appRepos[0]).replace(/^\/+/, '')}/**)`), 'the checkouts are read only');
+  assert.ok(after('--disallowedTools').includes(`Edit(//${codeTreesRoot(w.settings).replace(/^\/+/, '')}/**)`), 'the checkouts are read only');
   assert.ok(after('--allowedTools').includes(`Bash(git -C ${tree} show:*)`));
   const translator = commandFor({ stage: 'build', role: 'translator', keys: ['1'], group: '1', pr: 'x#1', worktrees: [] }, w.settings, { model: 'm', agentsPath: '/a.json', roots: [] });
   assert.ok(!translator.args.includes(tree));

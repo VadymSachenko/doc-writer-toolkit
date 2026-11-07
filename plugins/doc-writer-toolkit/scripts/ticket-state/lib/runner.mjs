@@ -201,7 +201,7 @@ export function writeDeniedFor(settings, roots = []) {
     ...[...new Set(own)].map((f) => `Edit(${abs(f)})`),
     ...ENV_FILES.map((f) => `Read(//**/${f})`),
     ...roots.map((r) => `Edit(${abs(r)}/**)`),
-    ...['tickets', 'locks', 'roles', 'watch', 'jobs', 'runs', 'reports', LOCK_NAME, BUSY_NAME].map((d) => `Edit(${abs(path.join(state, d))}/**)`),
+    ...['tickets', 'locks', 'roles', 'watch', 'jobs', 'runs', 'reports', 'code', LOCK_NAME, BUSY_NAME].map((d) => `Edit(${abs(path.join(state, d))}/**)`),
     // The browser lock and the busy notes go only through browser-lock.mjs: no holder-less lock, no forged holder.
     ...[LOCK_NAME, BUSY_NAME].map((d) => `Edit(${abs(path.join(state, d))})`),
     ...['rearmed.json', 'roles-proposal.json'].map((f) => `Edit(${abs(path.join(state, f))})`),
@@ -353,6 +353,7 @@ export function briefFor(step, settings) {
     step.interrupted ? 'The last run of this stage was interrupted: read what it left and finish it.' : null,
     step.withoutVideo ? 'The owner moved the card back before every video part had its transcript: go on without the video, and say so in the plan comment.' : null,
     step.changed ? 'The section plan file changed after its gate: post the new plan and move the card back to Blocked (a new gate).' : null,
+    step.stage === 'resync' && step.since ? `UA changed since ready for merge at ${step.since}: re-sync the blocks changed in ${step.since}..${step.head ?? 'HEAD'}.` : null,
     step.stale ? `The UA pages changed after this stage last ran (${step.stale} file(s)): run it again on the current head.` : null,
     step.cards ? `Cards, highest priority first:\n${step.cards.map((c) => `- ${c.key}: ${c.url ?? c.shortLink} (${c.priority})`).join('\n')}` : null,
     step.worktrees?.length ? worktreeLines(step.worktrees) : null,
@@ -392,8 +393,13 @@ function codeLines(trees) {
 
 // The roles that read code as evidence.
 const CODE_ROLES = new Set(['writer', 'reviewer']);
-// Every role is denied the clones' own files, and writing in the checkouts: a clone's working tree may be weeks old.
-const codeDenied = (settings) => [...new Set((settings.appRepos ?? []).flatMap((a) => [`Read(${abs(path.resolve(settings.root, a.path))}/**)`, `Edit(${abs(path.resolve(settings.root, a.path))}/**)`, `Edit(${abs(codeTreesRoot(settings, a))}/**)`]))];
+// Every role is denied the owner's clones of the code repos (`path`), whose working tree may be weeks old, and writing
+// in the runner's own clones and checkouts.
+const codeDenied = (settings) => {
+  const apps = settings.appRepos ?? [];
+  const owners = apps.filter((a) => a.path).map((a) => abs(path.resolve(settings.root, a.path)));
+  return [...new Set([...owners.flatMap((c) => [`Read(${c}/**)`, `Edit(${c}/**)`]), ...(apps.length ? [`Edit(${abs(codeTreesRoot(settings))}/**)`] : [])])];
+};
 
 export function commandFor(step, settings, { model, agentsPath, claude = 'claude', roleDir = ROLE_DIR, roots = scriptRoots(settings) }) {
   const role = settings.roles[step.role];
@@ -968,7 +974,10 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
         const stuck = trees.flatMap((t) => (t.stuck ?? []).map((n) => `${t.path}: ${n}`));
         if (stuck.length) throw new Error(stuck.join('; '));
         // The code as fetched now. One that can't be fetched or checked out is said in the brief, and stops no session.
-        const codeTrees = CODE_ROLES.has(step.role) ? (settings.appRepos ?? []).map((a) => (io.ensureCodeTree ?? ensureCodeTree)(settings, a)) : [];
+        // With no other session running (no live lock but this step's), the checkouts of other commits go.
+        const mine = new Set([step.group ?? step.keys[0], ...held]);
+        const othersRunning = allLocks(settings.state, clock()).some((l) => l.live && !mine.has(l.group));
+        const codeTrees = CODE_ROLES.has(step.role) ? (settings.appRepos ?? []).map((a) => (io.ensureCodeTree ?? ensureCodeTree)(settings, a, { othersRunning })) : [];
         step = { ...step, worktrees: trees, codeTrees };
       } catch (e) {
         const note = `the worktree: ${String(e.message).slice(0, 400)}`;
