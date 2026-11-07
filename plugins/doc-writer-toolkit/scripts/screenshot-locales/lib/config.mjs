@@ -6,12 +6,13 @@ const posix = path.posix;
 export const cleanDir = (p) => posix.normalize(String(p).replace(/\\/g, '/')).replace(/^\.\//, '').replace(/\/+$/, '');
 export const within = (p, dir) => p === dir || p.startsWith(`${dir}/`);
 
-export const MODES = ['url-prefix', 'query', 'cookie', 'ui'];
-const NAMED = { query: 'parameter', cookie: 'cookie' };
+export const MODES = ['url-prefix', 'query', 'cookie', 'ui', 'storage'];
+const NAMED = { query: 'parameter', cookie: 'cookie', storage: 'localStorage key' };
 const list = (spec) => unique(String(spec ?? '').split(',').map((x) => x.trim()).filter(Boolean));
 
 // `<mode> [<name>] <locale>=<token>, …`: `url-prefix uk=/, en=/en/`, `query lang uk=uk, en=en`, `cookie locale uk=uk, en=en`,
-// `ui uk=Українська, en=English`. Returns { mode, name, tokens, problems }.
+// `ui uk=Українська, en=English`, `storage lang uk="uk-UA", en="en-US"`. A `storage` token is the text stored, exactly as
+// written: an app that keeps a JSON string there needs the quotes. Returns { mode, name, tokens, problems }.
 export function parseSwitch(spec) {
   const problems = [];
   const m = String(spec).trim().match(/^(\S+)\s*([\s\S]*)$/);
@@ -24,7 +25,7 @@ export function parseSwitch(spec) {
   if (NAMED[mode]) {
     const n = rest.match(/^([^\s=,]+)\s+([\s\S]*)$/);
     if (n) [, name, rest] = n;
-    else problems.push(`Locale switch: '${mode}' needs the ${NAMED[mode]} name before the tokens, as in \`${mode} lang uk=uk, en=en\`.`);
+    else problems.push(`Locale switch: '${mode}' needs the ${NAMED[mode]} name before the tokens, as in \`${mode} lang ${mode === 'storage' ? 'uk="uk-UA", en="en-US"' : 'uk=uk, en=en'}\`.`);
   }
   const tokens = {};
   for (const part of rest.split(',').map((x) => x.trim()).filter(Boolean)) {
@@ -33,6 +34,25 @@ export function parseSwitch(spec) {
     else problems.push(`Locale switch: can't read '${part}'. Write <locale>=<token>.`);
   }
   return { mode, name, tokens, problems };
+}
+
+// How a capture switches the app to each locale, from the parsed switch. `clicksPicker` is true only for `ui`: in every
+// other mode a capture never clicks the app's language picker (in `storage` mode it may also save the language on the
+// signed-in account). `storage` sets the value before the page loads (`initScript`, for Playwright's
+// `context.addInitScript`), then checks that the stored value is still the token after the load and that the page
+// shows that locale (`check`); a page that doesn't is a failed locale.
+export function captureOf(sw) {
+  if (!sw) return null;
+  const base = { clicksPicker: sw.mode === 'ui' };
+  if (sw.mode !== 'storage') return base;
+  return {
+    ...base,
+    storage: 'localStorage',
+    key: sw.name,
+    when: 'before the page loads',
+    initScript: Object.fromEntries(Object.entries(sw.tokens).map(([l, v]) => [l, `window.localStorage.setItem(${JSON.stringify(sw.name)}, ${JSON.stringify(v)});`])),
+    check: Object.fromEntries(Object.entries(sw.tokens).map(([l, v]) => [l, { storedValue: v, pageLanguage: l }])),
+  };
 }
 
 // `en=EN_, de=DE_` -> { en: 'EN_', de: 'DE_' }
@@ -89,6 +109,7 @@ export async function resolveConfig(values) {
     const parsed = parseSwitch(switchSpec);
     for (const message of parsed.problems) problem('Locale switch', message);
     localeSwitch = { mode: parsed.mode, name: parsed.name, tokens: parsed.tokens, path: c['locale switch path'] ?? null };
+    localeSwitch.capture = captureOf(localeSwitch);
     if (locales.length > 1) {
       for (const locale of locales.filter((l) => !(l in parsed.tokens))) problem('Locale switch', `Locale switch: has no token for '${locale}'.`, { locale });
     }

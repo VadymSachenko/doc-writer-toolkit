@@ -1,0 +1,44 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "comments": {
+          "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+          },
+          "nodes": [
+            {
+              "id": "IC_701",
+              "databaseId": 701,
+              "author": {
+                "login": "docs-writer"
+              },
+              "body": "Summary of this run: 2 fixed, 1 suggested.",
+              "createdAt": "2026-11-04T09:40:00Z",
+              "updatedAt": "2026-11-04T09:40:00Z"
+            },
+            {
+              "id": "IC_700",
+              "databaseId": 700,
+              "author": {
+                "login": "pat"
+              },
+              "body": "Please look at the second table.",
+              "createdAt": "2026-11-02T09:40:00Z",
+              "updatedAt": "2026-11-04T09:50:00Z"
+            },
+            {
+              "id": "IC_699",
+              "databaseId": 699,
+              "author": null,
+              "body": "old",
+              "createdAt": "2026-10-01T09:40:00Z",
+              "updatedAt": "2026-10-01T09:40:00Z"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

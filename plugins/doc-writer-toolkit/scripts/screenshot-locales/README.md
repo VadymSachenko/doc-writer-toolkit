@@ -12,15 +12,16 @@ Run it from the docs repo root (or pass `--root`). Needs Node 18.3+. Tests: `npm
 
 | Command | What it does |
 |---|---|
-| `config` | The declared screenshot locales, the locale switch, the env prefixes and each locale's folder in every root pair. `multilocale: false` when the host declares no `Screenshot locales:`. `--locales <list>` checks an explicitly locale-scoped request. |
+| `config` | The declared screenshot locales, the locale switch, the env prefixes and each locale's folder in every root pair. `multilocale: false` when the host declares no `Screenshot locales:`. `--locales <list>` checks an explicitly locale-scoped request. The switch's `capture` says how a capture switches: `clicksPicker` (true only for `ui`), and for `storage` the `key`, `when` (`before the page loads`), an `initScript` per locale (the `localStorage.setItem` call, for Playwright's `addInitScript`) and a `check` per locale (`storedValue`, `pageLanguage`) to confirm after the load. |
 | `resolve <manifest>` | Fills each shot's `requiredLocales`, `captureLocales`, `stagedPathPerLocale` and `outputPathPerLocale`, and sets the locales to capture to `pending`. Deletes leftover staged files of those shots. `--shot <ids>` picks the shots to (re)capture; without it, only shots never resolved are set up, and every other shot keeps its staged captures, its failures and their reasons. `--locales <list>` (with `--shot`) is a one-off locale-scoped request. `--dry-run` writes nothing. |
 | `fail <manifest>` | Records that one locale of the current round could not be captured: `--shot <id> --locale <locale> --reason <text>`. It writes that locale's `status` (`failed`) and `failureReason`. |
 | `promote <manifest>` | Moves each complete staged set into the docs, every locale of the round or none. `--shot <ids>`, `--dry-run`. |
 | `status <manifest>` | Each shot's state, from the manifest and the disk. |
+| `pairs --base <ref>` | The UA → EN image check of a branch: each image changed between `<base>...<head>` (`--head`, default `HEAD`) in a pair's UA content root (added, changed or removed; a `.sources/` folder is skipped) whose EN counterpart, the same path under the pair's EN i18n root, didn't change with it, unless that EN file is a link to the UA one. `missing` names each as `{ ua, en, change }`, and the exit is `1`. Applies only when `en` is a screenshot locale (`applies: false`, exit `0`, otherwise). The ticket flow's align stage runs it before ready-for-merge. |
 
 Output is JSON on stdout and logs on stderr. A failure prints `{"error": …}`.
 
-**Exit codes:** `0` ok · `1` a set was not promoted (`promote`), or a shot is not complete (`status`) · `2` configuration or input problem, or an unsafe path (ask the user) · `3` unexpected error (stop and report it).
+**Exit codes:** `0` ok · `1` a set was not promoted (`promote`), a shot is not complete (`status`), or a UA image changed without its EN counterpart (`pairs`) · `2` configuration or input problem, or an unsafe path (ask the user) · `3` unexpected error (stop and report it).
 
 The flow of a capture:
 
@@ -35,8 +36,8 @@ From the `Documentation toolkit configuration` block of `<root>/CLAUDE.md` (same
 | Field | Meaning |
 |---|---|
 | `Screenshot locales:` | Comma-separated locales, as `docusaurus.config` names them: `uk, en`. Absent: the host is single-locale and the script has nothing to do. |
-| `Locale switch:` | `<mode> [<name>] <locale>=<token>, …`. Modes: `url-prefix` (`url-prefix uk=/, en=/en/`), `query` with the parameter name (`query lang uk=uk, en=en`), `cookie` with the cookie name (`cookie locale uk=uk, en=en`), `ui` with the option labels of the app's language picker (`ui uk=Українська, en=English`). Required with two or more locales, one token per locale. |
-| `Locale switch path:` | For `ui` only: how to reach the language picker, as plain text. |
+| `Locale switch:` | `<mode> [<name>] <locale>=<token>, …`. Modes: `url-prefix` (`url-prefix uk=/, en=/en/`), `query` with the parameter name (`query lang uk=uk, en=en`), `cookie` with the cookie name (`cookie locale uk=uk, en=en`), `ui` with the option labels of the app's language picker (`ui uk=Українська, en=English`), `storage` with the `localStorage` key (`storage lang uk="uk-UA", en="en-US"`). A `storage` token is the text stored, exactly as written: an app that stores a JSON string needs the quotes, one that stores plain text doesn't (`uk=uk-UA`). Required with two or more locales, one token per locale. |
+| `Locale switch path:` | For `ui` only: how to reach the language picker, as plain text. Another mode accepts it and doesn't use it. |
 | `Locale env prefix:` | Optional `<locale>=<prefix>` pairs: `en=EN_`. For that locale, each `.env` variable is read with the prefix in front (`EN_OPERATOR_BASE_URL`). The prefixed base URL must be a test environment, like the unprefixed one: never production. Absent: every locale uses the same variables. |
 | `UA content root:`, `EN i18n root:` and every further root pair | The roots the locale folders derive from (`context/project-paths.md`). `--ua-root`, `--en-root` override the primary pair's. |
 | `Toolkit state root:` | Default `.doc-toolkit/`. `--state-root` overrides it. |

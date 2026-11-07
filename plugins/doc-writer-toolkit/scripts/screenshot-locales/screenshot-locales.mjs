@@ -4,11 +4,12 @@ import { parseArgs } from 'node:util';
 import { CliError, log, printJson } from '../ui-labels/lib/util.mjs';
 import { resolveConfig, configView } from './lib/config.mjs';
 import { resolveManifest, failShot, promoteManifest, manifestStatus } from './lib/manifest.mjs';
+import { checkPairs } from './lib/pairs.mjs';
 
 const USAGE = `screenshot-locales <command> [<manifest>] [options]
 
-Exit codes: 0 ok · 1 a set was not promoted, or a shot is not complete · 2 configuration or input problem (ask the
-user) · 3 unexpected error (stop and report it)
+Exit codes: 0 ok · 1 a set was not promoted, a shot is not complete, or a UA image changed without its EN one ·
+2 configuration or input problem (ask the user) · 3 unexpected error (stop and report it)
 
 Commands
   config                 The screenshot locales, how the app switches between them, and each locale's folder per
@@ -22,6 +23,9 @@ Commands
                          failed or missing locale keeps its previous images; its staged files are discarded. Exit 1 if any.
   status <manifest>      Per shot: complete, pending, failed, mixed (some locales have their image, some don't) or
                          interrupted (an earlier image left in staging). Exit 1 unless every shot is complete.
+  pairs --base <ref>     The images the branch changed (base...head) in a UA content root whose EN counterpart, at the
+                         same path in the pair's EN i18n root, didn't change with it. Exit 1 names each one. Applies
+                         only when 'en' is a screenshot locale.
 
 Options (default: the 'Documentation toolkit configuration' block of <root>/CLAUDE.md)
   --root <dir>             docs repo root (default: cwd)
@@ -32,6 +36,7 @@ config:   --locales <list>   an explicitly locale-scoped request: each must be a
 resolve:  --shot <ids>       the shots to (re)capture (default: only the shots never resolved)  --dry-run
           --locales <list>   with --shot: a one-off locale-scoped request (the other locales must be committed)
 promote:  --shot <ids>  --dry-run
+pairs:    --base <ref>  --head <ref> (default HEAD)
 `;
 
 const OPTIONS = {
@@ -45,6 +50,8 @@ const OPTIONS = {
   locale: { type: 'string' },
   reason: { type: 'string' },
   'dry-run': { type: 'boolean' },
+  base: { type: 'string' },
+  head: { type: 'string' },
   help: { type: 'boolean', short: 'h' },
 };
 
@@ -62,6 +69,11 @@ async function main() {
     }
     printJson(configView(cfg));
     return 0;
+  }
+  if (command === 'pairs') {
+    const out = checkPairs(cfg, { base: values.base, head: values.head });
+    printJson(out);
+    return out.ok ? 0 : 1;
   }
   if (!manifestArg) throw new CliError(`${command} needs the manifest path.\n\n${USAGE}`, { code: 2 });
   const manifest = path.resolve(cfg.root, manifestArg);

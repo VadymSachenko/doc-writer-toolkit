@@ -1,0 +1,57 @@
+[
+  {
+    "id": "5f0000000000000000300006",
+    "type": "updateCard",
+    "date": "2026-11-04T09:30:00.000Z",
+    "data": {
+      "card": { "id": "5f00000000000000000c0005", "name": "Hidden draft card", "shortLink": "Drft0005", "idList": "5f00000000000000000a0002" },
+      "old": { "desc": "x" },
+      "list": { "id": "5f00000000000000000a0002", "name": "Drafts" }
+    },
+    "memberCreator": { "id": "5f0000000000000000200001", "username": "test_writer" }
+  },
+  {
+    "id": "5f0000000000000000300005",
+    "type": "updateCard",
+    "date": "2026-11-04T09:00:00.000Z",
+    "data": {
+      "card": { "id": "5f00000000000000000c0004", "name": "Old card", "shortLink": "Arch0004", "closed": true },
+      "old": { "closed": false },
+      "list": { "id": "5f00000000000000000a0008", "name": "Finished" }
+    },
+    "memberCreator": { "id": "5f0000000000000000200001", "username": "test_writer" }
+  },
+  {
+    "id": "5f0000000000000000300004",
+    "type": "updateCard",
+    "date": "2026-11-04T08:30:00.000Z",
+    "data": {
+      "card": { "id": "5f00000000000000000c0003", "name": "#2002 - Add a currency", "shortLink": "Doin0003", "idList": "5f00000000000000000a0005" },
+      "old": { "idList": "5f00000000000000000a0004" },
+      "listBefore": { "id": "5f00000000000000000a0004", "name": "Doing" },
+      "listAfter": { "id": "5f00000000000000000a0005", "name": "Blocked" }
+    },
+    "memberCreator": { "id": "5f0000000000000000200001", "username": "test_writer" }
+  },
+  {
+    "id": "5f0000000000000000300003",
+    "type": "commentCard",
+    "date": "2026-11-04T08:00:00.000Z",
+    "data": { "text": "A question", "card": { "id": "5f00000000000000000c0003", "name": "#2002 - Add a currency", "shortLink": "Doin0003" }, "list": { "id": "5f00000000000000000a0004", "name": "Doing" } },
+    "memberCreator": { "id": "5f0000000000000000200002", "username": "test_reader" }
+  },
+  {
+    "id": "5f0000000000000000300002",
+    "type": "addLabelToCard",
+    "date": "2026-11-04T07:30:00.000Z",
+    "data": { "label": { "id": "5f00000000000000000b0002", "name": "needs answer", "color": "red" }, "card": { "id": "5f00000000000000000c0003", "name": "#2002 - Add a currency", "shortLink": "Doin0003" } },
+    "memberCreator": { "id": "5f0000000000000000200002", "username": "test_reader" }
+  },
+  {
+    "id": "5f0000000000000000300001",
+    "type": "addAttachmentToCard",
+    "date": "2026-11-04T07:00:00.000Z",
+    "data": { "attachment": { "id": "5f00000000000000000e0001", "name": "clip.mp4" }, "card": { "id": "5f00000000000000000c0003", "name": "#2002 - Add a currency", "shortLink": "Doin0003" }, "list": { "id": "5f00000000000000000a0004", "name": "Doing" } },
+    "memberCreator": { "id": "5f0000000000000000200002", "username": "test_reader" }
+  }
+]

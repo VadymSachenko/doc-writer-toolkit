@@ -325,16 +325,20 @@ test('settings: defaults, then local.json, then HARNESS_* variables', () => {
   assert.deepEqual(harnessSettings({ HARNESS_MODE: 'on', HARNESS_MAX_SESSION_PERCENT: '30', HARNESS_DAILY_WEEK_PERCENT: '5' }, file), { mode: 'on', maxSessionPercent: 30, dailyWeekPercent: 5, maxWeekPercent: null });
 });
 
-// A stand-in for the CLI: `/usage` prints FAKE_SESSION%, FAKE_WEEK% and the week's reset (FAKE_WEEK_RESET, or in about 3 days: day 5, 50% allowed);
-// a run prints a passing transcript.
+// A stand-in for the CLI: `/usage` prints FAKE_SESSION%, FAKE_WEEK% and the week's reset (FAKE_WEEK_RESET, or 2.5 days ahead:
+// day 5, 50% allowed); a run prints a passing transcript. Day 5 is the reset between 2 and 3 days ahead, so the default reset is
+// 2.5 days ahead to the minute, with its own hour, half a day from either edge at any time the test runs. A fixed "6am" would put
+// the reset more than 3 days ahead (day 4) between midnight and 6am UTC.
 function fakeClaude(dir) {
   const bin = path.join(dir, 'fake-claude.mjs');
   fs.writeFileSync(bin, `#!/usr/bin/env node
 const args = process.argv.slice(2);
 if (args[1] === '/usage') {
   console.log('Current session: ' + process.env.FAKE_SESSION + '% used · resets soon');
-  const soon = new Date(Date.now() + 3 * 86400000);
-  const reset = process.env.FAKE_WEEK_RESET || soon.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' }) + ' ' + soon.getUTCDate() + ' at 6am (UTC)';
+  const soon = new Date(Date.now() + 2.5 * 86400000);
+  const h = soon.getUTCHours();
+  const at = ((h % 12) || 12) + ':' + String(soon.getUTCMinutes()).padStart(2, '0') + (h < 12 ? 'am' : 'pm');
+  const reset = process.env.FAKE_WEEK_RESET || soon.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' }) + ' ' + soon.getUTCDate() + ' at ' + at + ' (UTC)';
   console.log('Current week (all models): ' + (process.env.FAKE_WEEK ?? '1') + '% used · resets ' + reset);
   console.log('Current week (Fable): 0% used · resets ' + reset);
   process.exit(0);

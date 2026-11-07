@@ -1,0 +1,16 @@
+[
+  {
+    "filename": "docs/export.md",
+    "status": "modified",
+    "patch": "@@ -10,4 +10,6 @@ Export\n context line 10\n-old line 11\n+new line 11\n+new line 12\n context line 13\n context line 14\n@@ -40,2 +42,3 @@ Later\n context line 42\n+added line 43\n context line 44"
+  },
+  {
+    "filename": "docs/moved.md",
+    "status": "removed",
+    "patch": "@@ -1,2 +0,0 @@\n-gone one\n-gone two"
+  },
+  {
+    "filename": "static/img/export.png",
+    "status": "added"
+  }
+]
