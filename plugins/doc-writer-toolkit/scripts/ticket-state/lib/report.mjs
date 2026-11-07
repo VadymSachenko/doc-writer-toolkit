@@ -112,7 +112,11 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
       if (j.watch && js.armed) return `${j.name}: new cards in ${j.watch.list} since ${js.firstChange}; runs ${j.quietHours} h after the last change (${js.lastChange})${failing}${js.heldUntil ? `, held by the guard until ${js.heldUntil}` : ''}`;
       return `${j.name}: ${js.lastRun ? `last run ${js.lastRun}` : 'not run yet'}${failing}${js.lastFailure ? `, disarmed after an hour of failing at ${js.lastFailure}${js.rearmed ? `, re-armed at ${js.rearmed.at} (${js.rearmed.why})` : ''}` : ''}${js.heldUntil ? `, held until ${js.heldUntil}` : ''}`;
     });
-    out.push('## The watcher', '', `Last check ${checks.at(-1) ?? 'never'}; the morning run ${feed.morning?.lastDate === date ? `ran at ${feed.morning.at ?? date}` : 'has not run on this date'}.`, '', list([...failing, ...jobs], 'no source failing, no host job'), '');
+    // The last start pass between morning runs (lib/watch.mjs), and a change it keeps for the start hours.
+    const s = feed.starts;
+    const pass = s?.by === 'watcher' && s.date === date ? ` The last start pass when a slot freed: ${s.at}, ${!s.outcome || s.outcome === 'running' ? 'the run that wrote this report' : s.outcome}.` : '';
+    const kept = s?.deferred ? ` A change waits for the start hours (${s.deferred}).` : '';
+    out.push('## The watcher', '', `Last check ${checks.at(-1) ?? 'never'}; the morning run ${feed.morning?.lastDate === date ? `ran at ${feed.morning.at ?? date}` : 'has not run on this date'}.${pass}${kept}`, '', list([...failing, ...jobs], 'no source failing, no host job'), '');
   }
 
   out.push('## Starting and finishing', '');

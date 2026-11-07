@@ -13,6 +13,8 @@ import { prId } from './ledger.mjs';
 //   - `checkedAt` is when the last check ended, and `awakeSince` the first check after a pause longer than
 //     pauseMs (the Mac asleep, the agent off). A source's failure counts from the later of its `failingSince` and
 //     `awakeSince`: after ALERT_MS of that it is urgent;
+//   - `starts` is the last start pass (the morning run's or the watcher's, lib/watch.mjs): what it saw, so the next one
+//     runs only after a change;
 //   - the file is written to a temp file and renamed.
 
 export const WINDOW_MS = 10 * 60 * 1000;
@@ -82,6 +84,9 @@ export async function readSource(src, clients, from) {
       list: a.list ?? null,
       listBefore: a.listBefore ?? null,
       listAfter: a.listAfter ?? null,
+      // The flow status of the card's list (the settings' board only), and the one a move went to.
+      status: a.status ?? null,
+      statusAfter: a.statusAfter ?? null,
     }));
   }
   if (src.kind === 'prs') {

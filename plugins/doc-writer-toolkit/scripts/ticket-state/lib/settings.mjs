@@ -41,6 +41,9 @@ export const LOCAL_DEFAULTS = {
     // `startOrder`: which ready group a scheduled run starts first: `priority` (then the oldest) or `easiest` (the
     // triage size, then fewer repos, then fewer pages, then priority).
     startOrder: 'priority',
+    // `startHours`: the local hours in which the watcher may triage and start between morning runs, when a slot frees
+    // (`HH-HH` or `HH:MM-HH:MM`, the end not included). Outside them it triages nothing and starts nothing.
+    startHours: '10-22',
   },
   // `tokenFile`: a file (mode 600) with the long-lived sign-in token the watcher's runs use; none: the CLI's own sign-in.
   schedule: { morning: '07:00', watchMinutes: 5, tokenFile: null },
@@ -61,6 +64,16 @@ export const LOCAL_DEFAULTS = {
 // The statuses the ticket flow reads by name. Each must be a status of tracker.statuses.
 export const REQUIRED_STATUSES = ['intake', 'ready', 'inProgress', 'blocked', 'finalReview', 'translation', 'done'];
 export const FLOW_STATUSES = ['intake', 'ready', 'inProgress', 'blocked', 'smeReview', 'finalReview', 'translation', 'done', 'outOfScope'];
+
+// `limits.startHours` as minutes of the local day, { from, to } (`to` not included; 24 is the day's end), or null when
+// it isn't such a range.
+export function parseStartHours(text) {
+  const m = /^\s*([01]?\d|2[0-4])(?::([0-5]\d))?\s*-\s*([01]?\d|2[0-4])(?::([0-5]\d))?\s*$/.exec(typeof text === 'string' ? text : '');
+  if (!m) return null;
+  const from = Number(m[1]) * 60 + Number(m[2] ?? 0);
+  const to = Number(m[3]) * 60 + Number(m[4] ?? 0);
+  return from < to && to <= 24 * 60 ? { from, to } : null;
+}
 
 const isObject = (v) => v && typeof v === 'object' && !Array.isArray(v);
 const fail = (msg) => {
@@ -137,6 +150,7 @@ export function validateSettings(merged, { root, stateRootDefault }) {
   num(limits.dailyPercent, 'limits.dailyPercent');
   if (limits.maxWeekPercent !== null) num(limits.maxWeekPercent, 'limits.maxWeekPercent');
   if (limits.open !== null) num(limits.open, 'limits.open', { min: 1 });
+  if (!parseStartHours(limits.startHours)) fail('limits.startHours must be local hours such as 10-22 or 09:30-21:00, the start before the end');
   if (!START_ORDERS.includes(limits.startOrder)) fail(`limits.startOrder must be one of ${START_ORDERS.join(', ')}`);
   if (!isObject(limits.estimates)) fail('limits.estimates must be { size: percent of the week }');
   for (const [size, v] of Object.entries(limits.estimates)) {
