@@ -106,7 +106,7 @@ const REFUSED = [
 export const isRefusal = (line) => REFUSED.some((re) => re.test(line));
 
 // What is masked is a best effort: the forms below, and no promise of more. The value goes, the name and the scheme stay.
-const NAME = '[\\w.-]*(?:token|key|secret|password|passwd|pwd)[\\w.-]*';
+const NAME = '[\\w.-]{0,100}(?:token|key|secret|password|passwd|pwd)[\\w.-]{0,100}';
 const MASKS = [
   // NAME=value, NAME: value (a header), "NAME": "value"; a quoted value may hold spaces, an escaped quote ends a bare one.
   [new RegExp(`(\\b${NAME}["']?(?:\\s*:\\s*|=))("[^"]*"|'[^']*')`, 'gi'), '$1***'],
@@ -117,9 +117,9 @@ const MASKS = [
   [/(\bAuthorization\s*:\s*\\?["']?(?:\w+\s+)?)[^\s"'\\]+/gi, '$1***'],
   [/(\bBearer\s+)[\w.~+/=-]+/gi, '$1***'],
   // curl's -u user:password, only a value with a colon, so `git push -u origin` is left alone.
-  [/(\s(?:-u|--user|--proxy-user)[\s=]+)("[^"]*:[^"]*"|'[^']*:[^']*'|[^\s"':]*:\S*)/g, '$1***'],
+  [/(\s(?:-u|--user|--proxy-user)[\s=]+)("[^":]*:[^"]*"|'[^':]*:[^']*'|[^\s"':]*:\S*)/g, '$1***'],
   // https://user:password@host
-  [/(\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@"']+:)[^\s/@"']+(?=@)/gi, '$1***'],
+  [/(\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s/:@"']+:)[^\s/@"']+(?=@)/gi, '$1***'],
 ];
 // C0 and C1 control characters but the whitespace ones, which the collapse below turns into single spaces.
 const CONTROL = /[\x00-\x08\x0E-\x1F\x7F-\x9F]/g;

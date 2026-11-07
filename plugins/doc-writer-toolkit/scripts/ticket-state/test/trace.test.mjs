@@ -482,3 +482,14 @@ test('the role-session guard: any value of the variable refuses, before the ledg
   // Without the variable the same call prints the trace.
   assert.match((await trace(w)).out, /read plan\.md$/m);
 });
+
+test('the mask does not backtrack on one very long line: 100k of "a-" is handled fast and comes out unchanged', () => {
+  const clean = cleaner({ root: '/zz-root', targets: [] }, { toolkit: null });
+  const line = 'a-'.repeat(50000);
+  const started = Date.now();
+  const printed = clean(line, 1e6);
+  const took = Date.now() - started;
+  assert.equal(printed, line);
+  assert.ok(took < 2000, `took ${took} ms`);
+  assert.equal(clean(`${line} --password "x y"`, 1e6), `${line} --password ***`);
+});
