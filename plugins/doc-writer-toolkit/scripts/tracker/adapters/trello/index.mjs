@@ -4,7 +4,7 @@ import { Refusal } from '../../lib/errors.mjs';
 // the shapes `lib/adapter-contract.mjs` lists and takes the module's decisions as plain calls. A place is a Trello
 // list. It decides nothing: the statuses, the guards and the idempotency checks are in `lib/tracker.mjs`.
 
-const CARD_FIELDS = 'name,desc,idShort,shortLink,shortUrl,labels,idList,idBoard,closed,dateLastActivity';
+const CARD_FIELDS = 'name,desc,idShort,shortLink,shortUrl,labels,idList,idBoard,idMembers,closed,dateLastActivity';
 const MAX_PAGES = 200;
 const LINK = /trello\.com\/c\/([A-Za-z0-9]{8})\b/g;
 
@@ -39,6 +39,7 @@ function card(raw) {
     lastActivity: raw.dateLastActivity ?? null,
     createdAt: createdAt(raw.id),
     closed: Boolean(raw.closed),
+    memberIds: Array.isArray(raw.idMembers) ? raw.idMembers : [],
   };
 }
 
@@ -195,6 +196,11 @@ export function createTrelloAdapter(client, { pageSize = 1000 } = {}) {
       return rows.map((l) => ({ id: l.id, name: l.name ?? '', color: l.color ?? null }));
     },
 
+    async members(board) {
+      const rows = await client.get(`/1/boards/${board}/members`, { fields: 'username,fullName' });
+      return rows.map((m) => ({ id: m.id, username: m.username ?? '', name: m.fullName ?? null }));
+    },
+
     // The board's actions since a time (an ISO date), oldest first. `types` narrows them (Trello's filter).
     async actions(board, { since, types }) {
       const rows = await paged(`/1/boards/${board}/actions`, { since, ...(types ? { filter: types.join(',') } : {}) });
@@ -220,6 +226,9 @@ export function createTrelloAdapter(client, { pageSize = 1000 } = {}) {
     },
     async removeLabel(ref, labelId) {
       await client.write('DELETE', `/1/cards/${ref}/idLabels/${labelId}`);
+    },
+    async addMember(ref, memberId) {
+      await client.write('POST', `/1/cards/${ref}/idMembers`, { value: memberId });
     },
     async setDescription(ref, text) {
       await client.write('PUT', `/1/cards/${ref}`, { desc: text });

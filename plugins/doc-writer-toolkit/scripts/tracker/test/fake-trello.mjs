@@ -19,6 +19,14 @@ export const L = {
 };
 export const C = { inbox1: '5f00000000000000000c0001', inbox2: '5f00000000000000000c0002', doing: '5f00000000000000000c0003', archived: '5f00000000000000000c0004', draft: '5f00000000000000000c0005', orig: '5f00000000000000000c0006' };
 
+// The board's members (invented people). The owner is already on the card in Doing.
+export const M = { owner: '5f00000000000000000e0001', expertOne: '5f00000000000000000e0002', expertTwo: '5f00000000000000000e0003' };
+export const MEMBERS = [
+  { id: M.owner, username: 'owner-one', fullName: 'Owner One' },
+  { id: M.expertOne, username: 'expert-one', fullName: 'Expert One' },
+  { id: M.expertTwo, username: 'expert-two', fullName: 'Expert Two' },
+];
+
 export const fixture = (name) => JSON.parse(fs.readFileSync(path.join(HERE, 'fixtures', `${name}.json`), 'utf8'));
 
 // The host settings the tests share (the tracker part of the ticket flow settings).
@@ -44,7 +52,7 @@ const json = (res, status, body) => {
 
 export async function startFake({ onRequest } = {}) {
   const requests = [];
-  const state = { cardList: { [C.inbox1]: L.inbox, [C.inbox2]: L.inbox, [C.doing]: L.doing }, labels: { [C.doing]: ['5f00000000000000000b0002'] }, desc: {}, nextId: 1 };
+  const state = { cardList: { [C.inbox1]: L.inbox, [C.inbox2]: L.inbox, [C.doing]: L.doing }, labels: { [C.doing]: ['5f00000000000000000b0002'] }, members: { [C.doing]: [M.owner] }, desc: {}, nextId: 1 };
   const behaviour = { throttle: 0, throttleStatus: 429 }; // answer this many requests with 429 first
   let origin = '';
 
@@ -55,6 +63,7 @@ export async function startFake({ onRequest } = {}) {
     for (const c of all) {
       if (state.cardList[c.id]) c.idList = state.cardList[c.id];
       if (state.desc[c.id] !== undefined) c.desc = state.desc[c.id];
+      c.idMembers = state.members[c.id] ?? [];
       if (state.labels[c.id]) {
         const known = fixture('labels');
         c.labels = state.labels[c.id].map((id) => known.find((l) => l.id === id));
@@ -94,6 +103,7 @@ export async function startFake({ onRequest } = {}) {
         if ((m = /^\/1\/lists\/([^/]+)\/cards$/.exec(p))) return json(res, 200, [...cards(), ...watchCards()].filter((c) => c.idList === m[1] && !c.closed));
         if ((m = /^\/1\/boards\/([^/]+)\/cards\/all$/.exec(p))) return json(res, 200, page(m[1] === BOARD ? cards() : watchCards(), q));
         if ((m = /^\/1\/boards\/([^/]+)\/labels$/.exec(p))) return json(res, 200, fixture('labels'));
+        if ((m = /^\/1\/boards\/([^/]+)\/members$/.exec(p))) return json(res, 200, m[1] === BOARD ? MEMBERS : []);
         if ((m = /^\/1\/boards\/([^/]+)\/actions$/.exec(p))) {
           const since = q.get('since');
           const rows = m[1] === BOARD ? fixture('board-actions').filter((a) => !since || a.date >= since) : [];
@@ -123,6 +133,13 @@ export async function startFake({ onRequest } = {}) {
           const c = findCard(m[1]);
           state.labels[c.id] = [...new Set([...(state.labels[c.id] ?? c.labels.map((l) => l.id)), record.form.value])];
           return json(res, 200, [record.form.value]);
+        }
+        if ((m = /^\/1\/cards\/([^/]+)\/idMembers$/.exec(p)) && req.method === 'POST') {
+          const c = findCard(m[1]);
+          // Trello refuses a member already on the card.
+          if ((state.members[c.id] ?? []).includes(record.form.value)) return json(res, 400, 'member is already on the card');
+          state.members[c.id] = [...(state.members[c.id] ?? []), record.form.value];
+          return json(res, 200, MEMBERS.filter((x) => state.members[c.id].includes(x.id)));
         }
         if ((m = /^\/1\/cards\/([^/]+)\/idLabels\/([^/]+)$/.exec(p)) && req.method === 'DELETE') {
           const c = findCard(m[1]);

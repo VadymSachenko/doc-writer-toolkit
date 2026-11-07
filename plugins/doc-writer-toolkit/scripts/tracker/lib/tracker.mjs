@@ -13,7 +13,9 @@ import { assertAdapter } from './adapter-contract.mjs';
 //   - `move` runs only a (from, to) pair the settings list in `transitions`;
 //   - `createCard` creates only in the `intake` status;
 //   - an empty comment or description is refused;
-//   - no operation archives, deletes or renames a card.
+//   - only the people the settings name (`tracker.owner`, the targets' `cardMembers`) are added to a card, and each
+//     must be a member of the board, resolved with the statuses: a name that matches no member stops the run;
+//   - no operation archives, deletes or renames a card, or removes anyone from it.
 
 const ZWNJ = /‌/g;
 // U+200C is kept in stored text and stripped only to compare (or to see that a text is empty).
@@ -61,6 +63,20 @@ export function resolveStatuses(statuses, places) {
   return { statuses: resolved, statusOfPlace: claimed, places };
 }
 
+// Maps the people the settings name (`[{ name, where }]`) onto the board's members, by username, without case or a
+// leading `@`. A name that matches no member stops the run, as a list name does.
+const userKey = (name) => String(name ?? '').replace(ZWNJ, '').trim().replace(/^@/, '').toLowerCase();
+export function resolveMembers(spec, boardMembers) {
+  const unresolved = spec.filter((m) => !boardMembers.some((b) => userKey(b.username) === userKey(m.name)));
+  if (unresolved.length) {
+    throw new CliError(`no board member matches ${unresolved.map((u) => `'${u.name}' (${u.where})`).join(', ')}. Fix the settings or the board.`, {
+      code: 2,
+      data: { unresolvedMembers: unresolved },
+    });
+  }
+  return new Map(spec.map((m) => [userKey(m.name), boardMembers.find((b) => userKey(b.username) === userKey(m.name))]));
+}
+
 export const PRIORITIES = ['high', 'medium', 'low'];
 
 // A card's priority: the tracker's own field when the adapter gives one (Jira), else the labels the settings name
@@ -76,6 +92,8 @@ export function priorityOf(card, names = { high: 'high', low: 'low' }) {
 export function createTracker({ adapter, tracker, dryRun = false, now = () => Date.now() }) {
   assertAdapter(adapter);
   const { board, statuses: statusSpec, neverRead, transitions, labels: labelNames } = tracker;
+  const memberSpec = tracker.members ?? [];
+  const owner = tracker.owner ?? null;
   const priorityNames = tracker.priority ?? { high: 'high', low: 'low' };
   const boards = [board, ...tracker.watchBoards];
 
@@ -89,7 +107,16 @@ export function createTracker({ adapter, tracker, dryRun = false, now = () => Da
   };
 
   let resolution = null;
-  const resolve = async () => (resolution ??= resolveStatuses(statusSpec, await adapter.places(board)));
+  // The lists, and the people the settings name, once per run. The board's members are read only when the settings name
+  // someone.
+  const resolve = async () => {
+    if (!resolution) {
+      const res = resolveStatuses(statusSpec, await adapter.places(board));
+      res.members = memberSpec.length ? resolveMembers(memberSpec, await adapter.members(board)) : new Map();
+      resolution = res;
+    }
+    return resolution;
+  };
   const statusOf = (res, placeId) => res.statusOfPlace.get(placeId) ?? null;
   const placeName = (res, placeId) => res.places.find((p) => p.id === placeId)?.name ?? null;
 
@@ -134,6 +161,16 @@ export function createTracker({ adapter, tracker, dryRun = false, now = () => Da
     });
   };
 
+  // A person to add: `owner` stands for `tracker.owner`; any other name must be one the settings name.
+  const memberOf = (res, wanted) => {
+    if (!bare(wanted)) throw new CliError('a member is needed (--member): a username the settings name, or owner', { code: 2 });
+    const name = String(wanted).trim() === 'owner' ? owner : String(wanted);
+    if (!name) throw new Refusal('unknown', 'the settings name no owner (tracker.owner)');
+    const m = res.members.get(userKey(name));
+    if (!m) throw new Refusal('notAllowed', `'${wanted}' is not a person the settings name (tracker.owner, the targets' cardMembers)`, { member: String(wanted) });
+    return m;
+  };
+
   const sinceOf = (value) => {
     if (value === undefined || value === null || value === '') return null;
     if (Number.isNaN(Date.parse(value))) throw new CliError(`'${value}' is not a time: give an ISO date such as 2026-11-04T08:00:00Z`, { code: 2 });
@@ -157,6 +194,7 @@ export function createTracker({ adapter, tracker, dryRun = false, now = () => Da
         })),
         unmapped: res.places.filter((p) => !res.statusOfPlace.has(p.id)),
         transitions,
+        ...(memberSpec.length ? { members: memberSpec.map((m) => ({ name: m.name, where: m.where, id: res.members.get(userKey(m.name)).id, username: res.members.get(userKey(m.name)).username })) } : {}),
       };
     },
 
@@ -326,6 +364,24 @@ export function createTracker({ adapter, tracker, dryRun = false, now = () => Da
       if (!card.labels.some((x) => x.id === l.id)) return { card: card.id, label: l.name, changed: false, reason: 'the card does not have the label' };
       await adapter.removeLabel(ref, l.id);
       return { card: card.id, label: l.name, changed: true };
+    },
+
+    // A person the settings name, onto the card. One already on it is no change; no call removes anyone.
+    async addMember({ card: input, member }) {
+      const { ref, card, res } = await need(input);
+      const m = memberOf(res, member);
+      if (card.boardId !== board) throw new Refusal('outsideFlow', 'the card is not on the board in the settings', { boardId: card.boardId });
+      if (card.closed) throw new Refusal('archived', 'the card is archived; no one is added');
+      if ((card.memberIds ?? []).includes(m.id)) return { card: card.id, member: m.username, changed: false, reason: 'the person is already on the card' };
+      await adapter.addMember(ref, m.id);
+      return { card: card.id, member: m.username, changed: true };
+    },
+
+    // Whether a person the settings name is on the card (no change).
+    async hasMember({ card: input, member }) {
+      const { card, res } = await need(input);
+      const m = memberOf(res, member);
+      return { card: card.id, member: m.username, on: (card.memberIds ?? []).includes(m.id) };
     },
 
     // The text is sent as given (U+200C kept). An empty text is refused: a PUT with it once blanked a description.

@@ -33,7 +33,7 @@ const hex = (n) => n.toString(16).padStart(6, '0');
 export const id24 = (kind = 'c') => `5f00000000000000${kind}${hex(++ids).padStart(7, '0')}`.slice(0, 24);
 
 // A card in the module's adapter shape.
-export function card({ number = null, name, status = 'ready', list, labels = [], desc = '', lastActivity = ago(48), createdAt = ago(72), closed = false, shortLink, board = BOARD }) {
+export function card({ number = null, name, status = 'ready', list, labels = [], desc = '', lastActivity = ago(48), createdAt = ago(72), closed = false, shortLink, board = BOARD, members = [] }) {
   const id = id24('c');
   const sl = shortLink ?? `Card${String(ids).padStart(4, '0')}`;
   return {
@@ -50,8 +50,16 @@ export function card({ number = null, name, status = 'ready', list, labels = [],
     lastActivity,
     createdAt,
     closed,
+    memberIds: members.map((u) => MEMBERS.find((m) => m.username === u)?.id ?? u),
   };
 }
+
+// The board's members (invented people).
+export const MEMBERS = [
+  { id: '5f00000000000000000e0001', username: 'owner-one', name: 'Owner One' },
+  { id: '5f00000000000000000e0002', username: 'expert-one', name: 'Expert One' },
+  { id: '5f00000000000000000e0003', username: 'expert-two', name: 'Expert Two' },
+];
 
 // `actions`: { <board id>: [actions in the adapter's shape] }, given back from `since` on, as the real board does.
 export function trackerAdapter({ cards = [], comments = {}, release = [], actions = {} } = {}) {
@@ -91,6 +99,7 @@ export function trackerAdapter({ cards = [], comments = {}, release = [], action
     comments: async (ref) => comments[get(ref).id] ?? [],
     attachments: async () => [],
     labels: async () => labels,
+    members: async (board) => (reads.push(['members', board]), board === BOARD ? MEMBERS : []),
     actions: async (board, { since } = {}) => {
       reads.push(['actions', board, since]);
       if (actions.fail?.[board]) throw new Error(actions.fail[board]);
@@ -109,6 +118,12 @@ export function trackerAdapter({ cards = [], comments = {}, release = [], action
     },
     addLabel: async (ref, labelId) => log.push(['addLabel', ref, labelId]),
     removeLabel: async (ref, labelId) => log.push(['removeLabel', ref, labelId]),
+    addMember: async (ref, memberId) => {
+      log.push(['addMember', ref, memberId]);
+      const c = get(ref);
+      if (c.memberIds.includes(memberId)) throw new Error('the tracker refuses a member already on the card');
+      c.memberIds = [...c.memberIds, memberId];
+    },
     setDescription: async (ref, text) => log.push(['setDescription', ref, text]),
     createCard: async () => {
       throw new Error('not in these tests');
