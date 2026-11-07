@@ -109,19 +109,28 @@ export function startPrint({ date, openKeys = [], ready = [], intakeDue = [] }) 
 const printOfStatus = (st, date) => startPrint({ date, openKeys: st.wip?.openKeys, ready: readyGroupsOf(st), intakeDue: (st.intake?.due ?? []).map((c) => c.key) });
 const printOfSummary = (s, date) => (s?.wip ? startPrint({ date, openKeys: s.wip.openKeys, ready: s.ready, intakeDue: s.intakeDue }) : null);
 
-// Why a start pass is due, from the print the last pass left and the one seen now; null when nothing changed.
+const gone = (a = [], b = []) => a.filter((x) => !b.includes(x));
+
+// The intake cards due now that weren't at the last look: the only ones a watcher pass triages. A card whose triage
+// failed stays due, so it waits for the next morning run, or for a person (a comment puts it back in its quiet hours,
+// and it is new once due again).
+export function newlyDue(last, now) {
+  return last ? gone(now.intakeDue, last.intakeDue) : [...now.intakeDue];
+}
+
+// Why a start pass is due, from the print the last look left and the one seen now; null when nothing changed that
+// could let a start or a triage happen. Only these count: a ticket no longer open, a group newly ready, an intake card
+// newly due, a new date. The open tickets growing, a ready group gone, a card back in its quiet hours: none.
 export function changeOf(last, now) {
   if (!last) return 'no start pass yet';
   if (last.date !== now.date) return 'a new day';
-  const gone = (a, b) => a.filter((x) => !b.includes(x));
   const why = [];
   const left = gone(last.open, now.open);
   if (left.length) why.push(`a slot freed: ${left.join(', ')} no longer open`);
   const ready = gone(now.ready, last.ready);
   if (ready.length) why.push(`newly ready: ${ready.join(', ')}`);
-  const due = gone(now.intakeDue, last.intakeDue);
+  const due = newlyDue(last, now);
   if (due.length) why.push(`due for triage: ${due.join(', ')}`);
-  if (!why.length && JSON.stringify(last) !== JSON.stringify(now)) why.push('the open tickets or the ready groups changed');
   return why.length ? why.join('; ') : null;
 }
 
@@ -134,6 +143,9 @@ export function noRoomOf(wip) {
   if (typeof l.waiting === 'number' && wip.waiting >= l.waiting) return `${wip.waiting} waiting of ${l.waiting}`;
   return null;
 }
+
+// A start pass that failed before its first step is tried again after this long, not at every check.
+export const RETRY_MS = 30 * 60 * 1000;
 
 // A card that came into, or changed in, the ready or the intake list of the flow's board.
 const START_STATUSES = new Set(['ready', 'intake']);
@@ -337,8 +349,10 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
     // The cursors move: every event was handed on, or its ticket is in `pending`.
     if (!dryRun) writeFeed(settings.state, next);
 
-    // 5b. The start pass: not in a check that ran the morning run, or waits for it.
-    if (!morningDue) {
+    // 5b. The start pass: only once today's morning run has run, and not in the check that ran it. Today is the date
+    // the check began on, so a check that began before `schedule.morning` and ran past it leaves the day's first
+    // starts to the morning run, and so do start hours that begin before it.
+    if (!morningDue && next.morning?.lastDate === today) {
       try {
         out.startPass = await startPassOf();
       } catch (e) {
@@ -424,14 +438,16 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
         if (why && !last?.deferred) next.starts = { ...(last ?? {}), deferred: why };
         return null;
       }
+      // A pass that failed before its first step (or its status read) is tried again after RETRY_MS, not at every check.
+      if (last?.retryAt && clock() < Date.parse(last.retryAt)) return null;
+      const retryLater = (why) => ({ ...(last ?? {}), deferred: last?.deferred ?? why, retryAt: iso(clock() + RETRY_MS) });
       if (!seen && !last?.deferred && last?.date === today && !dueAgain && !cardMoved) return null;
       let view = seen;
       if (!view) {
         try {
           view = await computeStatus({ settings, clients, now: checkStart, only: [], git: io.git ?? makeGit(settings) });
         } catch (e) {
-          // Looked at again at the next check.
-          next.starts = { ...(last ?? {}), deferred: last?.deferred ?? 'the status could not be read' };
+          next.starts = retryLater('the status could not be read');
           throw e;
         }
       }
@@ -444,12 +460,15 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
       }
       const why = changeOf(last?.print ?? null, print);
       if (!why) {
-        if (last && (last.deferred || last.nextDueAt !== nextDueAt)) next.starts = { ...last, deferred: null, nextDueAt };
+        // Nothing that could let a start happen; what was seen is the view the next change is measured from.
+        if (last) next.starts = { ...last, print, nextDueAt, deferred: null, retryAt: null };
         return null;
       }
-      const base = { date: today, at: iso(checkStart), by: 'watcher', print, nextDueAt, deferred: null };
-      // Nothing to triage, and nothing that could start whatever the allowance: no runner, no /usage.
-      const noRoom = view.intake?.due?.length ? null : !print.ready.length ? 'no ready ticket' : noRoomOf(view.wip);
+      const base = { date: today, at: iso(checkStart), by: 'watcher', print, nextDueAt, deferred: null, retryAt: null };
+      // Only the intake cards newly due are triaged here; nothing to triage, and nothing that could start whatever the
+      // allowance: no runner, no /usage.
+      const triageKeys = newlyDue(last?.print ?? null, print);
+      const noRoom = triageKeys.length ? null : !print.ready.length ? 'no ready ticket' : noRoomOf(view.wip);
       if (noRoom) {
         next.starts = { ...base, outcome: `not run: ${noRoom}` };
         return { why, ran: false, skipped: noRoom };
@@ -463,13 +482,13 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
       try {
         // No triage and no further start once the hours end while the pass runs; a started group's chain goes on.
         const startUntil = startHoursEnd(clock(), settings.limits.startHours);
-        const r = await run({ settings, clients, io: runnerIo, options: { dryRun, trigger: 'schedule', startPass: true, startUntil, claude, progress } });
+        const r = await run({ settings, clients, io: runnerIo, options: { dryRun, trigger: 'schedule', startPass: true, startUntil, triageKeys, claude, progress } });
         const started = startedOf(r);
         next.starts = { ...base, at: iso(clock()), print: printOfSummary(r.after, today) ?? print, nextDueAt: r.after?.intakeQuietAt ?? nextDueAt, outcome: started.length ? `started ${started.map((s) => s.keys.join(', ')).join('; ')}` : 'started nothing' };
         return { why, ran: true, run: r };
       } catch (e) {
-        // One that failed before its first step is tried again at the next check; one that failed part way counts.
-        next.starts = progress.begun ? { ...base, outcome: `failed: ${errorText(e)}` } : { ...(last ?? {}), deferred: why };
+        // One that failed before its first step is tried again after RETRY_MS; one that failed part way counts.
+        next.starts = progress.begun ? { ...base, outcome: `failed: ${errorText(e)}` } : { ...retryLater(why), deferred: why };
         throw e;
       }
     }

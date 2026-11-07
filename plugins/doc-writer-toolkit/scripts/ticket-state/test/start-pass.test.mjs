@@ -70,7 +70,8 @@ const morningLeft = (date, open, ready, intakeDue = []) => ({ date, at: `${date}
 
 // A check with the real runner for the start pass (its start session a stand-in), and a recorded stand-in for the
 // watcher's own run and the morning run. No real notification: `notify` records.
-function checker(w, { cards = {}, week = 7, finishTakes = 0 } = {}) {
+function checker(w, { cards = {}, week = 7, finishTakes = 0, passThrows = 0 } = {}) {
+  let throws = passThrows;
   const calls = { runs: [], sessions: [], notes: [], usage: 0 };
   let clock = NOW;
   const spawnClaude = async (cmd) => {
@@ -94,6 +95,10 @@ function checker(w, { cards = {}, week = 7, finishTakes = 0 } = {}) {
           if (!a.options.startPass) {
             if (!a.options.morning) clock += finishTakes; // the watcher's own run, as long as its sessions take
             return { mode: w.settings.mode, named: a.options.named ?? [], ran: [], starts: [], guard: [] };
+          }
+          if (throws > 0) {
+            throws--;
+            throw new Error('the runner crashed before its first step');
           }
           return runDaily({ ...a, io: { ...a.io, now: () => clock, readUsage: () => (calls.usage++, usageAt(week)), spawnClaude, ensureWorktree: () => assert.fail('a start has no worktree') } });
         },
@@ -283,7 +288,77 @@ test('an intake card that arrives at 15:00 is triaged when its quiet hours end, 
   assert.equal(out.startPass.why, 'due for triage: 601');
 });
 
-test('a start pass before the first morning run of a new deploy, and a dry run that plans the start and writes no memory', async () => {
+test("no start pass before today's morning run: a check that began at 09:55 and whose own run ended at 10:05 leaves the starts to the 10:10 morning run", async () => {
+  const { w, cards, merge } = flow({ extra: { schedule: { morning: '10:10' } } });
+  seed(w, AT('09:45'), { morning: '2026-11-09', starts: morningLeft('2026-11-09', ['801'], ['502']) });
+  const { check, calls, passes } = checker(w, { cards, finishTakes: 10 * MIN });
+  merge(AT('09:50'));
+  const out = await check(AT('09:55'));
+  assert.deepEqual(calls.runs.map((r) => r.named), [['801']], "the watcher's own run follows the merged ticket");
+  assert.deepEqual([out.startPass, passes().length, calls.usage], [undefined, 0, 0]);
+  await check(AT('10:05'));
+  assert.equal(passes().length, 0, 'inside the hours, but the morning run has not run today');
+  await check(AT('10:10'));
+  assert.deepEqual(calls.runs.filter((r) => r.morning).length, 1, 'the morning run makes the day\'s first starts');
+  assert.equal(passes().length, 0);
+  // A host whose start hours begin before the morning run: the same.
+  const early = flow({ extra: { schedule: { morning: '10:10' } }, limits: { startHours: '08-22' } });
+  seed(early.w, AT('08:55'), { morning: '2026-11-09' });
+  const e = checker(early.w, { cards: early.cards });
+  early.merge(AT('09:00'));
+  await e.check(AT('09:05'));
+  assert.equal(e.passes().length, 0);
+});
+
+test('a start pass that fails before its first step is tried again after 30 minutes, not at every check', async () => {
+  const { w, actions, cards, merge } = flow();
+  seed(w, AT('14:50'), { starts: morningLeft('2026-11-10', ['801'], ['502']) });
+  const { check, calls, passes } = checker(w, { cards, passThrows: 1 });
+  merge(AT('15:00'));
+  const first = await check(AT('15:05'));
+  assert.deepEqual(first.errors, [{ part: 'the start pass', error: 'the runner crashed before its first step' }]);
+  const memory = readFeed(w.settings.state).starts;
+  assert.deepEqual([memory.retryAt, memory.deferred], [iso(AT('15:35')), 'a slot freed: 801 no longer open']);
+  for (const at of [AT('15:10'), AT('15:20'), AT('15:30')]) {
+    actions[BOARD].push(act(cards[801], at - MIN));
+    await check(at);
+  }
+  assert.equal(passes().length, 1, 'not again before 15:35');
+  const again = await check(AT('15:35'));
+  assert.equal(passes().length, 2);
+  assert.equal(again.startPass.why, 'a slot freed: 801 no longer open');
+  assert.equal(calls.sessions[0], 'start 502 schedule');
+  assert.equal(readFeed(w.settings.state).starts.retryAt, null);
+});
+
+test('a watcher pass triages only the intake cards newly due; one whose triage failed waits for the morning run or a person', async () => {
+  const { w, actions, cards } = flow({ ready: false });
+  seed(w, AT('14:50'), { starts: morningLeft('2026-11-10', ['801'], [], ['600']) });
+  w.forge.prs.find((p) => p.number === 801).state = 'merged';
+  // 600 was due at the morning run already (its triage failed there); 601 becomes due at 17:00.
+  const old = card({ number: 600, status: 'intake', labels: ['Guide'], lastActivity: iso(AT('06:00')) });
+  const intake = card({ number: 601, status: 'intake', labels: ['Guide'], lastActivity: iso(AT('15:00')) });
+  w.tracker.cards.push(old, intake);
+  const { check, calls, passes } = checker(w, { cards });
+  actions[BOARD].push(act(intake, AT('15:00'), { type: 'createCard' }));
+  await check(AT('15:05'));
+  assert.equal(passes().length, 0, '600 is not new; 601 is not due yet; no ready ticket');
+  await check(AT('17:00'));
+  assert.deepEqual(passes().map((r) => r.triageKeys), [['601']]);
+  const triages = () => calls.sessions.filter((s) => s.startsWith('triage')).length;
+  const tried = triages();
+  assert.ok(tried >= 1, 'the triage session ran (and failed, the stand-in fails it)');
+  // A new ready card later: a pass, with nothing to triage; the failed 601 waits.
+  const owner = card({ number: 503, status: 'ready', labels: ['Guide'] });
+  w.tracker.cards.push(owner);
+  cards[503] = owner;
+  actions[BOARD].push(act(owner, AT('17:20'), { type: 'createCard' }));
+  await check(AT('17:25'));
+  assert.deepEqual(passes().map((r) => r.triageKeys), [['601'], []]);
+  assert.equal(triages(), tried, 'no second triage of 601 on a change');
+});
+
+test('the first check after an update, with no memory and the morning run done: a pass; a dry run plans the start and writes no memory', async () => {
   const { w, cards, merge } = flow();
   merge(AT('14:00'));
   seed(w, AT('14:50'));
@@ -310,7 +385,12 @@ test('the change rule and the counts that leave no room', () => {
   assert.equal(changeOf(p(['1'], ['2']), p(['1'], ['2'])), null);
   assert.equal(changeOf(p(['1'], ['2']), p([], ['2'])), 'a slot freed: 1 no longer open');
   assert.equal(changeOf(p(['1'], ['2']), p(['1'], ['2', '3'], ['4'])), 'newly ready: 3; due for triage: 4');
-  assert.equal(changeOf(p(['1'], ['2']), p(['1', '2'], [])), 'the open tickets or the ready groups changed');
+  // What can't make room or a triage counts for nothing: the open tickets growing, a ready group gone, a card back
+  // in its quiet hours.
+  assert.equal(changeOf(p(['1'], ['2']), p(['1', '2'], [])), null);
+  assert.equal(changeOf(p(['1'], ['2', '3']), p(['1'], ['3'])), null);
+  assert.equal(changeOf(p(['1'], ['2'], ['4']), p(['1'], ['2'], [])), null);
+  assert.equal(changeOf(p(['1', '5'], ['2'], ['4']), p(['1', '6'], ['2'], ['4', '7'])), 'a slot freed: 5 no longer open; due for triage: 7');
   const wip = (o) => ({ inProgress: 0, waiting: 0, open: 0, openKeys: [], limits: { inProgress: 3, waiting: 5, open: null }, ...o });
   assert.equal(noRoomOf(wip({})), null);
   assert.equal(noRoomOf(wip({ open: 1, openKeys: ['7'], limits: { inProgress: 3, waiting: 5, open: 1 } })), '1 open (7) of 1');

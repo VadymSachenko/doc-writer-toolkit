@@ -729,6 +729,9 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
   // `startUntil` (ms): the end of the watcher's start hours. A start pass triages nothing and starts no further group
   // from then on; a group it started goes on with its next steps, as after any scheduled start.
   const startUntil = startPass && Number.isFinite(options.startUntil) ? options.startUntil : null;
+  // `triageKeys`: the intake cards a start pass may triage (those newly due since the watcher's last look). An intake
+  // card has no ledger, so a failed triage holds nothing: without this a pass would try it again at every change.
+  const triageKeys = startPass && Array.isArray(options.triageKeys) ? options.triageKeys.map(String) : null;
   const hoursOver = () => startUntil !== null && clock() >= startUntil;
   const manual = trigger === 'manual';
   // A failed step that waits for a person runs again once at the next morning run, or when the owner runs it by hand.
@@ -810,7 +813,7 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
   // Mornings and the watcher's start pass: triage every intake card quiet for its hours, high priority first, in one
   // session. A manual run that names tickets triages only those.
   if (morning || (startPass && !hoursOver())) {
-    const due = st.intake.due.filter((c) => !manual || !named.length || named.includes(c.key)).slice(0, settings.limits.triageBatch);
+    const due = st.intake.due.filter((c) => (!manual || !named.length || named.includes(c.key)) && (!triageKeys || triageKeys.includes(String(c.key)))).slice(0, settings.limits.triageBatch);
     if (due.length) {
       const step = { stage: 'triage', role: 'triage', keys: due.map((c) => c.key), group: null, cards: due.map((c) => ({ key: c.key, url: c.card.url, shortLink: c.card.shortLink, priority: c.priority })) };
       if (planOnly) out.triage = describe(step);
