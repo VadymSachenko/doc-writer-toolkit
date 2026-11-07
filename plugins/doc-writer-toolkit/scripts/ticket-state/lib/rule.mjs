@@ -11,8 +11,8 @@ import { prId } from './ledger.mjs';
 //    5 a PR closed unmerged                           outside; reported
 //    6 the card's list differs from left.list        a person moved it: follow the move
 //    7 a stage recorded running, no live lock         interrupted; run it again
-//    8-12 per PR: a hand edit; placesWait with a review requested; placesWait with no open place; new comments;
-//         finalReview: the first chain stage not done for the head
+//    8-12 per PR: a hand edit, or a UA change after ready for merge; finalReview with a new review requested; new
+//         comments; translation: the first chain stage not done for the head
 //   13 videoGate                                      the automatic try, the fallback, or the import
 //   14 ready and a free slot                          start (the `startable` groups, see limits.mjs)
 //   15 otherwise                                      the state's own next step
@@ -41,10 +41,14 @@ const dayOf = (ms, timeZone) => new Intl.DateTimeFormat('en-CA', { timeZone, yea
 // when its record was made later (`seq`).
 const doneAfter = (l, stage, after) => l.stages?.[stage]?.status === 'done' && (!after || (l.stages?.[after]?.status === 'done' && l.stages[stage].seq > l.stages[after].seq));
 
+// A chain stage left running on a PR that isn't at `translation` now (an old ledger, a person's move back) waits for a
+// person's move like the rest of the chain: no session starts for it.
 function runningStage(l) {
   for (const [stage, rec] of Object.entries(l.stages ?? {})) if (rec?.status === 'running') return { stage };
   for (const pr of l.prs ?? []) {
-    for (const [stage, rec] of Object.entries({ ...(pr.chain ?? {}), ...(pr.steps ?? {}) })) if (rec?.status === 'running') return { stage, pr: prId(pr) };
+    for (const [stage, rec] of Object.entries({ ...(pr.chain ?? {}), ...(pr.steps ?? {}) })) {
+      if (rec?.status === 'running' && (!CHAIN.includes(stage) || pr.stage === 'translation')) return { stage, pr: prId(pr) };
+    }
   }
   return null;
 }
@@ -74,15 +78,13 @@ function preparationStep(l) {
   return null;
 }
 
-const openPlaces = (l, pr) => (l.places ?? []).filter((p) => p.repo === pr.repo && Number(p.pr) === Number(pr.number) && (p.state ?? 'open') === 'open').length;
-
 const GATES = {
   needsInfo: { who: 'team', why: 'a person removes the needs-info label' },
   questions: { who: 'owner', why: 'answers on the card, then the card back to In progress' },
   planGate: { who: 'owner', why: 'the section plan: moving the card back approves it' },
-  placesWait: { who: 'owner', why: 'answer the places in their threads, or request a reviewer' },
   reworkWait: { who: 'owner', why: 'a person moved the card back to In progress' },
   smeReview: { who: 'reviewer', why: 'the review, then a person moves the card' },
+  finalReview: { who: 'owner', why: "the owner's read of the UA: comments first, then the card to In translation, or a reviewer requested" },
   readyForMerge: { who: 'owner', why: 'the final edit and the merge' },
   ownerBlock: { who: 'owner', why: "the owner's own block" },
   paused: { who: 'owner', why: 'a person moved the card back to the ready status' },
@@ -297,10 +299,17 @@ function derive(l, w) {
         out.steps.push(s);
       }
     }
-    // The card stands where the least advanced PR is. If the pipeline left it elsewhere, it moves it.
+    // The card stands where the least advanced PR is. If the pipeline left it elsewhere, it moves it. Back from In
+    // translation with every PR ready for merge: the chain is done, and the card says so.
     const expected = CARD_STATUS_OF[PR_ORDER[least]];
-    if (expected && expected !== status && card.list?.id === l.left?.list?.id && !out.steps.some((s) => s.stage === 'move' && !s.pr)) {
-      out.steps.unshift(step('move', { to: expected, card: true }));
+    // Never into In translation by itself: only a person's move (or the other card of the same PR, lib/runner.mjs) goes there.
+    if (expected && expected !== status && expected !== 'translation' && card.list?.id === l.left?.list?.id && !out.steps.some((s) => s.stage === 'move' && !s.pr)) {
+      out.steps.unshift(step('move', { to: expected, card: true, ...(status === 'translation' && PR_ORDER[least] === 'readyForMerge' ? { ready: true } : {}) }));
+    }
+    // A place from the code with no reference at a commit: its comment is posted, so the record stood; it is reported.
+    for (const p of prs) {
+      const missing = (l.places ?? []).filter((x) => x.noRef && x.repo === p.pr.repo && Number(x.pr) === Number(p.pr.number)).map((x) => x.id);
+      if (missing.length) out.mismatch.push(`${prId(p.pr)}: ${missing.length} place(s) from the code with no reference at a commit: ${missing.join(', ')}`);
     }
     return out;
   }
@@ -393,7 +402,7 @@ function personMoved(l, w, out, prs) {
     }
     return out;
   }
-  out.state = to === 'finalReview' ? 'finalReview' : to === 'smeReview' ? 'smeReview' : to === 'inProgress' ? 'reworkWait' : stateOf(l, prs, to, phase);
+  out.state = ['finalReview', 'translation', 'smeReview'].includes(to) ? to : to === 'inProgress' ? 'reworkWait' : stateOf(l, prs, to, phase);
   out.steps.push(step('follow', { to, ...(PR_STAGE_OF_STATUS[to] ? { prStage: PR_STAGE_OF_STATUS[to] } : {}) }));
   return out;
 }
@@ -412,17 +421,23 @@ function prStep(l, p, w, out, prs) {
   const hand = handCommits(pr, head, w);
   if (hand === null) out.notes.push(`${id}: the head ${String(head ?? '').slice(0, 7)} is not fetched here: hand edits and stale chain stages are not checked`);
   else {
-    if (hand.length) {
-      if (pr.readyForMerge?.length) {
-        // A hand commit after ready for merge: the re-sync, then the visual pack if it changed an image, then ready again.
+    if (hand.length && p.stage !== 'readyForMerge') out.mismatch.push(`${id}: ${hand.length} commit(s) on the branch the pipeline didn't make: a hand edit, kept; the next stage reads the branch`);
+    // A UA change after ready for merge, whoever made it (the owner's final edit, an answer to a comment): the re-sync,
+    // then the visual pack if it changed an image, then ready again. An id-only change keeps the PR ready (D-073,
+    // `changedUnder`), and so does a commit that left UA alone, unless a person made it.
+    const ready = pr.readyForMerge?.at(-1);
+    if (p.stage === 'readyForMerge' && ready && head && ready.head !== head) {
+      const changed = w.git?.changedUnder(target, ready.head, head, uaRoots(pr, w, target)) ?? null;
+      if (changed === null && !hand.length) out.notes.push(`${id}: ready for merge at ${String(ready.head).slice(0, 7)}, the head is ${String(head).slice(0, 7)}, and git here can't compare them`);
+      if (hand.length || changed?.length) {
         const after = handAfterReady(pr, p, w, target, head, hand.length, out);
         if (after) return after;
-      } else out.mismatch.push(`${id}: ${hand.length} commit(s) on the branch the pipeline didn't make: a hand edit, kept; the next stage reads the branch`);
+      }
     }
   }
-  // The approval (the SME review, or the places settled) saw a head; a word change in UA since then is reported. An
-  // id-only change (heading ids, link fragments) keeps it (D-073).
-  if (pr.approval?.head && head && pr.approval.head !== head && ['finalReview', 'readyForMerge'].includes(p.stage)) {
+  // The approval (a person's move of the card to In translation) saw a head; a word change in UA since then is reported.
+  // An id-only change (heading ids, link fragments) keeps it (D-073).
+  if (pr.approval?.head && head && pr.approval.head !== head && ['translation', 'readyForMerge'].includes(p.stage)) {
     const roots = uaRoots(pr, w, target);
     const changed = w.git?.changedUnder(target, pr.approval.head, head, roots) ?? null;
     const v = out.prs.find((x) => x.id === id);
@@ -431,31 +446,33 @@ function prStep(l, p, w, out, prs) {
       out.mismatch.push(`${id}: ${changed.length} UA page(s) changed after the approval at ${String(pr.approval.head).slice(0, 7)}: the review saw another text`);
     } else if (changed) v.approvalStale = 0;
   }
-  // Row 9.
-  if (p.stage === 'placesWait' && world.reviewRequests.length) return step('move', { pr: id, to: 'smeReview' });
-  // Row 10.
-  if (p.stage === 'placesWait' && openPlaces(l, pr) === 0) return step('move', { pr: id, to: 'finalReview' });
+  // Row 9: a person asked a reviewer on a `places` PR in the owner's queue. A request the move already took along (a
+  // reviewer who hasn't answered when a person moved the card back) doesn't move it again.
+  if (p.stage === 'finalReview' && pr.review === 'places' && newReviewRequests(pr, world).length) return step('move', { pr: id, to: 'smeReview' });
   // Row 11.
   if (world.newComments?.length) {
     const owner = world.newComments.filter((c) => c.by === 'owner').length;
     return step('answerComments', { pr: id, comments: world.newComments.length, owner, reviewer: world.newComments.length - owner });
   }
-  // Two PRs: an approved PR goes on by itself while the card stands where the slower PR is.
+  // Two PRs: an approved PR goes on to the owner's queue by itself while the card stands where the slower PR is. That
+  // starts nothing: both wait for the card.
   if (p.stage === 'smeReview' && world.reviewDecision === 'APPROVED' && prs.some((o) => o !== p && rank(o.stage) < rank(p.stage))) {
     return step('move', { pr: id, to: 'finalReview', approved: true });
   }
   // Row 12.
-  if (p.stage === 'finalReview') return chainStep(l, p, w, out, target, head);
+  if (p.stage === 'translation') return chainStep(l, p, w, out, target, head);
   return null;
 }
 
-// Row 8 after ready for merge: the hand commit's blocks re-synced (`resync`), then, when an image changed since the
-// visual pack saw the branch, the pack again (`visualPack`), and only then `readyForMerge` for the new head.
+const newReviewRequests = (pr, world) => (world.reviewRequests ?? []).map((r) => r.login ?? r.team ?? r).filter((r) => !(pr.reviewersRequested ?? []).map(String).includes(String(r)));
+
+// Row 8 after ready for merge: the changed blocks re-synced (`resync`), then, when an image changed since the visual
+// pack saw the branch, the pack again (`visualPack`), and only then `readyForMerge` for the new head.
 function handAfterReady(pr, p, w, target, head, commits, out) {
   const id = prId(pr);
   if (pr.readyForMerge.at(-1).head === head) return null;
   const synced = pr.steps?.resync?.status === 'done' && pr.steps.resync.head === head;
-  if (!synced) return step('resync', { pr: id, head, commits });
+  if (!synced) return step('resync', { pr: id, head, since: pr.readyForMerge.at(-1).head, commits });
   const pack = pr.chain?.visualPack;
   if (pack?.head && pack.head !== head) {
     const images = w.git?.imagesChanged?.(target, pack.head, head) ?? null;
@@ -480,8 +497,8 @@ function chainStep(l, p, w, out, target, head) {
       else if (changed.length) return step(stage, { pr: id, head, stale: changed.length });
     }
   }
-  if (!(pr.readyForMerge ?? []).some((r) => r.head === head)) return step('readyForMerge', { pr: id, head });
-  return null;
+  // Every stage is done for this head: ready again. So a person's move here with nothing changed starts no model step.
+  return step('readyForMerge', { pr: id, head });
 }
 
 function uaRoots(pr, w, target) {
@@ -534,7 +551,7 @@ export function rebuiltState(card, prViews) {
   if (status === 'ready') return 'ready';
   if (status === 'blocked') return 'questions';
   if (status === 'smeReview') return 'smeReview';
-  if (status === 'finalReview') return prViews.length && prViews.every((p) => p.state === 'merged') ? 'merged' : 'finalReview';
+  if (status === 'finalReview' || status === 'translation') return prViews.length && prViews.every((p) => p.state === 'merged') ? 'merged' : status;
   if (status === 'inProgress') return prViews.some((p) => p.state === 'open') ? 'writing' : 'planning';
   if (status === 'done' || status === 'outOfScope') return 'closed';
   if (status === 'intake') return 'new';

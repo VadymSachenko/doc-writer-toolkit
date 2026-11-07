@@ -10,13 +10,13 @@ import { allLocks, takeLock, releaseLock, renewLock } from './locks.mjs';
 import { runRecord, cardStatusFor } from './record.mjs';
 import { runUnlock } from './handover.mjs';
 import { allowanceOf, parseUsage } from './allowance.mjs';
-import { CARD_STATUS_OF, LABEL_OF, PR_STAGE_OF_STATUS, PRIORITY_RANK, finishRank } from './stages.mjs';
+import { LABEL_OF, PR_STAGE_OF_STATUS, PRIORITY_RANK, finishRank, followsMove } from './stages.mjs';
 import { appendRunLog, localDate, readRunLog, renderReport, writeReport } from './report.mjs';
 import { ROLES } from './settings.mjs';
 import { cleanupTicket } from './cleanup.mjs';
 import { removeClosedMarkdown } from './import.mjs';
 import { DOWNLOAD_DIRS_VARIABLE, ROLE_SESSION_VARIABLE, childEnv, sessionChildEnv } from './env.mjs';
-import { clonePath, ensureWorktree, prsForStep, worktreePath } from './worktree.mjs';
+import { clonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureWorktree, prsForStep, worktreePath } from './worktree.mjs';
 import { BUSY_NAME, LOCK_NAME, busyEnded, freeBrowserLock } from './browser-lock.mjs';
 import { HOOK_VARIABLE, commandsOfRules, hookSettings } from './role-hook.mjs';
 import { parseClaudeConfig } from '../../ui-labels/lib/config.mjs';
@@ -142,14 +142,14 @@ export const jobDenied = (settings, roots = scriptRoots(settings)) => [...new Se
 export const NODE_SCRIPTS = ['ticket-state/ticket-state.mjs record', 'ticket-state/ticket-state.mjs status', 'ticket-state/ticket-state.mjs config', 'tracker/tracker.mjs', 'forge/forge.mjs', 'locale-sync/locale-sync.mjs', 'ui-labels/ui-labels.mjs', 'doc-align/doc-align.mjs', 'screenshot-locales/screenshot-locales.mjs', 'section-state/section-state.mjs', 'visual-pack/visual-pack.mjs', 'video-parts/video-parts.mjs', 'ticket-state/browser-lock.mjs'];
 // Each role's own, from what its stages and the skills it runs call. Triage reads and answers cards and writes nothing else;
 // the writer's skills run the UI label check and the screenshot paths; the translator's run the locale pipeline and the
-// alignment check; the reviewer builds the visual pack. The last two read a PR's base with `forge pr-state`, which neither
-// `status` nor the brief gives. A role's list narrows only: a script not in it has no rule, and
+// alignment check; the reviewer builds the visual pack, and adds what the EN review left open to the PR's description
+// (`forge edit-pr`). The last two read a PR's base with `forge pr-state`, which neither `status` nor the brief gives. A role's list narrows only: a script not in it has no rule, and
 // the role's hook refuses it however it is spelled.
 const STATE_SCRIPTS = ['ticket-state/ticket-state.mjs record', 'ticket-state/ticket-state.mjs status', 'ticket-state/ticket-state.mjs config'];
 export const ROLE_SCRIPTS = {
   triage: [...STATE_SCRIPTS, 'tracker/tracker.mjs'],
   writer: [...STATE_SCRIPTS, 'ticket-state/browser-lock.mjs', 'tracker/tracker.mjs', 'forge/forge.mjs', 'ui-labels/ui-labels.mjs', 'screenshot-locales/screenshot-locales.mjs', 'video-parts/video-parts.mjs'],
-  reviewer: [...STATE_SCRIPTS, 'visual-pack/visual-pack.mjs', 'forge/forge.mjs pr-state'],
+  reviewer: [...STATE_SCRIPTS, 'visual-pack/visual-pack.mjs', 'forge/forge.mjs pr-state', 'forge/forge.mjs edit-pr'],
   translator: [...STATE_SCRIPTS, 'locale-sync/locale-sync.mjs', 'ui-labels/ui-labels.mjs', 'doc-align/doc-align.mjs', 'screenshot-locales/screenshot-locales.mjs', 'forge/forge.mjs pr-state'],
 };
 export const scriptRulesFor = (roots = [], role = null) => [...new Set(roots.flatMap((r) => (role ? ROLE_SCRIPTS[role] : NODE_SCRIPTS).map((s) => `Bash(node ${path.join(r, 'scripts', s)}:*)`)))];
@@ -201,7 +201,7 @@ export function writeDeniedFor(settings, roots = []) {
     ...[...new Set(own)].map((f) => `Edit(${abs(f)})`),
     ...ENV_FILES.map((f) => `Read(//**/${f})`),
     ...roots.map((r) => `Edit(${abs(r)}/**)`),
-    ...['tickets', 'locks', 'roles', 'watch', 'jobs', 'runs', 'reports', LOCK_NAME, BUSY_NAME].map((d) => `Edit(${abs(path.join(state, d))}/**)`),
+    ...['tickets', 'locks', 'roles', 'watch', 'jobs', 'runs', 'reports', 'code', LOCK_NAME, BUSY_NAME].map((d) => `Edit(${abs(path.join(state, d))}/**)`),
     // The browser lock and the busy notes go only through browser-lock.mjs: no holder-less lock, no forged holder.
     ...[LOCK_NAME, BUSY_NAME].map((d) => `Edit(${abs(path.join(state, d))})`),
     ...['rearmed.json', 'roles-proposal.json'].map((f) => `Edit(${abs(path.join(state, f))})`),
@@ -353,9 +353,11 @@ export function briefFor(step, settings) {
     step.interrupted ? 'The last run of this stage was interrupted: read what it left and finish it.' : null,
     step.withoutVideo ? 'The owner moved the card back before every video part had its transcript: go on without the video, and say so in the plan comment.' : null,
     step.changed ? 'The section plan file changed after its gate: post the new plan and move the card back to Blocked (a new gate).' : null,
+    step.stage === 'resync' && step.since ? `UA changed since ready for merge at ${step.since}: re-sync the blocks changed in ${step.since}..${step.head ?? 'HEAD'}.` : null,
     step.stale ? `The UA pages changed after this stage last ran (${step.stale} file(s)): run it again on the current head.` : null,
     step.cards ? `Cards, highest priority first:\n${step.cards.map((c) => `- ${c.key}: ${c.url ?? c.shortLink} (${c.priority})`).join('\n')}` : null,
     step.worktrees?.length ? worktreeLines(step.worktrees) : null,
+    step.codeTrees?.length ? codeLines(step.codeTrees) : null,
     '',
     `Host repo: ${root}`,
     `The toolkit's scripts folder: ${path.join(PLUGIN_ROOT, 'scripts')}`,
@@ -381,6 +383,24 @@ function worktreeLines(trees) {
   ].join('\n');
 }
 
+// What the brief says about the code the session may read: the checkout at the commit the runner just fetched.
+function codeLines(trees) {
+  return [
+    'Code repos, each a read-only checkout at the commit the runner fetched for this session. Read code only here, with Read and Grep, never in a clone, whose files may be weeks old (Read and Grep are denied there). A fact from the code carries its reference when you read it: repo, path, lines and the commit below.',
+    ...trees.map((t) => (t.error ? `- ${t.repo}: not available (${t.error}). A fact only this code could answer stays a marker.` : `- ${t.repo}: ${t.path}, commit ${t.commit}${t.url ? `; a link to lines: ${t.url}/blob/${t.commit}/<path>#L<from>-L<to>` : ''}.${t.notes?.length ? ` Note: ${t.notes.join('; ')}.` : ''}`)),
+  ].join('\n');
+}
+
+// The roles that read code as evidence.
+const CODE_ROLES = new Set(['writer', 'reviewer']);
+// Every role is denied the owner's clones of the code repos (`path`), whose working tree may be weeks old, and writing
+// in the runner's own clones and checkouts.
+const codeDenied = (settings) => {
+  const apps = settings.appRepos ?? [];
+  const owners = apps.filter((a) => a.path).map((a) => abs(path.resolve(settings.root, a.path)));
+  return [...new Set([...owners.flatMap((c) => [`Read(${c}/**)`, `Edit(${c}/**)`]), ...(apps.length ? [`Edit(${abs(codeTreesRoot(settings))}/**)`] : [])])];
+};
+
 export function commandFor(step, settings, { model, agentsPath, claude = 'claude', roleDir = ROLE_DIR, roots = scriptRoots(settings) }) {
   const role = settings.roles[step.role];
   const def = readRole(step.role, roleDir);
@@ -390,16 +410,17 @@ export function commandFor(step, settings, { model, agentsPath, claude = 'claude
   const roleRules = [...def.allowedTools, ...(role.allowedTools ?? [])].filter((r) => !UNSCOPED_WRITE.test(r));
   const trees = step.worktrees ?? [];
   const dirsOf = trees.map((t) => t.path);
-  const readDirs = trees.length ? [] : [...new Set(settings.targets.map((t) => clonePath(settings, t)).filter(Boolean))];
+  const codeDirs = (step.codeTrees ?? []).filter((t) => !t.error).map((t) => t.path);
+  const readDirs = [...(trees.length ? [] : [...new Set(settings.targets.map((t) => clonePath(settings, t)).filter(Boolean))]), ...codeDirs];
   const allowed = [...new Set([...withGitC(roleRules, dirsOf), ...cloneReadRules(roleRules, readDirs), ...writeAllowedFor(step, settings), ...scriptRulesFor(roots, step.role), ...pushRulesFor(trees), ...fetchRulesFor(trees), ...lsRemoteRulesFor(trees)])];
   // A role that doesn't run Playwright doesn't get it from the hub's `npx playwright:*`.
   const noPlaywright = roleRules.some((r) => r.startsWith('Bash(npx playwright')) ? [] : ['Bash(npx playwright:*)'];
-  const disallowed = [...new Set([...def.disallowedTools, ...(role.disallowedTools ?? []), ...PUSH_DENIED_PLAIN, ...BRANCH_DENIED, ...deniedFor(dirsOf), ...dirsOf.flatMap((d) => [`Bash(git -C ${d} branch:*)`, `Bash(git -C ${d} grep:*)`]), ...ROLE_DENIED, ...noPlaywright, ...scriptFlagsDenied(roots), ...writeDeniedFor(settings, roots), ...(trees.length ? checkoutDeniedFor(settings) : []), ...SETUP_DENIED])];
+  const disallowed = [...new Set([...def.disallowedTools, ...(role.disallowedTools ?? []), ...PUSH_DENIED_PLAIN, ...BRANCH_DENIED, ...deniedFor(dirsOf), ...dirsOf.flatMap((d) => [`Bash(git -C ${d} branch:*)`, `Bash(git -C ${d} grep:*)`]), ...ROLE_DENIED, ...noPlaywright, ...scriptFlagsDenied(roots), ...writeDeniedFor(settings, roots), ...(trees.length ? checkoutDeniedFor(settings) : []), ...SETUP_DENIED, ...codeDenied(settings)])];
   // The folders a session may reach (`--add-dir`, and so `cd`): the step's worktrees; a step with none (triage, the plan)
   // reads the target clones instead.
   // The toolkit roots too, so `ls` works where a session reads its scripts: probed, this loads no further skill or plugin,
   // and `writeDeniedFor` keeps them closed to Write and the hook to `mkdir`.
-  const dirs = [...new Set([...(trees.length ? dirsOf : settings.targets.map((t) => (t.path ? path.resolve(settings.root, t.path) : null))), ...roots].filter((d) => d && d !== settings.root))];
+  const dirs = [...new Set([...(trees.length ? dirsOf : settings.targets.map((t) => (t.path ? path.resolve(settings.root, t.path) : null))), ...codeDirs, ...roots].filter((d) => d && d !== settings.root))];
   const args = [
     '-p',
     briefFor(step, settings),
@@ -539,10 +560,13 @@ export function scriptedCalls(step, ledger, settings) {
         const expected = cardStatusFor(after);
         return [...label(pr, step.to), ...(expected && expected !== step.card?.status ? [`tracker move ${card} --to ${expected}`] : [])];
       }
-      return [...ledger.prs.filter((p) => p.number && !p.merged).flatMap((p) => label(p, p.stage)), `tracker move ${card} --to ${step.to}`];
+      return [...ledger.prs.filter((p) => p.number && !p.merged).flatMap((p) => label(p, p.stage)), ...(step.ready ? [`tracker comment ${card} --text <the ready comment>`] : []), `tracker move ${card} --to ${step.to}`];
     }
     case 'follow':
-      return ledger.prs.filter((p) => p.number && CARD_STATUS_OF[p.stage] === ledger.left?.status && PR_STAGE_OF_STATUS[step.to]).flatMap((p) => label(p, PR_STAGE_OF_STATUS[step.to]));
+      return [
+        ...ledger.prs.filter((p) => p.number && followsMove(p.stage, ledger.left?.status, step.to)).flatMap((p) => label(p, PR_STAGE_OF_STATUS[step.to])),
+        ...cardsMovedWith(step, ledger, settings).map((o) => `tracker move ${o.card?.shortLink ?? o.card?.id} --to ${step.to}`),
+      ];
     case 'close':
       return step.card?.status === 'done' ? [] : [`tracker move ${card} --to done`];
     case 'videoBlock':
@@ -552,6 +576,16 @@ export function scriptedCalls(step, ledger, settings) {
     default:
       return [];
   }
+}
+
+// A PR with two cards: a person's move of either card into In translation, or back out of it, is a move for the other
+// too, so one chain never runs for one card and not the other. The other tickets of the group that share a PR with this
+// one and stand where this card stood, in the pipeline's hands. Only those moves: other moves keep each card on its own.
+function cardsMovedWith(step, ledger, settings) {
+  const from = ledger.left?.status;
+  if (step.to !== 'translation' && from !== 'translation') return [];
+  const shared = new Set((ledger.prs ?? []).filter((p) => p.number).map(prId));
+  return readAllLedgers(settings.state).filter((o) => o.key !== ledger.key && !step.keys.includes(o.key) && o.group === ledger.group && o.mode === 'pipeline' && o.left?.status === from && o.stages?.close?.status !== 'done' && (o.prs ?? []).some((p) => p.number && shared.has(prId(p)) && followsMove(p.stage, from, step.to)));
 }
 
 async function runScripted(step, ctx) {
@@ -567,23 +601,42 @@ async function runScripted(step, ctx) {
   const rec = (k, extra = {}) => runRecord({ settings, clients, key: k, stage: step.stage, status: 'done', pr: step.pr, now: (io.now ?? Date.now)(), ...extra });
   switch (step.stage) {
     case 'move': {
+      // Each ticket of the step moves its own card: a PR with two cards has two.
       if (step.pr) {
-        const pr = findPr(ledger, step.pr);
-        await setLabel(pr, step.to);
-        const after = structuredClone(ledger);
-        findPr(after, step.pr).stage = step.to;
-        const expected = cardStatusFor(after);
-        if (expected) await clients.tracker.move({ card, to: expected });
-        for (const k of step.keys) await rec(k, { to: step.to });
+        await setLabel(findPr(ledger, step.pr), step.to);
+        for (const k of step.keys) {
+          const after = structuredClone(readLedger(settings.state, k));
+          findPr(after, step.pr).stage = step.to;
+          const expected = cardStatusFor(after);
+          if (expected) await clients.tracker.move({ card: after.card.shortLink ?? after.card.id, to: expected });
+          await rec(k, { to: step.to });
+        }
         return;
       }
       for (const p of ledger.prs.filter((x) => x.number && !x.merged)) await setLabel(p, p.stage);
-      await clients.tracker.move({ card, to: step.to });
-      for (const k of step.keys) await rec(k, { to: step.to });
+      for (const k of step.keys) {
+        const l = readLedger(settings.state, k);
+        const own = l.card.shortLink ?? l.card.id;
+        // The chain is done: said on the card once per ready head, and kept apart from what a person writes.
+        let result;
+        if (step.ready) {
+          const since = l.prs.flatMap((p) => p.readyForMerge ?? []).map((r) => r.at).filter(Boolean).sort().at(-1);
+          const c = await clients.tracker.comment({ card: own, text: settings.readyComment, unlessHeader: settings.readyComment, ...(since ? { since } : {}) });
+          const id = c.id ?? c.existing ?? null;
+          if (id) result = JSON.stringify({ posted: { card: [id] } });
+        }
+        await clients.tracker.move({ card: own, to: step.to });
+        await rec(k, { to: step.to, ...(result ? { result } : {}) });
+      }
       return;
     }
     case 'follow': {
-      for (const p of ledger.prs.filter((x) => x.number && CARD_STATUS_OF[x.stage] === ledger.left?.status && PR_STAGE_OF_STATUS[step.to])) await setLabel(p, PR_STAGE_OF_STATUS[step.to]);
+      for (const p of ledger.prs.filter((x) => x.number && followsMove(x.stage, ledger.left?.status, step.to))) await setLabel(p, PR_STAGE_OF_STATUS[step.to]);
+      // The other card first: a stop here leaves this ticket's move still to follow, and the run starts it again.
+      for (const o of cardsMovedWith(step, ledger, settings)) {
+        await clients.tracker.move({ card: o.card.shortLink ?? o.card.id, to: step.to });
+        await runRecord({ settings, clients, key: o.key, stage: 'follow', status: 'done', to: step.to, now: (io.now ?? Date.now)() });
+      }
       for (const k of step.keys) await rec(k, { to: step.to });
       return;
     }
@@ -732,7 +785,8 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
     }
     // The worktrees a live run would make or bring up to date: named, nothing made.
     const trees = prsForStep(step, step.keys.map((k) => readLedger(settings.state, k))).map((p) => ({ repo: p.repo, branch: p.branch, path: worktreePath(settings, p), push: `git -C ${worktreePath(settings, p)} push origin HEAD:refs/heads/${p.branch}` }));
-    const cmd = commandFor({ ...step, worktrees: trees }, settings, { model: settings.roles[step.role].model, agentsPath: path.join(settings.state, 'roles', 'agents.json'), claude });
+    const codeTrees = CODE_ROLES.has(step.role) ? (settings.appRepos ?? []).map((a) => ({ repo: a.repo, path: codeTreePath(settings, a, '<commit>'), commit: '<fetched at the run>', url: a.url })) : [];
+    const cmd = commandFor({ ...step, worktrees: trees, codeTrees }, settings, { model: settings.roles[step.role].model, agentsPath: path.join(settings.state, 'roles', 'agents.json'), claude });
     const held = guardReason();
     return { ...pick(step), runs: `claude -p as ${agentName(step.role)}`, model: cmd.model, effort: cmd.effort, ...(trees.length ? { worktrees: trees.map((t) => t.path) } : {}), ...(held ? { guard: `a live run would not start it: ${held}` } : {}), command: [cmd.bin, ...cmd.args] };
   };
@@ -919,7 +973,12 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
         const trees = prsForStep(step, step.keys.map((k) => readLedger(settings.state, k))).map((p) => (io.ensureWorktree ?? ensureWorktree)(settings, p));
         const stuck = trees.flatMap((t) => (t.stuck ?? []).map((n) => `${t.path}: ${n}`));
         if (stuck.length) throw new Error(stuck.join('; '));
-        step = { ...step, worktrees: trees };
+        // The code as fetched now. One that can't be fetched or checked out is said in the brief, and stops no session.
+        // With no other session running (no live lock but this step's), the checkouts of other commits go.
+        const mine = new Set([step.group ?? step.keys[0], ...held]);
+        const othersRunning = allLocks(settings.state, clock()).some((l) => l.live && !mine.has(l.group));
+        const codeTrees = CODE_ROLES.has(step.role) ? (settings.appRepos ?? []).map((a) => (io.ensureCodeTree ?? ensureCodeTree)(settings, a, { othersRunning })) : [];
+        step = { ...step, worktrees: trees, codeTrees };
       } catch (e) {
         const note = `the worktree: ${String(e.message).slice(0, 400)}`;
         for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'failed', pr: step.pr, note, now: clock() }).catch(() => {});

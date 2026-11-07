@@ -190,13 +190,13 @@ export function createForge({ adapter, forge, dryRun = false }) {
     },
 
     // The state of one PR, by number or by head branch.
-    async prState({ repo: repoIn, number, head }) {
+    async prState({ repo: repoIn, number, head, withBody = false }) {
       const repo = repoOf(repoIn);
       if ((number === undefined || number === null) === !head) throw new CliError('prState needs exactly one of --number or --head', { code: 2 });
       const pr = head ? await adapter.prByHead({ repo, head: String(head).trim() }) : await adapter.pr({ repo, number: needNumber(number) });
       if (!pr) throw new Refusal('unknown', `no PR for the head '${head}' in ${repo}`, { head });
       const { nodeId, body, ...rest } = pr;
-      return { repo, ...rest };
+      return { repo, ...rest, ...(withBody ? { body } : {}) };
     },
 
     // Which PRs changed since a time: all states, newest update first.

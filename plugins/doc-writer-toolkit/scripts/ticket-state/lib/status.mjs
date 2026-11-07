@@ -75,7 +75,7 @@ export async function computeStatus({ settings, clients, now = Date.now(), only 
         const needsInfo = hasLabel(card, settings.intake.needsInfoLabel);
         const t = { ...base, group: key, ledger: 'absent', mode: 'pipeline', startedBy: null, state: needsInfo ? 'needsInfo' : 'ready', next: null, steps: [], gate: needsInfo ? { who: 'team', why: 'a person removes the needs-info label' } : null, mismatch: [], notes: [triaged ? 'triaged before the ledger existed' : "an owner's card that names a docs target"], prs: [], counts: null, counted: false, locked: Boolean(locks.get(key)?.live), triage: { verdict: triaged ? 'legacy' : 'owner-card', targets: check.targets, size: null, relations: [] } };
         tickets.push(t);
-        if (!needsInfo) ready.push({ ...t, number: card.number, name: card.name, desc: card.desc, targets: check.targets, relations: [], pages: [], size: null });
+        if (!needsInfo) ready.push({ ...t, number: card.number, name: card.name, desc: card.desc, targets: check.targets, relations: [], together: [], pages: [], size: null });
         continue;
       }
       const links = prLinks(detail.comments.map((c) => c.text).join('\n'), settings);
@@ -101,7 +101,7 @@ export async function computeStatus({ settings, clients, now = Date.now(), only 
     if (t.ledger !== 'present' || t.state !== 'ready') continue;
     const l = ledgers.find((x) => x.key === t.key);
     const card = cards.get(l.card?.id);
-    ready.push({ ...t, number: card?.number ?? null, name: card?.name ?? l.card?.name, desc: card?.desc ?? '', targets: l.triage?.targets ?? [], relations: l.triage?.relations ?? [], pages: l.triage?.pages ?? [], size: l.triage?.size ?? null });
+    ready.push({ ...t, number: card?.number ?? null, name: card?.name ?? l.card?.name, desc: card?.desc ?? '', targets: l.triage?.targets ?? [], relations: l.triage?.relations ?? [], together: l.triage?.together ?? [], pages: l.triage?.pages ?? [], size: l.triage?.size ?? null });
   }
 
   // Groups, and the tickets in work a ready one waits for (the host's batch skill attaches it or waits; v1 waits).
@@ -109,7 +109,7 @@ export async function computeStatus({ settings, clients, now = Date.now(), only 
   const workView = inWorkTickets.map((t) => {
     const l = ledgers.find((x) => x.key === t.key);
     const card = cards.get(l.card?.id);
-    return { key: t.key, number: card?.number ?? null, name: card?.name ?? '', desc: card?.desc ?? '', targets: l.triage?.targets ?? [], relations: l.triage?.relations ?? [], pages: l.triage?.pages ?? [] };
+    return { key: t.key, number: card?.number ?? null, name: card?.name ?? '', desc: card?.desc ?? '', targets: l.triage?.targets ?? [], relations: l.triage?.relations ?? [], together: l.triage?.together ?? [], pages: l.triage?.pages ?? [] };
   });
   const repos = (t) => new Set((t.targets ?? []).map((id) => settings.targets.find((x) => x.id === id)?.repo).filter(Boolean));
   const groups = groupsOf(ready, settings).map((g) => ({ ...g, waitsFor: workView.filter((w) => g.members.some((m) => related(m, w, repos))).map((w) => w.key) }));

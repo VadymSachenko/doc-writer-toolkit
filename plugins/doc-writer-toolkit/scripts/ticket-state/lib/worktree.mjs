@@ -179,6 +179,66 @@ export function ensureWorktree(settings, pr) {
   return { repo: pr.repo, branch: pr.branch, base, path: wt, clone, head: tryRun(wt, ['rev-parse', 'HEAD']), push: `git -C ${wt} push origin HEAD:refs/heads/${pr.branch}`, linked, missing, notes, stuck };
 }
 
+// A code repo a session reads as evidence (`appRepos`). The runner keeps its own clone of it, bare, under the state
+// folder (`<state>/code/<repo>.git`), made once from the repo's https address (`url`) and fetched before each session,
+// and makes a read-only checkout of the base as fetched, one per commit (`<state>/code/<repo>/<commit, 12 characters>`)
+// and never moved, so two sessions that started at different commits each read their own. The owner's clone (`path`)
+// is never touched: no fetch, no prune, no worktree registered there; the runner denies its files to Read and Grep.
+// When no other session runs (`othersRunning` false), the checkouts of other commits are removed with
+// `git worktree remove`: only the one this session needs stays. One git refuses to remove stays, listed in `kept`.
+// Returns { repo, path, commit, url, notes, removed, kept }; one that can't be cloned, has no fetched base, or can't be
+// checked out comes back with `error`, and the session still runs. `remote` is where a new clone comes from (tests).
+export const codeTreesRoot = (settings) => path.join(path.resolve(settings.state), 'code');
+export const codeClonePath = (settings, app) => path.join(codeTreesRoot(settings), `${app.repo}.git`);
+export const codeTreePath = (settings, app, commit) => path.join(codeTreesRoot(settings), app.repo, String(commit).slice(0, 12));
+// A clone or a fetch never waits for a password: one that needs it fails, and the brief says so.
+const quiet = (args) => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }).trim();
+export function ensureCodeTree(settings, app, { remote = app.url, othersRunning = false } = {}) {
+  const clone = codeClonePath(settings, app);
+  const out = { repo: app.repo, base: app.base, clone, path: null, url: app.url, commit: null, notes: [], removed: [], kept: [] };
+  if (!fs.existsSync(path.join(clone, 'HEAD'))) {
+    if (!remote) return { ...out, error: `no url for ${app.repo} in appRepos: the runner clones the repo from it` };
+    if (fs.existsSync(clone) && fs.readdirSync(clone).length) return { ...out, error: `${clone} exists and is not a clone of ${app.repo}` };
+    try {
+      fs.mkdirSync(path.dirname(clone), { recursive: true });
+      quiet(['clone', '-q', '--bare', '--', remote, clone]);
+    } catch (e) {
+      return { ...out, error: `could not clone ${app.repo}: ${gitError(e)}` };
+    }
+  }
+  try {
+    quiet(['-C', clone, 'fetch', '-q', 'origin', `+refs/heads/${app.base}:refs/remotes/origin/${app.base}`]);
+  } catch {
+    out.notes.push(`could not fetch ${app.base} from origin: this commit may be old, so say so next to each fact read from it`);
+  }
+  const commit = tryRun(clone, ['rev-parse', '--verify', '-q', `refs/remotes/origin/${app.base}^{commit}`]);
+  if (!commit) return { ...out, error: `no ${app.base} fetched into the runner's clone of ${app.repo}` };
+  const wt = codeTreePath(settings, app, commit);
+  try {
+    const registered = listWorktrees(clone).find((x) => canon(x.path) === canon(wt));
+    if (!registered || registered.prunable || !fs.existsSync(wt) || tryRun(wt, ['rev-parse', 'HEAD']) !== commit) {
+      if (fs.existsSync(wt) && fs.readdirSync(wt).length && !registered) return { ...out, path: wt, error: `${wt} exists and is not a checkout of ${app.repo}` };
+      tryRun(clone, ['worktree', 'prune']);
+      if (!registered || registered.prunable || !fs.existsSync(wt)) {
+        fs.mkdirSync(path.dirname(wt), { recursive: true });
+        run(clone, ['worktree', 'add', '-q', '--detach', wt, commit]);
+      } else return { ...out, path: wt, error: `${wt} is not at ${commit.slice(0, 12)}` };
+    }
+  } catch (e) {
+    return { ...out, path: wt, error: `the checkout at ${wt}: ${gitError(e)}` };
+  }
+  if (!othersRunning) {
+    const dir = canon(path.join(codeTreesRoot(settings), app.repo)) + path.sep;
+    for (const t of listWorktrees(clone)) {
+      const at = canon(t.path);
+      if (at === canon(wt) || !at.startsWith(dir)) continue;
+      (tryRun(clone, ['worktree', 'remove', t.path]) === null ? out.kept : out.removed).push(t.path);
+    }
+    tryRun(clone, ['worktree', 'prune']);
+  }
+  return { ...out, path: wt, commit };
+}
+
 // What a write left on one PR branch, checked in its worktree: commits beyond the base, and the branch on origin at the
 // worktree's head. Returns { head, ahead } or { error }. A worktree the write never touched, a commit made elsewhere (in
 // an owner's checkout), or a push of another head is not a written branch. No worktree on this machine: the check

@@ -6,7 +6,7 @@ import { LISTS, NOW, ago, card, pr, tmp } from './fakes.mjs';
 import { ledger, read, snapshot, world } from './helpers.mjs';
 import { makeClients } from '../lib/world.mjs';
 import { runRecord } from '../lib/record.mjs';
-import { lockOf } from '../lib/locks.mjs';
+import { lockOf, takeLock } from '../lib/locks.mjs';
 import { browserLockState, noteBusy, takeBrowserLock } from '../lib/browser-lock.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
 import { BRANCH_DENIED, PLUGIN_ROOT, PUSH_DENIED, PUSH_DENIED_PLAIN, ROLE_DIR, scriptRoots, scriptRulesFor, agentsFile, briefFor, collectSteps, commandFor, nextModelUp, proposeRoles, readRole, runDaily } from '../lib/runner.mjs';
@@ -130,6 +130,23 @@ test('a scheduled run: the session records its stage; a session that does not is
   const log = fs.readFileSync(path.join(w.settings.state, 'runs', `${date}.jsonl`), 'utf8').trim().split('\n').map((x) => JSON.parse(x));
   assert.deepEqual(log.filter((e) => e.kind === 'retry').map((e) => [e.stage, e.from, e.to]), [['plan', 'claude-sonnet-5-5', 'claude-opus-5-5']]);
   assert.ok(fs.existsSync(path.join(w.settings.state, 'roles', 'agents.json')));
+});
+
+test('a writer\'s code checkouts: the others are removed only when no other group holds a live lock', async () => {
+  for (const foreign of [false, true]) {
+    const { w } = busyWorld();
+    w.settings.appRepos = [{ repo: 'code-repo', path: null, base: 'main', url: 'https://code.example/org/code-repo' }];
+    if (foreign) takeLock(w.settings.state, { group: '999', kind: 'manual', stage: 'write', leaseMinutes: 120, now: NOW });
+    const seen = [];
+    const ensureCodeTree = (s, app, opts) => {
+      seen.push(opts.othersRunning);
+      return { repo: app.repo, error: 'not here', notes: [] };
+    };
+    const spawnClaude = async () => ({ code: 1, stdout: "", stderr: "stop" });
+    await runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: () => usageAt(5), now: () => NOW, spawnClaude, ensureCodeTree }, options: { named: ['502'] } });
+    assert.ok(seen.length > 0, 'a writer session asked for the code');
+    assert.ok(seen.every((x) => x === foreign), `another live lock: ${foreign}; seen ${seen}`);
+  }
 });
 
 test('a plan session that ends by asking is done, not a failure: no retry on a bigger model, and the ticket waits for the answer', async () => {
@@ -701,13 +718,13 @@ test('the weekly roles proposal: frequent retries propose the next model; many c
 });
 
 test('the report: waiting for the owner, places, the check label, videos, ready for merge, cards left in a watched list', async () => {
-  const c = { q: card({ number: 701, status: 'blocked' }), places: card({ number: 702, status: 'inProgress' }), rfm: card({ number: 703, status: 'finalReview' }), video: card({ number: 704, status: 'blocked' }) };
+  const c = { q: card({ number: 701, status: 'blocked' }), places: card({ number: 702, status: 'finalReview' }), rfm: card({ number: 703, status: 'finalReview' }), video: card({ number: 704, status: 'blocked' }) };
   const head = '9'.repeat(40);
   const release = [card({ list: { id: '5f00000000000000000a0101', name: 'Shipping' }, board: '5f00000000000000000d0002', name: 'Release notes 1.2', lastActivity: ago(30) })];
   const w = world({ cards: Object.values(c), release, prs: [pr({ repo: 'api-docs', number: 81, labels: ['In progress', 'Look at me'] }), pr({ repo: 'guide-docs', number: 82, headCommit: head })] });
   const base = { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' };
   ledger(w, c.q, { stages: { start: 'done', plan: 'done', questions: 'done' } });
-  ledger(w, c.places, { stages: base, prs: [{ repo: 'api-docs', number: 81, targets: ['api'], review: 'places', stage: 'placesWait' }], places: [{ id: 'p1', repo: 'api-docs', pr: 81, state: 'open' }, { id: 'p2', repo: 'api-docs', pr: 81, state: 'open' }] });
+  ledger(w, c.places, { stages: base, prs: [{ repo: 'api-docs', number: 81, targets: ['api'], review: 'places', stage: 'finalReview' }], places: [{ id: 'p1', repo: 'api-docs', pr: 81, state: 'open' }, { id: 'p2', repo: 'api-docs', pr: 81, state: 'open' }] });
   ledger(w, c.rfm, { stages: base, prs: [{ repo: 'guide-docs', number: 82, targets: ['guide'], stage: 'readyForMerge', readyForMerge: [{ head, at: ago(2) }], chain: Object.fromEntries(['translate', 'enReview', 'locales', 'align', 'labelSync', 'build', 'visualPack'].map((s) => [s, { status: 'done', head }])) }] });
   ledger(w, c.video, { stages: { start: 'done', plan: 'done', videoGate: 'done', videoBlock: 'done' }, video: { videos: [{ file: 'v.mp4', parts: [{ file: 'v-part1.mp4', start: 0, transcript: 'v-part1.txt', tries: [{ at: ago(20), outcome: 'failed', reason: 'a sign-in wall' }] }] }] } });
   const out = await runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: () => usageAt(5), now: () => NOW }, options: { dryRun: true } });
@@ -855,7 +872,7 @@ test('the start recorded before its session puts each ticket under its group loc
   for (const n of [601, 602]) {
     const c = card({ number: n, status: 'ready' });
     w.tracker.cards.push(c);
-    ledger(w, c, { stages: { triage: 'done' }, triage: { verdict: 'docs-required', targets: ['guide'], size: 'edit', relations: n === 601 ? ['602'] : [] } });
+    ledger(w, c, { stages: { triage: 'done' }, triage: { verdict: 'docs-required', targets: ['guide'], size: 'edit', together: n === 601 ? ['602'] : [] } });
   }
   const owner = card({ number: 603, status: 'ready', labels: ['Guide'] }); // an owner's card: no triage, no ledger
   w.tracker.cards.push(owner);

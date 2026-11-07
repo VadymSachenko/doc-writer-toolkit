@@ -70,17 +70,17 @@ test('start checks the card is in work and records who started it', async () => 
 test('a question on one PR stops that PR; the answer resumes it where it was', async () => {
   const c = card({ number: 1220, status: 'inProgress' });
   const w = world({ cards: [c], prs: [pr({ repo: 'portal-docs', number: 81, head: 'b-ui' }), pr({ repo: 'portal-docs', number: 82, head: 'b-api' })] });
-  ledger(w, c, { stages: { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' }, prs: [{ repo: 'portal-docs', number: 81, branch: 'b-ui', targets: ['portal-ui'], stage: 'smeReview' }, { repo: 'portal-docs', number: 82, branch: 'b-api', targets: ['portal-api'], stage: 'placesWait' }] });
+  ledger(w, c, { stages: { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' }, prs: [{ repo: 'portal-docs', number: 81, branch: 'b-ui', targets: ['portal-ui'], stage: 'smeReview' }, { repo: 'portal-docs', number: 82, branch: 'b-api', targets: ['portal-api'], stage: 'finalReview' }] });
   await refused(w, { key: '1220', stage: 'questions', status: 'done', pr: 'portal-docs#81', result: { questions: [{ text: 'Which?' }] } }, 'card');
   c.placeId = LISTS.blocked.id;
   await rec(w, { key: '1220', stage: 'questions', status: 'done', pr: 'portal-docs#81', result: { questions: [{ text: 'Which?' }] } });
   let l = read(w, '1220');
-  assert.deepEqual(l.prs.map((p) => [p.number, p.stage, p.resumeTo]), [[81, 'questions', 'smeReview'], [82, 'placesWait', null]]);
+  assert.deepEqual(l.prs.map((p) => [p.number, p.stage, p.resumeTo]), [[81, 'questions', 'smeReview'], [82, 'finalReview', null]]);
   assert.deepEqual([l.questions[0].pr, l.questions[0].repo], [81, 'portal-docs']);
   c.placeId = LISTS.inProgress.id;
   await rec(w, { key: '1220', stage: 'answers', status: 'done', pr: 'portal-docs#81' });
   l = read(w, '1220');
-  assert.deepEqual(l.prs.map((p) => [p.number, p.stage, p.resumeTo]), [[81, 'smeReview', null], [82, 'placesWait', null]]);
+  assert.deepEqual(l.prs.map((p) => [p.number, p.stage, p.resumeTo]), [[81, 'smeReview', null], [82, 'finalReview', null]]);
   assert.ok(l.questions[0].answer);
 });
 
@@ -114,23 +114,24 @@ test('pr checks each PR is on the forge for its branch; the review kind sets the
   await refused(w, { key: '1240', stage: 'pr', status: 'done', result: { prs: [{ branch: 'ticket-1240', number: 91 }, { branch: 'ticket-1240-api', number: 92 }] } }, 'noPr');
   await rec(w, { key: '1240', stage: 'pr', status: 'done', result: { prs: [{ branch: 'ticket-1240', number: 91 }, { branch: 'ticket-1240-api', number: 93 }], places: [{ id: 'p1', repo: 'api-docs', pr: 93, page: 'docs/a.md', line: 4, claim: 'c', why: 'codeOnly' }] } });
   const l = read(w, '1240');
-  assert.deepEqual(l.prs.map((p) => [p.repo, p.number, p.review, p.stage, p.label]), [['guide-docs', 91, 'sme', 'smeReview', 'in expert review'], ['api-docs', 93, 'places', 'placesWait', null]]);
+  assert.deepEqual(l.prs.map((p) => [p.repo, p.number, p.review, p.stage, p.label]), [['guide-docs', 91, 'sme', 'smeReview', 'in expert review'], ['api-docs', 93, 'places', 'finalReview', null]]);
   assert.deepEqual(l.prs[0].pipelineCommits, ['1111111']);
 });
 
-test('move --pr checks the card status and the stage label, and keeps the approved head', async () => {
+test('move --pr checks the card status and the stage label; only a person\'s move approves, and no record takes a PR into the chain', async () => {
   const head = 'e'.repeat(40);
   const forgePr = pr({ repo: 'api-docs', number: 95, labels: ['In progress'], headCommit: head });
   const c = card({ number: 1250, status: 'inProgress' });
   const w = world({ cards: [c], prs: [forgePr] });
-  ledger(w, c, { stages: { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' }, prs: [{ repo: 'api-docs', number: 95, targets: ['api'], review: 'places', stage: 'placesWait' }] });
+  ledger(w, c, { stages: { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' }, prs: [{ repo: 'api-docs', number: 95, targets: ['api'], review: 'places', stage: 'reworkWait' }] });
   await refused(w, { key: '1250', stage: 'move', status: 'done', pr: 'api-docs#95', to: 'finalReview' }, 'card');
   c.placeId = LISTS.finalReview.id;
   await refused(w, { key: '1250', stage: 'move', status: 'done', pr: 'api-docs#95', to: 'finalReview' }, 'label');
   forgePr.labels = ['In final review'];
   await rec(w, { key: '1250', stage: 'move', status: 'done', pr: 'api-docs#95', to: 'finalReview' });
   const p = read(w, '1250').prs[0];
-  assert.deepEqual([p.stage, p.label, p.approval.head, p.approval.from], ['finalReview', 'In final review', head, 'placesWait']);
+  assert.deepEqual([p.stage, p.label, p.approval ?? null], ['finalReview', 'In final review', null]);
+  await usage(w, { key: '1250', stage: 'move', status: 'done', pr: 'api-docs#95', to: 'translation' }, /a PR stage/);
 });
 
 test('a chain stage is done only for the head the forge shows; ready for merge only when the whole chain is', async () => {

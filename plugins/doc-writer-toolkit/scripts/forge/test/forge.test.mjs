@@ -196,6 +196,12 @@ test('prState: state, head and merge commits, review decision, requests and labe
   assert.equal(s.nodeId, undefined);
 });
 
+test('prState: the description only when asked for', async () => {
+  const { forge } = setup();
+  assert.equal('body' in (await forge.prState({ repo: 'guide-docs', number: 7 })), false);
+  assert.equal(typeof (await forge.prState({ repo: 'guide-docs', number: 7, withBody: true })).body, 'string');
+});
+
 test('prState: a merged PR has its merge commit and time; by head, the open PR of the repo wins and a fork is ignored', async () => {
   const merged = setup({ routes: { 'graphql PrByNumber': fixture('gql-pr-9-merged') } });
   const m = await merged.forge.prState({ repo: 'guide-docs', number: 9 });

@@ -30,14 +30,18 @@ disallowedTools:
 
 # Reviewer
 
-You run one review stage on the branch of one PR, in a worktree of it. The toolkit's style skills do the review: `doc-style-reviewer` in scope mode (only the blocks the branch changed), then `doc-style-fixer` with `apply:mechanical,substantive`; what needs a judgment stays a finding for the owner and goes into the result, never into the page.
+You run one review stage on the branch of one PR, in a worktree of it. The toolkit's style skills do the review: `doc-style-reviewer` in scope mode (only the blocks the branch changed), then `doc-style-fixer` with `apply:mechanical,substantive`. The fixer never applies a judgment-required finding; you settle what is left after it:
+
+- **A clear answer from the text, the glossary or the code** (at the commit in your brief, if the brief names code repos): fix it yourself, and list it in `fixed`. A term missing from the glossary is worded around, never added to it.
+- **A product fact** goes to the code first, never to the owner.
+- **Anything else**, what a writer must decide or only a developer can answer, stays a finding in `open`, never in the page.
 
 ## The stages
 
 | Stage | What you do | Record |
 |---|---|---|
-| `uaReview` | The self-check of the UA pages the branch changed (markers, links, screenshots, the template), then the UA style review and fix. Commit and push. | `--result '{ "prs": [{ "repo", "branch", "commits": [...] }], "open": ["<finding left for the owner>", …] }'` |
-| `enReview` | The EN style review and fix of the EN pages the translator wrote. Commit and push. EN that a person changed by hand is never rewritten: report it. | `--pr <repo>#<n> --head <the head after your push> --result '{ "commits": [...], "open": [...] }'` |
+| `uaReview` | The self-check of the UA pages the branch changed (markers, links, screenshots, the template), then the UA style review and fix, then what is left as above. Commit and push. | `--result '{ "prs": [{ "repo", "branch", "commits": [...] }], "fixed": [{ "page", "before", "after" }], "open": ["<finding left open>", …] }'` |
+| `enReview` | The EN style review and fix of the EN pages the translator wrote, then what is left as above. Commit and push. EN that a person changed by hand is never rewritten: report it. What stays open goes into the PR's open questions as the host's rules say, by the reader who can answer it: read the description with `forge.mjs pr-state --with-body`, write it whole with your edit, and send it with `forge.mjs edit-pr --body-file`, changing nothing else in it. On a run after an earlier EN review, replace what that review added rather than adding it again. | `--pr <repo>#<n> --head <the head after your push> --result '{ "commits": [...], "fixed": [...], "open": [...] }'` |
 | `visualPack` | Build the visual review pack of the changed pages (`scripts/visual-pack/`) and write its summary: what looks broken, per page and locale. It also runs after ready for merge when a hand commit changed an image: build it again from the current head. | `--pr <repo>#<n> --head <head> --result '{ "pack": "<its path>", "problems": n }'` |
 
 Record with the head the branch has after your own push: a record whose head isn't the branch's is refused.

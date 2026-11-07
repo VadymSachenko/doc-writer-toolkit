@@ -8,7 +8,8 @@ import { ledger, read, world } from './helpers.mjs';
 import { runDaily } from '../lib/runner.mjs';
 import { runRecord } from '../lib/record.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
-import { ensureWorktree, listWorktrees, canon, prsForStep, worktreePath } from '../lib/worktree.mjs';
+import { codeClonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureWorktree, listWorktrees, canon, prsForStep, worktreePath } from '../lib/worktree.mjs';
+import { commandFor } from '../lib/runner.mjs';
 import { spentOf } from '../lib/limits.mjs';
 import { writeLedger } from '../lib/ledger.mjs';
 import { localDate, renderReport } from '../lib/report.mjs';
@@ -96,8 +97,8 @@ function commitIn(wt, rel, text) {
   return g('rev-parse', 'HEAD');
 }
 
-function finalReviewTicket({ done = CHAIN.slice(0, 5), stage = 'finalReview', extra = {}, declare } = {}) {
-  const c = card({ number: 1501, status: 'finalReview' });
+function finalReviewTicket({ done = CHAIN.slice(0, 5), stage = 'translation', extra = {}, declare } = {}) {
+  const c = card({ number: 1501, status: stage === 'translation' ? 'translation' : 'finalReview' });
   const forgePr = pr({ repo: 'guide-docs', number: 71, head: 'ticket-71' });
   const w = world({ cards: [c], prs: [forgePr], extra });
   const fx = withClone(w, { declare });
@@ -462,14 +463,16 @@ async function afterReady(files) {
   const h2 = t.handEdit(files);
   t.forgePr.headCommit = h2;
   const stages = [];
+  const briefs = {};
   const spawnClaude = async (cmd) => {
     const stage = stageOf(cmd);
     stages.push(stage);
+    briefs[stage] = briefOf(cmd);
     await runRecord({ settings: t.w.settings, clients: t.w.clients(), key: '1501', stage, pr: 'guide-docs#71', status: 'done', head: h2, result: {}, now: NOW });
     return { code: 0, stdout: RESULT, stderr: '' };
   };
   const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1501'] } });
-  return { t, h2, out, stages, l: read(t.w, '1501') };
+  return { t, h2, out, stages, briefs, l: read(t.w, '1501') };
 }
 
 test('AC-4: a hand commit that changes an image after ready for merge: the re-sync, the visual pack, then ready again', async () => {
@@ -484,8 +487,9 @@ test('AC-4: a hand commit that changes an image after ready for merge: the re-sy
 });
 
 test('AC-4: a hand commit that changes only text after ready for merge: the re-sync, then ready again, with no pack', async () => {
-  const { h2, out, l } = await afterReady({ 'docs/x/index.md': '# Сторінка\n\nВиправлений абзац.\n' });
+  const { t, h2, out, l, briefs } = await afterReady({ 'docs/x/index.md': '# Сторінка\n\nВиправлений абзац.\n' });
   assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['resync', 'done'], ['readyForMerge', 'done']]);
+  assert.ok(briefs.resync.includes(`UA changed since ready for merge at ${t.h1}: re-sync the blocks changed in ${t.h1}..${h2}.`), "the session's brief names the range");
   assert.notEqual(l.prs[0].chain.visualPack.head, h2);
   assert.equal(l.prs[0].readyForMerge.at(-1).head, h2);
 });
@@ -574,4 +578,164 @@ test('AC-3: record align with no worktree on this machine is refused, never skip
     (e) => e.refused === 'imagePairs' && /no worktree of guide-docs ticket-71/.test(e.message),
   );
   assert.equal(read(t.w, '1501').prs[0].chain.align, undefined, 'nothing written');
+});
+
+// ------------------------------------------------------------------ the end of the chain
+
+test('after the chain: the card goes back to the owner\'s queue with one comment, which is no person\'s action; moving it on again starts no model step', async () => {
+  const t = finalReviewTicket({ done: CHAIN });
+  t.w.settings.readyComment = 'All set to merge';
+  const go = () => runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude: async () => assert.fail('a session started') }, options: { trigger: 'watcher', named: ['1501'] } });
+  let out = await go();
+  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['readyForMerge', 'done'], ['move', 'done']]);
+  assert.equal(t.c.placeId, LISTS.finalReview.id);
+  let l = read(t.w, '1501');
+  assert.deepEqual([l.prs[0].stage, l.left.status], ['readyForMerge', 'finalReview']);
+  const said = t.w.tracker.log.filter((e) => e[0] === 'comment');
+  assert.deepEqual(said.map((e) => e[2]), ['All set to merge']);
+  assert.equal(l.posted.card.length, 1, "the comment is the pipeline's own");
+  assert.deepEqual((await t.w.one('1501')).steps, []);
+
+  // A person moves the finished card on again: follow (the ready PR stays ready), the card back. No session.
+  t.c.placeId = LISTS.translation.id;
+  out = await go();
+  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['follow', 'done'], ['move', 'done']]);
+  assert.equal(t.c.placeId, LISTS.finalReview.id);
+  l = read(t.w, '1501');
+  assert.equal(l.prs[0].stage, 'readyForMerge');
+  assert.deepEqual((await t.w.one('1501')).steps, []);
+});
+
+test('two PRs: the card goes back only when both are ready', async () => {
+  const c = card({ number: 1505, status: 'translation' });
+  const w = world({ cards: [c], prs: [pr({ repo: 'portal-docs', number: 91, head: 'a' }), pr({ repo: 'portal-docs', number: 92, head: 'b' })] });
+  ledger(w, c, { stages: { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' }, prs: [{ repo: 'portal-docs', number: 91, branch: 'a', targets: ['portal-api'], review: 'places', stage: 'readyForMerge', readyForMerge: [{ head: 'a'.repeat(40), at: ago(1) }] }, { repo: 'portal-docs', number: 92, branch: 'b', targets: ['portal-ui'], review: 'sme', stage: 'translation' }] });
+  const t = await w.one('1505');
+  assert.deepEqual(t.steps.map((s) => s.stage), ['translate']);
+  assert.equal(t.card.status, 'translation', 'it stands with the PR still in the chain');
+});
+
+// ------------------------------------------------------------------ a UA change after ready for merge
+
+// An answer to a comment at ready for merge: the pipeline's own commit, so in `pipelineCommits`.
+async function answeredAfterReady(files) {
+  const t = finalReviewTicket({ done: CHAIN, stage: 'readyForMerge' });
+  const h2 = t.handEdit(files);
+  t.forgePr.headCommit = h2;
+  const l0 = read(t.w, '1501');
+  l0.prs[0].pipelineCommits.push(h2);
+  writeLedger(t.w.settings.state, l0);
+  const stages = [];
+  const spawnClaude = async (cmd) => {
+    const stage = stageOf(cmd);
+    stages.push(stage);
+    await runRecord({ settings: t.w.settings, clients: t.w.clients(), key: '1501', stage, pr: 'guide-docs#71', status: 'done', head: h2, result: {}, now: NOW });
+    return { code: 0, stdout: RESULT, stderr: '' };
+  };
+  const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1501'] } });
+  return { t, h2, out, stages, l: read(t.w, '1501') };
+}
+
+test('a commit of the pipeline that changes UA after ready for merge: the re-sync, then ready for the new head', async () => {
+  const { h2, out, l } = await answeredAfterReady({ 'docs/x/index.md': '# Сторінка\n\nВиправлено за коментарем.\n' });
+  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['resync', 'done'], ['readyForMerge', 'done']]);
+  assert.equal(l.prs[0].readyForMerge.at(-1).head, h2);
+  assert.equal(l.prs[0].stage, 'readyForMerge');
+});
+
+test('a commit of the pipeline that adds only heading ids after ready for merge keeps the PR ready (the id-only change)', async () => {
+  const { out, l, t } = await answeredAfterReady({ 'docs/x/index.md': '# Сторінка {/* #page */}\n\nНовий абзац.\n' });
+  assert.deepEqual(out.ran, []);
+  assert.equal(l.prs[0].readyForMerge.at(-1).head, t.h1);
+});
+
+// ------------------------------------------------------------------ code read at a fetched commit
+
+function codeRepo(w) {
+  const bare = path.join(tmp('code-origin-'), 'code-repo.git');
+  execFileSync('git', ['init', '-q', '--bare', '-b', 'main', bare]);
+  const clone = gitRepo(path.join(w.root, 'repos', 'code-repo'));
+  const h1 = clone.commit({ 'services/queue.go': 'const attempts = 10\n' }, 'base');
+  clone.g('remote', 'add', 'origin', bare);
+  clone.g('push', '-q', 'origin', 'main');
+  // The owner's clone stays where it is; someone else moves origin on.
+  const other = path.join(tmp('code-other-'), 'code-repo');
+  execFileSync('git', ['clone', '-q', bare, other]);
+  const og = (...a) => execFileSync('git', ['-C', other, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  const advance = (text) => {
+    fs.writeFileSync(path.join(other, 'services/queue.go'), text);
+    og('-c', 'user.email=o@example.com', '-c', 'user.name=O', '-c', 'commit.gpgsign=false', 'commit', '-q', '-am', 'change');
+    og('push', '-q', 'origin', 'main');
+    return og('rev-parse', 'HEAD');
+  };
+  return { bare, clone, h1, advance, app: { repo: 'code-repo', path: 'repos/code-repo', base: 'main', url: 'https://code.example/org/code-repo' } };
+}
+
+test('a code repo is read at the commit fetched now, in the runner\'s own clone; one checkout per commit, the others removed only when no other session runs; the owner\'s clone is never touched', async () => {
+  const w = world();
+  const code = codeRepo(w);
+  const owner = () => [code.clone.g('rev-parse', 'HEAD'), code.clone.g('rev-parse', 'refs/remotes/origin/main'), listWorktrees(code.clone.dir).length];
+  const before = owner();
+  const h2 = code.advance('const attempts = 4\n');
+  const a = ensureCodeTree(w.settings, code.app, { remote: code.bare });
+  assert.equal(a.error, undefined);
+  assert.equal(a.commit, h2);
+  assert.equal(a.path, codeTreePath(w.settings, code.app, h2));
+  assert.equal(a.clone, codeClonePath(w.settings, code.app));
+  assert.ok(a.path.startsWith(codeTreesRoot(w.settings)) && a.clone.startsWith(path.resolve(w.settings.state)), 'under the state folder');
+  assert.equal(execFileSync('git', ['-C', a.clone, 'rev-parse', '--is-bare-repository'], { encoding: 'utf8' }).trim(), 'true', 'no working tree to read stale files from');
+  assert.equal(fs.readFileSync(path.join(a.path, 'services/queue.go'), 'utf8'), 'const attempts = 4\n');
+  assert.equal(fs.readFileSync(path.join(code.clone.dir, 'services/queue.go'), 'utf8'), 'const attempts = 10\n', 'the owner\'s clone keeps its own files');
+
+  // Another session runs: a new commit gets its own checkout, and the first one stays.
+  const h3 = code.advance('const attempts = 3\n');
+  const b = ensureCodeTree(w.settings, code.app, { remote: code.bare, othersRunning: true });
+  assert.equal(b.commit, h3);
+  assert.notEqual(b.path, a.path);
+  assert.equal(fs.readFileSync(path.join(b.path, 'services/queue.go'), 'utf8'), 'const attempts = 3\n');
+  assert.equal(fs.readFileSync(path.join(a.path, 'services/queue.go'), 'utf8'), 'const attempts = 4\n', 'a session still reading the first one is not moved under');
+  assert.deepEqual(b.removed, []);
+
+  // No other session: only the checkout this one needs stays.
+  const c = ensureCodeTree(w.settings, code.app, { remote: code.bare });
+  assert.equal(c.path, b.path, 'the same commit: the same checkout');
+  assert.deepEqual(c.removed.map(canon), [canon(a.path)]);
+  assert.ok(!fs.existsSync(a.path));
+  assert.ok(fs.existsSync(path.join(b.path, 'services/queue.go')));
+  assert.deepEqual(owner(), before, 'no fetch, no worktree, no prune in the owner\'s clone');
+});
+
+test('a code repo that can\'t be fetched, cloned, or has no url is said, and stops nothing', async () => {
+  const w = world();
+  const code = codeRepo(w);
+  const first = ensureCodeTree(w.settings, code.app, { remote: code.bare });
+  execFileSync('git', ['-C', first.clone, 'remote', 'set-url', 'origin', '/nowhere/at/all.git']);
+  code.advance('const attempts = 2\n');
+  const a = ensureCodeTree(w.settings, code.app, { remote: code.bare });
+  assert.equal(a.commit, code.h1, 'the commit fetched last time');
+  assert.match(a.notes.join(' '), /could not fetch main/);
+  const none = ensureCodeTree(w.settings, { repo: 'other', path: null, base: 'main', url: null });
+  assert.match(none.error, /no url for other/);
+  const bad = ensureCodeTree(w.settings, { repo: 'gone', path: null, base: 'main', url: 'https://code.example/org/gone' }, { remote: '/nowhere/at/all.git' });
+  assert.match(bad.error, /could not clone gone/);
+});
+
+test('a writer\'s session gets the checkout and the commit; every role is denied the clone\'s own files', () => {
+  const w = world();
+  w.settings.appRepos = [{ repo: 'code-repo', path: 'repos/code-repo', base: 'main', url: 'https://code.example/org/code-repo' }];
+  const clone = path.join(w.settings.root, 'repos/code-repo');
+  const tree = codeTreePath(w.settings, w.settings.appRepos[0], 'c0ffee1');
+  const step = { stage: 'plan', role: 'writer', keys: ['1'], group: '1', codeTrees: [{ repo: 'code-repo', path: tree, commit: 'c0ffee1', url: 'https://code.example/org/code-repo', notes: [] }] };
+  const cmd = commandFor(step, w.settings, { model: 'm', agentsPath: '/a.json', roots: [] });
+  const brief = briefOf(cmd);
+  assert.match(brief, /commit c0ffee1/);
+  assert.match(brief, /https:\/\/code\.example\/org\/code-repo\/blob\/c0ffee1\/<path>#L<from>-L<to>/);
+  const after = (flag) => cmd.args.slice(cmd.args.indexOf(flag) + 1);
+  assert.ok(cmd.args.includes(tree), 'the checkout is an added folder');
+  assert.ok(after('--disallowedTools').includes(`Read(//${clone.replace(/^\/+/, '')}/**)`), 'the clone is denied');
+  assert.ok(after('--disallowedTools').includes(`Edit(//${codeTreesRoot(w.settings).replace(/^\/+/, '')}/**)`), 'the checkouts are read only');
+  assert.ok(after('--allowedTools').includes(`Bash(git -C ${tree} show:*)`));
+  const translator = commandFor({ stage: 'build', role: 'translator', keys: ['1'], group: '1', pr: 'x#1', worktrees: [] }, w.settings, { model: 'm', agentsPath: '/a.json', roots: [] });
+  assert.ok(!translator.args.includes(tree));
+  assert.ok(translator.args.includes(`Read(//${clone.replace(/^\/+/, '')}/**)`));
 });
