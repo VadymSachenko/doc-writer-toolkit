@@ -416,7 +416,7 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
       next.checkedAt = iso(clock());
       writeFeed(settings.state, next);
       appendRunLog(settings.state, today, log);
-      progressAfterCheck({ settings, now: clock(), notify: io.notify });
+      progressAfterCheck({ settings, now: clock(), notify: io.notify, notifyIo: io.notifyIo ?? {} });
     }
     out.log = log;
     out.quiet = !fresh.length && !wanted.length && !out.morning && !out.startPass && !out.errors.length && !out.jobs.some((j) => j.due !== false) && out.sources.every((s) => s.outcome !== 'failed' && s.outcome !== 'gap');

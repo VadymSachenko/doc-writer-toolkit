@@ -12,7 +12,7 @@ import { runDaily } from '../lib/runner.mjs';
 import { runCheck } from '../lib/watch.mjs';
 import { setLocal } from '../lib/setlocal.mjs';
 import { loadSettings } from '../lib/settings.mjs';
-import { gatesOf, liveProgress, memoryPath, notifyGates, progressAfterCheck, progressPath, readMemory, renderProgress, writeProgress } from '../lib/progress.mjs';
+import { digestRun, gatesOf, liveProgress, memoryPath, notifyGates, progressAfterCheck, progressPath, readMemory, renderProgress, writeProgress } from '../lib/progress.mjs';
 
 // The live progress file: a checklist of phases from the ledgers, with no model and no network.
 
@@ -41,7 +41,7 @@ test('AC-1: the rows of a ticket in work: done with cost and time, running with 
   const text = render([l]);
   assert.match(text, /^# Ticket flow progress\n\nUpdated \d\d:\d\d · mode on\n/);
   assert.match(text, /### 701 · Change 701 \(3 of \d+\)/);
-  assert.match(text, /- ✅ Triaging — \$0\.15, 1m 30s/);
+  assert.match(text, /- ✅ Triaging — \$0\.15 \(a share\)\n/, 'a shared session: the cost share, no duration on the card');
   assert.match(text, /- ✅ Picking up the ticket — \$1\.30, 6m 25s/);
   assert.match(text, /- ✅ Drafting a plan — \$2\.50, 3m 05s/);
   assert.match(text, /- ❌ Writing the UA pages — the session ended without recording the stage/);
@@ -76,7 +76,7 @@ test('AC-1: the chain of a PR: stale stages go back to not done, the gates name 
   });
   const plain = render([l]);
   assert.match(plain, /\*\*PR guide-docs#12\*\* — sme review, stage translation/);
-  assert.match(plain, /- ✅ Expert review/);
+  assert.doesNotMatch(plain, /Expert review/, 'no expert was asked, recommended or called');
   assert.match(plain, /- ✅ Your read of the UA/);
   assert.match(plain, /- ✅ Translating into EN — \$0\.80, 2m 05s/);
   assert.match(plain, /- ❌ Checking UA and EN alignment — an image has no EN counterpart/);
@@ -106,13 +106,13 @@ test('AC-1: the gates: the owner\'s read, the final merge, questions and the pla
   ];
   const text = render(ledgers);
   const waiting = text.slice(text.indexOf('## Waiting for you'), text.indexOf('## The last run'));
-  assert.match(waiting, /- 👉 711 · Change 711 — guide-docs#1: your read of the UA/);
-  assert.match(waiting, /- 👉 713 .* guide-docs#3: the final edit and the merge/);
-  assert.match(waiting, /- 👉 714 .* answers on the card/);
-  assert.match(waiting, /- 👉 715 .* the section plan/);
+  assert.match(waiting, /- 👉 711 · Change 711 — guide-docs#1: read the UA/);
+  assert.match(waiting, /- 👉 713 .* guide-docs#3: make the final edit and merge/);
+  assert.match(waiting, /- 👉 714 .* answer the questions on the card/);
+  assert.match(waiting, /- 👉 715 .* approve the section plan/);
   assert.doesNotMatch(waiting, /712/, 'an expert review waits for the reviewer, not for you');
-  assert.match(text, /- ⏸ Expert review — waits for the reviewer/);
-  assert.match(text, /- 👉 Your read of the UA — waits for you/);
+  assert.match(text, /- ⏸ Expert review — waits for the reviewer: the expert review, then a person moves the card/);
+  assert.match(text, /- 👉 Your read of the UA — waits for you: comments first, then the card to In translation, or to the review status to call the expert\n/, 'the wording once, not doubled');
   assert.match(text, /- 👉 Ready for merge — waits for you/);
   assert.match(text, /- 👉 Questions — waits for you/);
   assert.match(text, /- 👉 Plan approval — waits for you/);
@@ -123,9 +123,9 @@ test('AC-1: the gates: the owner\'s read, the final merge, questions and the pla
 
 test('a session working on a PR at the owner\'s gate is running, not the owner\'s turn', () => {
   const pr = Object.assign(newPr({ repo: 'guide-docs', review: 'places', branch: 'a' }), { number: 1, stage: 'finalReview', pipelineCommits: ['c1'] });
-  const l = mk('791', { stages: { triage: rec(1, 'done'), pr: rec(6, 'done') }, prs: [pr] });
+  const l = mk('791', { stages: { triage: rec(1, 'done'), start: rec(2, 'done'), pr: rec(6, 'done') }, prs: [pr] });
   const idle = render([l]);
-  assert.match(idle, /- 👉 791 .* your read of the UA/);
+  assert.match(idle, /- 👉 791 .* read the UA/);
   const busy = render([l], { flights: [{ keys: ['791'], stage: 'answerComments', pr: 'guide-docs#1', since: NOW - 120000 }], live: true, run: { trigger: 'watcher' } });
   assert.match(busy, /Nothing waits for you\./);
   assert.match(busy, /- ⏳ Answering the review comments — since \d\d:\d\d \(2m 00s\)/);
@@ -133,10 +133,16 @@ test('a session working on a PR at the owner\'s gate is running, not the owner\'
 });
 
 test('AC-1: a ticket with no runs, no ledgers at all, tickets that are closed or in the owner\'s hands, and a ledger that does not read', () => {
-  const fresh = mk('721');
+  const fresh = mk('721', { stages: { start: rec(1, 'done') } });
   const text = render([fresh]);
-  assert.match(text, /### 721 · Change 721 \(0 of \d+\)/);
-  assert.equal(text.match(/- ✅/g), null, 'nothing is done');
+  assert.match(text, /### 721 · Change 721 \(1 of 8\)/);
+  assert.equal(text.match(/- ✅/g).length, 1, 'only the start is done; the ticket has no runs');
+  // A triaged ticket that has not started gets one line, no block; a step running on it gives it a block.
+  const triaged = mk('725', { stages: { triage: rec(1, 'done') } });
+  const lone = render([triaged, fresh]);
+  assert.match(lone, /Triaged, not started: 725\n/);
+  assert.doesNotMatch(lone, /### 725/);
+  assert.match(render([triaged], { flights: [{ keys: ['725'], stage: 'start', pr: null, since: NOW - 1000 }] }), /### 725 .*\n\n- ✅ Triaging\n- ⏳ Picking up the ticket/);
   assert.match(text, /Nothing waits for you\./);
   assert.match(render([]), /No ledgers yet: nothing has started\./);
   const closed = mk('722', { stages: { close: rec(9, 'done') } });
@@ -199,7 +205,7 @@ test('settings: progress.stepsFile is a local key, none by default, resolved fro
 test('a status that calls a chain stage stale is remembered, so a quiet pass with no status shows the same', () => {
   const w = world();
   const pr = Object.assign(newPr({ repo: 'guide-docs', review: 'sme', branch: 'b' }), { number: 5, stage: 'translation', chain: { translate: rec(10, 'done', { head: 'h1' }), enReview: rec(11, 'done', { head: 'h1' }) } });
-  writeLedger(w.settings.state, mk('741', { stages: { pr: rec(6, 'done') }, prs: [pr] }));
+  writeLedger(w.settings.state, mk('741', { stages: { start: rec(2, 'done'), pr: rec(6, 'done') }, prs: [pr] }));
   const st = { tickets: [{ key: '741', steps: [{ stage: 'translate', pr: 'guide-docs#5', head: 'h2', stale: 2 }] }] };
   writeProgress({ settings: w.settings, now: NOW, st });
   assert.match(fs.readFileSync(progressPath(w.settings.state), 'utf8'), /- ⬜ Translating into EN — stale: UA changed since/);
@@ -366,9 +372,119 @@ test('AC-4: the watcher\'s check refreshes the file and tells a gate once over t
   await check(1);
   await check(2);
   assert.deepEqual(sent.filter((m) => m.title === 'Ticket flow: your turn').map((m) => m.text), ['831 Change 831: read the UA (guide-docs#1)']);
-  assert.match(fs.readFileSync(progressPath(w.settings.state), 'utf8'), /- 👉 831 · Change 831 — guide-docs#1: your read of the UA/);
+  assert.match(fs.readFileSync(progressPath(w.settings.state), 'utf8'), /- 👉 831 · Change 831 — guide-docs#1: read the UA/);
   // A dry check writes nothing.
   const dry = world();
   await runCheck({ settings: dry.settings, clients: dry.clients(), io: { now: () => NOW, git: quietGit, runner: { now: () => NOW, readUsage: () => usage }, notify: () => assert.fail('dry') }, options: { dryRun: true } });
   assert.equal(fs.existsSync(memoryPath(dry.settings.state)), false);
+});
+
+// ------------------------------------------------------------------ the expert review, the start pass, the closing of a run
+
+const READY = { triage: rec(1, 'done'), start: rec(2, 'done'), plan: rec(3, 'done'), write: rec(4, 'done'), uaReview: rec(5, 'done'), pr: rec(6, 'done') };
+const prAt = (stage, extra = {}) => Object.assign(newPr({ repo: 'guide-docs', review: 'sme', branch: 'e' }), { number: 20, stage, pipelineCommits: ['c1'], ...extra });
+const expertRow = (text) => text.split('\n').find((x) => x.includes('Expert review')) ?? null;
+
+test('the expert row follows the stage and the history, not the review kind', () => {
+  // An sme PR at the owner's read, nobody asked: no expert row, and never a tick.
+  assert.equal(expertRow(render([mk('901', { stages: READY, prs: [prAt('finalReview')] })])), null);
+  // A review request that came with the `pr` record alone is not a review: not done.
+  const requested = expertRow(render([mk('902', { stages: READY, prs: [prAt('finalReview', { reviewersRequested: ['expert-login'] })] })]));
+  assert.match(requested, /^- ⬜ Expert review — requested, not called$/);
+  // A places PR the owner sent to the expert: the wait is the reviewer's.
+  const places = render([mk('903', { stages: READY, prs: [prAt('smeReview', { review: 'places', reviewersRequested: ['expert-login'] })] })]);
+  assert.match(expertRow(places), /^- ⏸ Expert review — waits for the reviewer/);
+  assert.ok(places.indexOf('Your read of the UA') < places.indexOf('Expert review'), "after the owner's read");
+  // A PR that went to the review and came back by a move: done.
+  const back = render([mk('904', { stages: READY, prs: [prAt('finalReview', { reviewersRequested: ['expert-login'], steps: { move: rec(9, 'done') } })] })]);
+  assert.equal(expertRow(back), '- ✅ Expert review');
+  // Only a recommendation: not done, with the reason; the owner's line names it too.
+  const text = render([mk('905', { stages: READY, prs: [prAt('finalReview', { expertReview: { recommended: true, why: 'the role rights are not in the code' } })] })]);
+  assert.equal(expertRow(text), '- ⬜ Expert review — recommended: the role rights are not in the code');
+  assert.match(text, /- 👉 905 .* guide-docs#20: read the UA \(an expert review is recommended: the role rights are not in the code\)/);
+  assert.match(text, /- 👉 Your read of the UA — waits for you: comments first, then the card to In translation, or to the review status to call the expert; an expert review is recommended: the role rights/);
+  // Not recommended: nothing to say.
+  assert.equal(expertRow(render([mk('906', { stages: READY, prs: [prAt('finalReview', { expertReview: { recommended: false, why: 'a typo' } })] })])), null);
+});
+
+test('the start pass: the reason a pass started nothing, from the feed, under the run', () => {
+  const w = world();
+  const put = (starts) => fs.writeFileSync(path.join(w.settings.state, 'watch', 'feed.json'), JSON.stringify({ version: 1, starts }));
+  fs.mkdirSync(path.join(w.settings.state, 'watch'), { recursive: true });
+  const text = () => (writeProgress({ settings: w.settings, now: NOW }), fs.readFileSync(progressPath(w.settings.state), 'utf8'));
+  put({ date: '2026-11-10', at: at(NOW - 60000), by: 'watcher', outcome: 'not run: no ready ticket' });
+  assert.match(text(), /- ⬜ Start pass \(\d\d:\d\d\): not run: no ready ticket/);
+  put({ date: '2026-11-10', at: at(NOW - 60000), by: 'watcher', outcome: 'not run: no room: 3 in progress of 3' });
+  assert.match(text(), /not run: no room/);
+  put({ date: '2026-11-10', at: at(NOW - 60000), by: 'watcher', outcome: 'started nothing' });
+  assert.match(text(), /Start pass \(\d\d:\d\d\): started nothing/);
+  put({ date: '2026-11-10', at: at(NOW - 60000), deferred: 'a card changed in the ready or intake list', outcome: null });
+  assert.match(text(), /- ⏸ Start pass deferred \(\d\d:\d\d\): a card changed in the ready or intake list — waits for the start hours \(10-22\) or a board that reads/);
+  put({ date: '2026-11-10', at: at(NOW - 60000), deferred: 'a slot freed', retryAt: at(NOW + 15 * 60000) });
+  assert.match(text(), /- ⏸ Start pass \(\d\d:\d\d\): retry at \d\d:\d\d — a slot freed/);
+  put({ date: '2026-11-10', at: at(NOW - 60000), outcome: 'failed: the status could not be read' });
+  assert.match(text(), /- ❌ Start pass .*: failed: the status could not be read/);
+  // A pass that started something, or is running, adds no line; a feed that does not read does not drop the file.
+  put({ date: '2026-11-10', at: at(NOW), outcome: 'started 801' });
+  assert.doesNotMatch(text(), /Start pass/);
+  fs.writeFileSync(path.join(w.settings.state, 'watch', 'feed.json'), '{ not json');
+  assert.match(text(), /^# Ticket flow progress/);
+});
+
+test('a run is labelled by what it was: the morning run, a start pass, the watcher, by hand', () => {
+  const label = (out, trigger = 'schedule') => render([], { run: digestRun({ out, trigger, now: NOW }) }).match(/Last run \(\d\d:\d\d\), (.*)\n/)[1];
+  assert.equal(label({ morning: true }), 'the morning run');
+  assert.equal(label({ startPass: true }), 'a start pass');
+  assert.equal(label({}, 'watcher'), 'the watcher');
+  assert.equal(label({}, 'manual'), 'a run started by hand');
+  assert.equal(label({ startPass: { why: 'a slot freed' } }, 'schedule'), 'a scheduled run', "the watcher's own record is not the runner's flag");
+});
+
+test('a shared triage session shows its duration once, in the run, and a share on each card', () => {
+  const session = () => run('triage', { share: 0.5, costUsd: 1, durationMs: 120000, session: 's-1', start: at(NOW - 60000) });
+  const a = mk('911', { stages: { triage: rec(1, 'done') }, runs: [session()] });
+  const b = mk('912', { stages: { triage: rec(1, 'done') }, runs: [session()] });
+  const text = render([a, b], { run: { at: at(NOW), startedAt: at(NOW - 300000), triage: { keys: ['911', '912'], outcome: 'done' }, steps: [] } });
+  assert.match(text, /Triaging: 2 intake card\(s\) — done, 2m 00s/);
+  const started = mk('913', { stages: { triage: rec(1, 'done'), start: rec(2, 'done') }, runs: [session()] });
+  assert.match(render([started]), /- ✅ Triaging — \$0\.50 \(a share\)\n/);
+});
+
+test('a run that throws does not leave the file saying it is in progress', async () => {
+  const ready = card({ number: 921, status: 'ready', labels: ['Guide'] });
+  const w = world({ cards: [ready], extra: { limits: { estimates: { edit: 4, newPage: 8 } } } });
+  ledger(w, ready, { stages: { triage: 'done' }, triage: { verdict: 'docs-required', targets: ['guide'], size: 'edit' } });
+  const usage = parseUsage('Current session: 10% used · resets 2pm (UTC)\nCurrent week (all models): 5% used · resets Nov 14 at 6am (UTC)\n');
+  const spawnClaude = async () => {
+    throw new Error('the session could not start');
+  };
+  await assert.rejects(runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: () => usage, now: () => NOW, spawnClaude }, options: {} }), /could not start/);
+  const text = fs.readFileSync(progressPath(w.settings.state), 'utf8');
+  assert.match(text, /## The last run/);
+  assert.doesNotMatch(text, /Run in progress/);
+  assert.doesNotMatch(text.split('## Tickets in work')[0], /⏳/, 'the run section shows no step in flight');
+});
+
+test('the memory is written before the notification is sent, and the sender gets its io', () => {
+  const { w, finalReview } = gateWorld();
+  writeProgress({ settings: w.settings, now: NOW });
+  finalReview('931', 1, ['c1']);
+  const seen = [];
+  const io = { osascript: '/usr/bin/true' };
+  const r = notifyGates({ settings: w.settings, now: NOW + 1000, notifyIo: io, notify: (m, got) => (seen.push(got), Object.keys(readMemory(w.settings.state).data.notified).length ? { sent: true } : assert.fail('the memory was written after the send')) });
+  assert.deepEqual(seen, [io]);
+  assert.equal(r.sent.length, 1);
+  // A sender that throws: told once, not at every pass.
+  finalReview('932', 2, ['c1']);
+  const bad = notifyGates({
+    settings: w.settings,
+    now: NOW + 2000,
+    notify: () => {
+      throw new Error('osascript is gone');
+    },
+  });
+  assert.equal(bad.sent[0].sent, false);
+  const again = [];
+  notifyGates({ settings: w.settings, now: NOW + 3000, notify: (m) => (again.push(m), { sent: true }) });
+  assert.deepEqual(again, []);
 });

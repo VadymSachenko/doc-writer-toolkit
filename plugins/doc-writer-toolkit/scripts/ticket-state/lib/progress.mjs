@@ -3,7 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { prId, readLedgersApart } from './ledger.mjs';
 import { CHAIN, PR_ORDER } from './stages.mjs';
-import { watchDir } from './feed.mjs';
+import { readFeed, watchDir } from './feed.mjs';
 
 // The live progress file: `<state>/watch/progress.md`, a checklist of phases rendered from the ledgers and the current
 // pass's log, for the owner's Markdown preview. No model and no network: this file reads the ledgers and a few small
@@ -73,8 +73,8 @@ const GATE_WHY = {
   video: 'transcripts of the video parts',
   smeReview: 'the expert review, then a person moves the card',
   reworkWait: 'a person moved the card back to In progress',
-  finalReview: 'your read of the UA: comments first, then the card to In translation',
-  readyForMerge: 'the final edit and the merge',
+  finalReview: 'comments first, then the card to In translation, or to the review status to call the expert',
+  readyForMerge: 'then the merge',
 };
 const GATE_ACTION = {
   questions: 'answer the questions on the card',
@@ -103,7 +103,7 @@ export function gatesOf(l) {
     const id = prId(p);
     if (p.stage === 'smeReview') gate('smeReview', 'reviewer', { pr: id });
     else if (p.stage === 'reworkWait') gate('reworkWait', 'owner', { pr: id });
-    else if (p.stage === 'finalReview') gate('finalReview', 'owner', { pr: id, ident: String(p.pipelineCommits?.at(-1) ?? st.pr?.seq ?? '') });
+    else if (p.stage === 'finalReview') gate('finalReview', 'owner', { pr: id, ident: String(p.pipelineCommits?.at(-1) ?? st.pr?.seq ?? ''), recommended: p.expertReview?.recommended ? oneLine(p.expertReview.why, 140) : null });
     else if (p.stage === 'readyForMerge') gate('readyForMerge', 'owner', { pr: id, ident: String(p.readyForMerge?.at(-1)?.head ?? '') });
   }
   return gates;
@@ -119,8 +119,9 @@ function runOf(l, stage, pr) {
 function costAndTime(run) {
   if (!run) return '';
   const bits = [];
-  if (typeof run.costUsd === 'number') bits.push(`$${(run.costUsd * (run.share ?? 1)).toFixed(2)}`);
-  if (typeof run.durationMs === 'number') bits.push(duration(run.durationMs));
+  const shared = typeof run.share === 'number' && run.share < 1;
+  if (typeof run.costUsd === 'number') bits.push(`$${(run.costUsd * (run.share ?? 1)).toFixed(2)}${shared ? ' (a share)' : ''}`);
+  if (!shared && typeof run.durationMs === 'number') bits.push(duration(run.durationMs));
   return bits.length ? ` — ${bits.join(', ')}` : '';
 }
 const flightOf = (flights, key, stage, pr) => flights.find((f) => f.keys?.includes(key) && f.stage === stage && (pr ? f.pr === pr : !f.pr)) ?? null;
@@ -135,7 +136,7 @@ function stageRow(label, { rec, run, flight, stale, now }) {
   return { sym: '⬜', text: `- ⬜ ${label}` };
 }
 
-const gateRow = (label, g) => `- ${g.who === 'owner' ? '👉' : '⏸'} ${label} — waits for ${WHO[g.who] ?? g.who}: ${g.why}`;
+const gateRow = (label, g) => `- ${g.who === 'owner' ? '👉' : '⏸'} ${label} — waits for ${WHO[g.who] ?? g.who}: ${g.why}${g.recommended ? `; an expert review is recommended: ${g.recommended}` : ''}`;
 
 // A session working on the ticket now (an answer to a review comment, say) is not the owner's turn: the gate it works at
 // shows as running, not as a wait.
@@ -170,10 +171,6 @@ function ticketBlock(l, { flights, stale, now }) {
     lines.push('', `**PR ${id}** — ${p.review ?? 'review'} review, stage ${p.stage}`, '');
     // A session on the PR that is not a chain stage (answering the review comments, moving the card).
     for (const f of flights.filter((x) => x.keys?.includes(l.key) && x.pr === id && !CHAIN.includes(x.stage) && x.stage !== 'resync')) add({ text: `- ⏳ ${labelOf(f.stage)} — since ${hhmm(f.since)} (${duration(now - f.since)})` });
-    if (p.review === 'sme') {
-      const g = gates.find((x) => x.kind === 'smeReview' && x.pr === id);
-      add(g ? { text: gateRow('Expert review', g) } : rank > idx('smeReview') ? { text: '- ✅ Expert review', done: true } : { text: '- ⬜ Expert review' });
-    }
     const q = gates.find((g) => g.kind === 'questions');
     if (p.stage === 'questions' && q) add({ text: gateRow('Question on this PR', q) });
     const rw = gates.find((g) => g.kind === 'reworkWait' && g.pr === id);
@@ -182,6 +179,14 @@ function ticketBlock(l, { flights, stale, now }) {
     else if (fr) add({ text: gateRow('Your read of the UA', fr) });
     else if (rank >= idx('translation') || p.approval) add({ text: '- ✅ Your read of the UA', done: true });
     else add({ text: '- ⬜ Your read of the UA' });
+    // The expert review, after the owner's read: shown when the PR is at it, was asked for, or is recommended. Done only
+    // when a move took the PR there and back (a review request on the PR alone, from the `pr` record, is not that).
+    const sme = gates.find((x) => x.kind === 'smeReview' && x.pr === id);
+    const asked = (p.reviewersRequested ?? []).length > 0;
+    const recommended = p.expertReview?.recommended ? oneLine(p.expertReview.why, 140) : null;
+    if (p.stage === 'smeReview') add({ text: sme ? gateRow('Expert review', sme) : '- ⏸ Expert review' });
+    else if (asked && (p.steps?.move || p.steps?.follow)) add({ text: '- ✅ Expert review', done: true });
+    else if (asked || recommended) add({ text: `- ⬜ Expert review — ${recommended ? `recommended: ${recommended}` : 'requested, not called'}${rank >= idx('translation') ? ' (not called)' : ''}` });
     // The chain; a stage made stale by a change in UA, and every later one, goes back to not done.
     const overlay = stale.get(`${l.key}|${id}`);
     const from = overlay ? CHAIN.indexOf(overlay.stage) : -1;
@@ -207,13 +212,33 @@ function ticketBlock(l, { flights, stale, now }) {
 
 // ------------------------------------------------------------------ the whole file
 
-function runSection(run, flights, now, live) {
+const KIND = { morning: 'the morning run', startPass: 'a start pass', schedule: 'a scheduled run', watcher: 'the watcher', manual: 'a run started by hand' };
+
+// The last start pass of the watcher (`feed.starts`), when it didn't run or started nothing, or is waiting: the reason.
+function startLine(starts, startHours) {
+  if (!starts) return null;
+  const at = starts.at ? ` (${hhmm(starts.at)})` : '';
+  const outcome = String(starts.outcome ?? '');
+  if (starts.retryAt && Date.parse(starts.retryAt) > Date.parse(starts.at ?? 0)) return `- ⏸ Start pass${at}: retry at ${hhmm(starts.retryAt)}${starts.deferred ? ` — ${oneLine(starts.deferred, 120)}` : ''}`;
+  if (starts.deferred) return `- ⏸ Start pass deferred${at}: ${oneLine(starts.deferred, 120)}${startHours ? ` — waits for the start hours (${startHours}) or a board that reads` : ''}`;
+  if (/^failed/.test(outcome)) return `- ❌ Start pass${at}: ${oneLine(outcome, 140)}`;
+  if (/^not run|^started nothing/.test(outcome)) return `- ⬜ Start pass${at}: ${oneLine(outcome, 140)}`;
+  return null;
+}
+
+function runSection(run, flights, now, live, { starts = null, startHours = null, ledgers = [] } = {}) {
   const out = [];
-  if (!run && !flights.length) return ['No run yet.'];
+  const start = startLine(starts, startHours);
+  if (!run && !flights.length) return start ? ['No run yet.', '', start] : ['No run yet.'];
   const when = run?.at ? ` (${hhmm(run.at)})` : '';
-  out.push(live ? `Run in progress${run?.trigger ? `, started by ${run.trigger}` : ''}${run?.startedAt ? ` at ${hhmm(run.startedAt)}` : ''}` : `Last run${when}${run?.trigger ? `, started by ${run.trigger}` : ''}`, '');
+  const kind = KIND[run?.kind] ?? (run?.trigger ? `started by ${run.trigger}` : null);
+  out.push(live ? `Run in progress${kind ? `, ${kind}` : ''}${run?.startedAt ? `, since ${hhmm(run.startedAt)}` : ''}` : `Last run${when}${kind ? `, ${kind}` : ''}`, '');
   for (const f of flights) out.push(`- ⏳ ${labelOf(f.stage)} — ${f.keys?.join(', ')}${f.pr ? ` (${f.pr})` : ''}, since ${hhmm(f.since)} (${duration(now - f.since)})`);
-  if (run?.triage) out.push(`- ${run.triage.outcome === 'done' ? '✅' : run.triage.outcome ? '❌' : '⬜'} Triaging: ${run.triage.keys?.length ?? run.triage.due ?? 0} intake card(s)${run.triage.outcome ? ` — ${run.triage.outcome}` : ' due'}`);
+  if (run?.triage) {
+    // A triage session is shared by its cards: its duration is shown here once, from one card's run of it.
+    const session = ledgers.filter((l) => run.triage.keys?.includes(l.key)).flatMap((l) => l.runs ?? []).filter((r) => r.stage === 'triage' && typeof r.durationMs === 'number' && Date.parse(r.start) >= Date.parse(run.startedAt ?? 0)).at(-1);
+    out.push(`- ${run.triage.outcome === 'done' ? '✅' : run.triage.outcome ? '❌' : '⬜'} Triaging: ${run.triage.keys?.length ?? run.triage.due ?? 0} intake card(s)${run.triage.outcome ? ` — ${run.triage.outcome}${session ? `, ${duration(session.durationMs)}` : ''}` : ' due'}`);
+  }
   else if (run?.intakeDue) out.push(`- ⬜ Triaging: ${run.intakeDue} intake card(s) due`);
   for (const s of run?.steps ?? []) out.push(`- ${s.outcome === 'done' ? '✅' : s.outcome === 'failed' ? '❌' : '⏸'} ${labelOf(s.stage)} — ${(s.keys ?? []).join(', ')}${s.pr ? ` (${s.pr})` : ''}${s.outcome && s.outcome !== 'done' ? `: ${s.outcome}${s.note ? ` (${oneLine(s.note, 100)})` : ''}` : ''}`);
   if (run?.picked?.length) out.push(`- ✅ Picked: ${run.picked.join(', ')}`);
@@ -223,11 +248,12 @@ function runSection(run, flights, now, live) {
   if (w) out.push(`- Slots: ${w.inProgress} in progress${w.limits?.inProgress != null ? ` of ${w.limits.inProgress}` : ''}, ${w.waiting} waiting${w.limits?.waiting != null ? ` of ${w.limits.waiting}` : ''}${w.limits?.open != null ? `, ${w.open} open of ${w.limits.open}` : ''}`);
   const a = run?.allowance;
   if (a) out.push(`- Today's allowance: ${a.remaining}% left of ${a.cap}% (the week is at ${a.used}%)`);
+  if (start) out.push(start);
   return out;
 }
 
 // The whole file as text. Pure: the same input gives the same text.
-export function renderProgress({ ledgers = [], bad = [], memory = {}, run = null, live = false, flights = [], now = Date.now(), mode = null, stepsText = null }) {
+export function renderProgress({ ledgers = [], bad = [], memory = {}, run = null, live = false, flights = [], now = Date.now(), mode = null, stepsText = null, starts = null, startHours = null }) {
   const stale = new Map(Object.entries(memory.stale ?? {}));
   const open = ledgers.filter((l) => l.stages?.close?.status !== 'done');
   const mine = open.filter((l) => l.mode === 'pipeline');
@@ -237,15 +263,18 @@ export function renderProgress({ ledgers = [], bad = [], memory = {}, run = null
   if (!gates.length) out.push('Nothing waits for you.');
   for (const g of gates) {
     const l = mine.find((x) => x.key === g.key);
-    out.push(`- 👉 ${g.key}${l?.card?.name ? ` · ${oneLine(l.card.name, 70)}` : ''} — ${g.pr ? `${g.pr}: ` : ''}${g.why}`);
+    out.push(`- 👉 ${g.key}${l?.card?.name ? ` · ${oneLine(l.card.name, 70)}` : ''} — ${g.pr ? `${g.pr}: ` : ''}${GATE_ACTION[g.kind] ?? g.why}${g.recommended ? ` (an expert review is recommended: ${g.recommended})` : ''}`);
   }
-  out.push('', live ? '## The current run' : '## The last run', '', ...runSection(run, flights, now, live), '', '## Tickets in work', '');
+  out.push('', live ? '## The current run' : '## The last run', '', ...runSection(run, flights, now, live, { starts, startHours, ledgers }), '', '## Tickets in work', '');
   if (!ledgers.length && !bad.length) out.push('No ledgers yet: nothing has started.');
   else if (!mine.length) out.push('No ticket is in work.');
-  for (const l of mine) {
+  const started = (l) => Boolean(l.stages?.start) || flights.some((f) => f.keys?.includes(l.key));
+  for (const l of mine.filter(started)) {
     const b = ticketBlock(l, { flights, stale, now });
     out.push(b.head, '', ...b.lines, '');
   }
+  const waiting = mine.filter((l) => !started(l)).map((l) => l.key);
+  if (waiting.length) out.push(`Triaged, not started: ${waiting.join(', ')}`, '');
   if (hand.length) out.push(`In the owner's hands (observed only): ${hand.join(', ')}`, '');
   const closed = ledgers.length - open.length;
   if (closed) out.push(`${closed} closed ticket(s) not shown.`, '');
@@ -312,6 +341,7 @@ export function digestRun({ out = {}, st = null, log = [], trigger = null, start
     at: iso(now),
     startedAt: startedAt ? iso(startedAt) : null,
     trigger: trigger ?? out.trigger ?? null,
+    kind: out.morning ? 'morning' : out.startPass === true ? 'startPass' : (trigger ?? out.trigger ?? null),
     steps: (out.ran ?? []).map((s) => ({ stage: s.stage, keys: s.keys ?? [], pr: s.pr ?? null, outcome: s.outcome, note: s.note ?? null })),
     triage: out.triage?.stage ? { keys: out.triage.keys ?? [], outcome: out.triage.outcome ?? null } : null,
     intakeDue: out.triage ? 0 : (st?.intake?.due?.length ?? 0),
@@ -321,6 +351,15 @@ export function digestRun({ out = {}, st = null, log = [], trigger = null, start
     wip: st?.wip ? { inProgress: st.wip.inProgress, waiting: st.wip.waiting, open: st.wip.open, limits: st.wip.limits } : null,
     allowance: st?.allowance ? { remaining: st.allowance.remaining, cap: st.allowance.cap, used: st.allowance.used } : null,
   };
+}
+
+// The watcher's last start pass, from the feed; a feed that doesn't read shows none.
+function startsOf(state) {
+  try {
+    return readFeed(state).starts ?? null;
+  } catch {
+    return null;
+  }
 }
 
 // Renders and writes `watch/progress.md`. Never throws: a failed write is `{ written: false, error }`.
@@ -333,7 +372,7 @@ export function writeProgress({ settings, now = Date.now(), st = null, run = nul
     const memory = { ...mem.data, stale: staleFrom(st, mem.data.stale), ...(run ? { lastRun: run } : {}) };
     // The first write seeds the gates already standing, so a host that starts using the file isn't told about all of them.
     if (!mem.exists) memory.notified = Object.fromEntries(ledgers.flatMap((l) => gatesOf(l).filter((g) => g.notify).map((g) => [gateId(g), iso(now)])));
-    const text = renderProgress({ ledgers, bad, memory, run: run ?? memory.lastRun ?? null, live: live && Boolean(run), flights, now, mode: settings.mode ?? null, stepsText: readSteps(settings.progress?.stepsFile) });
+    const text = renderProgress({ ledgers, bad, memory, run: run ?? memory.lastRun ?? null, live: live && Boolean(run), flights, now, mode: settings.mode ?? null, stepsText: readSteps(settings.progress?.stepsFile), starts: startsOf(state), startHours: settings.limits?.startHours ?? null });
     atomicWrite(progressPath(state), text);
     atomicWrite(memoryPath(state), JSON.stringify(memory, null, 2) + '\n');
     return { written: true, file: progressPath(state) };
@@ -349,7 +388,7 @@ const gateId = (g) => `${g.key}|${g.kind}|${g.pr ?? ''}|${g.ident}`;
 // One notification for each gate reached, never repeated while the gate stands. A gate that is gone is forgotten, so a
 // later one of the same kind (a second round of questions) tells again. The first call with no memory only seeds.
 // `notify` is the sender (lib/notify.mjs `notify`); none: nothing is sent. Never throws.
-export function notifyGates({ settings, notify = null, now = Date.now() }) {
+export function notifyGates({ settings, notify = null, notifyIo = {}, now = Date.now() }) {
   try {
     if (!notify) return { sent: [], skipped: 'no sender' };
     const state = settings.state;
@@ -357,18 +396,26 @@ export function notifyGates({ settings, notify = null, now = Date.now() }) {
     const gates = ledgers.flatMap((l) => gatesOf(l).filter((g) => g.notify).map((g) => ({ ...g, id: gateId(g), name: l.card?.name ?? '' })));
     const mem = readMemory(state);
     const notified = mem.exists ? { ...(mem.data.notified ?? {}) } : null;
-    const sent = [];
     const next = {};
+    const due = [];
     for (const g of gates) {
-      if (!notified || notified[g.id]) {
-        next[g.id] = notified?.[g.id] ?? iso(now);
-        continue;
+      if (!notified || notified[g.id]) next[g.id] = notified?.[g.id] ?? iso(now);
+      else {
+        next[g.id] = iso(now);
+        due.push(g);
       }
-      const r = notify({ title: 'Ticket flow: your turn', text: `${g.key}${g.name ? ` ${oneLine(g.name, 70)}` : ''}: ${GATE_ACTION[g.kind]}${g.pr ? ` (${g.pr})` : ''}`, urgent: false });
-      sent.push({ key: g.key, kind: g.kind, pr: g.pr, ...(r ?? {}) });
-      next[g.id] = iso(now);
     }
+    // Remembered before it is sent: a sender that hangs or throws can't make the next pass tell it again.
     atomicWrite(memoryPath(state), JSON.stringify({ ...mem.data, notified: next }, null, 2) + '\n');
+    const sent = [];
+    for (const g of due) {
+      try {
+        const r = notify({ title: 'Ticket flow: your turn', text: `${g.key}${g.name ? ` ${oneLine(g.name, 70)}` : ''}: ${GATE_ACTION[g.kind]}${g.pr ? ` (${g.pr})` : ''}`, urgent: false }, notifyIo);
+        sent.push({ key: g.key, kind: g.kind, pr: g.pr, ...(r ?? {}) });
+      } catch (e) {
+        sent.push({ key: g.key, kind: g.kind, pr: g.pr, sent: false, why: String(e?.message ?? e).split('\n')[0] });
+      }
+    }
     return { sent };
   } catch (e) {
     return { sent: [], error: String(e?.message ?? e).split('\n')[0] };
@@ -376,9 +423,9 @@ export function notifyGates({ settings, notify = null, now = Date.now() }) {
 }
 
 // What the watcher does at the end of a check: refresh the file, then tell the owner of the gates just reached.
-export function progressAfterCheck({ settings, now = Date.now(), notify = null }) {
+export function progressAfterCheck({ settings, now = Date.now(), notify = null, notifyIo = {} }) {
   const file = writeProgress({ settings, now });
-  return { ...file, ...notifyGates({ settings, notify, now }) };
+  return { ...file, ...notifyGates({ settings, notify, notifyIo, now }) };
 }
 
 // ------------------------------------------------------------------ the runner's side
