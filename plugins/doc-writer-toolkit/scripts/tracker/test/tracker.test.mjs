@@ -513,6 +513,93 @@ test('labels: an unknown, ambiguous or empty label is refused; an exact name win
 
 // ------------------------------------------------------------------ setDescription
 
+// The people the settings name: the owner and the targets' card members.
+const withPeople = (extra = {}) => trackerSettings({ owner: 'owner-one', ...extra });
+const PEOPLE_TARGETS = [{ id: 'guide', cardMembers: ['expert-one'] }, { id: 'api', cardMembers: ['@Expert-Two'] }];
+async function peopleSetup(settings = withPeople(), targets = PEOPLE_TARGETS) {
+  const fake = await startFake();
+  const client = createTrelloClient({ key: KEY, token: TOKEN, origin: fake.origin, sleep: async () => {} });
+  const tracker = createTracker({ adapter: createTrelloAdapter(client), tracker: validateTracker(settings, targets) });
+  return { fake, tracker, close: () => fake.close() };
+}
+
+test('members: the owner and the targets\' card members come from the settings, without a leading @; a bad value is named', () => {
+  const t = validateTracker(withPeople(), PEOPLE_TARGETS);
+  assert.equal(t.owner, 'owner-one');
+  assert.deepEqual(t.members, [{ name: 'owner-one', where: 'tracker.owner' }, { name: 'expert-one', where: "targets 'guide'.cardMembers" }, { name: 'Expert-Two', where: "targets 'api'.cardMembers" }]);
+  assert.deepEqual(validateTracker(trackerSettings()).members, [], 'no people named: none');
+  assert.throws(() => validateTracker(trackerSettings({ owner: ' ' })), /tracker.owner must be a username/);
+  assert.throws(() => validateTracker(trackerSettings(), [{ id: 'guide', cardMembers: 'expert-one' }]), /targets 'guide'.cardMembers must be a list/);
+});
+
+test('addMember: a person the settings name goes onto the card once; one already on it is no change; Trello\'s own answer agrees', async () => {
+  const s = await peopleSetup();
+  try {
+    const add = await s.tracker.addMember({ card: 'Inbx0002', member: 'expert-one' });
+    assert.deepEqual(add, { card: C.inbox2, member: 'expert-one', changed: true });
+    const again = await s.tracker.addMember({ card: 'Inbx0002', member: 'Expert-One' });
+    assert.equal(again.changed, false, 'read back from the card');
+    assert.match(again.reason, /already on the card/);
+    // `owner` stands for tracker.owner; the owner is already on the card in Doing.
+    assert.equal((await s.tracker.addMember({ card: 'Doin0003', member: 'owner' })).changed, false);
+    assert.equal((await s.tracker.addMember({ card: 'Inbx0001', member: 'owner' })).changed, true);
+    assert.deepEqual((await s.tracker.hasMember({ card: 'Inbx0001', member: 'owner-one' })), { card: C.inbox1, member: 'owner-one', on: true });
+    assert.equal((await s.tracker.hasMember({ card: 'Inbx0002', member: 'expert-two' })).on, false);
+    const writes = s.fake.writes();
+    assert.deepEqual(writes.map((w) => [w.method, w.path, w.form.value]), [['POST', `/1/cards/${C.inbox2}/idMembers`, '5f00000000000000000e0002'], ['POST', `/1/cards/${C.inbox1}/idMembers`, '5f00000000000000000e0001']]);
+    // The board's members are read once per run, with the lists.
+    assert.equal(s.fake.requests.filter((r) => r.path === `/1/boards/${BOARD}/members`).length, 1);
+  } finally {
+    await s.close();
+  }
+});
+
+test('addMember: a person the settings don\'t name is refused; no owner in the settings is refused; an archived card is refused; nothing is written', async () => {
+  const s = await peopleSetup();
+  try {
+    await rejects(s.tracker.addMember({ card: 'Inbx0002', member: 'someone-else' }), 'notAllowed');
+    await rejects(s.tracker.addMember({ card: 'Arch0004', member: 'expert-one' }), 'archived');
+    await rejects(s.tracker.addMember({ card: 'Inbx0002', member: ' ' }));
+    assert.equal(s.fake.writes().length, 0);
+  } finally {
+    await s.close();
+  }
+  const n = await peopleSetup(trackerSettings(), PEOPLE_TARGETS);
+  try {
+    await rejects(n.tracker.addMember({ card: 'Inbx0002', member: 'owner' }), 'unknown');
+  } finally {
+    await n.close();
+  }
+});
+
+test('members: a name the board has no member for stops the run, like a list name, before a card is read', async () => {
+  const s = await peopleSetup(withPeople(), [{ id: 'guide', cardMembers: ['nobody-here'] }]);
+  try {
+    await assert.rejects(s.tracker.listCards({ status: 'ready' }), (e) => e.exitCode === 2 && /no board member matches 'nobody-here' \(targets 'guide'.cardMembers\)/.test(e.message) && e.data.unresolvedMembers.length === 1);
+    assert.ok(!s.fake.requests.some((r) => /\/lists\/[^/]+\/cards$/.test(r.path)), 'no card was read');
+  } finally {
+    await s.close();
+  }
+  // With no one named, the members are never read.
+  const q = await peopleSetup(trackerSettings(), []);
+  try {
+    await q.tracker.listCards({ status: 'ready' });
+    assert.ok(!q.fake.requests.some((r) => r.path.endsWith('/members')));
+  } finally {
+    await q.close();
+  }
+});
+
+test('statuses: with people named, each is shown with the board member it resolved to', async () => {
+  const s = await peopleSetup();
+  try {
+    const r = await s.tracker.statuses();
+    assert.deepEqual(r.members.map((m) => [m.name, m.where, m.id]), [['owner-one', 'tracker.owner', '5f00000000000000000e0001'], ['expert-one', "targets 'guide'.cardMembers", '5f00000000000000000e0002'], ['Expert-Two', "targets 'api'.cardMembers", '5f00000000000000000e0003']]);
+  } finally {
+    await s.close();
+  }
+});
+
 test('setDescription: refuses an empty text; sends the text exactly; skips an unchanged one', withFake({}, async (s) => {
   await rejects(s.tracker.setDescription({ card: 'Inbx0002', text: '' }), 'empty');
   await rejects(s.tracker.setDescription({ card: 'Inbx0002', text: `\n ${ZWNJ} ` }), 'empty');
@@ -651,10 +738,11 @@ test('the interface: an adapter that lacks a method is rejected; the Trello adap
   assert.throws(() => createAdapter('jira', {}), (e) => e.exitCode === 2 && /no adapter for tracker kind 'jira'/.test(e.message));
 });
 
-test('no operation archives, deletes or renames a card; every write the module made is one of the allowed shapes', withFake({}, async (s) => {
-  assert.deepEqual(Object.keys(s.tracker).sort(), ['actionsSince', 'addLabel', 'comment', 'createCard', 'downloadAttachment', 'dryRun', 'findCards', 'listCards', 'listCardsOn', 'move', 'readCard', 'removeLabel', 'setDescription', 'statuses']);
-  assert.deepEqual([...WRITES].sort(), ['addLabel', 'comment', 'createCard', 'moveCard', 'removeLabel', 'setDescription']);
-  assert.equal(READS.length, 11);
+test('no operation archives, deletes or renames a card, or removes anyone; every write the module made is one of the allowed shapes', withFake({ settings: withPeople() }, async (s) => {
+  assert.deepEqual(Object.keys(s.tracker).sort(), ['actionsSince', 'addLabel', 'addMember', 'comment', 'createCard', 'downloadAttachment', 'dryRun', 'findCards', 'hasMember', 'listCards', 'listCardsOn', 'move', 'readCard', 'removeLabel', 'setDescription', 'statuses']);
+  assert.deepEqual([...WRITES].sort(), ['addLabel', 'addMember', 'comment', 'createCard', 'moveCard', 'removeLabel', 'setDescription']);
+  assert.equal(READS.length, 12);
+  await s.tracker.addMember({ card: 'Inbx0002', member: 'owner' });
   await s.tracker.comment({ card: 'Doin0003', text: 'a' });
   await s.tracker.move({ card: 'Inbx0001', to: 'ready' });
   await s.tracker.addLabel({ card: 'Inbx0002', label: 'Billing' });
@@ -663,7 +751,7 @@ test('no operation archives, deletes or renames a card; every write the module m
   await s.tracker.createCard({ status: 'intake', name: 'n' });
   for (const w of s.fake.writes()) {
     const shape = `${w.method} ${w.path.replace(/\/[0-9a-f]{24}/g, '/:id')}`;
-    assert.ok(['POST /1/cards/:id/actions/comments', 'PUT /1/cards/:id', 'POST /1/cards/:id/idLabels', 'DELETE /1/cards/:id/idLabels/:id', 'POST /1/cards'].includes(shape), shape);
+    assert.ok(['POST /1/cards/:id/actions/comments', 'PUT /1/cards/:id', 'POST /1/cards/:id/idLabels', 'DELETE /1/cards/:id/idLabels/:id', 'POST /1/cards/:id/idMembers', 'POST /1/cards'].includes(shape), shape);
     for (const field of Object.keys(w.form)) assert.ok(['text', 'idList', 'pos', 'value', 'desc', 'name', 'idLabels', 'key', 'token'].includes(field), `${shape} sends ${field}`);
   }
 }));
@@ -782,6 +870,24 @@ test('cli: text from a file or from standard input is stored exactly; both flags
   }
 });
 
+test('cli: add-member reads the people from the whole settings file (the owner, the targets\' cardMembers); --member is required', async () => {
+  const fake = await startFake();
+  const root = tmp();
+  fs.mkdirSync(path.join(root, '.claude'));
+  fs.writeFileSync(path.join(root, '.claude', 'ticket-flow.json'), JSON.stringify({ schemaVersion: 1, tracker: withPeople(), targets: PEOPLE_TARGETS }));
+  try {
+    const r = await cli(['add-member', 'Inbx0002', '--member', 'expert-two'], { root, fake });
+    assert.equal(r.json.ok, true);
+    assert.equal(r.json.command, 'add-member');
+    assert.equal(r.json.changed, true);
+    assert.equal((await cli(['add-member', 'Inbx0002', '--member', 'expert-two'], { root, fake })).json.changed, false);
+    await assert.rejects(cli(['add-member', 'Inbx0002'], { root, fake }), (e) => e.exitCode === 2 && /needs --member/.test(e.message));
+    await assert.rejects(cli(['add-member', 'Inbx0002', '--member', 'someone-else'], { root, fake }), (e) => e.exitCode === 2 && e.refused === 'notAllowed');
+  } finally {
+    await fake.close();
+  }
+});
+
 test('cli: usage errors are exit-2 errors; help prints the commands', async () => {
   const fake = await startFake();
   const root = hostRoot();
@@ -798,7 +904,7 @@ test('cli: usage errors are exit-2 errors; help prints the commands', async () =
     assert.equal(unknown.code, 2, 'an unknown command exits 2, as in the forge');
     let help = '';
     assert.equal(await main(['--help'], { stdout: { write: (s) => void (help += s) } }), 0);
-    for (const c of ['statuses', 'list-cards', 'read-card', 'find-cards', 'actions-since', 'download-attachment', 'comment', 'move', 'add-label', 'remove-label', 'set-description', 'create-card']) assert.ok(help.includes(c), c);
+    for (const c of ['statuses', 'list-cards', 'read-card', 'find-cards', 'actions-since', 'download-attachment', 'comment', 'move', 'add-label', 'remove-label', 'add-member', 'set-description', 'create-card']) assert.ok(help.includes(c), c);
   } finally {
     await fake.close();
   }
@@ -852,6 +958,6 @@ test('the README documents every command, flag and exit code', () => {
   const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
   const source = fs.readFileSync(CLI, 'utf8');
   for (const m of source.matchAll(/^\s{2}'?([a-z-]+)'?: \{ type/gm)) if (m[1] !== 'help') assert.ok(readme.includes(`--${m[1]}`), `README lacks --${m[1]}`);
-  for (const c of ['statuses', 'list-cards', 'read-card', 'find-cards', 'actions-since', 'download-attachment', 'comment', 'move', 'add-label', 'remove-label', 'set-description', 'create-card']) assert.ok(readme.includes(`\`${c}`), `README lacks ${c}`);
-  for (const w of ['neverRead', 'transitions', 'intake', 'lastActivity', 'skippedNeverRead', 'unresolved', 'refused', '429']) assert.ok(readme.includes(w), `README lacks ${w}`);
+  for (const c of ['statuses', 'list-cards', 'read-card', 'find-cards', 'actions-since', 'download-attachment', 'comment', 'move', 'add-label', 'remove-label', 'add-member', 'set-description', 'create-card']) assert.ok(readme.includes(`\`${c}`), `README lacks ${c}`);
+  for (const w of ['neverRead', 'transitions', 'intake', 'lastActivity', 'skippedNeverRead', 'unresolved', 'unresolvedMembers', 'cardMembers', 'memberIds', 'refused', '429']) assert.ok(readme.includes(w), `README lacks ${w}`);
 });

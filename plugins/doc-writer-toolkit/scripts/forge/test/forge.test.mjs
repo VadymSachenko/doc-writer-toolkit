@@ -105,6 +105,14 @@ test('settings: validation names what is wrong', () => {
   bad({ targets: [{ id: 'a', repo: 'r' }, { id: 'a', repo: 'r2' }] }, /unique/);
   bad({ targets: [{ id: 'a', repo: 'r', reviewers: [1] }] }, /reviewers/);
   assert.equal(validateForge({ kind: 'github', owner: OWNER }, [{ id: 'a', repo: `${OWNER}/r` }]).checkLabel, null);
+  assert.equal(validateForge({ kind: 'github', owner: OWNER }, [{ id: 'a', repo: `${OWNER}/r` }]).expertLabel, null);
+});
+
+test('settings: the expert label may be added and is never removed', () => {
+  const f = validateForge({ kind: 'github', owner: OWNER, expertLabel: 'Expert advised' }, [{ id: 'a', repo: `${OWNER}/r`, labels: { inProgress: 'in progress' } }]);
+  assert.equal(f.expertLabel, 'Expert advised');
+  assert.equal(f.addable.get('expert advised'), 'Expert advised');
+  assert.ok(!f.removable.has('expert advised'));
 });
 
 test('settings: found by flag, by the CLAUDE.md field, or at the default place; the local file merges over the shared one', async () => {

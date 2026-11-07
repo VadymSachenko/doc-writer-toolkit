@@ -7,7 +7,7 @@ import { loadSettings } from './lib/settings.mjs';
 import { makeClients } from './lib/world.mjs';
 import { prepareEnv } from './lib/env.mjs';
 import { runCheck } from './lib/watch.mjs';
-import { notify } from './lib/notify.mjs';
+import { notify, startedOf } from './lib/notify.mjs';
 
 const USAGE = `watcher [options]
 
@@ -15,7 +15,9 @@ One check of the ticket flow's watcher, for launchd to start every few minutes (
 of its own, it reads every event since the last check (the boards' actions, the PRs that changed and the PR events),
 maps them to tickets through the ledgers, asks 'ticket-state status' what each changed ticket does next, and has the
 runner finish those that have a next step, each once. Once a day after schedule.morning it starts the morning run
-instead. It also starts the host jobs that are due. A check that finds nothing starts nothing.
+instead. Inside limits.startHours (10-22 by default), when a slot frees or another start may have become possible,
+it has the runner triage and start as a scheduled run would, once per change. It also starts the host jobs that are
+due. A check that finds nothing starts nothing.
 
 Options
   --dry-run                 read and plan only: no runner step, no job, no cursor, no notification is written
@@ -39,6 +41,19 @@ const OPTIONS = {
   help: { type: 'boolean', short: 'h' },
 };
 
+// The start pass in one phrase: why it ran, and what it started, would start (a dry run, observe) or why nothing.
+export function startPassLine(p) {
+  if (!p.ran) return `start pass not run (${p.why}): ${p.skipped ?? p.error ?? 'failed'}`;
+  const r = p.run ?? {};
+  const triaged = r.triage?.outcome === 'done' && r.triage.keys?.length ?`triaged ${r.triage.keys.join(', ')}; ` : '';
+  const started = startedOf(r);
+  if (started.length) return `start pass (${p.why}): ${triaged}started ${started.map((s) => s.keys.join(', ')).join('; ')}`;
+  const planned = (r.starts ?? []).filter((s) => s.stage === 'start' && !s.steps);
+  if ((r.dryRun || r.observe) && planned.length) return `start pass (${p.why}): ${triaged}would start ${planned.map((s) => s.keys.join(', ')).join('; ')}`;
+  const why = r.guard?.[0]?.reason ?? r.notStarted?.[0]?.reasons?.join('; ') ?? (r.starts?.length ? 'its start did not get the card into work' : 'no group could start');
+  return `start pass (${p.why}): ${triaged}started nothing (${why})`;
+}
+
 // One line for launchd's log: what the check found and did.
 export function oneLine(out) {
   if (out.stopped || out.skipped) return `${out.at ?? ''} ${out.stopped ?? out.skipped}`.trim();
@@ -48,6 +63,7 @@ export function oneLine(out) {
   if (out.morning) bits.push('morning run');
   if (out.errors?.length) bits.push(`${out.errors.length} part(s) failed: ${out.errors.map((e) => e.part).join(', ')}`);
   if (out.run) bits.push(`finished ${out.run.named.join(', ')}`);
+  if (out.startPass) bits.push(startPassLine(out.startPass));
   for (const j of out.jobs.filter((x) => x.due)) bits.push(`job ${j.name}: ${j.outcome ?? (j.held ? 'held' : 'planned')}`);
   if (out.notified.length) bits.push(`${out.notified.length} notification(s)`);
   return bits.join('; ');

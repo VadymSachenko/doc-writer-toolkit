@@ -41,6 +41,9 @@ export const LOCAL_DEFAULTS = {
     // `startOrder`: which ready group a scheduled run starts first: `priority` (then the oldest) or `easiest` (the
     // triage size, then fewer repos, then fewer pages, then priority).
     startOrder: 'priority',
+    // `startHours`: the local hours in which the watcher may triage and start between morning runs, when a slot frees
+    // (`HH-HH` or `HH:MM-HH:MM`, the end not included). Outside them it triages nothing and starts nothing.
+    startHours: '10-22',
   },
   // `tokenFile`: a file (mode 600) with the long-lived sign-in token the watcher's runs use; none: the CLI's own sign-in.
   schedule: { morning: '07:00', watchMinutes: 5, tokenFile: null },
@@ -63,6 +66,16 @@ export const LOCAL_DEFAULTS = {
 // The statuses the ticket flow reads by name. Each must be a status of tracker.statuses.
 export const REQUIRED_STATUSES = ['intake', 'ready', 'inProgress', 'blocked', 'finalReview', 'translation', 'done'];
 export const FLOW_STATUSES = ['intake', 'ready', 'inProgress', 'blocked', 'smeReview', 'finalReview', 'translation', 'done', 'outOfScope'];
+
+// `limits.startHours` as minutes of the local day, { from, to } (`to` not included; 24 is the day's end), or null when
+// it isn't such a range.
+export function parseStartHours(text) {
+  const m = /^\s*([01]?\d|2[0-4])(?::([0-5]\d))?\s*-\s*([01]?\d|2[0-4])(?::([0-5]\d))?\s*$/.exec(typeof text === 'string' ? text : '');
+  if (!m) return null;
+  const from = Number(m[1]) * 60 + Number(m[2] ?? 0);
+  const to = Number(m[3]) * 60 + Number(m[4] ?? 0);
+  return from < to && to <= 24 * 60 ? { from, to } : null;
+}
 
 const isObject = (v) => v && typeof v === 'object' && !Array.isArray(v);
 const fail = (msg) => {
@@ -101,6 +114,9 @@ function validateTargets(raw, forge) {
       repo: t.repo,
       review: r.review,
       reviewers: t.reviewers,
+      // The people on the tracker added to the card when a person calls this target's expert review (lib/experts.mjs);
+      // checked in validateTracker, and against the board's members with the lists.
+      cardMembers: (r.cardMembers ?? []).map((n) => String(n).replace(/^@/, '').trim()),
       labels: t.labels,
       appLabel: typeof r.appLabel === 'string' && r.appLabel.trim() ? r.appLabel : null,
       path: typeof r.path === 'string' && r.path.trim() ? r.path : null,
@@ -114,7 +130,7 @@ function validateTargets(raw, forge) {
 // Checks the merged settings and returns them with every default filled in. Nothing here reads the tracker or the forge.
 export function validateSettings(merged, { root, stateRootDefault }) {
   if (!isObject(merged)) fail('the file is not a JSON object');
-  const tracker = validateTracker(merged.tracker);
+  const tracker = validateTracker(merged.tracker, merged.targets);
   for (const s of REQUIRED_STATUSES) if (!(s in tracker.statuses)) fail(`tracker.statuses has no '${s}': the ticket flow reads it`);
   const forge = validateForge(merged.forge, merged.targets);
   const targets = validateTargets(merged.targets ?? [], forge);
@@ -139,6 +155,7 @@ export function validateSettings(merged, { root, stateRootDefault }) {
   num(limits.dailyPercent, 'limits.dailyPercent');
   if (limits.maxWeekPercent !== null) num(limits.maxWeekPercent, 'limits.maxWeekPercent');
   if (limits.open !== null) num(limits.open, 'limits.open', { min: 1 });
+  if (!parseStartHours(limits.startHours)) fail('limits.startHours must be local hours such as 10-22 or 09:30-21:00, the start before the end');
   if (!START_ORDERS.includes(limits.startOrder)) fail(`limits.startOrder must be one of ${START_ORDERS.join(', ')}`);
   if (!isObject(limits.estimates)) fail('limits.estimates must be { size: percent of the week }');
   for (const [size, v] of Object.entries(limits.estimates)) {
@@ -267,6 +284,6 @@ export function printable(s) {
   return {
     ...rest,
     tracker: { ...tracker, credentials: { ...tracker.credentials } },
-    forge: { kind: forge.kind, owner: forge.owner, self: forge.self, assignee: forge.assignee, checkLabel: forge.checkLabel, repos: forge.repos },
+    forge: { kind: forge.kind, owner: forge.owner, self: forge.self, assignee: forge.assignee, checkLabel: forge.checkLabel, expertLabel: forge.expertLabel ?? null, repos: forge.repos },
   };
 }

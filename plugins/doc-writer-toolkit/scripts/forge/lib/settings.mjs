@@ -24,8 +24,9 @@ export const labelKey = (name) => String(name ?? '').trim().toLowerCase();
 // Checks the `forge` object and the `targets` of the settings and returns them in a fixed shape. Nothing here talks to
 // the forge. The sets that follow from them are what the module is allowed to touch:
 //   repos          the repositories named by a target; a call on any other is refused;
-//   addable        the labels the module may add: every target's stage labels and `checkLabel`;
-//   removable      the labels it may remove: the stage labels only (`checkLabel` is the owner's to remove);
+//   addable        the labels the module may add: every target's stage labels, `checkLabel` and `expertLabel`;
+//   removable      the labels it may remove: the stage labels only (`checkLabel` and `expertLabel` are the owner's to
+//                  remove);
 //   logins         the users it may assign or ask for a review: `self`, `assignee`, every target's reviewers.
 export function validateForge(forge, targets) {
   if (!isObject(forge)) fail("the file has no 'forge' object");
@@ -34,6 +35,8 @@ export function validateForge(forge, targets) {
   const self = str(forge.self, 'forge.self', { optional: true });
   const assignee = str(forge.assignee, 'forge.assignee', { optional: true });
   const checkLabel = str(forge.checkLabel, 'forge.checkLabel', { optional: true });
+  // The label on a PR whose writer recommends an expert review (the ticket flow's `pr` record).
+  const expertLabel = str(forge.expertLabel, 'forge.expertLabel', { optional: true });
   if (!Array.isArray(targets) || !targets.length) fail("the file has no 'targets' list (the forge works only on the repos the targets name)");
   const list = targets.map((t, i) => {
     if (!isObject(t)) fail(`targets[${i}] must be an object`);
@@ -64,9 +67,9 @@ export function validateForge(forge, targets) {
       if (!removable.has(labelKey(name))) removable.set(labelKey(name), name);
     }
   }
-  if (checkLabel && !addable.has(labelKey(checkLabel))) addable.set(labelKey(checkLabel), checkLabel);
+  for (const extra of [checkLabel, expertLabel]) if (extra && !addable.has(labelKey(extra))) addable.set(labelKey(extra), extra);
   const logins = new Set([self, assignee, ...list.flatMap((t) => t.reviewers)].filter(Boolean));
-  return { kind, owner, self, assignee, checkLabel, targets: list, repos: [...new Set(list.map((t) => t.repo))], addable, removable, logins };
+  return { kind, owner, self, assignee, checkLabel, expertLabel, targets: list, repos: [...new Set(list.map((t) => t.repo))], addable, removable, logins };
 }
 
 export async function loadSettings({ root, settings: flag }) {

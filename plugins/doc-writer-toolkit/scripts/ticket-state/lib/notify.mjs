@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 
-// A macOS notification (design §7): the morning run's counts, and an urgent one only for a limit reached, a
+// A macOS notification (design §7): the morning run's counts, a ticket the watcher started when a slot freed (not
+// urgent), and an urgent one only for a limit reached, a
 // step that failed twice or hit its daily cap, a host job that failed for an hour, or a part of a check that failed.
 // The text goes to osascript as an argument, never inside the script, so a card name with quotes can't change what
 // runs. Elsewhere than macOS nothing is sent.
@@ -20,11 +21,20 @@ const guardNote = (reason, what, today) =>
     ? { key: `noUsage:${today}`, urgent: true, title: 'Ticket flow: no usage reading', text: `${what} stopped: /usage gave no reading. Check the sign-in (schedule.tokenFile) and run claude -p /usage.` }
     : { key: `limit:${today}`, urgent: true, title: 'Ticket flow: limit reached', text: `${what} stopped: ${reason}.` };
 
-// What to tell the owner after a check: one urgent notification per reason a day, and the morning counts once a day.
-// `runs` are runner results; `jobs` the host jobs' outcomes. Returns [{ key, title, text, urgent }].
-export function notificationsOf({ morning, run, jobs = [], errors = [], capped = [], today }) {
+// The groups a run started: their start step done. A planned start (a dry run, observe) is not one.
+export function startedOf(run) {
+  return (run?.starts ?? []).filter((s) => s.steps?.[0]?.stage === 'start' && s.steps[0].outcome === 'done').map((s) => ({ group: s.group, keys: s.steps[0].keys ?? [s.group] }));
+}
+
+// What to tell the owner after a check: one urgent notification per reason a day, the morning counts once a day, and
+// each group the watcher's start pass started. `morning`, `run` and `startPass.run` are runner results; `jobs` the host
+// jobs' outcomes. Returns [{ key, title, text, urgent }].
+export function notificationsOf({ morning, run, startPass = null, jobs = [], errors = [], capped = [], today }) {
   const out = [];
-  for (const r of [morning, run].filter(Boolean)) {
+  for (const s of startedOf(startPass?.run)) {
+    out.push({ key: `started:${today}:${s.group}`, urgent: false, title: 'Ticket flow: a ticket started', text: `${s.keys.join(', ')} started outside the morning run (${startPass.why}). /ticket-report` });
+  }
+  for (const r of [morning, run, startPass?.run].filter(Boolean)) {
     for (const g of (r.guard ?? []).filter((x) => x.kind === 'guard')) out.push(guardNote(g.reason, 'Scheduled steps', today));
     // The morning triage is a step too: its result is in `triage`, not in `ran`.
     for (const s of [...(r.ran ?? []), ...(r.triage?.outcome ? [r.triage] : [])]) {
