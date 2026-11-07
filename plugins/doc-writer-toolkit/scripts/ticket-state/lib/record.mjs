@@ -141,9 +141,15 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
           const check = labelCheck(await tracker.readCard({ card: card.id }), settings, null);
           if (check.settled) throw new Refused('textSettles', `the card has no app label, but its text names ${check.targets.join(', ')}: triage it from the text`, { targets: check.targets });
         }
-        // The owner on every card the triage moves into the ready status (`tracker.owner`).
-        if (card.status === 'ready' && settings.tracker.owner && !(await tracker.hasMember({ card: card.id, member: 'owner' })).on) {
-          throw new Refused('member', `the card is in the ready status without the owner (${settings.tracker.owner}) on it: \`tracker.mjs add-member <card> --member owner\` first`);
+        // The owner on every card the triage moved into the ready status (`tracker.owner`), by the record itself, so no
+        // session has to: one already on the card is no change, and a failure to add is a warning, never a refusal.
+        if (result.movedTo === 'ready' && card.status === 'ready' && settings.tracker.owner) {
+          try {
+            const added = await clients.tracker.addMember({ card: card.id, member: 'owner' });
+            if (added.changed) result.ownerAdded = true;
+          } catch (e) {
+            warnings.push(`the owner (${settings.tracker.owner}) was not added to the card: ${e.message}`);
+          }
         }
         l.triage = { ...result, at, priority: card.priority ?? 'medium' };
         l.priority = card.priority ?? 'medium';
@@ -181,7 +187,7 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         for (const q of l.questions) if (!q.answer && (!pr || (q.repo === pr.repo && Number(q.pr) === Number(pr.number)))) q.answer = { at, ...(result.answer ?? {}) };
         if (pr) {
           // A question asked during the chain: the answer may change the text, so the owner reads it and moves the card again.
-          pr.stage = pr.resumeTo === 'translation' ? 'finalReview' : pr.resumeTo ?? 'smeReview';
+          pr.stage = pr.resumeTo === 'translation' ? 'finalReview' : pr.resumeTo ?? 'finalReview';
           pr.resumeTo = null;
         }
         if (result.withoutVideo && l.video) l.video.skipped = { at, reason: 'the card came back before every transcript' };
@@ -267,13 +273,14 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
       case 'pr': {
         const entries = result.prs ?? [];
         if (!entries.length) throw new CliError('pr needs --result {"prs": [{ "branch", "number", "url", "expertReview" }], "places": [...]}', { code: 2 });
-        // Whether the writer recommends an expert review, and why: the owner decides; nothing waits on it.
-        for (const e of entries) {
+        // Whether the writer recommends an expert review, and why: the owner decides; nothing waits on it. The PR and its
+        // comments are already posted, so a missing or malformed one is recorded as null with a warning, not refused.
+        const expertOf = (e) => {
           const x = e.expertReview;
-          if (!x || typeof x.recommended !== 'boolean' || typeof x.why !== 'string' || !x.why.trim()) {
-            throw new CliError(`pr: each PR needs "expertReview": { "recommended": true|false, "why": "<the open questions for the expert, or the facts not found in the code or the UI; or why none is needed>" } (${e.branch})`, { code: 2 });
-          }
-        }
+          if (x && typeof x.recommended === 'boolean' && typeof x.why === 'string' && x.why.trim()) return { recommended: x.recommended, why: x.why.trim(), at };
+          warnings.push(`${e.branch}: no "expertReview": { "recommended": true|false, "why": "<the open questions for the expert, or the facts not found in the code or the UI; or why none is needed>" }; recorded as null`);
+          return null;
+        };
         for (const e of entries) {
           const p = l.prs.find((x) => x.branch === e.branch && (!e.repo || x.repo === e.repo));
           if (!p) throw new CliError(`no PR entry for the branch ${e.branch}; the write record names the branches`, { code: 2 });
@@ -287,7 +294,7 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
           p.label = (st.labels ?? []).find((x) => Object.values(targetOf(p)?.labels ?? {}).some((y) => y.toLowerCase() === x.toLowerCase())) ?? null;
           addAll(p.reviewersRequested, e.reviewersRequested);
           addAll(p.pipelineCommits, e.commits);
-          p.expertReview = { recommended: e.expertReview.recommended, why: e.expertReview.why.trim(), at };
+          p.expertReview = expertOf(e);
           const asked = (st.reviewRequests ?? []).map((r) => r.login ?? r.team ?? r).filter((r) => !p.reviewersRequested.map(String).includes(String(r)));
           if (asked.length) warnings.push(`${p.repo}#${p.number} has review requests (${asked.join(', ')}): every PR opens with no reviewer, and the expert is called by a person's move`);
         }
@@ -298,10 +305,18 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
           if (noRef) warnings.push(`place ${place.id ?? '?'} is from the code and has no reference with repo, path, lines and commit`);
           l.places.push({ state: 'open', at, ...place, pr: Number(place.pr), ...(noRef ? { noRef: true } : {}) });
         }
-        // Every PR to the owner's queue, whatever its review kind: the owner reads first and calls the expert if needed.
+        // Every PR to the owner's queue, whatever its review kind: the owner reads first and calls the expert if needed. A
+        // recommended expert review puts `forge.expertLabel` on the PR, never taken off; a failure is a warning.
         for (const e of entries) {
           const p = l.prs.find((x) => x.branch === e.branch && (!e.repo || x.repo === e.repo));
           p.stage = 'finalReview';
+          if (p.expertReview?.recommended && settings.forge.expertLabel) {
+            try {
+              await clients.forge.addLabel({ repo: p.repo, number: p.number, label: settings.forge.expertLabel });
+            } catch (err) {
+              warnings.push(`${p.repo}#${p.number}: the label '${settings.forge.expertLabel}' was not added: ${err.message}`);
+            }
+          }
         }
         return;
       }

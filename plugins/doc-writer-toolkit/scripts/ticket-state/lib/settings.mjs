@@ -264,6 +264,6 @@ export function printable(s) {
   return {
     ...rest,
     tracker: { ...tracker, credentials: { ...tracker.credentials } },
-    forge: { kind: forge.kind, owner: forge.owner, self: forge.self, assignee: forge.assignee, checkLabel: forge.checkLabel, repos: forge.repos },
+    forge: { kind: forge.kind, owner: forge.owner, self: forge.self, assignee: forge.assignee, checkLabel: forge.checkLabel, expertLabel: forge.expertLabel ?? null, repos: forge.repos },
   };
 }

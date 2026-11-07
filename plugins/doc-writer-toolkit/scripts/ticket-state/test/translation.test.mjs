@@ -323,7 +323,7 @@ test('a place from the code with no reference: the record stands, the session is
 // The people on the board: the owner, and each target's card members next to its reviewers.
 const PEOPLE = (() => {
   const r = rawSettings();
-  return { tracker: { ...r.tracker, owner: 'owner-one' }, targets: r.targets.map((t) => ({ ...t, cardMembers: t.reviewers[0] === 'expert-one' ? ['expert-one'] : ['@expert-two'] })) };
+  return { tracker: { ...r.tracker, owner: 'owner-one' }, forge: { ...r.forge, expertLabel: 'Expert advised' }, targets: r.targets.map((t) => ({ ...t, cardMembers: t.reviewers[0] === 'expert-one' ? ['expert-one'] : ['@expert-two'] })) };
 })();
 const added = (w) => w.tracker.log.filter((e) => e[0] === 'addMember').map((e) => [e[1], MEMBERS.find((m) => m.id === e[2]).username]);
 const asked = (w) => w.forge.log.filter((e) => e[0] === 'requestReviewers').map((e) => [e[1].number, e[1].logins]);
@@ -338,7 +338,7 @@ test('owner first: a sme PR opens with no reviewer and lands in the owner\'s que
   const out = await run(w, noSession, { named: ['530'] });
   assert.deepEqual(ran(out), [['move', 'finalReview', 'done']]);
   assert.equal(c.placeId, LISTS.finalReview.id);
-  assert.deepEqual(w.forge.prs[0].labels, ['In final review']);
+  assert.deepEqual(w.forge.prs[0].labels, ['Expert advised', 'In final review'], 'the stage label, and the expert label the recommendation put on');
   assert.deepEqual(w.forge.prs[0].reviewRequests, [], 'no review request');
   assert.deepEqual([asked(w), added(w)], [[], []], 'no expert asked or added');
   const st = await w.status();
@@ -411,20 +411,42 @@ test('a ledger at the review from before the owner-first rule reads as it did; t
   assert.deepEqual([asked(w), added(w)], [[], []]);
 });
 
-test('triage into the ready status: the record needs the owner on the card; a card already carrying the owner is unchanged', async () => {
+test('triage into the ready status: the record adds the owner to the card, once; a card already carrying the owner is unchanged; a failure is a warning', async () => {
   const bare = card({ number: 534, status: 'ready', labels: ['Guide'] });
   const has = card({ number: 535, status: 'ready', labels: ['Guide'], members: ['owner-one'] });
-  const w = world({ cards: [bare, has], extra: PEOPLE });
-  const triage = (c) => runRecord({ settings: w.settings, clients: w.clients(), key: String(c.number), stage: 'triage', status: 'done', card: c.shortLink, result: { verdict: 'docs-required', movedTo: 'ready', targets: ['guide'], size: 'edit' }, now: NOW });
-  await assert.rejects(triage(bare), (e) => e.refused === 'member' && /add-member <card> --member owner/.test(e.message));
-  assert.equal(read(w, '534'), null, 'nothing recorded');
-  assert.equal((await w.clients().tracker.addMember({ card: bare.shortLink, member: 'owner' })).changed, true);
-  assert.equal((await w.clients().tracker.addMember({ card: bare.shortLink, member: 'owner' })).changed, false, 'once');
-  await triage(bare);
-  assert.equal((await w.clients().tracker.addMember({ card: has.shortLink, member: 'owner' })).changed, false);
+  const byHand = card({ number: 537, status: 'ready', labels: ['Guide'] });
+  const failing = card({ number: 538, status: 'ready', labels: ['Guide'] });
+  const w = world({ cards: [bare, has, byHand, failing], extra: PEOPLE });
+  const triage = (c, result = { verdict: 'docs-required', movedTo: 'ready', targets: ['guide'], size: 'edit' }) => runRecord({ settings: w.settings, clients: w.clients(), key: String(c.number), stage: 'triage', status: 'done', card: c.shortLink, result, now: NOW });
+  const r = await triage(bare);
+  assert.equal(r.warnings, undefined);
   await triage(has);
-  assert.deepEqual(added(w), [[bare.id, 'owner-one']]);
-  assert.deepEqual([read(w, '534').triage.verdict, read(w, '535').triage.verdict], ['docs-required', 'docs-required']);
+  // A card the owner put in the ready status by hand (no move by the triage) is neither refused nor touched.
+  await triage(byHand, { verdict: 'owner-card', targets: ['guide'] });
+  assert.deepEqual(added(w), [[bare.id, 'owner-one']], 'only the card the triage moved and that lacked the owner');
+  w.tracker.addMember = async () => {
+    throw new Error('the tracker is down');
+  };
+  const f = await triage(failing);
+  assert.match(f.warnings.join('; '), /the owner \(owner-one\) was not added to the card: the tracker is down/);
+  assert.deepEqual([534, 535, 537, 538].map((n) => read(w, String(n)).triage.verdict), ['docs-required', 'docs-required', 'owner-card', 'docs-required'], 'every triage recorded');
+});
+
+test('pr with no expert review recommendation records null with a warning and adds no label; a label the repository lacks is a warning', async () => {
+  const c = card({ number: 539, status: 'inProgress' });
+  const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 37, head: 'ticket-37', labels: ['in progress'] }), pr({ repo: 'api-docs', number: 38, head: 'ticket-38', labels: ['In progress'] })], extra: PEOPLE });
+  ledger(w, c, { stages: { start: 'done', plan: 'done', write: 'done', uaReview: 'done' }, prs: [{ repo: 'guide-docs', branch: 'ticket-37', targets: ['guide'], review: 'sme', number: undefined }, { repo: 'api-docs', branch: 'ticket-38', targets: ['api'], review: 'places', number: undefined }] });
+  const changeLabels = w.forge.changeLabels;
+  w.forge.changeLabels = async (a) => {
+    if (a.add.includes('Expert advised')) throw new Error("no label 'Expert advised' in the repository");
+    return changeLabels(a);
+  };
+  const r = await runRecord({ settings: w.settings, clients: w.clients(), key: '539', stage: 'pr', status: 'done', result: { prs: [{ repo: 'guide-docs', branch: 'ticket-37', number: 37 }, { repo: 'api-docs', branch: 'ticket-38', number: 38, expertReview: { recommended: true, why: 'a fee found neither in the code nor in the UI' } }] }, now: NOW });
+  assert.match(r.warnings.join('; '), /ticket-37: no "expertReview".*recorded as null/);
+  assert.match(r.warnings.join('; '), /api-docs#38: the label 'Expert advised' was not added: no label/);
+  const l = read(w, '539');
+  assert.deepEqual(l.prs.map((p) => [p.stage, p.expertReview?.recommended ?? null]), [['finalReview', null], ['finalReview', true]]);
+  assert.deepEqual(w.forge.prs.map((p) => p.labels), [['in progress'], ['In progress']], 'no label on either');
 });
 
 test('a card member the board has no member for stops the run like an unmatched list; with no one named, the members are never read', async () => {
