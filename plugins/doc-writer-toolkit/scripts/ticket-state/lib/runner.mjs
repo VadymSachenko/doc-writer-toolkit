@@ -1039,7 +1039,13 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
       if (rec?.status === 'running') {
         if (!busy) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'failed', pr: step.pr, note: 'the session ended without recording the stage', now: clock() }).catch(() => {});
         ok = false;
-      } else if (!rec || rec.status !== 'done' || rec.seq <= (seqBefore.get(k) ?? 0)) ok = false;
+      } else if (!rec || rec.status !== 'done' || rec.seq <= (seqBefore.get(k) ?? 0)) {
+        // A plan or a write may end by asking: the `questions` record is then the session's whole result, not a failure.
+        // A session that also recorded the stage, even as failed, ended on that record.
+        const before = seqBefore.get(k) ?? 0;
+        const asked = !step.pr && ['plan', 'write'].includes(step.stage) && (!rec || rec.seq <= before) ? l?.stages?.questions : null;
+        if (asked?.status !== 'done' || asked.seq <= before) ok = false;
+      }
     }
     return ok ? 'done' : busy ? 'busy' : 'failed';
   }

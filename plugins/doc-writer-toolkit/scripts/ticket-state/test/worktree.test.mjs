@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { NOW, ago, card, gitRepo, pr, tmp } from './fakes.mjs';
+import { LISTS, NOW, ago, card, gitRepo, pr, tmp } from './fakes.mjs';
 import { ledger, read, world } from './helpers.mjs';
 import { runDaily } from '../lib/runner.mjs';
 import { runRecord } from '../lib/record.mjs';
@@ -511,6 +511,26 @@ test('AC-3: a hand commit after ready for merge that changes only a UA image: th
   assert.equal(out.ran.at(-1).outcome, 'failed');
   assert.equal(l.prs[0].readyForMerge.length, 1, 'not ready again');
   assert.match(JSON.stringify(l), new RegExp(`${UK_IMG.replace(/\./g, '\\.')} changed without`));
+});
+
+test('a write session that ends by asking is done; one that asked and then recorded the write as failed is a failure', async () => {
+  for (const failedToo of [false, true]) {
+    const c = card({ number: 1502, status: 'inProgress' });
+    const w = world({ cards: [c] });
+    withClone(w);
+    ledger(w, c, { stages: { start: 'done', plan: 'done' }, prs: [{ repo: 'guide-docs', targets: ['guide'], review: 'sme', branch: 'ticket-80', base: 'main' }] });
+    const clients = w.clients();
+    const spawnClaude = async (cmd) => {
+      assert.equal(stageOf(cmd), 'write');
+      c.placeId = LISTS.blocked.id;
+      await runRecord({ settings: w.settings, clients, key: '1502', stage: 'questions', status: 'done', result: { questions: [{ id: 'q1', kind: 'fit', text: 'the block lists something else' }] }, now: NOW });
+      if (failedToo) await runRecord({ settings: w.settings, clients, key: '1502', stage: 'write', status: 'failed', note: 'gave up after asking', now: NOW });
+      return { code: 0, stdout: RESULT, stderr: '' };
+    };
+    const out = await runDaily({ settings: w.settings, clients, io: { readUsage: usage, now: () => NOW, spawnClaude }, options: {} });
+    assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['write', failedToo ? 'failed' : 'done']]);
+    assert.equal(read(w, '1502').stages.write?.status, failedToo ? 'failed' : undefined);
+  }
 });
 
 test('record write is done only when the worktree holds commits beyond the base, pushed as they are; never for a page written in an owner\'s checkout', async () => {
