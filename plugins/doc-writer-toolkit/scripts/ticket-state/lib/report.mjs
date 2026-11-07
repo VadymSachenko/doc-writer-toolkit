@@ -61,7 +61,7 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
   out.push(a ? `Allowance: day ${a.day} of the week window, ${a.used}% of the week used of ${a.cap}% allowed by now, ${a.remaining}% left today; finishing the tickets in work needs about ${a.inWork}%${a.inWorkUnknown?.length ? ` plus ${a.inWorkUnknown.length} ticket(s) with no estimate yet` : ''}.` : 'Allowance: no usage reading.');
   out.push('');
 
-  const waitingOwner = st.tickets.filter((t) => t.held || ['questions', 'planGate', 'ownerBlock', 'paused', 'reworkWait'].includes(t.state));
+  const waitingOwner = st.tickets.filter((t) => t.held || ['questions', 'planGate', 'ownerBlock', 'paused', 'reworkWait', 'finalReview'].includes(t.state));
   out.push('## Waiting for you', '', list(waitingOwner.map((t) => `${link(t)}${cardName(t)}: ${t.state}${t.gate?.why ? `, ${t.gate.why}` : ''}`)), '');
 
   const places = [];
@@ -72,10 +72,10 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
     const l = byKey.get(t.key);
     for (const p of t.prs ?? []) {
       const open = (l?.places ?? []).filter((x) => x.repo === p.repo && Number(x.pr) === Number(p.number) && (x.state ?? 'open') === 'open').length;
-      if (p.stage === 'placesWait') places.push(`${p.url ? `[${p.id}](${p.url})` : p.id} (${link(t)}): ${open} open place(s)`);
+      if (open && p.state !== 'merged') places.push(`${p.url ? `[${p.id}](${p.url})` : p.id} (${link(t)}): ${open} open place(s)`);
       if (checkLabel && (p.labels ?? []).some((x) => x.toLowerCase() === checkLabel)) check.push(`${p.url ? `[${p.id}](${p.url})` : p.id} (${link(t)})`);
       if (p.stage === 'readyForMerge') ready.push(`${p.url ? `[${p.id}](${p.url})` : p.id} (${link(t)}): ready for your final edit and the merge`);
-      else if (p.stage === 'finalReview' && t.state !== 'finalReview' && t.prs.length > 1) ready.push(`${p.id} (${link(t)}): approved and gone on by itself to the final review; the card stands where the slower PR is`);
+      else if (p.stage === 'finalReview' && t.state !== 'finalReview' && t.prs.length > 1) ready.push(`${p.id} (${link(t)}): in the owner's queue; it waits for the card, which stands where the slower PR is`);
     }
   }
   out.push('## PRs with places', '', list(places), '');

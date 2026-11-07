@@ -158,8 +158,8 @@ test('the video gate: a card the owner moves back before every transcript goes o
   assert.ok(t.notes.some((n) => /without the video/.test(n)));
 });
 
-test('rows 9, 10 and 11: places wait; a review requested moves to review; no open place moves to final review; new comments are answered', async () => {
-  const c = { req: card({ number: 501, status: 'inProgress' }), settled: card({ number: 502, status: 'inProgress' }), open: card({ number: 503, status: 'inProgress' }), commented: card({ number: 504, status: 'smeReview' }) };
+test('rows 9 and 11: a places PR waits in the owner\'s queue, open places or none; a new review request moves it to review; new comments are answered', async () => {
+  const c = { req: card({ number: 501, status: 'finalReview' }), settled: card({ number: 502, status: 'finalReview' }), open: card({ number: 503, status: 'finalReview' }), commented: card({ number: 504, status: 'smeReview' }) };
   const prs = [
     pr({ repo: 'api-docs', number: 11, labels: ['In progress'], reviewRequests: ['expert-two'] }),
     pr({ repo: 'api-docs', number: 12, labels: ['In progress'] }),
@@ -176,16 +176,17 @@ test('rows 9, 10 and 11: places wait; a review requested moves to review; no ope
   const w = world({ cards: Object.values(c), prs, activity });
   const base = { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' };
   const places = (n, state) => [{ id: 'p1', repo: 'api-docs', pr: n, page: 'docs/x.md', line: 3, claim: 'c', why: 'codeOnly', state }];
-  ledger(w, c.req, { stages: base, prs: [{ repo: 'api-docs', number: 11, targets: ['api'], review: 'places', stage: 'placesWait' }], places: places(11, 'open') });
-  ledger(w, c.settled, { stages: base, prs: [{ repo: 'api-docs', number: 12, targets: ['api'], review: 'places', stage: 'placesWait' }], places: places(12, 'ownerAnswered') });
-  ledger(w, c.open, { stages: base, prs: [{ repo: 'api-docs', number: 13, targets: ['api'], review: 'places', stage: 'placesWait' }], places: places(13, 'open') });
+  ledger(w, c.req, { stages: base, prs: [{ repo: 'api-docs', number: 11, targets: ['api'], review: 'places', stage: 'finalReview' }], places: places(11, 'open') });
+  ledger(w, c.settled, { stages: base, prs: [{ repo: 'api-docs', number: 12, targets: ['api'], review: 'places', stage: 'finalReview' }], places: places(12, 'ownerAnswered') });
+  ledger(w, c.open, { stages: base, prs: [{ repo: 'api-docs', number: 13, targets: ['api'], review: 'places', stage: 'finalReview' }], places: places(13, 'open') });
   ledger(w, c.commented, { stages: base, prs: [{ repo: 'guide-docs', number: 14, targets: ['guide'], review: 'sme', stage: 'smeReview' }], posted: { card: [], pr: [7003] }, reviewComments: [{ repo: 'guide-docs', pr: 14, id: 7001, updatedAt: ago(4) }] });
   const st = await w.status();
   const by = Object.fromEntries(st.tickets.map((t) => [t.key, t]));
   assert.equal(next(by['501']), 'move api-docs#11 -> smeReview');
-  assert.equal(next(by['502']), 'move api-docs#12 -> finalReview');
-  assert.equal(by['503'].state, 'placesWait');
-  assert.equal(by['503'].counts, 'waiting', 'waiting on places counts as waiting');
+  assert.equal(by['502'].next, null, 'settled places start nothing');
+  assert.equal(by['503'].state, 'finalReview');
+  assert.equal(by['503'].counts, null, "the owner's queue counts for nothing");
+  assert.equal(by['503'].gate.who, 'owner');
   assert.equal(by['503'].next, null);
   const t = by['504'];
   assert.equal(t.state, 'smeReview');
@@ -197,13 +198,13 @@ test('rows 9, 10 and 11: places wait; a review requested moves to review; no ope
 
 test('row 12: the first chain stage not done for the head; then ready for merge; row 4: every PR merged closes', async () => {
   const head = 'b'.repeat(40);
-  const c = { chain: card({ number: 601, status: 'finalReview' }), done: card({ number: 602, status: 'finalReview' }), rfm: card({ number: 603, status: 'finalReview' }), merged: card({ number: 604, status: 'finalReview' }), unmerged: card({ number: 605, status: 'finalReview' }) };
+  const c = { chain: card({ number: 601, status: 'translation' }), done: card({ number: 602, status: 'translation' }), rfm: card({ number: 603, status: 'finalReview' }), merged: card({ number: 604, status: 'finalReview' }), unmerged: card({ number: 605, status: 'finalReview' }) };
   const prs = [pr({ repo: 'guide-docs', number: 21, headCommit: head }), pr({ repo: 'guide-docs', number: 22, headCommit: head }), pr({ repo: 'guide-docs', number: 23, headCommit: head }), pr({ repo: 'guide-docs', number: 24, state: 'merged' }), pr({ repo: 'guide-docs', number: 25, state: 'closed' })];
   const w = world({ cards: Object.values(c), prs });
   const base = { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' };
   const chain = (n) => Object.fromEntries(['translate', 'enReview', 'locales', 'align', 'labelSync', 'build', 'visualPack'].slice(0, n).map((s, i) => [s, { status: 'done', head, seq: 10 + i }]));
-  ledger(w, c.chain, { stages: base, prs: [{ repo: 'guide-docs', number: 21, targets: ['guide'], review: 'sme', stage: 'finalReview', chain: chain(2) }] });
-  ledger(w, c.done, { stages: base, prs: [{ repo: 'guide-docs', number: 22, targets: ['guide'], review: 'sme', stage: 'finalReview', chain: chain(7) }] });
+  ledger(w, c.chain, { stages: base, prs: [{ repo: 'guide-docs', number: 21, targets: ['guide'], review: 'sme', stage: 'translation', chain: chain(2) }] });
+  ledger(w, c.done, { stages: base, prs: [{ repo: 'guide-docs', number: 22, targets: ['guide'], review: 'sme', stage: 'translation', chain: chain(7) }] });
   ledger(w, c.rfm, { stages: base, prs: [{ repo: 'guide-docs', number: 23, targets: ['guide'], review: 'sme', stage: 'readyForMerge', chain: chain(7), readyForMerge: [{ head, at: ago(1) }] }] });
   ledger(w, c.merged, { stages: base, prs: [{ repo: 'guide-docs', number: 24, targets: ['guide'], review: 'sme', stage: 'readyForMerge' }] });
   ledger(w, c.unmerged, { stages: base, prs: [{ repo: 'guide-docs', number: 25, targets: ['guide'], review: 'sme', stage: 'finalReview' }] });
@@ -222,7 +223,7 @@ test('row 12: the first chain stage not done for the head; then ready for merge;
   assert.match(by['605'].notes[0], /closed unmerged/);
 });
 
-test('two PRs: the card stands with the slower PR; an approved PR goes on by itself; a question stops only its PR', async () => {
+test('two PRs: the card stands with the slower PR; an approved PR goes on to the owner\'s queue by itself and starts nothing; a question stops only its PR', async () => {
   const c = { two: card({ number: 701, status: 'inProgress' }), asked: card({ number: 702, status: 'blocked' }) };
   const prs = [
     pr({ repo: 'portal-docs', number: 31, head: 'ticket-701-api', labels: ['In progress'] }),
@@ -235,7 +236,7 @@ test('two PRs: the card stands with the slower PR; an approved PR goes on by its
   ledger(w, c.two, {
     stages: base,
     prs: [
-      { repo: 'portal-docs', number: 31, branch: 'ticket-701-api', targets: ['portal-api'], review: 'places', stage: 'placesWait' },
+      { repo: 'portal-docs', number: 31, branch: 'ticket-701-api', targets: ['portal-api'], review: 'places', stage: 'reworkWait' },
       { repo: 'portal-docs', number: 32, branch: 'ticket-701-ui', targets: ['portal-ui'], review: 'sme', stage: 'smeReview' },
     ],
     places: [{ id: 'p1', repo: 'portal-docs', pr: 31, state: 'open' }],
@@ -244,30 +245,30 @@ test('two PRs: the card stands with the slower PR; an approved PR goes on by its
     stages: base,
     left: 'blocked',
     prs: [
-      { repo: 'portal-docs', number: 33, branch: 'ticket-702-api', targets: ['portal-api'], review: 'places', stage: 'placesWait' },
+      { repo: 'portal-docs', number: 33, branch: 'ticket-702-api', targets: ['portal-api'], review: 'places', stage: 'finalReview' },
       { repo: 'portal-docs', number: 34, branch: 'ticket-702-ui', targets: ['portal-ui'], review: 'sme', stage: 'questions', resumeTo: 'smeReview' },
     ],
     places: [],
   });
   const st = await w.status();
   const two = st.tickets.find((t) => t.key === '701');
-  assert.equal(two.state, 'placesWait', 'the ticket is where its least advanced PR is');
+  assert.equal(two.state, 'reworkWait', 'the ticket is where its least advanced PR is');
   assert.equal(two.card.status, 'inProgress');
   assert.deepEqual(two.steps.map(fmt), ['move portal-docs#32 -> finalReview']);
   assert.equal(two.steps[0].approved, true);
   const asked = st.tickets.find((t) => t.key === '702');
   assert.equal(asked.state, 'questions');
-  assert.deepEqual(asked.steps.map(fmt), ['move portal-docs#33 -> finalReview'], 'the other PR goes on while the card is in Blocked');
+  assert.deepEqual(asked.steps, [], "the other PR waits in the owner's queue while the card is in Blocked");
 });
 
 test('row 8: a hand edit before ready for merge is noted and kept; after it, the final edit is re-synced', async () => {
   const head = 'c'.repeat(40);
-  const c = { before: card({ number: 801, status: 'finalReview' }), after: card({ number: 802, status: 'finalReview' }) };
+  const c = { before: card({ number: 801, status: 'translation' }), after: card({ number: 802, status: 'finalReview' }) };
   const git = { branchCommits: () => ['c'.repeat(40), 'd'.repeat(40)], changedUnder: () => [], pagesOf: () => [] };
   const w = world({ cards: Object.values(c), prs: [pr({ repo: 'guide-docs', number: 41, headCommit: head }), pr({ repo: 'guide-docs', number: 42, headCommit: head })], git });
   const base = { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' };
   const chain = Object.fromEntries(['translate', 'enReview', 'locales', 'align', 'labelSync', 'build', 'visualPack'].map((s) => [s, { status: 'done', head: 'd'.repeat(40) }]));
-  ledger(w, c.before, { stages: base, prs: [{ repo: 'guide-docs', number: 41, targets: ['guide'], stage: 'finalReview', pipelineCommits: ['ddddddd'], chain: { translate: { status: 'done', head } } }] });
+  ledger(w, c.before, { stages: base, prs: [{ repo: 'guide-docs', number: 41, targets: ['guide'], stage: 'translation', pipelineCommits: ['ddddddd'], chain: { translate: { status: 'done', head } } }] });
   ledger(w, c.after, { stages: base, prs: [{ repo: 'guide-docs', number: 42, targets: ['guide'], stage: 'readyForMerge', pipelineCommits: ['ddddddd'], chain, readyForMerge: [{ head: 'd'.repeat(40), at: ago(3) }] }] });
   const st = await w.status();
   const before = st.tickets.find((t) => t.key === '801');
@@ -312,7 +313,7 @@ test('a failed step waits until a person acts after it: a move, a comment, a PR 
     moved: card({ number: 955, status: 'inProgress' }),
     prComment: card({ number: 956, status: 'smeReview' }),
     prOwn: card({ number: 957, status: 'smeReview' }),
-    committed: card({ number: 958, status: 'finalReview' }),
+    committed: card({ number: 958, status: 'translation' }),
   };
   const comments = Object.fromEntries(Object.values(c).map((x) => [x.id, [{ id: `own-${x.number}`, text: 'the failed session wrote this' }]]));
   comments[c.commented.id].push({ id: 'person-1', text: 'see the second screen' });
@@ -338,7 +339,7 @@ test('a failed step waits until a person acts after it: a move, a comment, a PR 
   ledger(w, c.prComment, { stages: base, prs: [{ repo: 'guide-docs', number: 71, targets: ['guide'], review: 'sme', stage: 'smeReview' }], runs: [{ seq: 9, stage: 'answerComments', pr: 'guide-docs#71', outcome: 'failed', failures: 1, start: at, after: prMark(c.prComment, 71, ['7101']) }] });
   ledger(w, c.prOwn, { stages: base, prs: [{ repo: 'guide-docs', number: 72, targets: ['guide'], review: 'sme', stage: 'smeReview' }], runs: [{ seq: 9, stage: 'answerComments', pr: 'guide-docs#72', outcome: 'failed', failures: 1, start: at, after: prMark(c.prOwn, 72, ['7201']) }] });
   // The failed session pushed e…e without recording it: in the mark. f…f came after: a hand commit.
-  ledger(w, c.committed, { stages: base, prs: [{ repo: 'guide-docs', number: 73, targets: ['guide'], review: 'sme', stage: 'finalReview' }], runs: [{ seq: 9, stage: 'translate', pr: 'guide-docs#73', outcome: 'failed', failures: 1, start: at, after: mark(c.committed, { prs: { 'guide-docs#73': { head, hand: ['e'.repeat(40)], comments: [] } } }) }] });
+  ledger(w, c.committed, { stages: base, prs: [{ repo: 'guide-docs', number: 73, targets: ['guide'], review: 'sme', stage: 'translation' }], runs: [{ seq: 9, stage: 'translate', pr: 'guide-docs#73', outcome: 'failed', failures: 1, start: at, after: mark(c.committed, { prs: { 'guide-docs#73': { head, hand: ['e'.repeat(40)], comments: [] } } }) }] });
   const st = await w.status();
   const by = Object.fromEntries(st.tickets.map((t) => [t.key, t]));
   const waits = (k) => [next(by[k]), Boolean(by[k].next?.waits), by[k].failed?.acted ?? null];

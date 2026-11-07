@@ -18,6 +18,7 @@ export const LISTS = {
   blocked: { id: '5f00000000000000000a0005', name: 'Blocked' },
   smeReview: { id: '5f00000000000000000a0006', name: 'Expert check' },
   finalReview: { id: '5f00000000000000000a0007', name: 'Final check' },
+  translation: { id: '5f00000000000000000a000c', name: 'Translating' },
   done: { id: '5f00000000000000000a0008', name: 'Finished' },
   oldDone: { id: '5f00000000000000000a0009', name: 'Closed, Oct 2026' },
   outOfScope: { id: '5f00000000000000000a000a', name: 'Not needed' },
@@ -218,12 +219,12 @@ export function rawSettings(extra = {}) {
       watchBoards: [WATCH],
       statuses: {
         intake: ['Incoming'], drafts: ['Parked'], ready: ['To do'], inProgress: ['Doing'], blocked: ['Blocked'], smeReview: ['Expert check'],
-        finalReview: ['Final check'], done: ['Finished', 'Closed*'], outOfScope: ['Not needed'],
+        finalReview: ['Final check'], translation: ['Translating'], done: ['Finished', 'Closed*'], outOfScope: ['Not needed'],
       },
       neverRead: ['drafts'],
       transitions: [
         ['intake', 'ready'], ['intake', 'outOfScope'], ['intake', 'done'], ['ready', 'inProgress'], ['inProgress', 'blocked'], ['blocked', 'inProgress'],
-        ['inProgress', 'smeReview'], ['inProgress', 'finalReview'], ['smeReview', 'blocked'], ['smeReview', 'finalReview'], ['finalReview', 'done'],
+        ['inProgress', 'smeReview'], ['inProgress', 'finalReview'], ['smeReview', 'blocked'], ['smeReview', 'finalReview'], ['finalReview', 'smeReview'], ['finalReview', 'translation'], ['finalReview', 'done'], ['translation', 'finalReview'], ['translation', 'inProgress'], ['translation', 'smeReview'], ['translation', 'done'],
       ],
       labels: { needsInfo: 'needs info' },
       docLabels: ['Guide', 'Api', 'Docs', 'Portal UI', 'Portal API'],

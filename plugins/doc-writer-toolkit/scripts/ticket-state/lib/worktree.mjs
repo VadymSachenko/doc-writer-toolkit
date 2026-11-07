@@ -179,6 +179,32 @@ export function ensureWorktree(settings, pr) {
   return { repo: pr.repo, branch: pr.branch, base, path: wt, clone, head: tryRun(wt, ['rev-parse', 'HEAD']), push: `git -C ${wt} push origin HEAD:refs/heads/${pr.branch}`, linked, missing, notes, stuck };
 }
 
+// A code repo a session reads as evidence (`appRepos`): a read-only checkout, detached at the base as fetched just now,
+// beside the docs worktrees, so a read can't come from an old clone (the runner denies the clone's own files, the brief
+// names the commit). The clone gets only a fetch and a worktree registration. Returns { repo, path, commit, url, notes };
+// a clone that isn't here, or a checkout that can't be made, comes back with `error`, and the session still runs.
+export const codeTreePath = (settings, app) => path.join(path.dirname(path.resolve(settings.root, app.path)), '.worktrees', app.repo, '_code');
+export function ensureCodeTree(settings, app) {
+  const clone = path.resolve(settings.root, app.path);
+  const wt = codeTreePath(settings, app);
+  const out = { repo: app.repo, base: app.base, clone, path: wt, url: app.url, commit: null, notes: [] };
+  if (!fs.existsSync(clone)) return { ...out, error: `the clone ${clone} is not on this machine` };
+  if (tryRun(clone, ['fetch', '-q', 'origin', `+refs/heads/${app.base}:refs/remotes/origin/${app.base}`]) === null) out.notes.push(`could not fetch ${app.base} from origin: this commit may be old, so say so next to each fact read from it`);
+  const commit = tryRun(clone, ['rev-parse', '--verify', '-q', `refs/remotes/origin/${app.base}^{commit}`]);
+  if (!commit) return { ...out, error: `no origin/${app.base} in ${clone}` };
+  try {
+    const registered = listWorktrees(clone).find((x) => canon(x.path) === canon(wt));
+    if (!registered || registered.prunable || !fs.existsSync(wt)) {
+      tryRun(clone, ['worktree', 'prune']);
+      fs.mkdirSync(path.dirname(wt), { recursive: true });
+      run(clone, ['worktree', 'add', '-q', '--detach', wt, commit]);
+    } else if (tryRun(wt, ['rev-parse', 'HEAD']) !== commit) run(wt, ['checkout', '-q', '--force', '--detach', commit]);
+  } catch (e) {
+    return { ...out, error: `the checkout at ${wt}: ${gitError(e)}` };
+  }
+  return { ...out, commit };
+}
+
 // What a write left on one PR branch, checked in its worktree: commits beyond the base, and the branch on origin at the
 // worktree's head. Returns { head, ahead } or { error }. A worktree the write never touched, a commit made elsewhere (in
 // an owner's checkout), or a push of another head is not a written branch. No worktree on this machine: the check

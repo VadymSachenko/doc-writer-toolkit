@@ -50,6 +50,8 @@ export function readLedger(state, key) {
     throw new CliError(`cannot parse ${file}: ${e.message}`, { code: 2 });
   }
   if (ledger.schemaVersion !== SCHEMA_VERSION) throw new CliError(`${file}: schemaVersion ${ledger.schemaVersion}, this script reads ${SCHEMA_VERSION}`, { code: 2 });
+  // An older ledger's PR that waited on its places stands in the owner's queue now.
+  for (const p of ledger.prs ?? []) if (p.stage === 'placesWait') p.stage = 'finalReview';
   return ledger;
 }
 

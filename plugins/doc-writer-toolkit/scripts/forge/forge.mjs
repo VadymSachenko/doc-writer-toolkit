@@ -20,7 +20,7 @@ Commands
   open-pr --repo <r> --head <branch> --base <branch> --title <t> [--body <t>] [--assignee <login>] [--reviewer <login>]...
           [--label <name>]... [--draft]   Opens a PR, or returns the open one of the same head.
   edit-pr --repo <r> --number <n> [--title <t>] [--body <t>]   An empty title or description is refused.
-  pr-state --repo <r> (--number <n> | --head <branch>)         State, head and merge commits, review decision, requests, labels.
+  pr-state --repo <r> (--number <n> | --head <branch>) [--with-body]   State, head and merge commits, review decision, requests, labels; the description with --with-body.
   changed-prs-since --repo <r> --since <time>                  PRs updated since a time, every state.
   pr-activity --repo <r> --number <n> [--since <time>]         Reviews, review threads with comments, comments, review requests.
   events-since --repo <r> --since <time> [--types a,b]         The PR events of the repository since a time.
@@ -68,6 +68,7 @@ export const OPTIONS = {
   reviewer: { type: 'string', multiple: true },
   label: { type: 'string', multiple: true },
   draft: { type: 'boolean' },
+  'with-body': { type: 'boolean' },
   since: { type: 'string' },
   types: { type: 'string' },
   'comments-file': { type: 'string' },
@@ -155,7 +156,7 @@ export async function main(argv, io = {}) {
       result = await forge.editPr({ repo, number, title: values.title, body: textOf(values, 'body', io) });
       break;
     case 'pr-state':
-      result = await forge.prState({ repo, number, head: values.head });
+      result = await forge.prState({ repo, number, head: values.head, withBody: values['with-body'] });
       break;
     case 'changed-prs-since':
       result = await forge.changedPrsSince({ repo, since: values.since });

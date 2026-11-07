@@ -59,8 +59,8 @@ export const LOCAL_DEFAULTS = {
 };
 
 // The statuses the ticket flow reads by name. Each must be a status of tracker.statuses.
-export const REQUIRED_STATUSES = ['intake', 'ready', 'inProgress', 'blocked', 'finalReview', 'done'];
-export const FLOW_STATUSES = ['intake', 'ready', 'inProgress', 'blocked', 'smeReview', 'finalReview', 'done', 'outOfScope'];
+export const REQUIRED_STATUSES = ['intake', 'ready', 'inProgress', 'blocked', 'finalReview', 'translation', 'done'];
+export const FLOW_STATUSES = ['intake', 'ready', 'inProgress', 'blocked', 'smeReview', 'finalReview', 'translation', 'done', 'outOfScope'];
 
 const isObject = (v) => v && typeof v === 'object' && !Array.isArray(v);
 const fail = (msg) => {
@@ -70,6 +70,20 @@ const num = (v, where, { min = 0 } = {}) => {
   if (typeof v !== 'number' || !Number.isFinite(v) || v < min) fail(`${where} must be a number ≥ ${min}`);
   return v;
 };
+
+// The code repos a session may read as evidence: { repo, path (the clone, from the host root), base, url }. The runner
+// fetches each before a writer's or a reviewer's session and gives it a read-only checkout at the fetched commit
+// (`ensureCodeTree`, lib/worktree.mjs).
+function validateAppRepos(raw) {
+  if (!Array.isArray(raw)) fail('appRepos must be a list of { repo, path, base, url }');
+  return raw.map((r, i) => {
+    if (!isObject(r)) fail(`appRepos[${i}] must be { repo, path, base, url }`);
+    if (typeof r.repo !== 'string' || !/^[^/\\\s]+$/.test(r.repo) || r.repo === '.' || r.repo === '..') fail(`appRepos[${i}].repo must be the repo's plain name`);
+    if (typeof r.path !== 'string' || !r.path.trim()) fail(`appRepos[${i}].path is required (the clone, from the host root)`);
+    if (r.url !== undefined && (typeof r.url !== 'string' || !/^https:\/\//.test(r.url))) fail(`appRepos[${i}].url must be the repo's https address`);
+    return { repo: r.repo, path: r.path, base: typeof r.base === 'string' && r.base.trim() ? r.base : 'main', url: r.url ? r.url.replace(/\/+$/, '') : null };
+  });
+}
 
 function validateTargets(raw, forge) {
   return forge.targets.map((t) => {
@@ -111,6 +125,8 @@ export function validateSettings(merged, { root, stateRootDefault }) {
     triageMarker: typeof rawTracker.triageMarker === 'string' && rawTracker.triageMarker.trim() ? rawTracker.triageMarker : null,
     needsInfoLabel: tracker.labels.needsInfo ?? null,
   };
+  // The comment on the card when the chain is done and it goes back to the final review status.
+  const readyComment = typeof rawTracker.readyComment === 'string' && rawTracker.readyComment.trim() ? rawTracker.readyComment : 'Ready for merge';
 
   const mode = merged.mode ?? LOCAL_DEFAULTS.mode;
   if (!MODES.includes(mode)) fail(`mode must be one of ${MODES.join(', ')}`);
@@ -168,7 +184,8 @@ export function validateSettings(merged, { root, stateRootDefault }) {
     forge,
     targets,
     noReviewLabel: merged.noReviewLabel ?? null,
-    appRepos: merged.appRepos ?? [],
+    appRepos: validateAppRepos(merged.appRepos ?? []),
+    readyComment,
     hostRules: merged.hostRules ?? {},
     hostJobs: validateJobs(merged.hostJobs ?? [], root),
     limits,

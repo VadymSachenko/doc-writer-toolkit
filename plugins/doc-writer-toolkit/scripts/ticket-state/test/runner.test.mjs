@@ -701,13 +701,13 @@ test('the weekly roles proposal: frequent retries propose the next model; many c
 });
 
 test('the report: waiting for the owner, places, the check label, videos, ready for merge, cards left in a watched list', async () => {
-  const c = { q: card({ number: 701, status: 'blocked' }), places: card({ number: 702, status: 'inProgress' }), rfm: card({ number: 703, status: 'finalReview' }), video: card({ number: 704, status: 'blocked' }) };
+  const c = { q: card({ number: 701, status: 'blocked' }), places: card({ number: 702, status: 'finalReview' }), rfm: card({ number: 703, status: 'finalReview' }), video: card({ number: 704, status: 'blocked' }) };
   const head = '9'.repeat(40);
   const release = [card({ list: { id: '5f00000000000000000a0101', name: 'Shipping' }, board: '5f00000000000000000d0002', name: 'Release notes 1.2', lastActivity: ago(30) })];
   const w = world({ cards: Object.values(c), release, prs: [pr({ repo: 'api-docs', number: 81, labels: ['In progress', 'Look at me'] }), pr({ repo: 'guide-docs', number: 82, headCommit: head })] });
   const base = { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' };
   ledger(w, c.q, { stages: { start: 'done', plan: 'done', questions: 'done' } });
-  ledger(w, c.places, { stages: base, prs: [{ repo: 'api-docs', number: 81, targets: ['api'], review: 'places', stage: 'placesWait' }], places: [{ id: 'p1', repo: 'api-docs', pr: 81, state: 'open' }, { id: 'p2', repo: 'api-docs', pr: 81, state: 'open' }] });
+  ledger(w, c.places, { stages: base, prs: [{ repo: 'api-docs', number: 81, targets: ['api'], review: 'places', stage: 'finalReview' }], places: [{ id: 'p1', repo: 'api-docs', pr: 81, state: 'open' }, { id: 'p2', repo: 'api-docs', pr: 81, state: 'open' }] });
   ledger(w, c.rfm, { stages: base, prs: [{ repo: 'guide-docs', number: 82, targets: ['guide'], stage: 'readyForMerge', readyForMerge: [{ head, at: ago(2) }], chain: Object.fromEntries(['translate', 'enReview', 'locales', 'align', 'labelSync', 'build', 'visualPack'].map((s) => [s, { status: 'done', head }])) }] });
   ledger(w, c.video, { stages: { start: 'done', plan: 'done', videoGate: 'done', videoBlock: 'done' }, video: { videos: [{ file: 'v.mp4', parts: [{ file: 'v-part1.mp4', start: 0, transcript: 'v-part1.txt', tries: [{ at: ago(20), outcome: 'failed', reason: 'a sign-in wall' }] }] }] } });
   const out = await runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: () => usageAt(5), now: () => NOW }, options: { dryRun: true } });
@@ -855,7 +855,7 @@ test('the start recorded before its session puts each ticket under its group loc
   for (const n of [601, 602]) {
     const c = card({ number: n, status: 'ready' });
     w.tracker.cards.push(c);
-    ledger(w, c, { stages: { triage: 'done' }, triage: { verdict: 'docs-required', targets: ['guide'], size: 'edit', relations: n === 601 ? ['602'] : [] } });
+    ledger(w, c, { stages: { triage: 'done' }, triage: { verdict: 'docs-required', targets: ['guide'], size: 'edit', together: n === 601 ? ['602'] : [] } });
   }
   const owner = card({ number: 603, status: 'ready', labels: ['Guide'] }); // an owner's card: no triage, no ledger
   w.tracker.cards.push(owner);

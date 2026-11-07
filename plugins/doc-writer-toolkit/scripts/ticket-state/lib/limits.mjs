@@ -56,8 +56,9 @@ export function remainingOf(l, estimates) {
   return round(Math.max(est - (spentOf(l) ?? 0), est * 0.2));
 }
 
-// Related ready tickets go together, as the host's batch skill groups them: the triage named the other (and they
-// share a target repo), the card's text names the other's number, or the triage found the same page.
+// Two meanings, kept apart. `related` is overlap: a ready ticket waits for a related ticket in work. `together` is the
+// triage's judgement that separate PRs would edit the same place or feature: only that joins tickets into one group, in
+// either direction, within one repo. Overlap alone never joins, so two tickets on one page go one after the other.
 export function groupsOf(ready, settings) {
   const parent = new Map(ready.map((t) => [t.key, t.key]));
   const find = (k) => (parent.get(k) === k ? k : (parent.set(k, find(parent.get(k))), parent.get(k)));
@@ -66,7 +67,7 @@ export function groupsOf(ready, settings) {
   for (const a of ready) {
     for (const b of ready) {
       if (a.key >= b.key) continue;
-      if (related(a, b, repos)) join(a.key, b.key);
+      if (together(a, b, repos)) join(a.key, b.key);
     }
   }
   const groups = new Map();
@@ -107,15 +108,35 @@ export function difficultyOf(members, repos) {
 
 export const byEasiest = (a, b) => a.sizeRank - b.sizeRank || a.repoCount - b.repoCount || a.pageCount - b.pageCount || byGroupOrder(a, b);
 
-export function related(a, b, repos) {
+// A ticket as triage writes it: `#1221` and `1221` are one ticket.
+const ticketRef = (x) => String(x).trim().replace(/^#/, '');
+const names = (list, t) => (list ?? []).some((x) => ticketRef(x) === String(t.key));
+const shareRepo = (a, b, repos) => {
   const ra = repos(a);
-  const shareRepo = [...repos(b)].some((r) => ra.has(r)) || !ra.size || !repos(b).size;
-  if ((a.relations ?? []).map(String).includes(String(b.key)) && shareRepo) return true;
-  if ((b.relations ?? []).map(String).includes(String(a.key)) && shareRepo) return true;
-  const names = (t, n) => n !== null && n !== undefined && new RegExp(`#${n}\\b`).test(`${t.name ?? ''}\n${t.desc ?? ''}`.replace(/^\s*(#\d+\s*[-–—:]?\s*)+/, ''));
-  if (names(a, b.number) || names(b, a.number)) return true;
-  const pa = new Set((a.pages ?? []).map((p) => `${p.repo ?? ''}:${p.path ?? p}`));
-  return (b.pages ?? []).some((p) => pa.has(`${p.repo ?? ''}:${p.path ?? p}`));
+  return [...repos(b)].some((r) => ra.has(r)) || !ra.size || !repos(b).size;
+};
+
+// A page as triage writes it (`<repo> <path> — <block>`) or as the older ledgers have it ({ repo, path }): its repo and
+// path, without the block. Null for a path with no repo, or a bare file name: nothing says that two of those are one page.
+export function pageKey(p) {
+  if (p && typeof p === 'object') return p.repo && p.path ? `${p.repo} ${p.path}` : null;
+  const [head] = String(p ?? '').split(/\s+[—–-]\s+/);
+  const [repo, ...rest] = head.trim().split(/\s+/);
+  return repo && rest.length ? `${repo} ${rest.join(' ')}` : null;
+}
+
+// The triage's judgement that the two go together, in either direction. Across repos a relation stays context.
+export const together = (a, b, repos) => (names(a.together, b) || names(b.together, a)) && shareRepo(a, b, repos);
+
+// Overlap: the triage named the other (and they share a target repo), the card's text names the other's number, or the
+// triage found the same page.
+export function related(a, b, repos) {
+  if ((names(a.relations, b) || names(b.relations, a)) && shareRepo(a, b, repos)) return true;
+  if (together(a, b, repos)) return true;
+  const named = (t, n) => n !== null && n !== undefined && new RegExp(`#${n}\\b`).test(`${t.name ?? ''}\n${t.desc ?? ''}`.replace(/^\s*(#\d+\s*[-–—:]?\s*)+/, ''));
+  if (named(a, b.number) || named(b, a.number)) return true;
+  const pa = new Set((a.pages ?? []).map(pageKey).filter(Boolean));
+  return (b.pages ?? []).map(pageKey).some((k) => k && pa.has(k));
 }
 
 // The WIP counts and the groups a scheduled run may start now, with the reason each other group doesn't.
@@ -130,6 +151,8 @@ export const isOpen = (t) => t.ledger === 'present' && t.mode === 'pipeline' && 
 // (the morning run, a manual run).
 export function startable({ tickets, groups, settings, allowance, estimates, inWork, locked, tried = new Set(), retryWaiting = false }) {
   const { limits } = settings;
+  const repos = (t) => new Set((t.targets ?? []).map((id) => settings.targets.find((x) => x.id === id)?.repo).filter(Boolean));
+  const startingMembers = []; // the tickets this calculation starts: a ticket related to one of them waits like one in work
   const counted = tickets.filter((t) => t.counted);
   let inProgress = counted.filter((t) => t.counts === 'inProgress').length;
   const waiting = counted.filter((t) => t.counts === 'waiting').length;
@@ -165,6 +188,8 @@ export function startable({ tickets, groups, settings, allowance, estimates, inW
     if (easiest && blockedBy !== null) why.push(`waits behind the easier group ${blockedBy}`);
     if (g.keys.some((k) => locked.has(k))) why.push('locked by a run');
     if (g.waitsFor?.length) why.push(`related to ${g.waitsFor.join(', ')}, still in work`);
+    const startingRelated = startingMembers.filter((s) => g.members.some((m) => related(m, s, repos))).map((s) => s.key);
+    if (startingRelated.length) why.push(`related to ${startingRelated.join(', ')}, starting now`);
     if (waiting >= limits.waiting) why.push(`${waiting} waiting (limit ${limits.waiting})`);
     if (limits.open !== null && open + g.size > limits.open && !(g.size > limits.open && open === 0)) why.push(`${open} open (${holders()}) + ${g.size} > ${limits.open}`);
     if (inProgress + g.size > limits.inProgress && !(g.size > limits.inProgress && inProgress === 0)) {
@@ -190,6 +215,7 @@ export function startable({ tickets, groups, settings, allowance, estimates, inW
     inProgress += g.size;
     open += g.size;
     starting.push(...g.keys);
+    startingMembers.push(...g.members);
     committed = round(committed + (estimate ?? 0));
     if (estimate === null) inWork = [...inWork, { key: g.group }];
   }

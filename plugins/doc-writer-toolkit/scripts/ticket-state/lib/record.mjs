@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import { CliError, Refused } from './errors.mjs';
 import { checkKey, findPr, keyOf, newLedger, newPr, prId, readLedger, writeLedger } from './ledger.mjs';
 import { lockOf, renewLock } from './locks.mjs';
-import { CARD_STATUS_OF, CHAIN, LABEL_OF, PR_ORDER, PR_STAGE_OF_STATUS, PR_STAGES, STATUSES, TICKET_STAGES } from './stages.mjs';
+import { CARD_STATUS_OF, CHAIN, LABEL_OF, PR_ORDER, PR_STAGE_OF_STATUS, PR_STAGES, STATUSES, TICKET_STAGES, followsMove } from './stages.mjs';
 import { labelCheck } from './intake.mjs';
 import { KINDS, recordedSize } from './cleanup.mjs';
 import { imagePairsAt } from './pairs.mjs';
@@ -14,7 +14,8 @@ import { writtenIn } from './worktree.mjs';
 // and the files support it (context/ticket-flow.md, "When a record is accepted"). On any problem nothing is written.
 
 const PR_ONLY = new Set([...CHAIN, 'answerComments', 'readyForMerge', 'resync']);
-const PR_TARGET_STAGES = ['writing', 'placesWait', 'reworkWait', 'smeReview', 'finalReview', 'questions'];
+// Never `translation`: only `follow`, a person's move of the card, takes a PR there.
+const PR_TARGET_STAGES = ['writing', 'reworkWait', 'smeReview', 'finalReview', 'questions'];
 const VERDICTS = ['docs-required', 'needs-info', 'out-of-scope', 'already-documented', 'duplicate', 'manual-out-of-scope', 'owner-card'];
 
 export const blobHash = (buf) => crypto.createHash('sha1').update(`blob ${buf.length}\0`).update(buf).digest('hex');
@@ -90,6 +91,7 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
     return st;
   };
   const record = { status, seq: l.seq + 1, at, ...(note ? { note } : {}), ...(Object.keys(result).length ? { result } : {}) };
+  const warnings = [];
 
   if (status === 'done') await applyDone();
   else if (status === 'running' && pr && (CHAIN.includes(stage) || ['answerComments', 'resync', 'readyForMerge'].includes(stage))) {
@@ -123,7 +125,7 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
 
   const file = writeLedger(settings.state, l);
   const lock = renewLock(settings.state, l.group, { leaseMinutes: settings.limits.lockLeaseMinutes, stage: status === 'running' ? stage : undefined, now });
-  return { file: path.relative(settings.root, file), key, stage, status, ...(pr ? { pr: prId(pr) } : {}), seq: l.seq, lockRenewed: Boolean(lock) };
+  return { file: path.relative(settings.root, file), key, stage, status, ...(pr ? { pr: prId(pr) } : {}), seq: l.seq, lockRenewed: Boolean(lock), ...(warnings.length ? { warnings } : {}) };
 
   // ------------------------------------------------------------------ what `done` checks, and what it changes
 
@@ -131,6 +133,7 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
     switch (stage) {
       case 'triage': {
         if (!VERDICTS.includes(result.verdict)) throw new CliError(`triage needs --result {"verdict": …}, one of ${VERDICTS.join(', ')}`, { code: 2 });
+        for (const k of ['together', 'separate']) if (result[k] !== undefined && !Array.isArray(result[k])) throw new CliError(`triage: ${k} must be a list of ticket numbers`, { code: 2 });
         const card = await cardNow(ref);
         if (result.movedTo && card.status !== result.movedTo) throw new Refused('card', `the triage moved the card to ${result.movedTo}, but it is in ${card.status}`);
         // Labels confirm; a missing app label alone is no reason for needs-info when the text settles the target.
@@ -173,7 +176,8 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         const card = await needCard('inProgress');
         for (const q of l.questions) if (!q.answer && (!pr || (q.repo === pr.repo && Number(q.pr) === Number(pr.number)))) q.answer = { at, ...(result.answer ?? {}) };
         if (pr) {
-          pr.stage = pr.resumeTo ?? 'smeReview';
+          // A question asked during the chain: the answer may change the text, so the owner reads it and moves the card again.
+          pr.stage = pr.resumeTo === 'translation' ? 'finalReview' : pr.resumeTo ?? 'smeReview';
           pr.resumeTo = null;
         }
         if (result.withoutVideo && l.video) l.video.skipped = { at, reason: 'the card came back before every transcript' };
@@ -273,10 +277,16 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
           addAll(p.reviewersRequested, e.reviewersRequested);
           addAll(p.pipelineCommits, e.commits);
         }
-        for (const place of result.places ?? []) l.places.push({ state: 'open', at, ...place, pr: Number(place.pr) });
+        // The places' comments are posted before this record, so a place from the code with no reference at a commit is
+        // not refused (a retry would post them again): the record stands, the session is told, and `status` reports it.
+        for (const place of result.places ?? []) {
+          const noRef = place.source === 'code' && !(Array.isArray(place.refs) && place.refs.length && place.refs.every((r) => r?.repo && r?.path && r?.lines && r?.commit));
+          if (noRef) warnings.push(`place ${place.id ?? '?'} is from the code and has no reference with repo, path, lines and commit`);
+          l.places.push({ state: 'open', at, ...place, pr: Number(place.pr), ...(noRef ? { noRef: true } : {}) });
+        }
         for (const e of entries) {
           const p = l.prs.find((x) => x.branch === e.branch && (!e.repo || x.repo === e.repo));
-          p.stage = p.review === 'sme' ? 'smeReview' : l.places.some((x) => x.repo === p.repo && Number(x.pr) === p.number && x.state === 'open') ? 'placesWait' : 'finalReview';
+          p.stage = p.review === 'sme' ? 'smeReview' : 'finalReview';
         }
         return;
       }
@@ -297,8 +307,8 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
             if (!(st.labels ?? []).some((x) => x.toLowerCase() === label.toLowerCase())) throw new Refused('label', `${prId(pr)} lacks its stage label '${label}'`);
             pr.label = label;
           }
-          // The text the review approved (or the places settled on): a later word change in UA is reported.
-          if (to === 'finalReview') pr.approval = { head: st.headCommit, at, from: before };
+          // Who the move to a review took along: a person moving the card back doesn't start this move again (row 9).
+          if (to === 'smeReview') addAll(pr.reviewersRequested, (st.reviewRequests ?? []).map((r) => r.login ?? r.team ?? r));
           l.left = { ...brief(card), at };
           return;
         }
@@ -312,8 +322,9 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         const card = await needCard(to);
         const from = l.left?.status;
         for (const p of l.prs) {
-          if (p.number && CARD_STATUS_OF[p.stage] === from && PR_STAGE_OF_STATUS[to]) {
-            if (PR_STAGE_OF_STATUS[to] === 'finalReview') p.approval = { head: (await clients.forge.prState({ repo: p.repo, number: p.number })).headCommit, at, from: p.stage, by: 'person' };
+          if (p.number && followsMove(p.stage, from, to)) {
+            // The only UA approve: a person's move to `translation`. A later word change in UA is reported.
+            if (to === 'translation') p.approval = { head: (await clients.forge.prState({ repo: p.repo, number: p.number })).headCommit, at, from: p.stage, by: 'person' };
             p.stage = PR_STAGE_OF_STATUS[to];
             const label = targetOf(p)?.labels?.[LABEL_OF[p.stage]];
             if (label) p.label = label;
@@ -376,8 +387,8 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
           pr.readyForMerge.push({ head: st.headCommit, at });
           pr.stage = 'readyForMerge';
         }
-        // The re-sync no longer makes the PR ready by itself: the rule checks the images, then `readyForMerge` does.
-        if (pr.stage === 'reworkWait' && CHAIN.includes(stage)) pr.stage = 'finalReview';
+        // The re-sync no longer makes the PR ready by itself: the rule checks the images, then `readyForMerge` does. A
+        // chain stage finished after a person moved the card back changes no PR stage: the move stands.
       }
     }
   }

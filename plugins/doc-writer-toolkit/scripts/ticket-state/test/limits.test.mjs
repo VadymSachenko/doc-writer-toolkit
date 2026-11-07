@@ -6,7 +6,7 @@ import { LISTS, NOW, ago, card, host, pr, rawSettings, settingsFor, tmp } from '
 import { ledger, world } from './helpers.mjs';
 import { parseUsage, allowanceOf, parseReset } from '../lib/allowance.mjs';
 import { loadSettings, validateSettings } from '../lib/settings.mjs';
-import { estimatesOf, remainingOf } from '../lib/limits.mjs';
+import { estimatesOf, pageKey, related, remainingOf } from '../lib/limits.mjs';
 import { takeLock } from '../lib/locks.mjs';
 import { renderReport } from '../lib/report.mjs';
 
@@ -30,10 +30,10 @@ const waiting = (w, n) => {
     ledger(w, c, { stages: { triage: 'done', start: 'done', plan: 'done', questions: 'done' }, startedBy: 'schedule', triage: { verdict: 'docs', targets: ['guide'], size: 'edit' } });
   }
 };
-const ready = (w, number, { labels = [], createdAt = ago(72), size = 'edit', relations = [], targets = ['guide'], pages = [] } = {}) => {
+const ready = (w, number, { labels = [], createdAt = ago(72), size = 'edit', relations = [], together = [], targets = ['guide'], pages = [] } = {}) => {
   const c = card({ number, status: 'ready', labels, createdAt });
   w.tracker.cards.push(c);
-  ledger(w, c, { stages: { triage: 'done' }, priority: null, triage: { verdict: 'docs', targets, size, relations, pages } });
+  ledger(w, c, { stages: { triage: 'done' }, priority: null, triage: { verdict: 'docs', targets, size, relations, together, pages } });
   return c;
 };
 // A ticket in SME review: its PR open, counted as neither in progress nor waiting.
@@ -82,7 +82,7 @@ test('AC-2: manual starts and tickets in the owner hands are not counted; a free
 
 test('AC-2: a group larger than the ceiling starts only when nothing is in progress', async () => {
   const w = world({ extra: estimates });
-  for (const n of [601, 602, 603, 604]) ready(w, n, { relations: [String(n === 601 ? 602 : n - 1)] });
+  for (const n of [601, 602, 603, 604]) ready(w, n, { together: [String(n === 601 ? 602 : n - 1)] });
   let st = await w.status({ usage: usage(5) });
   assert.deepEqual(st.startable.map((g) => [g.group, g.size]), [['601-602-603-604', 4]]);
   inProgress(w, 1);
@@ -176,7 +176,7 @@ test('open: no limit by default; a group larger than the limit starts only when 
   assert.equal(st.wip.limits.open, null);
   assert.deepEqual(st.startable.map((g) => g.group), ['501']);
   w = world({ extra: { limits: { ...estimates.limits, open: 1, inProgress: 5 } } });
-  ready(w, 601, { relations: ['602'] });
+  ready(w, 601, { together: ['602'] });
   ready(w, 602);
   st = await w.status({ usage: usage(5) });
   assert.deepEqual(st.startable.map((g) => [g.group, g.size]), [['601-602', 2]]);
@@ -262,7 +262,7 @@ test('startOrder easiest: a group held back only by its lock or a relation holds
   const limits = { ...estimates.limits, inProgress: 5, startOrder: 'easiest' };
   const w = world({ extra: { limits } });
   // Two related edits: their group's lock (a manual run on it) holds the group, not each ticket.
-  ready(w, 501, { size: 'edit', relations: ['502'] });
+  ready(w, 501, { size: 'edit', together: ['502'] });
   ready(w, 502, { size: 'edit' });
   ready(w, 503, { size: 'newPage' });
   takeLock(w.settings.state, { group: '501-502', kind: 'manual', stage: 'start', leaseMinutes: 120, now: NOW });
@@ -395,4 +395,59 @@ test('settings: bad values stop with the key named', () => {
   const s = settingsFor(root, { cleanup: { trashDir: 'trash-here' } });
   assert.equal(s.cleanup.trashDir, path.join(root, 'trash-here'));
   assert.ok(fs.existsSync(root));
+});
+
+// ------------------------------------------------------------------ overlap and together
+
+const ROUTING = 'guide-docs docs/routing/routing-mechanics/routing-mechanics.md';
+const inWorkOn = (w, number, triage, stage = 'readyForMerge') => {
+  const c = card({ number, status: 'finalReview' });
+  w.tracker.cards.push(c);
+  w.forge.prs.push(pr({ repo: 'guide-docs', number: number + 1000 }));
+  ledger(w, c, { startedBy: 'schedule', stages: { triage: 'done', start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' }, triage: { verdict: 'docs-required', targets: ['guide'], size: 'edit', ...triage }, prs: [{ repo: 'guide-docs', number: number + 1000, targets: ['guide'], review: 'sme', stage }] });
+};
+
+test('the strings triage writes: a ticket with or without #, a page with or without its block; overlap holds a ticket back, and only the judgement joins', async () => {
+  const repos = () => new Set(['guide-docs']);
+  const a = { key: '1195', number: 1195, relations: ['#916', '#1221'], pages: [`${ROUTING} — Черга кандидатів`] };
+  const b = { key: '1221', number: 1221, relations: ['#1195'], pages: ['guide-docs docs/routing/pools/pools.md', 'guide-docs docs/routing/routes/routes.md', ROUTING] };
+  assert.equal(related(a, b, repos), true);
+  assert.equal(related({ key: '1', pages: [`${ROUTING} — Черга кандидатів`] }, { key: '2', pages: [ROUTING] }, repos), true, 'the same page, with no relation');
+  assert.equal(related({ key: '1', pages: [`${ROUTING} — Один блок`] }, { key: '2', pages: [`${ROUTING} — Інший блок`] }, repos), true, 'another block, the same page');
+  assert.equal(related({ key: '1', pages: [{ repo: 'guide-docs', path: 'docs/a.md' }] }, { key: '2', pages: ['guide-docs docs/a.md — Блок'] }, repos), true, 'the older form');
+  assert.equal(related({ key: '1', pages: ['guide-docs docs/a.md'] }, { key: '2', pages: ['api-docs docs/a.md'] }, repos), false, 'another repo');
+  assert.equal(related({ key: '1', pages: ['a.md'] }, { key: '2', pages: ['a.md'] }, repos), false, 'a bare file name says nothing');
+  assert.equal(related({ key: '1', pages: [{ repo: null, path: 'docs/a.md' }] }, { key: '2', pages: [{ repo: null, path: 'docs/a.md' }] }, repos), false, 'a path with no repo says nothing');
+  assert.equal(pageKey(`${ROUTING} — Черга кандидатів`), ROUTING);
+  assert.equal(pageKey('guide-docs docs/api-reference/ — нова сторінка «Отримати перелік банків» (GET /banks)'), 'guide-docs docs/api-reference/');
+
+  const w = world({ extra: estimates });
+  ready(w, 1195, { relations: ['#916', '#1221'], pages: a.pages });
+  ready(w, 1221, { relations: ['#1195'], pages: b.pages });
+  let st = await w.status({ usage: usage(5) });
+  assert.deepEqual(st.groups.map((g) => g.group).sort(), ['1195', '1221'], 'without the judgement they stay apart');
+  assert.deepEqual(st.startable.map((g) => g.group), ['1195']);
+  assert.deepEqual(st.notStarted.map((g) => [g.group, g.reasons]), [['1221', ['related to 1195, starting now']]]);
+
+  // #1195 in work (its PR open, at any stage): #1221 waits for it, as it would for a merge.
+  const w2 = world({ extra: estimates });
+  inWorkOn(w2, 1195, { relations: ['#916', '#1221'], pages: a.pages });
+  ready(w2, 1221, { relations: ['#1195'], pages: b.pages });
+  st = await w2.status({ usage: usage(5) });
+  assert.deepEqual(st.groups.find((g) => g.keys.includes('1221')).waitsFor, ['1195']);
+  assert.deepEqual(st.startable, []);
+  assert.deepEqual(st.notStarted.map((g) => g.reasons), [['related to 1195, still in work']]);
+});
+
+test('together joins in either direction, as #N or N, and not across repos; a card naming the other or one page never joins', async () => {
+  const w = world({ extra: estimates });
+  ready(w, 701, { together: ['#702'] });
+  ready(w, 702);
+  ready(w, 703, { together: ['704'], targets: ['guide'] });
+  ready(w, 704, { targets: ['api'] });
+  ready(w, 705, { pages: ['guide-docs docs/b.md — Перший'] });
+  ready(w, 706, { pages: ['guide-docs docs/b.md — Другий'] });
+  const st = await w.status({ usage: usage(5) });
+  const groups = st.groups.map((g) => g.group).sort();
+  assert.deepEqual(groups, ['701-702', '703', '704', '705', '706']);
 });

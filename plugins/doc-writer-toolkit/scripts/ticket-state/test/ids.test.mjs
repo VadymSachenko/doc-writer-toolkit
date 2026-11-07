@@ -63,7 +63,7 @@ test('the old fragment is the slug Docusaurus made: punctuation dropped, repeats
 });
 
 test('status: an id-only UA change keeps the approval and the chain stages; a word change makes them stale', async () => {
-  const c = card({ number: 1001, status: 'finalReview' });
+  const c = card({ number: 1001, status: 'translation' });
   const forgePr = pr({ repo: 'guide-docs', number: 71 });
   const w = world({ cards: [c], prs: [forgePr] });
   const repo = gitRepo(path.join(w.root, 'repos/guide-docs'));
@@ -72,7 +72,7 @@ test('status: an id-only UA change keeps the approval and the chain stages; a wo
   const chain = Object.fromEntries(['translate', 'enReview', 'locales', 'align', 'labelSync', 'build', 'visualPack'].map((s) => [s, { status: 'done', head: v1 }]));
   ledger(w, c, {
     stages: { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' },
-    prs: [{ repo: 'guide-docs', number: 71, targets: ['guide'], review: 'sme', stage: 'finalReview', chain, approval: { head: v1, at: ago(5) } }],
+    prs: [{ repo: 'guide-docs', number: 71, targets: ['guide'], review: 'sme', stage: 'translation', chain, approval: { head: v1, at: ago(5) } }],
   });
   const git = makeGit(w.settings);
   const next = (t) => (t.next ? `${t.next.stage}${t.next.pr ? ` ${t.next.pr}` : ''}` : null);
