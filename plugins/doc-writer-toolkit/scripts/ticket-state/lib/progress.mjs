@@ -137,8 +137,12 @@ function stageRow(label, { rec, run, flight, stale, now }) {
 
 const gateRow = (label, g) => `- ${g.who === 'owner' ? '👉' : '⏸'} ${label} — waits for ${WHO[g.who] ?? g.who}: ${g.why}`;
 
+// A session working on the ticket now (an answer to a review comment, say) is not the owner's turn: the gate it works at
+// shows as running, not as a wait.
+const busyAt = (flights, g) => flights.some((f) => f.keys?.includes(g.key) && (!g.pr || !f.pr || f.pr === g.pr));
+
 function ticketBlock(l, { flights, stale, now }) {
-  const gates = gatesOf(l);
+  const gates = gatesOf(l).filter((g) => !busyAt(flights, g));
   const st = l.stages ?? {};
   const all = [];
   const lines = [];
@@ -164,6 +168,8 @@ function ticketBlock(l, { flights, stale, now }) {
     const rank = PR_ORDER.indexOf(p.stage);
     const idx = (s) => PR_ORDER.indexOf(s);
     lines.push('', `**PR ${id}** — ${p.review ?? 'review'} review, stage ${p.stage}`, '');
+    // A session on the PR that is not a chain stage (answering the review comments, moving the card).
+    for (const f of flights.filter((x) => x.keys?.includes(l.key) && x.pr === id && !CHAIN.includes(x.stage) && x.stage !== 'resync')) add({ text: `- ⏳ ${labelOf(f.stage)} — since ${hhmm(f.since)} (${duration(now - f.since)})` });
     if (p.review === 'sme') {
       const g = gates.find((x) => x.kind === 'smeReview' && x.pr === id);
       add(g ? { text: gateRow('Expert review', g) } : rank > idx('smeReview') ? { text: '- ✅ Expert review', done: true } : { text: '- ⬜ Expert review' });
@@ -226,7 +232,7 @@ export function renderProgress({ ledgers = [], bad = [], memory = {}, run = null
   const open = ledgers.filter((l) => l.stages?.close?.status !== 'done');
   const mine = open.filter((l) => l.mode === 'pipeline');
   const hand = open.filter((l) => l.mode !== 'pipeline').map((l) => l.key);
-  const gates = mine.flatMap(gatesOf).filter((g) => g.who === 'owner');
+  const gates = mine.flatMap(gatesOf).filter((g) => g.who === 'owner' && !busyAt(flights, g));
   const out = ['# Ticket flow progress', '', `Updated ${hhmm(now)}${mode ? ` · mode ${mode}` : ''}`, '', '## Waiting for you', ''];
   if (!gates.length) out.push('Nothing waits for you.');
   for (const g of gates) {
@@ -309,7 +315,7 @@ export function digestRun({ out = {}, st = null, log = [], trigger = null, start
     steps: (out.ran ?? []).map((s) => ({ stage: s.stage, keys: s.keys ?? [], pr: s.pr ?? null, outcome: s.outcome, note: s.note ?? null })),
     triage: out.triage?.stage ? { keys: out.triage.keys ?? [], outcome: out.triage.outcome ?? null } : null,
     intakeDue: out.triage ? 0 : (st?.intake?.due?.length ?? 0),
-    picked: (out.starts ?? []).flatMap((s) => (s.steps?.[0]?.keys ?? (s.group ? [s.group] : []))),
+    picked: (out.starts ?? []).filter((s) => !s.skipped).flatMap((s) => (s.steps?.[0]?.keys ?? (s.group ? [s.group] : []))),
     notStarted: (st?.notStarted ?? []).map((n) => ({ group: n.group, keys: n.keys ?? [], reasons: n.reasons ?? [] })),
     guard,
     wip: st?.wip ? { inProgress: st.wip.inProgress, waiting: st.wip.waiting, open: st.wip.open, limits: st.wip.limits } : null,

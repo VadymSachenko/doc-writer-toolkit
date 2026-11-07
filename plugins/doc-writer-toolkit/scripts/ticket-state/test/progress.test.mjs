@@ -121,6 +121,17 @@ test('AC-1: the gates: the owner\'s read, the final merge, questions and the pla
   assert.deepEqual(gatesOf(mk('717', { stages: { planGate: rec(4, 'done'), planApproval: rec(5, 'done'), write: rec(6, 'done') } })), []);
 });
 
+test('a session working on a PR at the owner\'s gate is running, not the owner\'s turn', () => {
+  const pr = Object.assign(newPr({ repo: 'guide-docs', review: 'places', branch: 'a' }), { number: 1, stage: 'finalReview', pipelineCommits: ['c1'] });
+  const l = mk('791', { stages: { triage: rec(1, 'done'), pr: rec(6, 'done') }, prs: [pr] });
+  const idle = render([l]);
+  assert.match(idle, /- 👉 791 .* your read of the UA/);
+  const busy = render([l], { flights: [{ keys: ['791'], stage: 'answerComments', pr: 'guide-docs#1', since: NOW - 120000 }], live: true, run: { trigger: 'watcher' } });
+  assert.match(busy, /Nothing waits for you\./);
+  assert.match(busy, /- ⏳ Answering the review comments — since \d\d:\d\d \(2m 00s\)/);
+  assert.doesNotMatch(busy, /👉/);
+});
+
 test('AC-1: a ticket with no runs, no ledgers at all, tickets that are closed or in the owner\'s hands, and a ledger that does not read', () => {
   const fresh = mk('721');
   const text = render([fresh]);
@@ -347,7 +358,8 @@ test('AC-4: with no sender nothing is sent and nothing is remembered as sent', (
 test('AC-4: the watcher\'s check refreshes the file and tells a gate once over two checks', async () => {
   const { w, finalReview } = gateWorld();
   const sent = [];
-  const check = (n) => runCheck({ settings: w.settings, clients: w.clients(), io: { now: () => NOW + n * 5 * 60000, git: quietGit, notify: (m) => (sent.push(m), { sent: true }) }, options: {} });
+  const usage = parseUsage('Current session: 10% used · resets 2pm (UTC)\nCurrent week (all models): 5% used · resets Nov 14 at 6am (UTC)\n');
+  const check = (n) => runCheck({ settings: w.settings, clients: w.clients(), io: { now: () => NOW + n * 5 * 60000, git: quietGit, runner: { now: () => NOW + n * 5 * 60000, readUsage: () => usage }, notify: (m) => (sent.push(m), { sent: true }) }, options: {} });
   await check(0);
   assert.ok(fs.existsSync(progressPath(w.settings.state)), 'a quiet check writes the file');
   finalReview('831', 1, ['c1']);
@@ -357,6 +369,6 @@ test('AC-4: the watcher\'s check refreshes the file and tells a gate once over t
   assert.match(fs.readFileSync(progressPath(w.settings.state), 'utf8'), /- 👉 831 · Change 831 — guide-docs#1: your read of the UA/);
   // A dry check writes nothing.
   const dry = world();
-  await runCheck({ settings: dry.settings, clients: dry.clients(), io: { now: () => NOW, git: quietGit, notify: () => assert.fail('dry') }, options: { dryRun: true } });
+  await runCheck({ settings: dry.settings, clients: dry.clients(), io: { now: () => NOW, git: quietGit, runner: { now: () => NOW, readUsage: () => usage }, notify: () => assert.fail('dry') }, options: { dryRun: true } });
   assert.equal(fs.existsSync(memoryPath(dry.settings.state)), false);
 });

@@ -360,7 +360,7 @@ The plist holds absolute paths (node, the watcher in the plugin's folder as inst
 
 `<state>/watch/progress.md` is a checklist of the work as it happens, for reading in an editor. A script writes it with no model and no network (`lib/progress.mjs`): at the start and the end of each step of a run, and at the end of each watcher check, so it also shows the pipeline while it only waits. The `watch/` folder is under the state folder, which a host keeps out of git.
 
-**To follow it:** open `progress.md` in VS Code and press `Cmd+K V` (Markdown: open preview to the side). The file is replaced as a whole (a temp file, then a rename), so a preview never shows half of it. Whether the preview refreshes by itself while the runner writes has to be seen on a live pass; if it does not, reopen the preview, or use the editor's plain file view, which does reload.
+**To follow it:** open `progress.md` in VS Code and press `Cmd+K V` (Markdown: open preview to the side). The file is replaced as a whole (a temp file, then a rename), so a preview never shows half of it. Whether the preview refreshes by itself while the runner writes has to be seen on a live pass; if it does not, reopen the preview (the file is a plain Markdown file, so any viewer that reloads on change works).
 
 What it shows, top to bottom:
 
@@ -371,6 +371,8 @@ What it shows, top to bottom:
 - **Claude's planned steps:** if `progress.stepsFile` names a file, its text, as it is, at the end. The runner never writes that file.
 
 The ledgers win: every row except the stale ones is read from them. The stale marks come from the status the runner has when it writes. They are kept in `watch/progress.json`, so a watcher check that ran no step shows them too, and they drop when the stage runs again for the new head. A check that reads no status leaves the marks as they were.
+
+Limits: the gates are read from the ledgers, which do not show a card a person moved out of the flow without a close record; such a ticket keeps its rows until its ledger is closed. Two processes writing `progress.json` at the same moment (a run started by hand and the watcher) can lose an entry of `notified`, which costs one repeated notification at most.
 
 **A step in flight** shows ⏳ at once, before its session records anything: the runner writes the file when a step starts and when it ends, whatever its outcome. A dry run and `observe` mode write nothing from the runner (the watcher's check writes the file in `observe` too: it only reads the ledgers).
 
