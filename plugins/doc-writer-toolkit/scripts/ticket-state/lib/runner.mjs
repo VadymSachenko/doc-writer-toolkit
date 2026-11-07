@@ -11,6 +11,7 @@ import { runRecord, cardStatusFor } from './record.mjs';
 import { runUnlock } from './handover.mjs';
 import { allowanceOf, parseUsage } from './allowance.mjs';
 import { LABEL_OF, PR_STAGE_OF_STATUS, PRIORITY_RANK, finishRank, followsMove } from './stages.mjs';
+import { callExperts, expertCalls } from './experts.mjs';
 import { appendRunLog, localDate, readRunLog, renderReport, writeReport } from './report.mjs';
 import { ROLES } from './settings.mjs';
 import { cleanupTicket } from './cleanup.mjs';
@@ -558,13 +559,14 @@ export function scriptedCalls(step, ledger, settings) {
         const after = structuredClone(ledger);
         findPr(after, step.pr).stage = step.to;
         const expected = cardStatusFor(after);
-        return [...label(pr, step.to), ...(expected && expected !== step.card?.status ? [`tracker move ${card} --to ${expected}`] : [])];
+        return [...label(pr, step.to), ...(step.to === 'smeReview' ? expertCalls(settings, [pr], [card], { request: false }) : []), ...(expected && expected !== step.card?.status ? [`tracker move ${card} --to ${expected}`] : [])];
       }
       return [...ledger.prs.filter((p) => p.number && !p.merged).flatMap((p) => label(p, p.stage)), ...(step.ready ? [`tracker comment ${card} --text <the ready comment>`] : []), `tracker move ${card} --to ${step.to}`];
     }
     case 'follow':
       return [
         ...ledger.prs.filter((p) => p.number && followsMove(p.stage, ledger.left?.status, step.to)).flatMap((p) => label(p, PR_STAGE_OF_STATUS[step.to])),
+        ...(step.to === 'smeReview' ? expertCalls(settings, ledger.prs.filter((p) => p.number && followsMove(p.stage, ledger.left?.status, step.to)), [card]) : []),
         ...cardsMovedWith(step, ledger, settings).map((o) => `tracker move ${o.card?.shortLink ?? o.card?.id} --to ${step.to}`),
       ];
     case 'close':
@@ -599,11 +601,14 @@ async function runScripted(step, ctx) {
     if (LABEL_OF[stage] && t?.labels?.[LABEL_OF[stage]]) await clients.forge.setStageLabel({ target: t.id, number: pr.number, stage: LABEL_OF[stage] });
   };
   const rec = (k, extra = {}) => runRecord({ settings, clients, key: k, stage: step.stage, status: 'done', pr: step.pr, now: (io.now ?? Date.now)(), ...extra });
+  const cardsOf = (keys) => keys.map((k) => readLedger(settings.state, k).card).map((c) => c.shortLink ?? c.id);
   switch (step.stage) {
     case 'move': {
       // Each ticket of the step moves its own card: a PR with two cards has two.
       if (step.pr) {
         await setLabel(findPr(ledger, step.pr), step.to);
+        // A review a person requested from the owner's queue: the card members too (lib/experts.mjs).
+        if (step.to === 'smeReview') await callExperts({ settings, clients, prs: [findPr(ledger, step.pr)], cards: cardsOf(step.keys), request: false });
         for (const k of step.keys) {
           const after = structuredClone(readLedger(settings.state, k));
           findPr(after, step.pr).stage = step.to;
@@ -631,7 +636,10 @@ async function runScripted(step, ctx) {
       return;
     }
     case 'follow': {
-      for (const p of ledger.prs.filter((x) => x.number && followsMove(x.stage, ledger.left?.status, step.to))) await setLabel(p, PR_STAGE_OF_STATUS[step.to]);
+      const following = ledger.prs.filter((x) => x.number && followsMove(x.stage, ledger.left?.status, step.to));
+      for (const p of following) await setLabel(p, PR_STAGE_OF_STATUS[step.to]);
+      // A person's move to the review status calls each following PR's expert (lib/experts.mjs).
+      if (step.to === 'smeReview') await callExperts({ settings, clients, prs: following, cards: cardsOf(step.keys) });
       // The other card first: a stop here leaves this ticket's move still to follow, and the run starts it again.
       for (const o of cardsMovedWith(step, ledger, settings)) {
         await clients.tracker.move({ card: o.card.shortLink ?? o.card.id, to: step.to });

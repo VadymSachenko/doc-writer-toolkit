@@ -99,6 +99,9 @@ function validateTargets(raw, forge) {
       repo: t.repo,
       review: r.review,
       reviewers: t.reviewers,
+      // The people on the tracker added to the card when a person calls this target's expert review (lib/experts.mjs);
+      // checked in validateTracker, and against the board's members with the lists.
+      cardMembers: (r.cardMembers ?? []).map((n) => String(n).replace(/^@/, '').trim()),
       labels: t.labels,
       appLabel: typeof r.appLabel === 'string' && r.appLabel.trim() ? r.appLabel : null,
       path: typeof r.path === 'string' && r.path.trim() ? r.path : null,
@@ -112,7 +115,7 @@ function validateTargets(raw, forge) {
 // Checks the merged settings and returns them with every default filled in. Nothing here reads the tracker or the forge.
 export function validateSettings(merged, { root, stateRootDefault }) {
   if (!isObject(merged)) fail('the file is not a JSON object');
-  const tracker = validateTracker(merged.tracker);
+  const tracker = validateTracker(merged.tracker, merged.targets);
   for (const s of REQUIRED_STATUSES) if (!(s in tracker.statuses)) fail(`tracker.statuses has no '${s}': the ticket flow reads it`);
   const forge = validateForge(merged.forge, merged.targets);
   const targets = validateTargets(merged.targets ?? [], forge);
@@ -261,6 +264,6 @@ export function printable(s) {
   return {
     ...rest,
     tracker: { ...tracker, credentials: { ...tracker.credentials } },
-    forge: { kind: forge.kind, owner: forge.owner, self: forge.self, assignee: forge.assignee, checkLabel: forge.checkLabel, repos: forge.repos },
+    forge: { kind: forge.kind, owner: forge.owner, self: forge.self, assignee: forge.assignee, checkLabel: forge.checkLabel, expertLabel: forge.expertLabel ?? null, repos: forge.repos },
   };
 }

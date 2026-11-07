@@ -9,6 +9,7 @@
 // Shapes
 //   Card     { id, shortLink, url, name, number, numbers, desc?, labels: [{ id, name, color }], placeId, boardId,
 //              lastActivity (ISO), createdAt (ISO, or null when the tracker doesn't say), closed,
+//              memberIds: [the ids of the people on the card],
 //              priority? ('high'|'medium'|'low', only from a tracker with a priority field of its own; else the module
 //              reads it from the labels the settings name) }
 //   Comment  { id, author: { id, username } | null, time, text, edited }
@@ -26,20 +27,23 @@
 //   comments(ref)                -> [Comment]
 //   attachments(ref)             -> [Attachment]
 //   labels(board)                -> [{ id, name, color }]
+//   members(board)               -> [{ id, username, name }], the board's members
 //   actions(board, { since, types? }) -> [Action], oldest first, paged
 //   download(url, dest)          -> { bytes }; sends credentials only to the tracker's own hosts
 // Writes (each goes through the client's one `write`, which `--dry-run` stops)
 //   comment(ref, text)           -> { id, time }
 //   moveCard(ref, placeId)
 //   addLabel(ref, labelId), removeLabel(ref, labelId)
+//   addMember(ref, memberId)     adds a board member to the card
 //   setDescription(ref, text)
 //   createCard({ placeId, name, desc, labelIds }) -> { id, shortLink, url }
 //
-// An adapter has no operation that archives, deletes or renames a card, and none that a caller could add: that is
-// the rule "never archive, delete, rename" held by what the interface does not contain.
+// An adapter has no operation that archives, deletes or renames a card, or removes a person from it, and none that a
+// caller could add: that is the rule "never archive, delete, rename, remove anyone" held by what the interface does not
+// contain.
 
-export const READS = ['cardRef', 'places', 'cardsIn', 'card', 'allCards', 'cardDetail', 'comments', 'attachments', 'labels', 'actions', 'download'];
-export const WRITES = ['comment', 'moveCard', 'addLabel', 'removeLabel', 'setDescription', 'createCard'];
+export const READS = ['cardRef', 'places', 'cardsIn', 'card', 'allCards', 'cardDetail', 'comments', 'attachments', 'labels', 'members', 'actions', 'download'];
+export const WRITES = ['comment', 'moveCard', 'addLabel', 'removeLabel', 'addMember', 'setDescription', 'createCard'];
 
 export function assertAdapter(adapter) {
   const missing = [...READS, ...WRITES].filter((m) => typeof adapter?.[m] !== 'function');

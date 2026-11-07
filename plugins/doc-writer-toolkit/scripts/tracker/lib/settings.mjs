@@ -46,7 +46,8 @@ const names = (value, where) => {
 };
 
 // Checks the `tracker` object of the settings and returns it in a fixed shape. Nothing here talks to the tracker.
-export function validateTracker(t) {
+// `targets`: the settings' targets, for the people each one adds to a card (`cardMembers`).
+export function validateTracker(t, targets = []) {
   if (!isObject(t)) fail("the file has no 'tracker' object");
   if (typeof t.kind !== 'string' || !t.kind) fail("tracker.kind is required (for example 'trello')");
   if (typeof t.board !== 'string' || !t.board) fail('tracker.board is required (the board id)');
@@ -71,6 +72,7 @@ export function validateTracker(t) {
   if (!isObject(c) || typeof c.key !== 'string' || typeof c.token !== 'string' || !c.key || !c.token) {
     fail("tracker.credentials must name the two environment variables: { \"key\": \"…\", \"token\": \"…\" } and, optionally, \"envFile\"");
   }
+  const { owner, members } = validateMembers(t.owner, targets);
   return {
     kind: t.kind,
     board: t.board,
@@ -80,8 +82,31 @@ export function validateTracker(t) {
     transitions,
     labels,
     priority: validatePriority(t.priority),
+    owner,
+    members,
     credentials: { key: c.key, token: c.token, envFile: c.envFile ?? '.env' },
   };
+}
+
+// The people the settings name on the tracker, by username: the owner (`tracker.owner`), added to every card the triage
+// moves into the ready status, and each target's `cardMembers`, added to the card when a person calls the expert
+// review. Only these may be added to a card; each must be a member of the board (checked against the board when the
+// statuses are resolved, like the list names).
+function validateMembers(rawOwner, targets) {
+  const user = (v, where) => {
+    if (typeof v !== 'string' || !v.replace(/^@/, '').trim()) fail(`${where} must be a username on the tracker`);
+    return v.replace(/^@/, '').trim();
+  };
+  const owner = rawOwner === undefined || rawOwner === null ? null : user(rawOwner, 'tracker.owner');
+  const members = owner ? [{ name: owner, where: 'tracker.owner' }] : [];
+  for (const [i, tg] of (Array.isArray(targets) ? targets : []).entries()) {
+    const list = tg?.cardMembers;
+    if (list === undefined || list === null) continue;
+    const where = `targets '${tg?.id ?? i}'.cardMembers`;
+    if (!Array.isArray(list)) fail(`${where} must be a list of usernames on the tracker`);
+    for (const v of list) members.push({ name: user(v, where), where });
+  }
+  return { owner, members };
 }
 
 // The labels that mark a card's priority: `{ high: <label name>, low: <label name> }`. A card with neither is medium.
@@ -112,7 +137,7 @@ export async function loadSettings({ root, settings: flag }) {
   if (!shared) throw new CliError(`no settings file at ${file}. Declare 'Ticket flow settings:' in CLAUDE.md or pass --settings.`, { code: 2 });
   const local = readJsonFile(localSettingsPath(file), 'local settings file');
   const merged = deepMerge(shared, local ?? {});
-  return { root, file, local: Boolean(local), tracker: validateTracker(merged.tracker) };
+  return { root, file, local: Boolean(local), tracker: validateTracker(merged.tracker, merged.targets) };
 }
 
 /** KEY=value lines, as in a .env file. Nothing is evaluated. */

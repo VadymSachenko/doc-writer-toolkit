@@ -12,7 +12,7 @@ const USAGE = `tracker <command> [<card>] [options]
 
 The tracker of a docs pipeline, in statuses and transitions. The statuses, the lists they map to, the transitions
 and the credentials' variable names come from the host's ticket flow settings; a Trello adapter does the calls.
-Prints JSON on stdout. Reads change nothing. Every change (comment, move, label, description, create) is one call;
+Prints JSON on stdout. Reads change nothing. Every change (comment, move, label, member, description, create) is one call;
 with --dry-run it is printed (credentials removed) and not sent.
 
 Commands
@@ -27,6 +27,8 @@ Commands
   comment <card> --text <t>      Add a comment. --unless-header <h> [--since <time>] skips it when one already starts with h.
   move <card> --to <status>      Move a card; refused unless (from, to) is a transition in the settings.
   add-label <card> --label <name>, remove-label <card> --label <name>
+  add-member <card> --member <name>   Add a person the settings name (tracker.owner, a target's cardMembers; owner
+                                 stands for tracker.owner); one already on the card is no change. No command removes anyone.
   set-description <card> --text <t>   Refuses an empty text.
   create-card --status intake --name <n> [--desc <t>] [--label <name>]...   Only in the intake status.
 
@@ -44,6 +46,7 @@ Options
   --attachment <id|name>, --out <file>, --overwrite
   --text <t>, --text-file <file|->   the text (a file, or - for stdin; stored exactly, U+200C kept)
   --desc <t>, --desc-file <file|->, --name <n>, --label <name> (repeatable), --unless-header <h>
+  --member <name>         add-member: a username the settings name, or owner
   --origin <url>          the tracker's API origin: only under DOC_TOOLKIT_TRACKER_TEST (the tests' local server)
   -h, --help              this text
 `;
@@ -70,13 +73,14 @@ const OPTIONS = {
   'desc-file': { type: 'string' },
   name: { type: 'string' },
   label: { type: 'string', multiple: true },
+  member: { type: 'string' },
   'unless-header': { type: 'string' },
   origin: { type: 'string' },
   help: { type: 'boolean', short: 'h' },
 };
 
-const COMMANDS = ['statuses', 'list-cards', 'read-card', 'find-cards', 'actions-since', 'download-attachment', 'comment', 'move', 'add-label', 'remove-label', 'set-description', 'create-card'];
-const TAKES_CARD = ['read-card', 'download-attachment', 'comment', 'move', 'add-label', 'remove-label', 'set-description'];
+const COMMANDS = ['statuses', 'list-cards', 'read-card', 'find-cards', 'actions-since', 'download-attachment', 'comment', 'move', 'add-label', 'remove-label', 'add-member', 'set-description', 'create-card'];
+const TAKES_CARD = ['read-card', 'download-attachment', 'comment', 'move', 'add-label', 'remove-label', 'add-member', 'set-description'];
 
 function textOf(values, flag, io) {
   if (values[flag] !== undefined && values[`${flag}-file`] !== undefined) throw new CliError(`give --${flag} or --${flag}-file, not both`, { code: 2 });
@@ -192,6 +196,10 @@ export async function main(argv, io = {}) {
     case 'remove-label':
       if (values.label?.length !== 1) throw new CliError(`${command} needs exactly one --label`, { code: 2 });
       result = await tracker[command === 'add-label' ? 'addLabel' : 'removeLabel']({ card, label: values.label[0] });
+      break;
+    case 'add-member':
+      if (!values.member) throw new CliError('add-member needs --member', { code: 2 });
+      result = await tracker.addMember({ card, member: values.member });
       break;
     case 'set-description':
       result = await tracker.setDescription({ card, text: textOf(values, 'text', io) });

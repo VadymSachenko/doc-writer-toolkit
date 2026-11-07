@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { LISTS, NOW, ago, card, pr } from './fakes.mjs';
+import { LISTS, MEMBERS, NOW, ago, card, pr, rawSettings } from './fakes.mjs';
 import { ledger, read, world } from './helpers.mjs';
-import { briefFor, runDaily } from '../lib/runner.mjs';
+import { briefFor, runDaily, scriptedCalls } from '../lib/runner.mjs';
+import { renderReport } from '../lib/report.mjs';
 import { runRecord } from '../lib/record.mjs';
 import { runHandover } from '../lib/handover.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
@@ -31,7 +32,7 @@ test('a places PR goes to the owner\'s queue after the pr stage, with places and
     const c = card({ number: 501, status: 'inProgress' });
     const w = world({ cards: [c], prs: [pr({ repo: 'api-docs', number: 11, head: 'ticket-11', labels: ['In progress'] })] });
     ledger(w, c, { stages: { start: 'done', plan: 'done', write: 'done', uaReview: 'done' }, prs: [{ repo: 'api-docs', branch: 'ticket-11', targets: ['api'], review: 'places', number: undefined }] });
-    await runRecord({ settings: w.settings, clients: w.clients(), key: '501', stage: 'pr', status: 'done', result: { prs: [{ repo: 'api-docs', branch: 'ticket-11', number: 11 }], places }, now: NOW });
+    await runRecord({ settings: w.settings, clients: w.clients(), key: '501', stage: 'pr', status: 'done', result: { prs: [{ repo: 'api-docs', branch: 'ticket-11', number: 11, expertReview: { recommended: false, why: 'every fact is from the code and the UI' } }], places }, now: NOW });
     assert.equal(read(w, '501').prs[0].stage, 'finalReview');
     const t = await w.one('501');
     assert.deepEqual(steps(t), ['move -> finalReview'], 'the card follows; no chain stage');
@@ -70,14 +71,14 @@ test('a reviewer\'s move after the approval lands in the owner\'s queue and star
   assert.deepEqual(steps(t), ['translate guide-docs#12']);
 });
 
-test('comments come first in the owner\'s queue and start no chain stage; a pending reviewer on a sme PR doesn\'t move it back', async () => {
+test('comments come first in the owner\'s queue and start no chain stage; a pending reviewer the move back took along doesn\'t move it back', async () => {
   const c = card({ number: 503, status: 'finalReview' });
   const w = world({
     cards: [c],
     prs: [pr({ repo: 'guide-docs', number: 13, headCommit: HEAD, reviewRequests: ['expert-one'] })],
     activity: { 'guide-docs#13': { comments: [{ id: 901, author: 'owner-login', body: 'fix this', createdAt: ago(1), updatedAt: ago(1) }] } },
   });
-  ledger(w, c, { stages: BASE, prs: [{ repo: 'guide-docs', number: 13, targets: ['guide'], review: 'sme', stage: 'finalReview' }] });
+  ledger(w, c, { stages: BASE, prs: [{ repo: 'guide-docs', number: 13, targets: ['guide'], review: 'sme', stage: 'finalReview', reviewersRequested: ['expert-one'] }] });
   const t = await w.one('503');
   assert.deepEqual(steps(t), ['answerComments guide-docs#13']);
 });
@@ -307,7 +308,7 @@ test('a place from the code with no reference: the record stands, the session is
   ledger(w, c, { stages: { start: 'done', plan: 'done', write: 'done', uaReview: 'done' }, prs: [{ repo: 'api-docs', branch: 'ticket-46', targets: ['api'], review: 'places' }] });
   const ref = { repo: 'code-repo', path: 'services/a.go', lines: '10-20', commit: 'c0ffee', url: 'https://code.example/blob/c0ffee/services/a.go#L10-L20' };
   const place = (id, extra) => ({ id, repo: 'api-docs', pr: 46, page: 'docs/a.md', line: 3, claim: 'c', source: 'code', reason: 'the change named it', ...extra });
-  const r = await runRecord({ settings: w.settings, clients: w.clients(), key: '520', stage: 'pr', status: 'done', result: { prs: [{ repo: 'api-docs', branch: 'ticket-46', number: 46 }], places: [place('p1', { refs: [ref] }), place('p2', {}), place('p3', { refs: [{ repo: 'code-repo', path: 'a.go' }] })] }, now: NOW });
+  const r = await runRecord({ settings: w.settings, clients: w.clients(), key: '520', stage: 'pr', status: 'done', result: { prs: [{ repo: 'api-docs', branch: 'ticket-46', number: 46, expertReview: { recommended: false, why: 'every fact is from the code and the UI' } }], places: [place('p1', { refs: [ref] }), place('p2', {}), place('p3', { refs: [{ repo: 'code-repo', path: 'a.go' }] })] }, now: NOW });
   assert.equal(r.warnings.length, 2);
   const l = read(w, '520');
   assert.deepEqual(l.places.map((p) => [p.id, Boolean(p.noRef)]), [['p1', false], ['p2', true], ['p3', true]]);
@@ -315,4 +316,145 @@ test('a place from the code with no reference: the record stands, the session is
   assert.equal(l.places[0].reason, 'the change named it');
   const t = await w.one('520');
   assert.match(t.mismatch.join('; '), /2 place\(s\) from the code with no reference at a commit: p2, p3/);
+});
+
+// ------------------------------------------------------------------ the owner first; the expert on the owner's call
+
+// The people on the board: the owner, and each target's card members next to its reviewers.
+const PEOPLE = (() => {
+  const r = rawSettings();
+  return { tracker: { ...r.tracker, owner: 'owner-one' }, forge: { ...r.forge, expertLabel: 'Expert advised' }, targets: r.targets.map((t) => ({ ...t, cardMembers: t.reviewers[0] === 'expert-one' ? ['expert-one'] : ['@expert-two'] })) };
+})();
+const added = (w) => w.tracker.log.filter((e) => e[0] === 'addMember').map((e) => [e[1], MEMBERS.find((m) => m.id === e[2]).username]);
+const asked = (w) => w.forge.log.filter((e) => e[0] === 'requestReviewers').map((e) => [e[1].number, e[1].logins]);
+const ran = (out) => out.ran.map((r) => [r.stage, r.to, r.outcome]);
+
+test('owner first: a sme PR opens with no reviewer and lands in the owner\'s queue with its final review label; no expert is asked or added; the report names the recommendation', async () => {
+  const c = card({ number: 530, status: 'inProgress' });
+  const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 31, head: 'ticket-31', labels: ['in progress'] })], extra: PEOPLE });
+  ledger(w, c, { stages: { start: 'done', plan: 'done', write: 'done', uaReview: 'done' }, prs: [{ repo: 'guide-docs', branch: 'ticket-31', targets: ['guide'], review: 'sme', number: undefined }] });
+  await runRecord({ settings: w.settings, clients: w.clients(), key: '530', stage: 'pr', status: 'done', result: { prs: [{ repo: 'guide-docs', branch: 'ticket-31', number: 31, expertReview: { recommended: true, why: 'one open question for the expert: the daily limit' } }] }, now: NOW });
+  assert.equal(read(w, '530').prs[0].stage, 'finalReview');
+  const out = await run(w, noSession, { named: ['530'] });
+  assert.deepEqual(ran(out), [['move', 'finalReview', 'done']]);
+  assert.equal(c.placeId, LISTS.finalReview.id);
+  assert.deepEqual(w.forge.prs[0].labels, ['Expert advised', 'In final review'], 'the stage label, and the expert label the recommendation put on');
+  assert.deepEqual(w.forge.prs[0].reviewRequests, [], 'no review request');
+  assert.deepEqual([asked(w), added(w)], [[], []], 'no expert asked or added');
+  const st = await w.status();
+  const t = st.tickets.find((x) => x.key === '530');
+  assert.deepEqual([t.state, t.steps, t.gate.who], ['finalReview', [], 'owner']);
+  assert.deepEqual(t.prs[0].expertReview.recommended, true);
+  const report = renderReport({ settings: w.settings, st, date: '2026-11-10' });
+  assert.match(report, /## Expert review, your call\n\n- \[guide-docs#31\]\(\S+\) \(\[530\]\(\S+\)\): an expert review is recommended: one open question for the expert: the daily limit/);
+});
+
+test('the owner\'s move to the review calls each PR\'s own expert (reviewer, review label, card member); a move back removes nobody; a second move adds nothing twice', async () => {
+  const c = card({ number: 531, status: 'finalReview' });
+  const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 32, headCommit: HEAD, labels: ['In final review'] }), pr({ repo: 'api-docs', number: 33, headCommit: HEAD, labels: ['In final review'] })], extra: PEOPLE });
+  ledger(w, c, { stages: BASE, prs: [{ repo: 'guide-docs', number: 32, targets: ['guide'], review: 'sme', stage: 'finalReview' }, { repo: 'api-docs', number: 33, targets: ['api'], review: 'places', stage: 'finalReview' }] });
+  moved(c, 'smeReview');
+  assert.deepEqual(steps(await w.one('531')), ['follow -> smeReview']);
+  assert.deepEqual(scriptedCalls({ stage: 'follow', to: 'smeReview', keys: ['531'] }, read(w, '531'), w.settings).filter((x) => !x.startsWith('forge set-stage-label')), [
+    'forge request-reviewers --repo guide-docs --number 32 --reviewer expert-one',
+    'forge request-reviewers --repo api-docs --number 33 --reviewer expert-two',
+    `tracker add-member ${c.shortLink} --member expert-one`,
+    `tracker add-member ${c.shortLink} --member expert-two`,
+  ]);
+  assert.deepEqual(ran(await run(w, noSession, { named: ['531'] })), [['follow', 'smeReview', 'done']]);
+  assert.deepEqual(asked(w), [[32, ['expert-one']], [33, ['expert-two']]], 'each PR its own target\'s reviewer');
+  assert.deepEqual(w.forge.prs.map((p) => p.labels), [['in expert review'], ['In tech review']]);
+  assert.deepEqual(added(w), [[c.id, 'expert-one'], [c.id, 'expert-two']]);
+  assert.deepEqual(read(w, '531').prs.map((p) => [p.stage, p.reviewersRequested]), [['smeReview', ['expert-one']], ['smeReview', ['expert-two']]]);
+  let t = await w.one('531');
+  assert.deepEqual([t.state, t.steps], ['smeReview', []]);
+
+  // Back to the owner's queue before the experts answered: nobody is removed, and the pending requests move nothing.
+  moved(c, 'finalReview');
+  assert.deepEqual(ran(await run(w, noSession, { named: ['531'] })), [['follow', 'finalReview', 'done']]);
+  assert.deepEqual(w.forge.prs.map((p) => p.reviewRequests.map((r) => r.login)), [['expert-one'], ['expert-two']], 'no request removed');
+  assert.deepEqual(c.memberIds.map((id) => MEMBERS.find((m) => m.id === id).username), ['expert-one', 'expert-two'], 'no one removed from the card');
+  assert.ok(!w.forge.log.some((e) => e[0] === 'updatePr'), 'no PR edit');
+  t = await w.one('531');
+  assert.deepEqual([t.state, t.steps], ['finalReview', []]);
+
+  // The owner's second call: the reviewers already asked and the members already on the card are left as they are.
+  moved(c, 'smeReview');
+  assert.deepEqual(ran(await run(w, noSession, { named: ['531'] })), [['follow', 'smeReview', 'done']]);
+  assert.equal(asked(w).length, 2, 'not asked twice');
+  assert.equal(added(w).length, 2, 'not added twice');
+});
+
+test('row 9 for every review kind: a reviewer a person requested on a sme PR in the owner\'s queue moves the card and adds the card member; the pipeline asks no one itself', async () => {
+  const c = card({ number: 532, status: 'finalReview' });
+  const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 34, headCommit: HEAD, reviewRequests: ['expert-one'], labels: ['In final review'] })], extra: PEOPLE });
+  ledger(w, c, { stages: BASE, prs: [{ repo: 'guide-docs', number: 34, targets: ['guide'], review: 'sme', stage: 'finalReview' }] });
+  assert.deepEqual(steps(await w.one('532')), ['move guide-docs#34 -> smeReview']);
+  assert.deepEqual(ran(await run(w, noSession, { named: ['532'] })), [['move', 'smeReview', 'done']]);
+  assert.equal(c.placeId, LISTS.smeReview.id);
+  assert.deepEqual(w.forge.prs[0].labels, ['in expert review']);
+  assert.deepEqual([asked(w), added(w)], [[], [[c.id, 'expert-one']]]);
+  assert.deepEqual(read(w, '532').prs[0].reviewersRequested, ['expert-one']);
+});
+
+test('a ledger at the review from before the owner-first rule reads as it did; the move back takes its pending request along', async () => {
+  const c = card({ number: 533, status: 'smeReview' });
+  const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 35, headCommit: HEAD, reviewRequests: ['expert-one'], labels: ['in expert review'] })], extra: PEOPLE });
+  ledger(w, c, { stages: BASE, prs: [{ repo: 'guide-docs', number: 35, targets: ['guide'], review: 'sme', stage: 'smeReview' }] });
+  let t = await w.one('533');
+  assert.deepEqual([t.state, t.steps], ['smeReview', []]);
+  moved(c, 'finalReview');
+  assert.deepEqual(ran(await run(w, noSession, { named: ['533'] })), [['follow', 'finalReview', 'done']]);
+  assert.deepEqual(read(w, '533').prs[0].reviewersRequested, ['expert-one']);
+  t = await w.one('533');
+  assert.deepEqual([t.state, t.steps], ['finalReview', []], 'no move back to the review');
+  assert.deepEqual([asked(w), added(w)], [[], []]);
+});
+
+test('triage into the ready status: the record adds the owner to the card, once; a card already carrying the owner is unchanged; a failure is a warning', async () => {
+  const bare = card({ number: 534, status: 'ready', labels: ['Guide'] });
+  const has = card({ number: 535, status: 'ready', labels: ['Guide'], members: ['owner-one'] });
+  const byHand = card({ number: 537, status: 'ready', labels: ['Guide'] });
+  const failing = card({ number: 538, status: 'ready', labels: ['Guide'] });
+  const w = world({ cards: [bare, has, byHand, failing], extra: PEOPLE });
+  const triage = (c, result = { verdict: 'docs-required', movedTo: 'ready', targets: ['guide'], size: 'edit' }) => runRecord({ settings: w.settings, clients: w.clients(), key: String(c.number), stage: 'triage', status: 'done', card: c.shortLink, result, now: NOW });
+  const r = await triage(bare);
+  assert.equal(r.warnings, undefined);
+  await triage(has);
+  // A card the owner put in the ready status by hand (no move by the triage) is neither refused nor touched.
+  await triage(byHand, { verdict: 'owner-card', targets: ['guide'] });
+  assert.deepEqual(added(w), [[bare.id, 'owner-one']], 'only the card the triage moved and that lacked the owner');
+  w.tracker.addMember = async () => {
+    throw new Error('the tracker is down');
+  };
+  const f = await triage(failing);
+  assert.match(f.warnings.join('; '), /the owner \(owner-one\) was not added to the card: the tracker is down/);
+  assert.deepEqual([534, 535, 537, 538].map((n) => read(w, String(n)).triage.verdict), ['docs-required', 'docs-required', 'owner-card', 'docs-required'], 'every triage recorded');
+});
+
+test('pr with no expert review recommendation records null with a warning and adds no label; a label the repository lacks is a warning', async () => {
+  const c = card({ number: 539, status: 'inProgress' });
+  const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 37, head: 'ticket-37', labels: ['in progress'] }), pr({ repo: 'api-docs', number: 38, head: 'ticket-38', labels: ['In progress'] })], extra: PEOPLE });
+  ledger(w, c, { stages: { start: 'done', plan: 'done', write: 'done', uaReview: 'done' }, prs: [{ repo: 'guide-docs', branch: 'ticket-37', targets: ['guide'], review: 'sme', number: undefined }, { repo: 'api-docs', branch: 'ticket-38', targets: ['api'], review: 'places', number: undefined }] });
+  const changeLabels = w.forge.changeLabels;
+  w.forge.changeLabels = async (a) => {
+    if (a.add.includes('Expert advised')) throw new Error("no label 'Expert advised' in the repository");
+    return changeLabels(a);
+  };
+  const r = await runRecord({ settings: w.settings, clients: w.clients(), key: '539', stage: 'pr', status: 'done', result: { prs: [{ repo: 'guide-docs', branch: 'ticket-37', number: 37 }, { repo: 'api-docs', branch: 'ticket-38', number: 38, expertReview: { recommended: true, why: 'a fee found neither in the code nor in the UI' } }] }, now: NOW });
+  assert.match(r.warnings.join('; '), /ticket-37: no "expertReview".*recorded as null/);
+  assert.match(r.warnings.join('; '), /api-docs#38: the label 'Expert advised' was not added: no label/);
+  const l = read(w, '539');
+  assert.deepEqual(l.prs.map((p) => [p.stage, p.expertReview?.recommended ?? null]), [['finalReview', null], ['finalReview', true]]);
+  assert.deepEqual(w.forge.prs.map((p) => p.labels), [['in progress'], ['In progress']], 'no label on either');
+});
+
+test('a card member the board has no member for stops the run like an unmatched list; with no one named, the members are never read', async () => {
+  const c = card({ number: 536, status: 'ready' });
+  const bad = { ...PEOPLE, targets: PEOPLE.targets.map((t, i) => (i ? t : { ...t, cardMembers: ['nobody-here'] })) };
+  const w = world({ cards: [c], extra: bad });
+  await assert.rejects(w.status(), (e) => e.exitCode === 2 && /no board member matches 'nobody-here' \(targets 'guide'.cardMembers\)/.test(e.message));
+  const plain = world({ cards: [c] });
+  await plain.status();
+  assert.ok(!plain.tracker.reads.some((r) => r[0] === 'members'));
 });
