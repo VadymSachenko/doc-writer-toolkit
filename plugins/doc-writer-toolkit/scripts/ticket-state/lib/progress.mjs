@@ -195,7 +195,7 @@ function ticketBlock(l, { flights, stale, now }) {
     const recommended = p.expertReview?.recommended ? oneLine(p.expertReview.why, 140) : null;
     if (p.stage === 'smeReview') add({ text: sme ? gateRow('Expert review', sme) : '- ⏸ Expert review' });
     else if (called) add({ text: '- ✅ Expert review', done: true });
-    else if (asked || recommended) add({ text: `- ⬜ Expert review — ${recommended ? `recommended: ${recommended}${rank >= idx('translation') ? ' (not called)' : ''}` : 'requested, not called'}` });
+    else if (asked || recommended) add({ text: `- ⬜ Expert review — ${recommended ? `recommended: ${recommended}` : 'requested, not called'}` });
     // The chain; a stage made stale by a change in UA, and every later one, goes back to not done.
     const overlay = stale.get(`${l.key}|${id}`);
     const from = overlay ? CHAIN.indexOf(overlay.stage) : -1;
@@ -224,11 +224,12 @@ function ticketBlock(l, { flights, stale, now }) {
 const KIND = { morning: 'the morning run', startPass: 'a start pass', schedule: 'a scheduled run', watcher: 'the watcher', manual: 'a run started by hand' };
 
 // The last start pass of the watcher (`feed.starts`), when it didn't run or started nothing, or is waiting: the reason.
-function startLine(starts, startHours) {
-  if (!starts || starts.by === 'morning') return null;
+function startLine(starts, startHours, now) {
+  // The morning run's own record says nothing here, unless it keeps a deferral or a retry.
+  if (!starts || (starts.by === 'morning' && !starts.deferred && !starts.retryAt)) return null;
   const at = starts.at ? ` (${hhmm(starts.at)})` : '';
   const outcome = String(starts.outcome ?? '');
-  if (starts.retryAt && Date.parse(starts.retryAt) > Date.parse(starts.at ?? 0)) return `- ⏸ Start pass${at}: retry at ${hhmm(starts.retryAt)}${starts.deferred ? ` — ${oneLine(starts.deferred, 120)}` : ''}`;
+  if (starts.retryAt && Date.parse(starts.retryAt) > now) return `- ⏸ Start pass${at}: retry at ${hhmm(starts.retryAt)}${starts.deferred ? ` — ${oneLine(starts.deferred, 120)}` : ''}`;
   if (starts.deferred) return `- ⏸ Start pass deferred${at}: ${oneLine(starts.deferred, 120)}${startHours ? ` — waits for the start hours (${startHours}) or a board that reads` : ''}`;
   if (/^failed/.test(outcome)) return `- ❌ Start pass${at}: ${oneLine(outcome, 140)}`;
   if (/^not run|^started nothing/.test(outcome)) return `- ⬜ Start pass${at}: ${oneLine(outcome, 140)}`;
@@ -237,7 +238,7 @@ function startLine(starts, startHours) {
 
 function runSection(run, flights, now, live, { starts = null, startHours = null, ledgers = [] } = {}) {
   const out = [];
-  const start = startLine(starts, startHours);
+  const start = startLine(starts, startHours, now);
   if (!run && !flights.length) return start ? ['No run yet.', '', start] : ['No run yet.'];
   const when = run?.at ? ` (${hhmm(run.at)})` : '';
   const kind = KIND[run?.kind] ?? (run?.trigger ? `started by ${run.trigger}` : null);

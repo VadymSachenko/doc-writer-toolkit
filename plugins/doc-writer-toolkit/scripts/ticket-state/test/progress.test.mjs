@@ -426,6 +426,16 @@ test('the start pass: the reason a pass started nothing, from the feed, under th
   assert.match(text(), /- ⏸ Start pass deferred \(\d\d:\d\d\): a card changed in the ready or intake list — waits for the start hours \(10-22\) or a board that reads/);
   put({ date: '2026-11-10', at: at(NOW - 60000), deferred: 'a slot freed', retryAt: at(NOW + 15 * 60000) });
   assert.match(text(), /- ⏸ Start pass \(\d\d:\d\d\): retry at \d\d:\d\d — a slot freed/);
+  // The retry time has passed (it is compared with now, not with the record's time): the deferral stands, no "retry at".
+  put({ date: '2026-11-10', at: at(NOW - 3600000), deferred: 'a slot freed', retryAt: at(NOW - 60000) });
+  const passed = text();
+  assert.doesNotMatch(passed, /retry at/);
+  assert.match(passed, /- ⏸ Start pass deferred \(\d\d:\d\d\): a slot freed/);
+  // A deferral kept on the morning run's record, before the start hours, still shows.
+  put({ date: '2026-11-10', at: at(NOW - 60000), by: 'morning', deferred: 'a card changed in the ready or intake list', outcome: 'started nothing' });
+  assert.match(text(), /- ⏸ Start pass deferred .*a card changed in the ready or intake list/);
+  put({ date: '2026-11-10', at: at(NOW - 60000), by: 'morning', retryAt: at(NOW + 600000), outcome: 'started nothing' });
+  assert.match(text(), /- ⏸ Start pass .*: retry at \d\d:\d\d/);
   put({ date: '2026-11-10', at: at(NOW - 60000), outcome: 'failed: the status could not be read' });
   assert.match(text(), /- ❌ Start pass .*: failed: the status could not be read/);
   // A pass that started something, or is running, adds no line; a feed that does not read does not drop the file.
