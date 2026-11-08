@@ -111,10 +111,10 @@ const gitOut = (cwd, args) => {
   }
 };
 
-// The fetch of `fetchHeads`: it never waits for a password (one that needs it fails) and never runs past a minute.
+// The fetch of `fetchHeads`: it never waits for a password (one that needs it fails) and gives up after 30 seconds.
 const gitFetch = (cwd, refspecs) => {
   try {
-    execFileSync('git', ['-C', cwd, 'fetch', '-q', '--no-tags', 'origin', ...refspecs], { stdio: ['ignore', 'ignore', 'ignore'], timeout: 60000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
+    execFileSync('git', ['-C', cwd, 'fetch', '-q', '--no-tags', 'origin', ...refspecs], { stdio: ['ignore', 'ignore', 'ignore'], timeout: 30000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
     return true;
   } catch {
     return false;

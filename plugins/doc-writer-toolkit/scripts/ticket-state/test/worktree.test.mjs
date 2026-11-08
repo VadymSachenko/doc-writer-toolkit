@@ -582,6 +582,9 @@ test('AC-1: a commit made on the forge after ready for merge is fetched by statu
   const blind = await t.w.one('1501', { git: noFetch });
   assert.equal(blind.next, null);
   assert.ok(blind.notes.some((n) => /is not fetched here/.test(n)), JSON.stringify(blind.notes));
+  // A check that names other tickets fetches nothing for this one.
+  await t.w.status({ git: makeGit(t.w.settings), only: ['1999'] });
+  assert.throws(() => t.clone.g('cat-file', '-e', `${h2}^{commit}`), 'still not fetched');
   // Status's own fetch brings the head in: a UA change after ready, back to the owner's queue (D-112).
   const tk = await t.w.one('1501', { git: makeGit(t.w.settings) });
   assert.deepEqual([tk.next?.stage, tk.next?.to, tk.next?.uaChanged], ['move', 'finalReview', 1]);
@@ -992,6 +995,19 @@ test('a start (a person\'s move into In progress) with the target clone off its 
   const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude: () => assert.fail('no session') }, options: { trigger: 'watcher', named: ['1601'] } });
   assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['start', 'failed']]);
   assert.match(read(t.w, '1601').runs.at(-1).note, /^the clone: .*on the branch ticket-71/);
+});
+
+test('a scheduled start of an owner\'s card in the ready status checks the clone of the target its label names: off its base, no session', async () => {
+  const c = card({ number: 1602, status: 'ready', labels: ['Guide'] });
+  const w = world({ cards: [c] });
+  const fx = withClone(w);
+  const out = await runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude: () => assert.fail('no session') }, options: {} });
+  const l = read(w, '1602');
+  assert.deepEqual(l.triage.targets, ['guide'], 'the start recorded the target before the check');
+  assert.deepEqual([l.runs.at(-1).stage, l.runs.at(-1).outcome, l.runs.at(-1).session], ['start', 'failed', null]);
+  assert.match(l.runs.at(-1).note, /^the clone: .*guide-docs is on the branch ticket-71, not on main/);
+  assert.ok(JSON.stringify(out.starts).includes('failed'), JSON.stringify(out.starts));
+  assert.equal(fx.clone.g('symbolic-ref', '--short', 'HEAD'), 'ticket-71');
 });
 
 test('a plan step with the target clone on its base but behind origin runs, and the brief says how far behind and how to read a merged page', async () => {

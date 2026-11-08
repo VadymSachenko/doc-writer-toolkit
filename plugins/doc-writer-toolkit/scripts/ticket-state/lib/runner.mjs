@@ -1101,12 +1101,12 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         // With no other session running (no live lock but this step's), the checkouts of other commits go.
         const mine = new Set([step.group ?? step.keys[0], ...held]);
         const othersRunning = allLocks(settings.state, clock()).some((l) => l.live && !mine.has(l.group));
-        const codeTrees = CODE_ROLES.has(step.role) ? (settings.appRepos ?? []).map((a) => (io.ensureCodeTree ?? ensureCodeTree)(settings, a, { othersRunning })) : [];
         // A step with no worktree reads the ticket's target clones as they stand: one off its base starts no session,
         // the same way (lib/worktree.mjs, `checkClone`); one behind its origin is said in the brief.
         const clones = !trees.length && step.role !== 'triage' ? targetsOf(settings, step.keys.map((k) => readLedger(settings.state, k))).map((t) => (io.checkClone ?? checkClone)(settings, t)).filter(Boolean) : [];
         const off = clones.filter((c) => c.off);
         if (off.length) throw Object.assign(new Error(`${off.map((c) => c.off).join('; ')}. Check out the base there, then ${step.keys.map((k) => `\`ticket-state set retry ${k}\``).join(', ')}`), { clone: true });
+        const codeTrees = CODE_ROLES.has(step.role) ? (settings.appRepos ?? []).map((a) => (io.ensureCodeTree ?? ensureCodeTree)(settings, a, { othersRunning })) : [];
         step = { ...step, worktrees: trees, codeTrees, clones };
       } catch (e) {
         const note = `${e.clone ? 'the clone' : 'the worktree'}: ${String(e.message).slice(0, 400)}`;

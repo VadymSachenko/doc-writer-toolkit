@@ -27,8 +27,9 @@ export async function computeStatus({ settings, clients, now = Date.now(), only 
   const prWorld = needsForge ? await readPrs({ settings, forge: clients.forge, ledgers }) : new Map();
   // A head the forge has and the target clone doesn't (a commit made on the forge): fetched into the clone's
   // remote-tracking refs once for this check, so the rule reads it as it reads a push from the clone (lib/world.mjs).
+  // Only the tickets asked for (`only`), when the check names them.
   const targetOfPr = (pr) => settings.targets.find((t) => t.id === pr.targets?.[0]) ?? settings.targets.find((t) => t.repo === pr.repo);
-  git.fetchHeads?.(ledgers.flatMap((l) => (l.prs ?? []).map((pr) => ({ pr, world: prWorld.get(`${l.key}/${prId(pr)}`) })).filter((x) => x.world?.state === 'open' && x.pr.branch).map(({ pr, world }) => ({ target: targetOfPr(pr), branch: pr.branch, base: pr.base ?? targetOfPr(pr)?.base ?? 'main', head: world.headCommit }))));
+  git.fetchHeads?.(ledgers.filter((l) => !only || only.includes(l.key)).flatMap((l) => (l.prs ?? []).map((pr) => ({ pr, world: prWorld.get(`${l.key}/${prId(pr)}`) })).filter((x) => x.world?.state === 'open' && x.pr.branch).map(({ pr, world }) => ({ target: targetOfPr(pr), branch: pr.branch, base: pr.base ?? targetOfPr(pr)?.base ?? 'main', head: world.headCommit }))));
   // The runner's own locks (the group it is advancing) don't hide that group from it.
   const locks = new Map(allLocks(settings.state, now).filter((x) => !ignoreLocks?.has(x.group)).map((x) => [x.group, x]));
   const fileExists = (rel) => fs.existsSync(path.resolve(settings.root, rel));
