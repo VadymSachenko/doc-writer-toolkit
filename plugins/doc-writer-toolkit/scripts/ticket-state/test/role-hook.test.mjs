@@ -570,7 +570,7 @@ test('settings validation: a skill job whose allow list opens all of git or all 
 test('forge remove-label is refused only as the command, wherever the options put it; a label named so is no command', async () => {
   const { cfg, root } = SHARED();
   const fg = `${R}/scripts/forge/forge.mjs`;
-  for (const cmd of [`node ${fg} --dry-run remove-label --repo r --number 3 --label x`, `node ${fg} --repo=r remove-label --number 3 --label x`]) assert.ok(refusalOf(cmd, cfg.writer, { cwd: root }), cmd);
+  for (const cmd of [`node ${fg} --dry-run remove-label --repo r --number 3 --label x`, `node ${fg} --repo=r remove-label --number 3 --label x`, `node ${fg} --repo r --number 3 --label x -- remove-label`, `node ${fg} -- remove-label --repo r`]) assert.ok(refusalOf(cmd, cfg.writer, { cwd: root }), cmd);
   for (const cmd of [`node ${fg} add-label --repo r --number 3 --label remove-label`, `node ${fg} --label remove-label add-label --repo r --number 3`]) assert.equal(refusalOf(cmd, cfg.writer, { cwd: root }), null, cmd);
   const { OPTIONS } = await import('../../forge/forge.mjs');
   const booleans = Object.entries(OPTIONS).filter(([, o]) => o.type === 'boolean').flatMap(([k, o]) => [`--${k}`, ...(o.short ? [`-${o.short}`] : [])]);

@@ -116,6 +116,14 @@ test('only the PR\'s experts count: another person\'s approval moves nothing and
   assert.equal(t.prs[0].reviewerAt, null);
 });
 
+test('logins compare without case: a reviewer set as Expert-One approving as expert-one moves the card', async () => {
+  const c = card({ number: 918, status: 'smeReview' });
+  const extra = { targets: rawSettings().targets.map((t) => (t.id === 'guide' ? { ...t, reviewers: ['Expert-One'] } : t)) };
+  const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 7, headCommit: HEAD, labels: ['in expert review'] })], activity: { 'guide-docs#7': { reviews: [approve(9181, ago(1))] } }, extra });
+  ledger(w, c, { stages: BASE, prs: [smePr({ smeSince: ago(5) })] });
+  assert.deepEqual(steps(await w.one('918')), ['move guide-docs#7 -> finalReview']);
+});
+
 test('two experts: the latest approval after the PR entered the review moves it, whoever gave the first verdict', async () => {
   const c = card({ number: 915, status: 'smeReview' });
   const reviews = [

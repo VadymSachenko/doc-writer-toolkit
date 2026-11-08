@@ -37,6 +37,8 @@ export const SCRIPT_COMMANDS = { 'forge/forge.mjs': { denied: ['remove-label'], 
 function subcommandOf(words, booleans) {
   for (let i = 0; i < words.length; i++) {
     const v = words[i].value;
+    // `--` ends the options (node's parseArgs): the next word is the command.
+    if (v === '--') return words[i + 1] ?? null;
     if (!v.startsWith('-')) return words[i];
     if (!v.includes('=') && !booleans.includes(v)) i++;
   }

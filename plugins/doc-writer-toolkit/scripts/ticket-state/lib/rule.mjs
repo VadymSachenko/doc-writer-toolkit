@@ -592,7 +592,8 @@ function handToCheck(pr, hand, w, target, head, out, { grace = false } = {}) {
 // How long a hand commit waits before its style check (the owner's push, then the move).
 export const GRACE_MS = 10 * 60000;
 
-// The latest approving review of a PR in the expert's review, when one of its experts approved since it entered the review (an older
+// The latest approving review of a PR in the expert's review, when one of its experts approved since it entered the review;
+// none while any expert's last verdict asks for changes, whatever its time (lib/world.mjs `reviewerSignals`) (an older
 // approval, of a review before a move back, moves nothing), and no review asks for changes. With the head it approved.
 function expertApproved(l, p) {
   if (!p.world?.approvals?.length || p.world.reviewDecision === 'CHANGES_REQUESTED') return null;

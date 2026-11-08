@@ -309,20 +309,22 @@ export function unhandled(ledger, pr, activity, self) {
 }
 
 // What the PR's experts did on it: only the logins in `experts` (the targets' `reviewers` and the reviewers requested on
-// the PR), never the pipeline's own login or a bot. `reviewerAt`, the time of their latest review or comment, for the
-// report's quiet expert; and `approvals`, each expert's approving review whose last verdict it is, oldest first, with the
-// commit it approved, none when one of them asks for changes (the rule keeps those after the PR entered the review).
+// the PR), compared without case as GitHub does, never the pipeline's own login or a bot. `reviewerAt`, the time of their
+// latest review or comment, for the report's quiet expert; and `approvals`, each expert's approving review whose last
+// verdict it is, oldest first, with the commit it approved. When any expert's last verdict asks for changes, whatever its
+// time, there are none: that expert holds the PR. The rule keeps the approvals given after the PR entered the review.
 // Read from the reviews themselves: GitHub fills the PR's review decision only where a branch rule requires a review.
 export function reviewerSignals(activity, self, experts = []) {
-  const allowed = new Set(experts.map(String));
-  const theirs = (author, bot) => Boolean(author) && author !== self && bot !== true && !/\[bot\]$/.test(author) && allowed.has(String(author));
+  const low = (x) => String(x ?? '').toLowerCase();
+  const allowed = new Set(experts.map(low));
+  const theirs = (author, bot) => Boolean(author) && low(author) !== low(self) && bot !== true && !/\[bot\]$/.test(author) && allowed.has(low(author));
   const times = [];
   for (const t of activity.threads ?? []) for (const c of t.comments ?? []) if (theirs(c.author, c.authorBot)) times.push(c.createdAt ?? c.updatedAt);
   for (const c of activity.comments ?? []) if (theirs(c.author, c.authorBot)) times.push(c.createdAt ?? c.updatedAt);
   const reviews = (activity.reviews ?? []).filter((r) => theirs(r.author, r.authorBot) && r.submittedAt);
   for (const r of reviews) times.push(r.submittedAt);
   const last = new Map();
-  for (const r of [...reviews].sort((a, b) => Date.parse(a.submittedAt) - Date.parse(b.submittedAt))) if (['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'].includes(r.state)) last.set(r.author, r);
+  for (const r of [...reviews].sort((a, b) => Date.parse(a.submittedAt) - Date.parse(b.submittedAt))) if (['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'].includes(r.state)) last.set(low(r.author), r);
   const verdicts = [...last.values()];
   const approvals = verdicts.some((r) => r.state === 'CHANGES_REQUESTED') ? [] : verdicts.filter((r) => r.state === 'APPROVED').sort((a, b) => Date.parse(a.submittedAt) - Date.parse(b.submittedAt));
   const valid = times.filter((x) => x && !Number.isNaN(Date.parse(x)));
