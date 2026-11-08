@@ -405,7 +405,7 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         for (const r of reviewed) {
           const sha = String(r.sha);
           if (pr.styleChecked.some((x) => x.sha.startsWith(sha) || sha.startsWith(x.sha))) continue;
-          pr.styleChecked.push({ sha, ...(typeof r.reason === 'string' && r.reason.trim() ? { reason: r.reason } : {}), at });
+          pr.styleChecked.push({ sha, ...(typeof r.reason === 'string' && r.reason.trim() ? { reason: r.reason } : {}), ...(result.skipped ? { skipped: String(result.skipped) } : {}), at });
         }
         return;
       }

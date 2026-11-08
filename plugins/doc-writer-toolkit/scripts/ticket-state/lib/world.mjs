@@ -179,6 +179,13 @@ export function makeGit(settings, opts = {}) {
       const out = gitOut(cwd, ['rev-list', head, '--not', ref]);
       return out === null ? null : out.split('\n').filter(Boolean);
     },
+    // When a commit was committed (ms), for the style check's cutoff. Null when it isn't here.
+    commitDate(target, sha) {
+      const cwd = repoPath(target);
+      if (!cwd || !hasCommit(cwd, sha)) return null;
+      const t = Date.parse(gitOut(cwd, ['show', '-s', '--format=%cI', sha])?.trim() ?? '');
+      return Number.isNaN(t) ? null : t;
+    },
     // The commits after `from` up to `to`, newest first. Null when either commit isn't here.
     commitsBetween(target, from, to) {
       const cwd = repoPath(target);

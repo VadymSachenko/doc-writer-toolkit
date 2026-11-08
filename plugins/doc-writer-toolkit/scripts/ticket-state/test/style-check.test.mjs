@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { LISTS, ago, card, pr } from './fakes.mjs';
+import { LISTS, ago, card, pr, settingsFor } from './fakes.mjs';
 import { ledger, read, world } from './helpers.mjs';
 import { briefFor } from '../lib/runner.mjs';
 import { runRecord } from '../lib/record.mjs';
@@ -74,7 +74,10 @@ test('AC-3: a check with nothing to fix records the sha, and the same head start
   const state = { commits: [HAND], diffs: { [HAND]: [PAGE] } };
   const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 82, headCommit: HAND })], git: vcs(state) });
   ledger(w, c, { stages: BASE, prs: [{ repo: 'guide-docs', number: 82, targets: ['guide'], review: 'sme', stage: 'smeReview' }] });
-  assert.equal(fmt((await w.one('802')).steps[0]), 'styleCheck guide-docs#82', 'at the expert review too');
+  assert.deepEqual((await w.one('802')).steps, [], 'at the expert review it waits for the owner\'s queue');
+  c.placeId = LISTS.finalReview.id;
+  ledger(w, c, { stages: BASE, prs: [{ repo: 'guide-docs', number: 82, targets: ['guide'], review: 'sme', stage: 'finalReview' }] });
+  assert.equal(fmt((await w.one('802')).steps[0]), 'styleCheck guide-docs#82');
   await runRecord({ settings: w.settings, clients: w.clients(), key: '802', stage: 'styleCheck', status: 'done', pr: 'guide-docs#82', result: { reviewed: [{ sha: HAND.slice(0, 7) }] }, now: Date.now() });
   assert.deepEqual((await w.one('802')).steps, [], 'a short sha covers the commit');
 });
@@ -170,4 +173,33 @@ test('a style check at In translation that fixed the owner\'s edit sends the PR 
   // A check that fixed nothing: the re-sync at once.
   ledger(w, c, { stages: BASE, prs: prOf({ approval: { head: HAND, at: ago(2) }, steps: { styleCheck: styleCheck(null) } }) });
   assert.equal(fmt((await w.one('809')).steps[0]), 'resync guide-docs#89');
+});
+
+test('a person\'s move is approval: hand commits the card was moved on with are recorded as seen, with no session and no bounce', async () => {
+  const c = card({ number: 810, status: 'translation' });
+  const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 90, headCommit: HAND })], git: vcs({ commits: [HAND], diffs: { [HAND]: [PAGE] } }) });
+  const prOf = (extra) => [{ repo: 'guide-docs', number: 90, targets: ['guide'], review: 'sme', stage: 'translation', approval: { head: HAND, at: ago(1) }, ...extra }];
+  ledger(w, c, { stages: BASE, prs: prOf() });
+  const s = (await w.one('810')).steps[0];
+  assert.deepEqual([fmt(s), s.role, s.skip, s.commits], ['styleCheck guide-docs#90', null, true, [{ sha: HAND, pages: [PAGE] }]], 'a scripted step, no writer session');
+  // What the runner's scripted step records.
+  await runRecord({ settings: w.settings, clients: w.clients(), key: '810', stage: 'styleCheck', status: 'done', pr: 'guide-docs#90', note: 'style check skipped: the card was moved on', result: { reviewed: [{ sha: HAND }], skipped: 'moved' }, now: Date.now() });
+  const l = read(w, '810');
+  assert.deepEqual(l.prs[0].styleChecked.map((x) => [x.sha, x.skipped]), [[HAND, 'moved']]);
+  assert.equal(l.log.at(-1).note, 'style check skipped: the card was moved on');
+  assert.equal(fmt((await w.one('810')).steps[0]), 'translate guide-docs#90', 'the chain goes on: no move back to the owner\'s queue');
+});
+
+test('styleCheck.since: a hand commit made before it counts as seen; a bad value is refused', async () => {
+  const c = card({ number: 811, status: 'finalReview' });
+  const LATER = 'f'.repeat(40);
+  const dates = { [HAND]: Date.parse('2026-11-01T10:00:00Z'), [LATER]: Date.parse('2026-11-09T10:00:00Z') };
+  const git = { ...vcs({ commits: [LATER, HAND], diffs: { [HAND]: [PAGE], [LATER]: [PAGE] } }), commitDate: (t, sha) => dates[sha] ?? null };
+  const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 91, headCommit: LATER })], git, extra: { styleCheck: { since: '2026-11-08T12:00:00Z' } } });
+  ledger(w, c, { stages: BASE, prs: [{ repo: 'guide-docs', number: 91, targets: ['guide'], review: 'sme', stage: 'finalReview' }] });
+  assert.deepEqual((await w.one('811')).steps[0].commits, [{ sha: LATER, pages: [PAGE] }], 'only the commit after the cutoff');
+  dates[LATER] = Date.parse('2026-11-02T10:00:00Z');
+  assert.deepEqual((await w.one('811')).steps, [], 'every commit before the cutoff: no check');
+  for (const since of ['2026-11-08', 'yesterday', 7]) assert.throws(() => settingsFor('/tmp/x', { styleCheck: { since } }), /styleCheck.since must be an ISO date-time/);
+  assert.equal(settingsFor('/tmp/x').styleCheck.since, null, 'absent: no cutoff');
 });

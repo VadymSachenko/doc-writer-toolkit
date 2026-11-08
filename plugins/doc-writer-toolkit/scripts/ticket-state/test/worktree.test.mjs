@@ -897,8 +897,10 @@ test('a hand edit at ready for merge and the owner\'s move in the same check: th
     return { code: 0, stdout: RESULT, stderr: '' };
   };
   const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1501'] } });
-  assert.deepEqual(out.ran.map((r) => r.stage), ['follow', 'styleCheck', 'resync', 'readyForMerge', 'move'], 'not sent back to the owner, who just moved it; the style check of the edit first');
-  assert.deepEqual(stages, ['styleCheck', 'resync']);
+  assert.deepEqual(out.ran.map((r) => r.stage), ['follow', 'styleCheck', 'resync', 'readyForMerge', 'move'], 'not sent back to the owner, who just moved it');
+  assert.equal(out.ran[1].note, 'style check skipped: the card was moved on', 'the move approved the edit: the check is skipped, with a note');
+  assert.deepEqual(stages, ['resync'], 'no style check session');
+  assert.deepEqual(read(t.w, '1501').prs[0].styleChecked.map((x) => [x.sha, x.skipped]), [[h2, 'moved']]);
   assert.equal(t.c.placeId, LISTS.finalReview.id);
 });
 
@@ -1122,7 +1124,7 @@ test('the translation label on a ready PR: taken along by the owner\'s move it i
     const changes = t.w.forge.log.filter((e) => e[0] === 'changeLabels').map((e) => [e[3], e[4]]);
     if (!pipeline) {
       assert.deepEqual(out.ran.map((r) => r.stage), ['follow', 'styleCheck', 'resync', 'readyForMerge', 'move']);
-      assert.deepEqual(seen, [['styleCheck', ['In translation']], ['resync', ['In translation']]], 'taken along: in translation for the style check and the re-sync');
+      assert.deepEqual(seen, [['resync', ['In translation']]], 'taken along: in translation for the re-sync; the style check skipped, with no session');
       assert.deepEqual(changes, [[['In translation'], ['In final review']], [['In final review'], ['In translation']]]);
     } else {
       // An answer the owner hasn't read: not taken, back to the owner's queue (row 8), the label untouched.

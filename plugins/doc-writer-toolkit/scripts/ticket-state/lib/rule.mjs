@@ -499,11 +499,14 @@ function prStep(l, p, w, out, prs) {
     const owner = world.newComments.filter((c) => c.by === 'owner');
     return step('answerComments', { pr: id, comments: world.newComments.length, owner: owner.length, reviewer: world.newComments.length - owner.length, ...ownerForms(pr, owner, w) });
   }
-  // Row 11b, the style check: hand commits that changed UA and no style check reviewed are reviewed before the next stage
-  // goes on (D-081, D-082), each once, whatever the head (the check records the shas it read). A ready PR went back to
-  // the owner's queue above first; new comments are answered first (the forge check picks them up within a minute).
-  if (hand?.length && p.stage !== 'readyForMerge') {
+  // Row 11b, the style check: hand commits that changed UA and no style check read are reviewed while the PR is in the
+  // owner's queue (D-081, D-082), each once, whatever the head (the check records the shas it read). A ready PR went
+  // back to the queue above first; new comments are answered first (the forge check picks them up within a minute);
+  // at an earlier stage they wait for the queue. Once a person moved the card on to In translation, the move approved
+  // them: no session and no bounce, the shas recorded as seen (`skip`, a scripted step).
+  if (hand?.length && ['finalReview', 'translation'].includes(p.stage)) {
     const commits = handToCheck(pr, hand, w, target, head, out);
+    if (commits.length && p.stage === 'translation') return step('styleCheck', { role: null, skip: true, pr: id, head, commits });
     if (commits.length) return step('styleCheck', { pr: id, head, commits, nextEdit: nextEditNumber({ edits: mergedEdits(w.editsByPr?.get(id) ?? [editsOf(pr)]) }) });
   }
   // Two PRs: an approved PR goes on to the owner's queue by itself while the card stands where the slower PR is. That
@@ -533,6 +536,15 @@ function handToCheck(pr, hand, w, target, head, out) {
       return [];
     }
     todo = todo.filter((sha) => after.includes(sha));
+  }
+  // Built for the PRs to come (D-080): a commit made before `styleCheck.since` counts as seen.
+  const since = w.settings.styleCheck?.since ? Date.parse(w.settings.styleCheck.since) : null;
+  if (since !== null && todo.length) {
+    todo = todo.filter((sha) => {
+      const at = w.git?.commitDate?.(target, sha) ?? null;
+      if (at === null) out.notes.push(`${id}: the hand commit ${sha.slice(0, 7)} has no date here: not style-checked yet`);
+      return at !== null && at >= since;
+    });
   }
   const commits = [];
   for (const sha of [...todo].reverse()) {

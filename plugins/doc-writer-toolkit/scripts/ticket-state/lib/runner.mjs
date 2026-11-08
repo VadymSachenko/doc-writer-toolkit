@@ -783,6 +783,14 @@ async function runScripted(step, ctx) {
       await rec(key, { result: JSON.stringify({ commentId, asked, posted: { card: commentId ? [commentId] : [] } }) });
       return;
     }
+    case 'styleCheck': {
+      // Only the skip is scripted: the card moved on to In translation before the check, so the move approved the
+      // hand edits. No session and no bounce: the shas are recorded as seen, with the note.
+      if (!step.skip) throw new Error('a style check runs as a writer session');
+      const note = 'style check skipped: the card was moved on';
+      for (const key of step.keys) await rec(key, { note, result: JSON.stringify({ reviewed: (step.commits ?? []).map((c) => ({ sha: c.sha })), skipped: 'moved' }) });
+      return [note];
+    }
     default:
       throw new Error(`no scripted handler for ${step.stage}`);
   }
@@ -1102,7 +1110,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
       const warnings = (await runScripted(step, { settings, clients, io })) ?? [];
       const note = warnings.length ? warnings.join('; ').slice(0, 300) : null;
       say({ kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, outcome: 'done', ...(note ? { note } : {}) });
-      return { ...pick(step), outcome: 'done', ...(warnings.length ? { warnings } : {}) };
+      return { ...pick(step), outcome: 'done', ...(warnings.length ? { warnings, note } : {}) };
     } catch (e) {
       const note = `${e.message}`.slice(0, 300);
       for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'failed', pr: step.pr, note, now: clock() }).catch(() => {});
