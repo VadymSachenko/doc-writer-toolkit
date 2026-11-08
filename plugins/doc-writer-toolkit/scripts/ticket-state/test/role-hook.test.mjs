@@ -5,7 +5,7 @@ import path from 'node:path';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { parseShell, segmentMatches } from '../lib/shell-words.mjs';
-import { HOOK_VARIABLE, commandsOfRules, hookSettings, refusalOf } from '../lib/role-hook.mjs';
+import { HOOK_VARIABLE, SCRIPT_COMMANDS, commandsOfRules, hookSettings, refusalOf } from '../lib/role-hook.mjs';
 import { ROLE_HOOK, ROLE_SCRIPTS, TOOLS_DENIED, briefFor, commandFor, downloadDirsFor, spawnClaude } from '../lib/runner.mjs';
 import { ROLE_SESSION_VARIABLE, DOWNLOAD_DIRS_VARIABLE, TRACKER_TEST_VARIABLE } from '../lib/env.mjs';
 import { isBareGit, jobCommand, validateJobs } from '../lib/jobs.mjs';
@@ -91,6 +91,8 @@ const REFUSED = ({ state, root }) => {
     `git log '--output=${root}/.claude/ticket-flow.local.json'`, `git log --out''put=${root}/.claude/settings.local.json`, `git log --out\\put=/x`, `git log "--output" /x`, `git show HEAD --output=/x`, `git diff --output /x`, `git -C ${WT} log '--output=/x'`, `git -C ${WT} diff --ou''tput=/x`, 'git log --output=/x', 'git log -1 --output /x',
     // Scripts' flags that run code.
     `node ${ui} check --sour''ce 'command id'`, `node ${ui} check '--source=command id'`, `node ${ui} "--source" x`, `node ${ui} check --sou\\rce=x`, `node ${vp} --range a..b '--playwright-from' /tmp/x`, `node ${vp} --range a..b --playwright''-from=/tmp/x`,
+    // The check label comes off only by the runner, on a person's forward move.
+    `node ${R}/scripts/forge/forge.mjs remove-label --repo guide-docs --number 3 --label x`, `node ${R}/scripts/forge/forge.mjs --repo guide-docs remove-label --number 3 --label x`, `node ${R}/scripts/forge/forge.mjs 'remove-label' --repo guide-docs --number 3 --label x`,
     // A browser lock by hand.
     `mkdir ${state}/.play''wright.lock`, `mkdir "${state}/.playwright.lock"`, `mkdir '${state}/.playwright.lock'`, 'mkdir .playwright.lock', `mkdir -p ${state}/tmp/.playwright.lock/x`, `mkdir ${state}/.PLAYWRIGHT.LOCK`, `mkdir ${state}/.playwright-busy`, `mkdir ${state}/.play*`,
     // Writes through read commands.
@@ -563,4 +565,14 @@ test('settings validation: a skill job whose allow list opens all of git or all 
     assert.doesNotThrow(() => validateJobs(job([rule])), rule);
   }
   assert.doesNotThrow(() => validateJobs(job(['Bash(git:*)'], { script: 'a.mjs' })), 'a script job has no session, and so no rules');
+});
+
+test('forge remove-label is refused only as the command, wherever the options put it; a label named so is no command', async () => {
+  const { cfg, root } = SHARED();
+  const fg = `${R}/scripts/forge/forge.mjs`;
+  for (const cmd of [`node ${fg} --dry-run remove-label --repo r --number 3 --label x`, `node ${fg} --repo=r remove-label --number 3 --label x`, `node ${fg} --repo r --number 3 --label x -- remove-label`, `node ${fg} -- remove-label --repo r`]) assert.ok(refusalOf(cmd, cfg.writer, { cwd: root }), cmd);
+  for (const cmd of [`node ${fg} add-label --repo r --number 3 --label remove-label`, `node ${fg} --label remove-label add-label --repo r --number 3`]) assert.equal(refusalOf(cmd, cfg.writer, { cwd: root }), null, cmd);
+  const { OPTIONS } = await import('../../forge/forge.mjs');
+  const booleans = Object.entries(OPTIONS).filter(([, o]) => o.type === 'boolean').flatMap(([k, o]) => [`--${k}`, ...(o.short ? [`-${o.short}`] : [])]);
+  assert.deepEqual([...SCRIPT_COMMANDS['forge/forge.mjs'].booleans].sort(), booleans.sort(), "the hook's list of forge's options with no value");
 });

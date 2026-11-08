@@ -74,6 +74,12 @@ export const PR_STAGE_OF_STATUS = { inProgress: 'reworkWait', smeReview: 'smeRev
 const below = (stage, of) => PR_ORDER.includes(stage) && PR_ORDER.indexOf(stage) < PR_ORDER.indexOf(of);
 export const followsMove = (stage, from, to) => Boolean(PR_STAGE_OF_STATUS[to]) && (to === 'translation' ? below(stage, 'readyForMerge') : CARD_STATUS_OF[stage] === from);
 
+// A person's forward move of the card (D-128): one that takes the card past the final review status, to In translation or
+// done. The owner's check is done, so the check label comes off. A move into the final review (from In progress, from the
+// expert's review, or the expert's Approve) keeps it: the owner's check only begins there; so do moves between In
+// progress and the expert's review, and every move back.
+export const forwardMove = (from, to) => from !== to && (to === 'translation' || to === 'done');
+
 // Ticket states and what they count as (design §1, §7).
 export const IN_PROGRESS = ['planning', 'writing'];
 export const WAITING = ['questions', 'planGate', 'videoGate', 'ownerBlock', 'reworkWait'];

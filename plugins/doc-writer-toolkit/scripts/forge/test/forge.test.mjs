@@ -85,8 +85,8 @@ test('settings: the forge object and the targets give the sets of repos, logins 
   assert.equal(f.addable.get('in progress'), 'in progress');
   assert.ok(f.addable.has('check me'));
   assert.ok(!f.addable.has('ship it'));
-  // the check label is added by the pipeline but never removed by it
-  assert.ok(!f.removable.has('check me'));
+  // the check label is added by the pipeline, and removed when a person's forward move says the owner's check is done
+  assert.ok(f.removable.has('check me'));
   assert.ok(f.removable.has('in sme review'));
   assert.deepEqual([...f.logins].sort(), ['pat', 'rev-one', 'rev-two']);
 });
@@ -626,9 +626,16 @@ test('addLabel and removeLabel: a label the settings do not name is refused befo
   await rejects(forge.addLabel({ repo: 'guide-docs', number: 7, label: 'ship it' }), 'notNamed');
   await rejects(forge.addLabel({ repo: 'guide-docs', number: 7, label: 'SHIP IT' }), 'notNamed');
   await rejects(forge.removeLabel({ repo: 'guide-docs', number: 7, label: 'ship it' }), 'notNamed');
-  // the check label is the owner's to remove
-  await rejects(forge.removeLabel({ repo: 'guide-docs', number: 7, label: 'Check me' }), 'notNamed');
   assert.equal(calls.length, 0);
+});
+
+test('removeLabel: the check label may be removed, the expert label never', async () => {
+  const { forge } = setup();
+  const r = await forge.removeLabel({ repo: 'guide-docs', number: 7, label: 'check me' });
+  assert.equal(r.label, 'Check me', 'not refused: the settings spelling is reported');
+  const f = validateForge({ kind: 'github', owner: OWNER, checkLabel: 'Check me', expertLabel: 'Expert advised' }, [{ id: 'a', repo: `${OWNER}/r` }]);
+  assert.ok(f.removable.has('check me'));
+  assert.ok(!f.removable.has('expert advised'));
 });
 
 test('removeLabel: removes a stage label; one the PR does not have is a no-op', async () => {
@@ -990,7 +997,7 @@ test('CLI: the settings command shows what the module may touch', async () => {
   assert.deepEqual(r.json.repos, ['guide-docs', 'api-docs']);
   assert.ok(r.json.addableLabels.includes('Check me'));
   assert.ok(!r.json.addableLabels.includes('ship it'));
-  assert.ok(!r.json.removableLabels.includes('Check me'));
+  assert.ok(r.json.removableLabels.includes('Check me'));
   assert.equal(r.calls.length, 0);
 });
 

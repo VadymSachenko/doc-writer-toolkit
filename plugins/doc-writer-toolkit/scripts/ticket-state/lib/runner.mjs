@@ -11,8 +11,8 @@ import { allLocks, takeLock, releaseLock, renewLock } from './locks.mjs';
 import { runRecord, cardStatusFor } from './record.mjs';
 import { runUnlock } from './handover.mjs';
 import { allowanceOf, parseUsage } from './allowance.mjs';
-import { PR_STAGE_OF_STATUS, PRIORITY_RANK, finishRank, followsMove, stageLabelOf } from './stages.mjs';
-import { callExperts, expertCalls } from './experts.mjs';
+import { PR_STAGE_OF_STATUS, PRIORITY_RANK, finishRank, followsMove, forwardMove, stageLabelOf } from './stages.mjs';
+import { callExperts, expertCalls, postReviewComment } from './experts.mjs';
 import { appendRunLog, localDate, readRunLog, renderReport, writeReport } from './report.mjs';
 import { ROLES } from './settings.mjs';
 import { cleanupTicket } from './cleanup.mjs';
@@ -160,12 +160,17 @@ export const ROLE_SCRIPTS = {
 };
 export const scriptRulesFor = (roots = [], role = null) => [...new Set(roots.flatMap((r) => (role ? ROLE_SCRIPTS[role] : NODE_SCRIPTS).map((s) => `Bash(node ${path.join(r, 'scripts', s)}:*)`)))];
 // Script flags that run code: ui-labels' `--source 'command <cmd>'` (a shell) and visual-pack's `--playwright-from
-// <dir>` (JavaScript from that folder), denied first, last or between other words, as `--x v` and `--x=v`.
+// <dir>` (JavaScript from that folder), denied first, last or between other words, as `--x v` and `--x=v`. And the
+// forge's `remove-label`, the runner's alone: the check label comes off only on a person's forward move (D-128).
 const SCRIPT_FLAGS = { 'ui-labels/ui-labels.mjs': ['--source'], 'visual-pack/visual-pack.mjs': ['--playwright-from'] };
-export const scriptFlagsDenied = (roots = []) => [...new Set(roots.flatMap((r) => Object.entries(SCRIPT_FLAGS).flatMap(([s, flags]) => {
-  const cmd = `node ${path.join(r, 'scripts', s)}`;
-  return flags.flatMap((f) => [`Bash(${cmd} ${f})`, `Bash(${cmd} ${f} *)`, `Bash(${cmd} * ${f})`, `Bash(${cmd} * ${f} *)`, `Bash(${cmd} ${f}=*)`, `Bash(${cmd} * ${f}=*)`]);
-})))];
+export const scriptFlagsDenied = (roots = []) => [...new Set(roots.flatMap((r) => [
+  ...Object.entries(SCRIPT_FLAGS).flatMap(([s, flags]) => {
+    const cmd = `node ${path.join(r, 'scripts', s)}`;
+    return flags.flatMap((f) => [`Bash(${cmd} ${f})`, `Bash(${cmd} ${f} *)`, `Bash(${cmd} * ${f})`, `Bash(${cmd} * ${f} *)`, `Bash(${cmd} ${f}=*)`, `Bash(${cmd} * ${f}=*)`]);
+  }),
+  `Bash(node ${path.join(r, 'scripts', 'forge/forge.mjs')} remove-label:*)`,
+  `Bash(node ${path.join(r, 'scripts', 'forge/forge.mjs')} * remove-label *)`,
+]))];
 
 // The toolkit roots a session may run scripts from: the runner's own, and every install of the plugin the hub's
 // sessions load (the owner's, or the hub's project install), from Claude Code's list of installed plugins.
@@ -365,6 +370,7 @@ export function briefFor(step, settings) {
     ...replyLines(step.replies),
     ...suggestionLines(step.suggestions),
     ...(step.stage === 'answerComments' ? styleAfterCommentsLines() : []),
+    step.askApprove ? `The PR is in the expert's review and the expert hasn't approved it: end the summary with one line that asks the expert, when nothing else is needed, to approve: the link ${step.askApprove} and the path «Review changes» → «Approve» → «Submit review».` : null,
     ...(step.stage === 'styleCheck' ? styleCheckLines(step.commits, step.fixes) : []),
     step.stale ? `The UA pages changed after this stage last ran (${step.stale} file(s)): run it again on the current head.` : null,
     step.cards ? `Cards, highest priority first:\n${step.cards.map((c) => `- ${c.key}: ${c.url ?? c.shortLink} (${c.priority})`).join('\n')}` : null,
@@ -600,6 +606,7 @@ export function collectSteps(st, { named = [], includeStart = false, retryWaitin
 // What a scripted step does, as the tracker and forge operations it calls (for the plan of a dry run).
 export function scriptedCalls(step, ledger, settings) {
   const card = ledger?.card?.shortLink ?? ledger?.card?.id ?? step.card?.shortLink;
+  const reviewCommentCall = (pr) => (pr.number && settings.reviewComment ? [`forge comment --repo ${pr.repo} --number ${pr.number} --body-file <the review comment> --unless-header <its first line>`] : []);
   const target = (pr) => settings.targets.find((t) => t.id === pr.targets?.[0]) ?? settings.targets.find((t) => t.repo === pr.repo);
   const label = (pr, stage) => {
     const t = target(pr);
@@ -613,21 +620,29 @@ export function scriptedCalls(step, ledger, settings) {
         const after = structuredClone(ledger);
         findPr(after, step.pr).stage = step.to;
         const expected = cardStatusFor(after);
-        return [...label(pr, step.to), ...(step.to === 'smeReview' ? expertCalls(settings, [pr], [card], { request: false }) : []), ...(expected && expected !== step.card?.status ? [`tracker move ${card} --to ${expected}`] : [])];
+        return [...label(pr, step.to), ...(step.to === 'smeReview' ? [...expertCalls(settings, [pr], [card], { request: false }), ...reviewCommentCall(pr)] : []), ...(expected && expected !== step.card?.status ? [`tracker move ${card} --to ${expected}`] : [])];
       }
       return [...ledger.prs.filter((p) => p.number && !p.merged).flatMap((p) => label(p, p.stage)), ...(step.ready ? [`tracker comment ${card} --text <the ready comment>`] : []), `tracker move ${card} --to ${step.to}`];
     }
-    case 'follow':
+    case 'follow': {
+      const following = ledger.prs.filter((p) => p.number && followsMove(p.stage, ledger.left?.status, step.to));
+      const taken = ledger.prs.filter((p) => p.number && (step.takeReady ?? []).some((t) => t.pr === prId(p)));
+      const others = cardsMovedWith(step, ledger, settings).map((o) => ({ o, own: o.prs.filter((p) => p.number && !ledger.prs.some((x) => prId(x) === prId(p)) && followsMove(p.stage, o.left?.status, step.to)) }));
+      // A person's forward move: the check label off every PR the move took, once the records stood (D-128).
+      // To done, the ticket's open PRs: no PR follows a move there.
+      const unchecked = !settings.forge.checkLabel || !forwardMove(ledger.left?.status, step.to) ? [] : step.to === 'done' ? ledger.prs.filter((p) => p.number && !p.merged) : [...following, ...taken.filter((p) => !following.includes(p)), ...others.flatMap((x) => x.own)];
       return [
-        ...ledger.prs.filter((p) => p.number && followsMove(p.stage, ledger.left?.status, step.to)).flatMap((p) => label(p, PR_STAGE_OF_STATUS[step.to])),
-        ...ledger.prs.filter((p) => p.number && (step.takeReady ?? []).some((t) => t.pr === prId(p))).flatMap((p) => label(p, 'translation')),
-        ...(step.to === 'smeReview' ? expertCalls(settings, ledger.prs.filter((p) => p.number && followsMove(p.stage, ledger.left?.status, step.to)), [card]) : []),
-        ...cardsMovedWith(step, ledger, settings).flatMap((o) => [
+        ...following.flatMap((p) => label(p, PR_STAGE_OF_STATUS[step.to])),
+        ...taken.flatMap((p) => label(p, 'translation')),
+        ...(step.to === 'smeReview' ? [...expertCalls(settings, following, [card]), ...following.flatMap(reviewCommentCall)] : []),
+        ...others.flatMap(({ o, own }) => [
           `tracker move ${o.card?.shortLink ?? o.card?.id} --to ${step.to}`,
           // The other card's own PRs its record moves (a shared one is labelled once, above).
-          ...o.prs.filter((p) => p.number && !ledger.prs.some((x) => prId(x) === prId(p)) && followsMove(p.stage, o.left?.status, step.to)).flatMap((p) => label(p, PR_STAGE_OF_STATUS[step.to])),
+          ...own.flatMap((p) => label(p, PR_STAGE_OF_STATUS[step.to])),
         ]),
+        ...unchecked.map((p) => `forge remove-label --repo ${p.repo} --number ${p.number} --label ${JSON.stringify(settings.forge.checkLabel)}`),
       ];
+    }
     case 'readyForMerge':
       return label(findPr(ledger, step.pr), 'readyForMerge');
     case 'close':
@@ -678,15 +693,24 @@ async function runScripted(step, ctx) {
     case 'move': {
       // Each ticket of the step moves its own card: a PR with two cards has two.
       if (step.pr) {
-        await setLabel(findPr(ledger, step.pr), step.to);
-        // A review a person requested from the owner's queue: the card members too (lib/experts.mjs).
-        if (step.to === 'smeReview') await callExperts({ settings, clients, prs: [findPr(ledger, step.pr)], cards: cardsOf(step.keys), request: false });
+        const pr = findPr(ledger, step.pr);
+        await setLabel(pr, step.to);
+        const result = {};
+        // A review a person requested from the owner's queue: the card members too (lib/experts.mjs), and the comment
+        // with the way to approve; its id goes in `posted`.
+        if (step.to === 'smeReview') {
+          await callExperts({ settings, clients, prs: [pr], cards: cardsOf(step.keys), request: false });
+          const id = await postReviewComment({ settings, clients, pr, url: pr.url, since: ledger.left?.at });
+          if (id) result.posted = [id];
+        }
+        // The expert's Approve moved it: the approval, at the head the expert approved.
+        if (step.review) result.expertApproval = step.review;
         for (const k of step.keys) {
           const after = structuredClone(readLedger(settings.state, k));
           findPr(after, step.pr).stage = step.to;
           const expected = cardStatusFor(after);
           if (expected) await clients.tracker.move({ card: after.card.shortLink ?? after.card.id, to: expected });
-          await rec(k, { to: step.to });
+          await rec(k, { to: step.to, ...(Object.keys(result).length ? { result: JSON.stringify(result) } : {}) });
         }
         return;
       }
@@ -710,8 +734,17 @@ async function runScripted(step, ctx) {
     case 'follow': {
       const following = ledger.prs.filter((x) => x.number && followsMove(x.stage, ledger.left?.status, step.to));
       for (const p of following) await setLabel(p, PR_STAGE_OF_STATUS[step.to]);
-      // A person's move to the review status calls each following PR's expert (lib/experts.mjs).
-      if (step.to === 'smeReview') await callExperts({ settings, clients, prs: following, cards: cardsOf(step.keys) });
+      // A person's move to the review status calls each following PR's expert (lib/experts.mjs), and each gets the
+      // comment with the way to approve; the ids go in `posted`.
+      const posted = [];
+      if (step.to === 'smeReview') {
+        await callExperts({ settings, clients, prs: following, cards: cardsOf(step.keys) });
+        for (const p of following) {
+          const id = await postReviewComment({ settings, clients, pr: p, url: p.url, since: ledger.left?.at });
+          if (id) posted.push(id);
+        }
+      }
+      const result = { ...(step.takeReady?.length ? { takeReady: step.takeReady } : {}), ...(posted.length ? { posted } : {}) };
       // The other card first: a stop here leaves this ticket's move still to follow, and the run starts it again.
       const others = cardsMovedWith(step, ledger, settings);
       const before = new Map([...others, ...step.keys.map((k) => readLedger(settings.state, k))].map((l) => [l.key, new Map(l.prs.map((x) => [prId(x), x.stage]))]));
@@ -719,14 +752,29 @@ async function runScripted(step, ctx) {
         await clients.tracker.move({ card: o.card.shortLink ?? o.card.id, to: step.to });
         await runRecord({ settings, clients, key: o.key, stage: 'follow', status: 'done', to: step.to, now: (io.now ?? Date.now)(), ...(step.takeReady?.length ? { result: JSON.stringify({ takeReady: step.takeReady }) } : {}) });
       }
-      for (const k of step.keys) await rec(k, { to: step.to, ...(step.takeReady?.length ? { result: JSON.stringify({ takeReady: step.takeReady }) } : {}) });
+      for (const k of step.keys) await rec(k, { to: step.to, ...(Object.keys(result).length ? { result: JSON.stringify(result) } : {}) });
       // Every other PR the records moved: a ready PR taken along (`takeReady`, which the record may leave when its head
       // moved again) and the other card's own PRs. Labelled after the records stood, so a failure is a warning.
       const labelled = new Set(following.map(prId));
+      const moved = [...following];
       for (const k of before.keys()) {
         for (const p of readLedger(settings.state, k).prs.filter((x) => x.number && !labelled.has(prId(x)) && x.stage !== before.get(k).get(prId(x)))) {
           labelled.add(prId(p));
+          moved.push(p);
           await afterRecord(p, p.stage);
+        }
+      }
+      // A person's forward move: the owner's check is done, and the check label comes off the PRs the move took
+      // (D-128). After the records stood, so a failure is a warning.
+      const check = settings.forge.checkLabel;
+      if (check && forwardMove(ledger.left?.status, step.to)) {
+        // To done, the ticket's open PRs: no PR follows a move there.
+        for (const p of step.to === 'done' ? ledger.prs.filter((x) => x.number && !x.merged) : moved) {
+          try {
+            await clients.forge.removeLabel({ repo: p.repo, number: p.number, label: check });
+          } catch (err) {
+            warnings.push(`${prId(p)}: the label '${check}' was not removed: ${err.message}`);
+          }
         }
       }
       return warnings;

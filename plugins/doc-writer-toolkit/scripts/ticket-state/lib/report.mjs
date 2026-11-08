@@ -3,6 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { readAllLedgers } from './ledger.mjs';
 import { readFeed } from './feed.mjs';
+import { reviewCommentFor } from './experts.mjs';
 
 // The morning report (design §7): a local file `<state>/reports/<date>.md`, written with no model call. Nothing goes to
 // the tracker or the forge. A separate skill reads it on demand.
@@ -43,6 +44,21 @@ export function writeReport(state, date, text) {
   return file;
 }
 
+// The working days (Monday to Friday) wholly between a time and a local date (`YYYY-MM-DD`), neither day counted: the
+// days the expert had in full.
+export function workingDaysBetween(fromMs, toDate) {
+  const [y, m, d] = String(toDate).split('-').map(Number);
+  const end = new Date(y, m - 1, d);
+  const day = new Date(fromMs);
+  day.setHours(0, 0, 0, 0);
+  let n = 0;
+  for (;;) {
+    day.setDate(day.getDate() + 1);
+    if (day >= end) return n;
+    if (day.getDay() !== 0 && day.getDay() !== 6) n++;
+  }
+}
+
 const mb = (bytes) => `${((bytes ?? 0) / 1048576).toFixed(1)} MB`;
 const link = (t) => (t.card?.url ? `[${t.key}](${t.card.url})` : t.key);
 const cardName = (t) => (t.card?.name ? ` ${t.card.name.replace(/\s+/g, ' ').slice(0, 90)}` : '');
@@ -74,6 +90,24 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
     }
   }
   out.push('## Expert review, your call', '', list(experts), '');
+
+  // Per PR in the expert's review, the expert quiet for `schedule.expertQuietDays` working days or more since the PR
+  // entered the review or since their last review or comment: a line with the text to send them (D-082).
+  const quiet = [];
+  const days = settings.schedule.expertQuietDays;
+  for (const t of st.tickets) {
+    for (const p of t.prs ?? []) {
+      if (p.stage !== 'smeReview' || (p.state && p.state !== 'open')) continue;
+      const since = [p.smeSince, p.reviewerAt].filter((x) => x && !Number.isNaN(Date.parse(x))).map((x) => Date.parse(x));
+      if (!since.length) continue;
+      const last = Math.max(...since);
+      const n = workingDaysBetween(last, date);
+      if (n < days) continue;
+      const text = reviewCommentFor(settings, p.url);
+      quiet.push(`${p.url ? `[${p.id}](${p.url})` : p.id} (${link(t)}): no word from the expert for ${n} working day(s), since ${localDate(last)}${text ? `. To send: ${text.replace(/\s*\n\s*/g, ' ')}` : ''}`);
+    }
+  }
+  out.push('## Expert review gone quiet', '', list(quiet), '');
 
   const places = [];
   const check = [];

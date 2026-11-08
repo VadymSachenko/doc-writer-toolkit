@@ -254,11 +254,12 @@ test('two PRs: the card stands with the slower PR; an approved PR goes on to the
   const c = { two: card({ number: 701, status: 'inProgress' }), asked: card({ number: 702, status: 'blocked' }) };
   const prs = [
     pr({ repo: 'portal-docs', number: 31, head: 'ticket-701-api', labels: ['In progress'] }),
-    pr({ repo: 'portal-docs', number: 32, head: 'ticket-701-ui', labels: ['In expert review'], reviewDecision: 'APPROVED' }),
+    pr({ repo: 'portal-docs', number: 32, head: 'ticket-701-ui', labels: ['In expert review'] }),
     pr({ repo: 'portal-docs', number: 33, head: 'ticket-702-api', labels: ['In progress'] }),
     pr({ repo: 'portal-docs', number: 34, head: 'ticket-702-ui', labels: ['In expert review'] }),
   ];
-  const w = world({ cards: Object.values(c), prs });
+  const activity = { 'portal-docs#32': { reviews: [{ id: 9032, author: 'expert-one', state: 'APPROVED', body: '', submittedAt: ago(1), commit: 'a'.repeat(40) }] } };
+  const w = world({ cards: Object.values(c), prs, activity });
   const base = { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' };
   ledger(w, c.two, {
     stages: base,

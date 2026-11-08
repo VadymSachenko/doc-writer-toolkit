@@ -32,7 +32,7 @@ The same ticket flow settings file as the `tracker` script, found the same way: 
 | `forge.owner` | required | The account or organization that owns the repositories. |
 | `forge.self` | no | The login the pipeline writes with. `reply` uses it to see its own earlier reply. |
 | `forge.assignee` | no | Assigned to a PR that `open-pr` creates, unless `--assignee` says another. |
-| `forge.checkLabel` | no | The label that asks the owner to look at a PR. The module may add it and never removes it. |
+| `forge.checkLabel` | no | The label that asks the owner to look at a PR. The module may add it, and may remove it: the ticket flow removes it when a person moves the card past the final review, the owner's check done. |
 | `forge.expertLabel` | no | The label on a PR whose writer recommends an expert review (the ticket flow's `pr` record adds it). The module may add it and never removes it. None: no such label. |
 | `targets[].id`, `targets[].repo` | required | A target's id (unique), and its repository (`name`, or `owner/name` with the forge's owner). |
 | `targets[].reviewers` | no | Logins the module may ask for a review. |
@@ -43,7 +43,7 @@ The same ticket flow settings file as the `tracker` script, found the same way: 
 
 - **Repositories:** only those a target names. Any other is refused (`notAllowed`).
 - **Logins** (assignee, reviewers): `self`, `assignee` and the targets' `reviewers`. Any other is refused (`notAllowed`).
-- **Labels it adds:** every target's stage labels, `checkLabel` and `expertLabel`. Any other label is refused before a request is made (`notNamed`), so a label the settings do not name (the owner's own label that marks a PR ready to merge) cannot be set by any operation. **Labels it removes:** the stage labels only; `checkLabel` and `expertLabel` are the owner's to remove. A label is compared without case and spacing, as GitHub does. A label the repository does not have is reported (`unknown`); labels are never created.
+- **Labels it adds:** every target's stage labels, `checkLabel` and `expertLabel`. Any other label is refused before a request is made (`notNamed`), so a label the settings do not name (the owner's own label that marks a PR ready to merge) cannot be set by any operation. **Labels it removes:** the stage labels and `checkLabel`; `expertLabel` is never removed. A label is compared without case and spacing, as GitHub does. A label the repository does not have is reported (`unknown`); labels are never created.
 
 ## Commands
 

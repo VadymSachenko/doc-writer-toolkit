@@ -7,8 +7,9 @@ import { STAGES, labelKey } from './settings.mjs';
 //
 // The rules held here, whatever the adapter:
 //   - it works only on the repositories the settings' targets name, and asks only the logins the settings name;
-//   - it adds only labels the settings name (the targets' stage labels and `checkLabel`) and removes only stage
-//     labels, so a label the settings don't name (the owner's merge label) can't be set and `checkLabel` is never removed;
+//   - it adds only labels the settings name (the targets' stage labels, `checkLabel` and `expertLabel`) and removes only
+//     the stage labels and `checkLabel`, so a label the settings don't name (the owner's merge label) can't be set and
+//     `expertLabel` is never removed;
 //   - a review on lines only comments, and a line outside the PR's diff is refused before anything is sent;
 //   - the texts it is given are sent exactly: it adds no footer and no tool name;
 //   - every write says which ids it posted;
@@ -78,7 +79,7 @@ export function createForge({ adapter, forge, dryRun = false }) {
   const labelsToRemove = (labels) =>
     (labels ?? []).map((raw) => {
       const hit = forge.removable.get(labelKey(raw));
-      if (!hit) throw new Refusal('notNamed', `label '${raw}' is not a stage label of a target; the module removes only those`, { label: raw });
+      if (!hit) throw new Refusal('notNamed', `label '${raw}' is not a stage label of a target nor the check label; the module removes only those`, { label: raw });
       return hit;
     });
   const target = (id) => {

@@ -111,7 +111,7 @@ test('AC-1: the gates: the owner\'s read, the final merge, questions and the pla
   assert.match(waiting, /- 👉 714 .* answer the questions on the card/);
   assert.match(waiting, /- 👉 715 .* approve the section plan/);
   assert.doesNotMatch(waiting, /712/, 'an expert review waits for the reviewer, not for you');
-  assert.match(text, /- ⏸ Expert review — waits for the reviewer: the expert review, then a person moves the card/);
+  assert.match(text, /- ⏸ Expert review — waits for the reviewer: the expert review: the expert's Approve moves the card on, or a person does/);
   assert.match(text, /- 👉 Your read of the UA — waits for you: comments first, then the card to In translation, or to the review status to call the expert\n/, 'the wording once, not doubled');
   assert.match(text, /- 👉 Ready for merge — waits for you/);
   assert.match(text, /- 👉 Questions — waits for you/);

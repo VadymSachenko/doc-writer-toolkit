@@ -344,8 +344,16 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
             if (!(st.labels ?? []).some((x) => x.toLowerCase() === label.toLowerCase())) throw new Refused('label', `${prId(pr)} lacks its stage label '${label}'`);
             pr.label = label;
           }
-          // Who the move to a review took along: a person moving the card back doesn't start this move again (row 9).
-          if (to === 'smeReview') addAll(pr.reviewersRequested, (st.reviewRequests ?? []).map((r) => r.login ?? r.team ?? r));
+          // Who a move into or out of the review took along: a pending request then moves no card back (row 9).
+          if (to === 'smeReview' || before === 'smeReview') addAll(pr.reviewersRequested, (st.reviewRequests ?? []).map((r) => r.login ?? r.team ?? r));
+          // When the PR entered the expert's review: only an approval after it moves the PR on.
+          if (to === 'smeReview' && before !== 'smeReview') pr.smeSince = at;
+          // The expert's Approve moved it (D-082): the approval, at the head the expert approved.
+          const ok = result.expertApproval;
+          if (ok !== undefined) {
+            if (before !== 'smeReview' || to !== 'finalReview' || !ok || typeof ok !== 'object' || !ok.head) throw new CliError('move: "expertApproval" goes with a move from smeReview to finalReview: { "id", "login", "head", "at" }', { code: 2 });
+            pr.expertApproval = { head: String(ok.head), at: ok.at ?? at, by: 'reviewer', ...(ok.login ? { login: String(ok.login) } : {}), ...(ok.id !== undefined ? { review: ok.id } : {}) };
+          }
           l.left = { ...brief(card), at };
           return;
         }
@@ -369,7 +377,15 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
             // The only UA approve: a person's move to `translation`. A later word change in UA is reported.
             if (to === 'translation') p.approval = { head: headNow ?? (await clients.forge.prState({ repo: p.repo, number: p.number })).headCommit, at, from: p.stage, by: 'person' };
             // Who a move into or out of the review took along: a pending request then moves no card back (row 9).
-            if (to === 'smeReview' || p.stage === 'smeReview') addAll(p.reviewersRequested, ((await clients.forge.prState({ repo: p.repo, number: p.number })).reviewRequests ?? []).map((r) => r.login ?? r.team ?? r));
+            if (to === 'smeReview' || p.stage === 'smeReview') {
+              const st = await clients.forge.prState({ repo: p.repo, number: p.number });
+              addAll(p.reviewersRequested, (st.reviewRequests ?? []).map((r) => r.login ?? r.team ?? r));
+              // A person's move on from the expert's review is the approval, at the head now (D-082): a word of the
+              // expert's elsewhere, recorded by the person who heard it.
+              if (p.stage === 'smeReview' && (to === 'finalReview' || to === 'translation')) p.expertApproval = { head: st.headCommit, at, by: 'person' };
+            }
+            // When the PR entered the expert's review: only an approval after it moves the PR on.
+            if (to === 'smeReview' && p.stage !== 'smeReview') p.smeSince = at;
             p.stage = PR_STAGE_OF_STATUS[to];
             const label = targetOf(p)?.labels?.[stageLabelOf(p.stage, targetOf(p))];
             if (label) p.label = label;
