@@ -74,8 +74,8 @@ To {task} a/an {entity}:
 **Result:** {What the reader sees once the task is complete.}
 
 {/* Optional: Omit Reference information if the task has no meaningful attributes to describe (for example, simple delete actions). You can tell this from the provided screenshots — if the UI has no form fields or configurable options, the section is not needed. */}
-{/* The explicit {#reference-information-{slug}} ID makes the anchor deterministic; {slug} is the task's kebab-case slug. The Variant A prompt links to it. */}
-## Reference information: {Task} a/an {entity} {#reference-information-{slug}}
+{/* The explicit \{#reference-information-{slug}} ID (written with the backslash: a bare `{#…}` breaks the MDX build in some hosts) makes the anchor deterministic; {slug} is the task's kebab-case slug. The Variant A prompt links to it. */}
+## Reference information: {Task} a/an {entity} \{#reference-information-{slug}}
 
 The following table describes the attributes you enter and select when {task-ing} a/an {entity}:
 
@@ -124,7 +124,7 @@ This guide describes how to {task, for example, create} [{entity}s](/link/to/the
 **Result:** {What the reader sees once the task is complete.}
 
 {/* Optional: Omit Reference information if the task has no meaningful attributes to describe. One combined Reference information section covers all phases. */}
-## Reference information: {Task} a/an {entity} {#reference-information-{slug}}
+## Reference information: {Task} a/an {entity} \{#reference-information-{slug}}
 
 {/* If attributes naturally split across phases, use H3 subsections here: ### {Phase 1} tab, ### {Phase 2} tab, etc. Otherwise use a single flat table. */}
 
@@ -165,7 +165,7 @@ To {task} a/an {entity}:
 
 {/* Optional: Omit the Reference information subsection below if this task has no meaningful attributes to describe. */}
 {/* Variant B: each task's Reference information needs its OWN id — use the task's slug, and link to #reference-information-{task-1-slug} inline where Task 1's fields are first mentioned. */}
-### Reference information: {Task 1} a/an {entity} {#reference-information-{task-1-slug}}
+### Reference information: {Task 1} a/an {entity} \{#reference-information-{task-1-slug}}
 
 The following table describes the attributes you enter and select when {task 1-ing} a/an {entity}:
 
@@ -182,7 +182,7 @@ To {task} a/an {entity}:
 **Result:** {What the reader sees once this task is complete.}
 
 {/* Optional: same rule applies for this task's Reference information subsection. */}
-### Reference information: {Task 2} a/an {entity} {#reference-information-{task-2-slug}}
+### Reference information: {Task 2} a/an {entity} \{#reference-information-{task-2-slug}}
 
 | Attribute | Description |
 |---|---|
@@ -260,7 +260,7 @@ Don't add a block with nothing substantive in it:
 - A system reaction ("The form opens.") stays on the same line after the step's period — it isn't its own bullet.
 - A screenshot under a step only when it helps identify an element or confirm a result — not mechanically after every step.
 - **Voice:** the UI element isn't the subject of the action; the action happens to the object. ✅ "Transactions appear in the table." ⛔ "The table displays transactions." Applies to Result blocks too.
-- **Links to Reference information** inside a step: inline, in the relevant phrase — not a separate sentence. ✅ "select the [filters](#reference-information-{slug}) you need." ⛔ "For more on each filter, see **Reference information**." The anchor must match the target heading's explicit `{#reference-information-{slug}}` ID; on a multi-task page, link to the specific task's id (`#reference-information-{task-1-slug}`).
+- **Links to Reference information** inside a step: inline, in the relevant phrase — not a separate sentence. ✅ "select the [filters](#reference-information-{slug}) you need." ⛔ "For more on each filter, see **Reference information**." The anchor must match the target heading's explicit `\{#reference-information-{slug}}` ID; on a multi-task page, link to the specific task's id (`#reference-information-{task-1-slug}`).
 
 ### Screenshots
 

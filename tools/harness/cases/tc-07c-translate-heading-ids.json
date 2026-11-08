@@ -32,7 +32,7 @@
       "name": "reference heading keeps its id",
       "type": "match",
       "path": "i18n/en/docusaurus-plugin-content-docs-portal/current/transactions/transactions.md",
-      "pattern": "^## (?:Reference information:? Filter transactions|[^\\n{]*\\{#reference-information-filter-transactions\\})$",
+      "pattern": "^## (?:Reference information:? Filter transactions|[^\\n{]*\\\\?\\{#reference-information-filter-transactions\\})$",
       "flags": "mi"
     },
     {

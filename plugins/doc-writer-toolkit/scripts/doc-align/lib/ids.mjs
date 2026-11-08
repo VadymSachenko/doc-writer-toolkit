@@ -1,6 +1,6 @@
 // Proposes the missing heading ids of a UA page from its EN page, and finds the links that use the old fragments
 // (context/doc-rules/project-rules/heading-anchors.md, rules 2, 6 and 8). The id of a UA heading without one is the
-// anchor of the EN heading at the same position: its explicit `{#id}`, else the slug Docusaurus generates from its
+// anchor of the EN heading at the same position: its explicit `\{#id}` (or `{#id}`), else the slug Docusaurus generates from its
 // text. The old fragment is the slug Docusaurus generated from the UA text. With `write`, the ids go onto the UA
 // heading lines and the links get the new fragment; no other byte changes, and no line is added or removed.
 
@@ -87,7 +87,7 @@ export async function proposeIds(uaText, enText, { uaPath, enPath, roots = [], w
   });
   const missing = uaInfo.filter((x) => x.u?.problem === 'missing' && !x.explicit);
   for (const x of uaInfo.filter((y) => y.u?.problem === 'missing' && y.explicit)) {
-    report.skipped.push({ line: x.h.line, heading: label(x.h), reason: 'the heading has an explicit {#id}: replace it with a {/* #id */} comment by hand' });
+    report.skipped.push({ line: x.h.line, heading: label(x.h), reason: 'the heading has an explicit id (\\{#id} or {#id}): replace it with a {/* #id */} comment by hand' });
   }
   if (!missing.length) return finish(report);
 
@@ -109,7 +109,7 @@ export async function proposeIds(uaText, enText, { uaPath, enPath, roots = [], w
     }
     const e = enIds[i];
     const p = { line: x.h.line, heading: label(x.h), id: e.id, from: e.explicit ? 'explicit' : 'generated', enLine: eh.line, enHeading: label(eh), oldFragment: x.oldFragment };
-    if (!ID_FORM.test(e.id)) p.problem = `'${e.id}' is not lowercase ASCII kebab-case: give the EN heading a wording that slugs to one, or an explicit {#id} (heading-anchors.md, rule 6), and run again`;
+    if (!ID_FORM.test(e.id)) p.problem = `'${e.id}' is not lowercase ASCII kebab-case: give the EN heading a wording that slugs to one, or an explicit \\{#id} (heading-anchors.md, rule 6), and run again`;
     else if (taken.has(e.id)) p.problem = `'${e.id}' is already the id of the UA heading on line ${taken.get(e.id)}`;
     else taken.set(e.id, x.h.line);
     report.proposals.push(p);

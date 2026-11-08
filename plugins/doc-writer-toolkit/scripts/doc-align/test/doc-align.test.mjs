@@ -8,7 +8,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { compare } from '../lib/compare.mjs';
 import { cellCount } from '../lib/parse.mjs';
-import { createSlugger, slugify, uaHeadingId } from '../lib/headings.mjs';
+import { createSlugger, enHeadingIds, headingText, slugify, uaHeadingId } from '../lib/headings.mjs';
 import { findNames, looseKey, mergeRows, parseNamesTable, searchable } from '../lib/names.mjs';
 import { proposeIds } from '../lib/ids.mjs';
 import { isIdOnlyChange } from '../lib/idonly.mjs';
@@ -693,7 +693,7 @@ test('--propose-ids: nothing is proposed when the heading counts differ; an expl
   assert.equal(r.skipped.length, 6);
   const ex = await proposeIds('# Т\n\n## Огляд {#overview}\n', '# T\n\n## Overview\n', { uaPath: 'ua.md', enPath: 'en.md' });
   assert.deepEqual([ex.proposals.length, ex.skipped.length], [0, 1]);
-  assert.match(ex.skipped[0].reason, /explicit \{#id\}/);
+  assert.match(ex.skipped[0].reason, /explicit id/);
   const none = await proposeIds('# Т\n\n## Огляд {/* #overview */}\n', '# T\n\n## Overview\n', { uaPath: 'ua.md', enPath: 'en.md' });
   assert.deepEqual([none.proposals, none.links, none.skipped], [[], [], []]);
 });
@@ -778,4 +778,48 @@ test('isIdOnlyChange: ids added and links rewritten to them; anything else is a 
   assert.equal(isIdOnlyChange({ ...other, before: other.before.replace('/balances/', '../balances/balances.md'), after: other.after.replace('/balances/', '../balances/balances.md') }, [other, page]), true, 'a relative file path');
   assert.equal(isIdOnlyChange(other, [other]), false, 'the linked page is not part of the change');
   assert.equal(isIdOnlyChange(other, [other, { ...page, after: before }]), false, 'the linked heading got no id');
+});
+
+// An explicit id is written `\{#id}`: a bare `{#id}` fails the MDX build in some hosts ("Could not parse expression with
+// acorn"). Every reader takes both forms, because existing pages may have either.
+const FORMS = ['\\{#reference-information-create-record}', '{#reference-information-create-record}'];
+
+test('explicit ids: both `\\{#id}` and `{#id}` are read as the EN id, and the backslash is not part of the heading text', () => {
+  for (const mark of FORMS) {
+    assert.equal(headingText(`Reference information ${mark}`), 'Reference information', mark);
+    const en = EN.replace(FORMS[1], mark);
+    assert.deepEqual(flags(compare(UA, en)), [], mark);
+    const other = compare(UA, EN.replace(FORMS[1], mark.replace('create-record', 'other')));
+    assert.deepEqual(flags(other), ['HEADING-ID-MISMATCH'], mark);
+    assert.match(other.warnings[0].description, /explicit id 'reference-information-other'/, mark);
+  }
+  const ids = enHeadingIds([{ raw: 'Overview \\{#overview-page}' }, { raw: 'Fees {#fees-page}' }, { raw: 'Plain words' }]);
+  assert.deepEqual(ids.map((x) => [x.id, x.explicit]), [['overview-page', true], ['fees-page', true], ['plain-words', false]]);
+});
+
+test('explicit ids: --propose-ids reads an EN id in either form and skips a UA heading that has one; the id-only predicate does not take it for an added id', async () => {
+  for (const mark of ['\\{#overview-page}', '{#overview-page}']) {
+    const r = await proposeIds('# Т\n\n## Огляд\n', `# T\n\n## Overview ${mark}\n`, { uaPath: 'ua.md', enPath: 'en.md' });
+    assert.deepEqual([r.proposals.length, r.proposals[0].id, r.proposals[0].from, r.proposals[0].problem], [1, 'overview-page', 'explicit', undefined], mark);
+    const ex = await proposeIds(`# Т\n\n## Огляд ${mark}\n`, '# T\n\n## Overview\n', { uaPath: 'ua.md', enPath: 'en.md' });
+    assert.deepEqual([ex.proposals.length, ex.skipped.length], [0, 1], mark);
+    assert.match(ex.skipped[0].reason, /explicit id/);
+    const page = { path: 'a.md', before: `## Огляд ${mark}\n`, after: `## Огляд ${mark} {/* #overview-page */}\n` };
+    assert.equal(isIdOnlyChange(page), false, mark);
+  }
+});
+
+test('explicit ids: the texts that tell how to write one show the escaped form', async () => {
+  const plugin = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+  const files = ['context/doc-rules/project-rules/heading-anchors.md', 'context/doc-templates/user-guide-template.md', 'skills/doc-translator/SKILL.md', 'skills/user-guide-writer/SKILL.md'];
+  // A heading example (a heading line, or a heading inside inline code) that ends in an id with no backslash.
+  const bare = /^\s*#{2,6} .*(?<!\\)\{#|`#{2,6} [^`]*(?<!\\)\{#/;
+  let escaped = 0;
+  for (const f of files) {
+    for (const line of (await fs.readFile(path.join(plugin, f), 'utf8')).split('\n')) {
+      if (line.includes('\\{#')) escaped++;
+      assert.equal(bare.test(line), false, `${f}: ${line}`);
+    }
+  }
+  assert.ok(escaped >= 8, 'the escaped form is the one the texts show');
 });

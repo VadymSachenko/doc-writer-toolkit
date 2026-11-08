@@ -237,7 +237,7 @@ export const withAnchor = (line, id) => `${line.replace(ANCHOR_COMMENT, '').repl
 
 const headingRaw = (page, sec) => page.lines[sec.start].replace(/^#{1,6}[ \t]+/, '');
 
-// The fragment a link used for each heading of a page, as Docusaurus gives it: the anchor comment, an explicit `{#id}`,
+// The fragment a link used for each heading of a page, as Docusaurus gives it: the anchor comment, an explicit `\{#id}` (or `{#id}`),
 // else the slug of the heading text (a page's headings without an id are slugged in order, repeats numbered).
 function headingFragments(page) {
   const slug = createSlugger();

@@ -85,7 +85,7 @@ Extract every heading (`#`, `##`, `###`, `####`) from both files in order. Count
 
 When comparing UA headings, strip the anchor comment (`{/* #slug */}`) before comparing structure. Additionally:
 
-- Every UA heading from `##` down must end with a well-formed `{/* #id */}` comment, per `heading-anchors.md`; the page title (`#`) takes none. The expected id is the one generated from the EN heading at the same position, or that heading's explicit `{#id}`. Flag a UA heading whose comment is missing or malformed, and an id used twice on the page.
+- Every UA heading from `##` down must end with a well-formed `{/* #id */}` comment, per `heading-anchors.md`; the page title (`#`) takes none. The expected id is the one generated from the EN heading at the same position, or that heading's explicit id (`\{#id}` or `{#id}`). Flag a UA heading whose comment is missing or malformed, and an id used twice on the page.
 - EN headings must **not** have `{/* … */}` anchor comments.
 
 **Flag:** `[HEADING COUNT/LEVEL MISMATCH]` — list the position and differing headings side by side.
