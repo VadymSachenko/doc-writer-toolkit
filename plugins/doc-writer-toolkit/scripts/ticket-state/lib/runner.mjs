@@ -426,7 +426,7 @@ function cloneLines(clones) {
   const out = [];
   if (read.length) {
     out.push(
-      'Read checkouts (the runner made them, detached at `origin/<base>` as it fetched it now): work on the target repos here, by these paths, and give every skill the read checkout\'s path (its section folder, its repo top), never the clone\'s, whose working tree is the owner\'s and may be on another branch or behind. Its pages, images and configuration are read-only. Its `.sources/` folders are the clone\'s (links), so a skill reads and writes its evidence there as usual; a `.sources/` folder it makes there for the first time is moved into the clone when the session ends. Only the Playwright spec is the clone\'s alone (below).',
+      'Read checkouts (the runner made them, detached at `origin/<base>` as it fetched it now): work on the target repos here, by these paths, and give every skill the read checkout\'s path (its section folder, its repo top), never the clone\'s, whose working tree is the owner\'s and may be on another branch or behind. Its pages, images and configuration are read-only. Its `.sources/` folders are the clone\'s (links), so a skill reads and writes its evidence there as usual; a `.sources/` folder it makes there for the first time is moved into the clone when the session ends. The toolkit\'s scripts take the clone\'s paths (one given a path in a read checkout, or run from one, is refused), and the Playwright spec is the clone\'s (below).',
       ...read.map((c) => `- ${c.repo}: ${c.read.path}, ${c.read.ref} at ${c.read.commit.slice(0, 7)}; its clone: ${c.clone}.${c.unfetched ? ` Note: could not fetch ${c.base} from origin, so this is ${c.read.ref} as last fetched.` : ''}`),
     );
   }
