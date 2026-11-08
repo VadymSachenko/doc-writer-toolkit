@@ -13,8 +13,8 @@ import { editsOf, mergedEdits, nextEditNumber, parseReply, resolveReply, suggest
 //    6 the card's list differs from left.list        a person moved it: follow the move
 //    7 a stage recorded running, no live lock         interrupted; run it again
 //    8-12 per PR: a hand edit, or a UA change after ready for merge (back to the owner's queue); finalReview with a new
-//         review requested; new comments; translation: the first chain stage not done for the head, or after ready
-//         for merge the re-sync of the whole range since the ready head
+//         review requested; new comments; a hand edit of UA no style check read (styleCheck); translation: the first
+//         chain stage not done for the head, or after ready for merge the re-sync of the whole range since the ready head
 //   13 videoGate                                      the automatic try, the fallback, or the import
 //   14 ready and a free slot                          start (the `startable` groups, see limits.mjs)
 //   15 otherwise                                      the state's own next step
@@ -499,6 +499,13 @@ function prStep(l, p, w, out, prs) {
     const owner = world.newComments.filter((c) => c.by === 'owner');
     return step('answerComments', { pr: id, comments: world.newComments.length, owner: owner.length, reviewer: world.newComments.length - owner.length, ...ownerForms(pr, owner, w) });
   }
+  // Row 11b, the style check: hand commits that changed UA and no style check reviewed are reviewed before the next stage
+  // goes on (D-081, D-082), each once, whatever the head (the check records the shas it read). A ready PR went back to
+  // the owner's queue above first; new comments are answered first (the forge check picks them up within a minute).
+  if (hand?.length && p.stage !== 'readyForMerge') {
+    const commits = handToCheck(pr, hand, w, target, head, out);
+    if (commits.length) return step('styleCheck', { pr: id, head, commits, nextEdit: nextEditNumber({ edits: mergedEdits(w.editsByPr?.get(id) ?? [editsOf(pr)]) }) });
+  }
   // Two PRs: an approved PR goes on to the owner's queue by itself while the card stands where the slower PR is. That
   // starts nothing: both wait for the card.
   if (p.stage === 'smeReview' && world.reviewDecision === 'APPROVED' && prs.some((o) => o !== p && rank(o.stage) < rank(p.stage))) {
@@ -507,6 +514,33 @@ function prStep(l, p, w, out, prs) {
   // Row 12.
   if (p.stage === 'translation') return chainStep(l, p, w, out, target, head);
   return null;
+}
+
+// The hand commits a style check has to read: not reviewed by one yet, after the head last marked ready for merge (what
+// came before it went through the chain and was the owner's to approve), and with a UA page of the PR's own changed
+// (a page, not an image; not an id-only change, not a page a merge of the base brought). Oldest first, each with its pages. A commit git
+// here can't diff is noted and left for a later check.
+function handToCheck(pr, hand, w, target, head, out) {
+  const id = prId(pr);
+  const reviewed = (sha) => (pr.styleChecked ?? []).some((x) => x?.sha && (sha.startsWith(x.sha) || x.sha.startsWith(sha)));
+  let todo = hand.filter((sha) => !reviewed(sha));
+  const ready = pr.readyForMerge?.at(-1)?.head;
+  if (todo.length && ready) {
+    const after = w.git?.commitsBetween?.(target, ready, head) ?? null;
+    if (after === null) {
+      out.notes.push(`${id}: ready for merge at ${String(ready).slice(0, 7)}, the head is ${String(head).slice(0, 7)}, and git here can't list the commits between: hand edits are not style-checked`);
+      return [];
+    }
+    todo = todo.filter((sha) => after.includes(sha));
+  }
+  const commits = [];
+  for (const sha of [...todo].reverse()) {
+    const changed = w.git?.changedUnder(target, `${sha}^`, sha, uaRoots(pr, w, target), baseOf(pr, target)) ?? null;
+    const pages = changed?.filter((f) => /\.mdx?$/.test(f)) ?? null;
+    if (pages === null) out.notes.push(`${id}: the hand commit ${sha.slice(0, 7)} can't be diffed here: not style-checked yet`);
+    else if (pages.length) commits.push({ sha, pages });
+  }
+  return commits;
 }
 
 const newReviewRequests = (pr, world) => (world.reviewRequests ?? []).map((r) => r.login ?? r.team ?? r).filter((r) => !(pr.reviewersRequested ?? []).map(String).includes(String(r)));

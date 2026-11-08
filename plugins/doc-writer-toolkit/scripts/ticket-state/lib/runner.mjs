@@ -24,7 +24,7 @@ import { HOOK_VARIABLE, commandsOfRules, hookSettings } from './role-hook.mjs';
 import { parseClaudeConfig } from '../../ui-labels/lib/config.mjs';
 import { liveProgress } from './progress.mjs';
 import { runsGoingIn } from './forge-state.mjs';
-import { replyLines, resyncItemLines, suggestionLines } from './edits.mjs';
+import { replyLines, resyncItemLines, styleAfterCommentsLines, styleCheckLines, suggestionLines } from './edits.mjs';
 
 // The daily run (design §7): finish first, then triage the quiet intake cards (mornings, and the watcher's start pass
 // when a slot frees), then start ready groups while
@@ -364,6 +364,8 @@ export function briefFor(step, settings) {
     step.nextEdit ? `A numbered list of edits you post on this PR starts at ${step.nextEdit}: the numbers already posted keep their items.` : null,
     ...replyLines(step.replies),
     ...suggestionLines(step.suggestions),
+    ...(step.stage === 'answerComments' ? styleAfterCommentsLines() : []),
+    ...(step.stage === 'styleCheck' ? styleCheckLines(step.commits) : []),
     step.stale ? `The UA pages changed after this stage last ran (${step.stale} file(s)): run it again on the current head.` : null,
     step.cards ? `Cards, highest priority first:\n${step.cards.map((c) => `- ${c.key}: ${c.url ?? c.shortLink} (${c.priority})`).join('\n')}` : null,
     step.worktrees?.length ? worktreeLines(step.worktrees) : null,

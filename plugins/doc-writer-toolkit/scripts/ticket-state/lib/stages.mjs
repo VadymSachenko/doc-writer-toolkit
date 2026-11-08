@@ -9,7 +9,7 @@ export const TICKET_STAGES = ['triage', 'start', 'plan', 'questions', 'planGate'
 export const CHAIN = ['translate', 'enReview', 'locales', 'align', 'labelSync', 'build', 'visualPack'];
 
 // PR-level stages: a record names the PR with --pr.
-export const PR_STAGES = ['move', 'follow', 'answerComments', 'questions', 'answers', ...CHAIN, 'readyForMerge', 'resync'];
+export const PR_STAGES = ['move', 'follow', 'answerComments', 'styleCheck', 'questions', 'answers', ...CHAIN, 'readyForMerge', 'resync'];
 
 export const STATUSES = ['running', 'done', 'failed'];
 
@@ -33,6 +33,7 @@ export const ROLE_OF = {
   close: null,
   move: null,
   answerComments: 'writer',
+  styleCheck: 'writer',
   translate: 'translator',
   enReview: 'reviewer',
   locales: 'translator',
@@ -82,7 +83,7 @@ export function finishRank(step) {
   if (step.stage === 'close') return 0;
   if (step.stage === 'readyForMerge' || step.stage === 'resync') return 1;
   if (CHAIN.includes(step.stage) || (['move', 'follow'].includes(step.stage) && ['finalReview', 'translation'].includes(step.to))) return 2;
-  if (step.stage === 'answerComments' || (step.stage === 'move' && step.to === 'smeReview') || step.stage === 'follow' || step.stage === 'move') return 3;
+  if (step.stage === 'answerComments' || step.stage === 'styleCheck' || (step.stage === 'move' && step.to === 'smeReview') || step.stage === 'follow' || step.stage === 'move') return 3;
   if (['answers', 'planApproval', 'videoImport', 'videoTry', 'videoBlock'].includes(step.stage)) return 4;
   return 5;
 }
