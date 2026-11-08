@@ -461,15 +461,18 @@ test('a re-sync left running runs again only at translation: not on a PR at read
 
 test('a person moving the card into work after a failed start left it in the ready status is a manual start', async () => {
   const at = new Date(NOW - 30 * 60000).toISOString();
-  const c = { failed: card({ number: 971, status: 'inProgress' }), moved: card({ number: 972, status: 'inProgress' }) };
+  const c = { failed: card({ number: 971, status: 'inProgress' }), moved: card({ number: 972, status: 'inProgress' }), retried: card({ number: 973, status: 'inProgress' }) };
   const w = world({ cards: Object.values(c) });
   // 971: the scheduled start's session failed with the card in the ready status; a person moved it since.
   // 972: the session moved the card itself and died before its record: it goes on as the scheduled start.
-  const failedRun = (list) => [{ seq: 2, stage: 'start', outcome: 'failed', start: at, after: { at, list, lastMove: ago(2), comments: [], prs: {} } }];
+  // 973: a retry recorded its start after the failure; its session moved the card and died before its run: the retry's.
+  const failedRun = (list, seq = 2) => [{ seq, stage: 'start', outcome: 'failed', start: at, after: { at, list, lastMove: ago(2), comments: [], prs: {} } }];
   ledger(w, c.failed, { stages: { triage: 'done', start: 'running' }, startedBy: 'schedule', left: 'ready', runs: failedRun(LISTS.ready.id) });
   ledger(w, c.moved, { stages: { triage: 'done', start: 'running' }, startedBy: 'schedule', left: 'ready', runs: failedRun(LISTS.inProgress.id) });
+  ledger(w, c.retried, { stages: { triage: 'done', start: 'running' }, startedBy: 'schedule', left: 'ready', runs: failedRun(LISTS.ready.id, 1) });
   const st = Object.fromEntries((await w.status()).tickets.map((t) => [t.key, t]));
   const origin = (t) => [t.state, t.steps[0]?.stage, Boolean(t.steps[0]?.byHand), Boolean(t.steps[0]?.again), t.steps[0]?.startedBy];
   assert.deepEqual(origin(st['971']), ['planning', 'start', true, false, 'manual']);
   assert.deepEqual(origin(st['972']), ['planning', 'start', false, true, 'schedule']);
+  assert.deepEqual(origin(st['973']), ['planning', 'start', false, true, 'schedule']);
 });

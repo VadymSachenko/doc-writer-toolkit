@@ -33,10 +33,11 @@ export const step = (stage, extra = {}) => ({ stage, role: ROLE_OF[stage] ?? nul
 const startStep = (l, extra = {}) => (l.stages?.start && l.startedBy && !failedInReady(l) ? step('start', { again: true, startedBy: l.startedBy, ...extra }) : step('start', { byHand: true, startedBy: 'manual', ...extra }));
 
 // The ticket's last session was a start that failed with the card still where the ledger left it, in the ready status
-// (the failure's mark shows it): whoever took the card into work since was a person, not that start.
+// (the failure's mark shows it): whoever took the card into work since was a person, not that start. A start recorded
+// after that failure (a retry, whose session may have moved the card and died before its run) is that retry's.
 function failedInReady(l) {
   const last = (l.runs ?? []).at(-1);
-  return last?.stage === 'start' && last.outcome === 'failed' && Boolean(last.after?.list) && l.left?.status === 'ready' && last.after.list === l.left.list?.id;
+  return last?.stage === 'start' && last.outcome === 'failed' && Boolean(last.after?.list) && l.left?.status === 'ready' && last.after.list === l.left.list?.id && last.seq >= (l.stages?.start?.seq ?? 0);
 }
 
 // A start recorded but not done whose card is still in the ready status: the start didn't happen (its session failed
