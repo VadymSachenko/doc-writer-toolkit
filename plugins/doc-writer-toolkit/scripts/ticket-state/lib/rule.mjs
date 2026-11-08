@@ -505,18 +505,24 @@ function prStep(l, p, w, out, prs) {
   // at an earlier stage they wait for the queue. Once a person moved the card on to In translation, the move approved
   // them: no session and no bounce, the shas recorded as seen (`skip`, a scripted step).
   if (hand?.length && ['finalReview', 'translation'].includes(p.stage)) {
-    const commits = handToCheck(pr, hand, w, target, head, out);
+    const commits = handToCheck(pr, hand, w, target, head, out, { grace: p.stage === 'finalReview' });
     if (commits.length && p.stage === 'translation') return step('styleCheck', { role: null, skip: true, pr: id, head, commits });
-    if (commits.length) return step('styleCheck', { pr: id, head, commits, nextEdit: nextEditNumber({ edits: mergedEdits(w.editsByPr?.get(id) ?? [editsOf(pr)]) }) });
+    if (commits.length) {
+      const edits = mergedEdits(w.editsByPr?.get(id) ?? [editsOf(pr)]);
+      // The style fixes already posted on the pages these commits changed: a hand edit that puts one's «було» back is
+      // the owner undoing it, and is left out (no re-fix loop).
+      const pages = new Set(commits.flatMap((c) => c.pages));
+      const fixes = edits.filter((e) => e.rule && pages.has(e.page)).map((e) => ({ n: e.n, page: e.page, block: e.block ?? null, before: e.before }));
+      return step('styleCheck', { pr: id, head, commits, nextEdit: nextEditNumber({ edits }), ...(fixes.length ? { fixes } : {}) });
+    }
   }
   // Two PRs: an approved PR goes on to the owner's queue by itself while the card stands where the slower PR is. That
   // starts nothing: both wait for the card.
   if (p.stage === 'smeReview' && world.reviewDecision === 'APPROVED' && prs.some((o) => o !== p && rank(o.stage) < rank(p.stage))) {
     return step('move', { pr: id, to: 'finalReview', approved: true });
   }
-  // Row 12. A style check that fixed a hand edit after the owner's move pushed what the owner hasn't read: the PR goes
-  // back to the owner's queue first, as a pipeline commit after ready does (D-112); the next move goes on.
-  if (p.stage === 'translation') return styleFixUnread(pr, w, target, head, out) ?? chainStep(l, p, w, out, target, head);
+  // Row 12.
+  if (p.stage === 'translation') return chainStep(l, p, w, out, target, head);
   return null;
 }
 
@@ -524,7 +530,7 @@ function prStep(l, p, w, out, prs) {
 // came before it went through the chain and was the owner's to approve), and with a UA page of the PR's own changed
 // (a page, not an image; not an id-only change, not a page a merge of the base brought). Oldest first, each with its pages. A commit git
 // here can't diff is noted and left for a later check.
-function handToCheck(pr, hand, w, target, head, out) {
+function handToCheck(pr, hand, w, target, head, out, { grace = false } = {}) {
   const id = prId(pr);
   const reviewed = (sha) => (pr.styleChecked ?? []).some((x) => x?.sha && (sha.startsWith(x.sha) || x.sha.startsWith(sha)));
   let todo = hand.filter((sha) => !reviewed(sha));
@@ -537,13 +543,25 @@ function handToCheck(pr, hand, w, target, head, out) {
     }
     todo = todo.filter((sha) => after.includes(sha));
   }
-  // Built for the PRs to come (D-080): a commit made before `styleCheck.since` counts as seen.
+  // Built for the PRs to come (D-080): a commit written before `styleCheck.since` (its author date, which a rebase or an
+  // amend keeps) counts as seen.
   const since = w.settings.styleCheck?.since ? Date.parse(w.settings.styleCheck.since) : null;
   if (since !== null && todo.length) {
     todo = todo.filter((sha) => {
-      const at = w.git?.commitDate?.(target, sha) ?? null;
+      const at = w.git?.commitDates?.(target, sha)?.author ?? null;
       if (at === null) out.notes.push(`${id}: the hand commit ${sha.slice(0, 7)} has no date here: not style-checked yet`);
       return at !== null && at >= since;
+    });
+  }
+  // The owner's usual "push, then move": a commit made less than GRACE ago waits, so a move to In translation right
+  // after it finds no style session running (the move then approves it). A commit git here has no date for goes on.
+  if (grace && todo.length) {
+    todo = todo.filter((sha) => {
+      const at = w.git?.commitDates?.(target, sha)?.committer ?? null;
+      // A date ahead of this clock (a skewed clock) doesn't hold the commit.
+      const young = at !== null && w.now - at >= 0 && w.now - at < GRACE_MS;
+      if (young) out.notes.push(`${id}: the hand commit ${sha.slice(0, 7)} is less than ${GRACE_MS / 60000} minutes old: style-checked at a later check`);
+      return !young;
     });
   }
   const commits = [];
@@ -556,19 +574,8 @@ function handToCheck(pr, hand, w, target, head, out) {
   return commits;
 }
 
-// The fixes of the last style check, when they came after the approval head: `move` back to the owner's queue.
-function styleFixUnread(pr, w, target, head, out) {
-  const id = prId(pr);
-  const rec = pr.steps?.styleCheck;
-  const fixes = rec?.status === 'done' ? rec.result?.commits ?? [] : [];
-  if (!fixes.length || !pr.approval?.head || !head || pr.approval.head === head) return null;
-  const after = w.git?.commitsBetween?.(target, pr.approval.head, head) ?? null;
-  if (after === null) {
-    out.notes.push(`${id}: approved at ${String(pr.approval.head).slice(0, 7)}, the head is ${String(head).slice(0, 7)}, and git here can't tell whether the style check's fixes came after it`);
-    return null;
-  }
-  return after.some((sha) => fixes.some((c) => c && sha.startsWith(String(c)))) ? step('move', { pr: id, to: 'finalReview', styleFixes: fixes.length }) : null;
-}
+// How long a hand commit waits before its style check (the owner's push, then the move).
+export const GRACE_MS = 10 * 60000;
 
 const newReviewRequests = (pr, world) => (world.reviewRequests ?? []).map((r) => r.login ?? r.team ?? r).filter((r) => !(pr.reviewersRequested ?? []).map(String).includes(String(r)));
 

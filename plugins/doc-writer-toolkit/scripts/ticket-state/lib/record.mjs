@@ -109,7 +109,7 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
   }
   l.seq += 1;
   l.updatedAt = at;
-  l.log.push({ seq: l.seq, at, stage, ...(pr ? { pr: prId(pr) } : {}), outcome: status, ...(note ? { note } : {}) });
+  l.log.push({ seq: l.seq, at, stage, ...(pr ? { pr: prId(pr) } : {}), outcome: status, ...(record.note ? { note: record.note } : {}) });
   if (run) l.runs.push({ seq: l.seq, stage, ...(pr ? { pr: prId(pr) } : {}), ...run });
   const posted = result.posted;
   if (Array.isArray(posted)) addAll(l.posted.pr, posted.map((p) => (typeof p === 'object' ? p.id : p)));
@@ -381,7 +381,7 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         for (const c of result.handled ?? []) l.reviewComments.push({ repo: pr.repo, pr: pr.number, at, ...c });
         // The notes are the style check's fixes left undone (they would change what an edit meant): in the summary
         // after its numbered list, never numbered.
-        if (result.notes !== undefined && (!Array.isArray(result.notes) || !result.summary?.id)) throw new CliError('answerComments: "notes" is a list of { "page", "block", "text" } in the summary comment: give "summary": { "id" } too', { code: 2 });
+        if (result.notes !== undefined && (!Array.isArray(result.notes) || (result.notes.length && !result.summary?.id))) throw new CliError('answerComments: "notes" is a list of { "page", "block", "text" } in the summary comment: give "summary": { "id" } too', { code: 2 });
         if (result.summary) l.summaries.push({ repo: pr.repo, pr: pr.number, at, ...result.summary, ...(result.notes?.length ? { notes: result.notes } : {}) });
         // The numbered list of the reply: the summary comment it was posted in, going on from the PR's last number.
         if (result.edits !== undefined && !result.summary?.id) throw new CliError('answerComments: "edits" are the numbered list of the summary comment: give "summary": { "id" } too', { code: 2 });
@@ -397,8 +397,12 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         // whatever the head; its fixes on the summary's numbered list; the notes in the summary.
         const reviewed = result.reviewed;
         if (!Array.isArray(reviewed) || !reviewed.length || reviewed.some((r) => !/^[0-9a-f]{7,40}$/.test(String(r?.sha ?? '')))) throw new CliError('styleCheck: "reviewed" lists every hand commit the check read: [{ "sha", "reason"? }], each sha as hex', { code: 2 });
-        if ((result.edits !== undefined || result.notes !== undefined) && !result.summary?.id) throw new CliError('styleCheck: "edits" and "notes" are in the summary comment: give "summary": { "id" } too', { code: 2 });
         if (result.notes !== undefined && !Array.isArray(result.notes)) throw new CliError('styleCheck: "notes" is a list of { "page", "block", "text" }', { code: 2 });
+        if ((result.edits?.length || result.notes?.length) && !result.summary?.id) throw new CliError('styleCheck: "edits" and "notes" are in the summary comment: give "summary": { "id" } too', { code: 2 });
+        // A fix is a commit pushed, and its list a comment posted: neither is recorded without the other.
+        if (result.edits?.length && !result.commits?.length) throw new CliError('styleCheck: "edits" are fixes: give the "commits" that pushed them', { code: 2 });
+        const postedIds = (Array.isArray(result.posted) ? result.posted : []).map((p) => String(typeof p === 'object' ? p?.id : p));
+        if (result.summary?.id && !postedIds.includes(String(result.summary.id))) throw new CliError('styleCheck: the summary comment goes in "posted" too, so the pipeline never answers it', { code: 2 });
         if (result.summary) l.summaries.push({ repo: pr.repo, pr: pr.number, at, ...result.summary, ...(result.notes?.length ? { notes: result.notes } : {}) });
         warnings.push(...addEdits(pr, result.edits, { list: result.summary?.id, stage, at, seq: l.seq + 1 }));
         pr.styleChecked ??= [];
@@ -406,6 +410,15 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
           const sha = String(r.sha);
           if (pr.styleChecked.some((x) => x.sha.startsWith(sha) || sha.startsWith(x.sha))) continue;
           pr.styleChecked.push({ sha, ...(typeof r.reason === 'string' && r.reason.trim() ? { reason: r.reason } : {}), ...(result.skipped ? { skipped: String(result.skipped) } : {}), at });
+        }
+        // Fixes pushed after a person moved the card on (the move came while the session ran): the chain goes on with
+        // them; the owner reads them on the summary's numbered list and can undo them by number.
+        if (result.commits?.length) {
+          const card = await cardNow(ref);
+          if (card.status !== 'finalReview') {
+            record.note = `style fixes landed after the card was moved on (${card.list?.name ?? card.status}): they are on the summary's numbered list (comment ${result.summary?.id}) and can be undone by number`;
+            warnings.push(record.note);
+          }
         }
         return;
       }

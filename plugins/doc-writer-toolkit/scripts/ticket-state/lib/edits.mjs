@@ -279,10 +279,11 @@ export function styleAfterCommentsLines() {
 
 // The hand commits a style check reviews: the commits on the branch the pipeline didn't make that changed UA, with
 // the UA pages each changed, oldest first.
-export function styleCheckLines(commits) {
+export function styleCheckLines(commits, fixes) {
   if (!commits?.length) return [];
   return [
     'Commits on this PR\'s branch the pipeline didn\'t make (hand edits) changed UA, and no style check has reviewed them. Run the style check (the writer role, "The style check") over the UA blocks each one changed (`git -C <worktree> show <sha> -- <page>`), and over no other block. Record every sha below in `reviewed`, fixed or not, with the reason its commit message gives, if any.',
     ...commits.map((c) => `- ${c.sha}: ${c.pages.join(', ')}`),
+    ...(fixes?.length ? ['Style fixes already on this PR\'s lists, on these pages: a block whose hand edit puts one\'s «було» back is the owner undoing that fix; leave the block out.', ...fixes.map((x) => `- ${x.n}: ${at(x)}: ${q(x.before)}`)] : []),
   ];
 }

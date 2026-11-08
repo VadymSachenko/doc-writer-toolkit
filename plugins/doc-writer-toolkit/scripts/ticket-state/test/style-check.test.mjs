@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { LISTS, ago, card, pr, settingsFor } from './fakes.mjs';
+import { LISTS, NOW, ago, card, pr, settingsFor } from './fakes.mjs';
 import { ledger, read, world } from './helpers.mjs';
 import { briefFor } from '../lib/runner.mjs';
 import { runRecord } from '../lib/record.mjs';
@@ -49,7 +49,11 @@ test('AC-3: a hand commit that changed UA gets one style check, listed with its 
   // A record with no `reviewed` is a usage error; one with a list and no summary too.
   const rec = (result) => runRecord({ settings: w.settings, clients: w.clients(), key: '801', stage: 'styleCheck', status: 'done', pr: 'guide-docs#81', result, now: Date.now() });
   await assert.rejects(rec({}), (e) => e.exitCode === 2 && /"reviewed" lists every hand commit/.test(e.message));
-  await assert.rejects(rec({ reviewed: [{ sha: HAND }], edits: [] }), (e) => e.exitCode === 2 && /give "summary"/.test(e.message));
+  const one = { n: 3, page: PAGE, block: 'Крок 1', before: 'а', after: 'б', rule: 'r' };
+  await assert.rejects(rec({ reviewed: [{ sha: HAND }], edits: [one], commits: [FIX] }), (e) => e.exitCode === 2 && /give "summary"/.test(e.message));
+  await assert.rejects(rec({ reviewed: [{ sha: HAND }], summary: { id: 7801 }, edits: [one], posted: [7801] }), (e) => e.exitCode === 2 && /give the "commits" that pushed them/.test(e.message));
+  await assert.rejects(rec({ reviewed: [{ sha: HAND }], summary: { id: 7801 }, edits: [one], commits: [FIX] }), (e) => e.exitCode === 2 && /the summary comment goes in "posted"/.test(e.message));
+  assert.equal(read(w, '801').prs[0].styleChecked?.length ?? 0, 0, 'nothing written by a refused record');
 
   // The check fixed a rule the hand edit broke: its fix is a pipeline commit, the head moves to it.
   const fix = { n: 3, page: PAGE, block: 'Крок 1', before: 'Натисніть на кнопку **Зберегти**', after: 'Натисніть **Зберегти**', rule: 'gdsg: ui-elements §2' };
@@ -141,6 +145,7 @@ test('AC-2: a fix that would change what the edit meant is a note in the summary
   ledger(w, c, { stages: BASE, prs: [{ repo: 'guide-docs', number: 88, targets: ['guide'], review: 'sme', stage: 'finalReview', edits: DESC }] });
   const rec = (result) => runRecord({ settings: w.settings, clients: w.clients(), key: '808', stage: 'answerComments', status: 'done', pr: 'guide-docs#88', result, now: Date.now() });
   await assert.rejects(rec({ notes: [{ page: PAGE, block: 'Крок 1', text: 'x' }] }), (e) => e.exitCode === 2 && /give "summary"/.test(e.message));
+  await rec({ notes: [] });
   const note = { page: PAGE, block: 'Крок 1', text: 'gdsg: wordiness: «для того, щоб» → «щоб» would drop the condition the owner added; left as written' };
   await rec({ summary: { id: 7821 }, edits: [], notes: [note], posted: [7821] });
   const l = read(w, '808');
@@ -149,30 +154,41 @@ test('AC-2: a fix that would change what the edit meant is a note in the summary
   assert.equal(resolveReply(parseReply('3 — поверни'), l.prs[0].edits)[0].do, 'ask', 'a number for a note is asked back');
 });
 
-test('a style check at In translation that fixed the owner\'s edit sends the PR back to the owner\'s queue; the next move goes on, and a check with no fix goes on at once', async () => {
+test('a check that was running when the owner moved the card keeps its fixes: the record notes it, and the chain goes on with no move back', async () => {
   const CHAIN = ['translate', 'enReview', 'locales', 'align', 'labelSync', 'build', 'visualPack'];
   const chain = Object.fromEntries(CHAIN.map((s, i) => [s, { status: 'done', head: OLD, seq: 10 + i }]));
   const c = card({ number: 809, status: 'translation' });
-  const forgePr = pr({ repo: 'guide-docs', number: 89, headCommit: FIX, labels: ['In final review'] });
-  // The owner pushed HAND and moved the card in one check: the approval saw HAND; the check pushed FIX.
-  const state = { commits: [FIX, HAND], diffs: { [HAND]: [PAGE], [FIX]: [PAGE] }, between: { [`${HAND}..${FIX}`]: [FIX], [`${OLD}..${FIX}`]: [FIX, HAND] }, changed: { [`${OLD}..${FIX}`]: [PAGE] } };
+  const forgePr = pr({ repo: 'guide-docs', number: 89, headCommit: FIX });
+  // The check read HAND in the queue; the owner moved the card while it ran, and the move's approval saw its fix FIX.
+  const state = { commits: [FIX, HAND], diffs: { [HAND]: [PAGE], [FIX]: [PAGE] }, changed: { [`${OLD}..${FIX}`]: [PAGE] } };
   const w = world({ cards: [c], prs: [forgePr], git: vcs(state) });
-  const styleCheck = (commits) => ({ status: 'done', seq: 30, at: ago(1), result: { reviewed: [{ sha: HAND }], ...(commits ? { commits } : {}) } });
-  const prOf = (extra) => [{ repo: 'guide-docs', number: 89, targets: ['guide'], review: 'sme', stage: 'translation', pipelineCommits: [OLD, FIX], chain, readyForMerge: [{ head: OLD, at: ago(5), seq: 5 }], styleChecked: [{ sha: HAND, at: ago(1) }], ...extra }];
-  ledger(w, c, { stages: BASE, prs: prOf({ approval: { head: HAND, at: ago(2) }, steps: { styleCheck: styleCheck([FIX]) } }) });
-  const s = (await w.one('809')).steps[0];
-  assert.deepEqual([fmt(s), s.styleFixes], ['move guide-docs#89 -> finalReview', 1]);
-  // The runner's scripted move (the label and the card first, as for a ready PR row 8 sends back), then its record.
-  c.placeId = LISTS.finalReview.id;
-  await runRecord({ settings: w.settings, clients: w.clients(), key: '809', stage: 'move', status: 'done', pr: 'guide-docs#89', to: 'finalReview', now: Date.now() });
-  assert.equal(read(w, '809').prs[0].stage, 'finalReview');
-  // The owner's next move approves the fix: the re-sync goes on.
-  ledger(w, c, { stages: BASE, left: 'translation', prs: prOf({ approval: { head: FIX, at: ago(0) }, steps: { styleCheck: styleCheck([FIX]) } }) });
-  c.placeId = LISTS.translation.id;
-  assert.equal(fmt((await w.one('809')).steps[0]), 'resync guide-docs#89');
-  // A check that fixed nothing: the re-sync at once.
-  ledger(w, c, { stages: BASE, prs: prOf({ approval: { head: HAND, at: ago(2) }, steps: { styleCheck: styleCheck(null) } }) });
-  assert.equal(fmt((await w.one('809')).steps[0]), 'resync guide-docs#89');
+  ledger(w, c, { stages: BASE, prs: [{ repo: 'guide-docs', number: 89, targets: ['guide'], review: 'sme', stage: 'translation', pipelineCommits: [OLD], chain, readyForMerge: [{ head: OLD, at: ago(5), seq: 5 }], approval: { head: FIX, at: ago(1) }, edits: DESC }] });
+  const fix = { n: 3, page: PAGE, block: 'Крок 1', before: 'Натисніть на кнопку **Зберегти**', after: 'Натисніть **Зберегти**', rule: 'gdsg: ui-elements §2' };
+  const out = await runRecord({ settings: w.settings, clients: w.clients(), key: '809', stage: 'styleCheck', status: 'done', pr: 'guide-docs#89', result: { reviewed: [{ sha: HAND }], summary: { id: 7891 }, edits: [fix], commits: [FIX], posted: [7891] }, now: Date.now() });
+  assert.equal(out.warnings.length, 1);
+  assert.match(out.warnings[0], /^style fixes landed after the card was moved on \(.+\): they are on the summary's numbered list \(comment 7891\) and can be undone by number$/);
+  const l = read(w, '809');
+  assert.deepEqual([l.log.at(-1).note, l.prs[0].steps.styleCheck.note], [out.warnings[0], out.warnings[0]]);
+  assert.equal(fmt((await w.one('809')).steps[0]), 'resync guide-docs#89', 'the chain goes on with the fixes: no move back');
+});
+
+test('the owner\'s push, then move: a hand commit younger than 10 minutes waits; a block that undoes an earlier style fix is named for the session to leave out', async () => {
+  const c = card({ number: 812, status: 'finalReview' });
+  const dates = { [HAND]: { author: NOW - 5 * 60000, committer: NOW - 5 * 60000 } };
+  const git = { ...vcs({ commits: [HAND], diffs: { [HAND]: [PAGE] } }), commitDates: (t, sha) => dates[sha] ?? null };
+  const fix = { n: 3, list: '7801', stage: 'styleCheck', page: PAGE, block: 'Крок 1', before: 'Натисніть на кнопку **Зберегти**', after: 'Натисніть **Зберегти**', rule: 'gdsg: ui-elements §2', at: ago(10), seq: 3 };
+  const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 92, headCommit: HAND })], git });
+  ledger(w, c, { stages: BASE, prs: [{ repo: 'guide-docs', number: 92, targets: ['guide'], review: 'sme', stage: 'finalReview', edits: [...DESC, fix] }] });
+  const young = await w.one('812');
+  assert.deepEqual(young.steps, [], 'too young: no session yet');
+  assert.ok(young.notes.some((n) => /less than 10 minutes old/.test(n)), JSON.stringify(young.notes));
+  dates[HAND] = { author: NOW - 11 * 60000, committer: NOW - 11 * 60000 };
+  const s = (await w.one('812')).steps[0];
+  assert.equal(fmt(s), 'styleCheck guide-docs#92');
+  assert.deepEqual(s.fixes, [{ n: 3, page: PAGE, block: 'Крок 1', before: fix.before }]);
+  const text = brief(w, s, '812');
+  assert.match(text, /a block whose hand edit puts one's «було» back is the owner undoing that fix; leave the block out\./);
+  assert.ok(text.includes(`- 3: ${PAGE}, Крок 1: "Натисніть на кнопку **Зберегти**"`));
 });
 
 test('a person\'s move is approval: hand commits the card was moved on with are recorded as seen, with no session and no bounce', async () => {
@@ -194,7 +210,7 @@ test('styleCheck.since: a hand commit made before it counts as seen; a bad value
   const c = card({ number: 811, status: 'finalReview' });
   const LATER = 'f'.repeat(40);
   const dates = { [HAND]: Date.parse('2026-11-01T10:00:00Z'), [LATER]: Date.parse('2026-11-09T10:00:00Z') };
-  const git = { ...vcs({ commits: [LATER, HAND], diffs: { [HAND]: [PAGE], [LATER]: [PAGE] } }), commitDate: (t, sha) => dates[sha] ?? null };
+  const git = { ...vcs({ commits: [LATER, HAND], diffs: { [HAND]: [PAGE], [LATER]: [PAGE] } }), commitDates: (t, sha) => (dates[sha] ? { author: dates[sha], committer: 0 } : null) };
   const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 91, headCommit: LATER })], git, extra: { styleCheck: { since: '2026-11-08T12:00:00Z' } } });
   ledger(w, c, { stages: BASE, prs: [{ repo: 'guide-docs', number: 91, targets: ['guide'], review: 'sme', stage: 'finalReview' }] });
   assert.deepEqual((await w.one('811')).steps[0].commits, [{ sha: LATER, pages: [PAGE] }], 'only the commit after the cutoff');

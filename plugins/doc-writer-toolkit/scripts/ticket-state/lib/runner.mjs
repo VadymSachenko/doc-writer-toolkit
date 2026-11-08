@@ -365,7 +365,7 @@ export function briefFor(step, settings) {
     ...replyLines(step.replies),
     ...suggestionLines(step.suggestions),
     ...(step.stage === 'answerComments' ? styleAfterCommentsLines() : []),
-    ...(step.stage === 'styleCheck' ? styleCheckLines(step.commits) : []),
+    ...(step.stage === 'styleCheck' ? styleCheckLines(step.commits, step.fixes) : []),
     step.stale ? `The UA pages changed after this stage last ran (${step.stale} file(s)): run it again on the current head.` : null,
     step.cards ? `Cards, highest priority first:\n${step.cards.map((c) => `- ${c.key}: ${c.url ?? c.shortLink} (${c.priority})`).join('\n')}` : null,
     step.worktrees?.length ? worktreeLines(step.worktrees) : null,
