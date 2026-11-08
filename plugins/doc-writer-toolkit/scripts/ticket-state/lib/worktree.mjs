@@ -11,7 +11,7 @@ import { prId } from './ledger.mjs';
 // `git worktree remove --force`, then prunes; nothing else ever moves a worktree's `.git` link.
 
 // The stages that work on a PR branch, so their session gets the worktree.
-export const TREE_STAGES = ['write', 'uaReview', 'pr', 'answerComments', 'translate', 'enReview', 'locales', 'align', 'labelSync', 'build', 'visualPack', 'resync'];
+export const TREE_STAGES = ['write', 'uaReview', 'pr', 'answerComments', 'styleCheck', 'translate', 'enReview', 'locales', 'align', 'labelSync', 'build', 'visualPack', 'resync'];
 export const DEFAULT_LINKS = ['node_modules'];
 
 const run = (cwd, args) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 }).trim();

@@ -6,7 +6,8 @@ import { CliError } from './errors.mjs';
 //
 // An item: `n` (fixed once posted), `list` (where it was posted: `description` for the PR description, else the id of
 // the comment), `stage`, `page`, `block`, `before` and `after` (the exact UA text), and `en` ({ page, before, after })
-// when its EN changed too. One PR numbers on: a later list starts after the last number, so a reply can't hit the
+// when its EN changed too; `rule` for a fix of the style check (the guide's rule it applies), and `reason` when the
+// comment or the commit message behind the edit gave one. One PR numbers on: a later list starts after the last number, so a reply can't hit the
 // wrong list. A number found in two lists (one posted by hand, or before the numbering went on) is asked back.
 
 export const editsOf = (pr) => pr?.edits ?? [];
@@ -28,7 +29,10 @@ export function addEdits(pr, items, { list, stage, at, seq }) {
     if (!Number.isInteger(n) || n < 1) throw new CliError(`edits: each item needs "n", a whole number from 1 (got ${JSON.stringify(e?.n)})`, { code: 2 });
     if (!text(e.page) || !e.page.trim() || !text(e.before) || !text(e.after)) throw new CliError(`edits: item ${n} needs "page" and the exact "before" and "after" texts`, { code: 2 });
     if (e.en !== undefined && e.en !== null && !(text(e.en.page) && text(e.en.before) && text(e.en.after))) throw new CliError(`edits: item ${n}'s "en" needs "page", "before" and "after"`, { code: 2 });
-    const item = { n, list: String(list), stage, page: e.page, block: text(e.block) ? e.block : null, before: e.before, after: e.after, ...(e.en ? { en: { page: e.en.page, before: e.en.before, after: e.en.after } } : {}), at, seq };
+    if ((e.rule !== undefined && e.rule !== null && !text(e.rule)) || (e.reason !== undefined && e.reason !== null && !text(e.reason))) throw new CliError(`edits: item ${n}'s "rule" and "reason" are texts`, { code: 2 });
+    // A style fix names its rule; an edit whose comment or commit message gave a reason keeps it (the learning from
+    // the owner's edits reads it).
+    const item = { n, list: String(list), stage, page: e.page, block: text(e.block) ? e.block : null, before: e.before, after: e.after, ...(e.en ? { en: { page: e.en.page, before: e.en.before, after: e.en.after } } : {}), ...(text(e.rule) && e.rule.trim() ? { rule: e.rule } : {}), ...(text(e.reason) && e.reason.trim() ? { reason: e.reason } : {}), at, seq };
     const same = pr.edits.findIndex((x) => x.n === n && x.list === item.list);
     if (same >= 0) {
       pr.edits[same] = item;
@@ -261,5 +265,25 @@ export function resyncItemLines(items) {
   return [
     'The numbered edits since ready for merge, in this range: record the EN side of each block you re-sync (`edits`: `[{ "n", "en": { "page", "before", "after" } }]`). An item marked "EN set" was changed in EN with UA (a restore of both): its EN block already matches, leave it.',
     ...items.map((x) => `- ${x.n}: ${at(x)}${x.en ? ' (EN set)' : ''}`),
+  ];
+}
+
+// After the review comments are applied: the style check over the blocks they changed (D-081). A plain comment that
+// quotes a sentence of the page with words removed or changed is the reviewer's replacement for that sentence.
+export function styleAfterCommentsLines() {
+  return [
+    'A plain comment (no `suggestion` block, no reply by number) that quotes a sentence of the page with words removed or changed is the reviewer\'s replacement for that sentence: put it in as quoted, the words outside the quote being an instruction.',
+    'Once the comments are applied, the style check runs over the UA blocks they changed (the writer role, "The style check"), and over no other block: a block an item of the reply restores or keeps stays as the owner chose it. Its fixes go on the summary\'s numbered list after your edits, each with its `rule`; a fix that would change what the edit meant is not applied and is a note after the list, never numbered.',
+  ];
+}
+
+// The hand commits a style check reviews: the commits on the branch the pipeline didn't make that changed UA, with
+// the UA pages each changed, oldest first.
+export function styleCheckLines(commits, fixes) {
+  if (!commits?.length) return [];
+  return [
+    'Commits on this PR\'s branch the pipeline didn\'t make (hand edits) changed UA, and no style check has reviewed them. Run the style check (the writer role, "The style check") over the UA blocks each one changed (`git -C <worktree> show <sha> -- <page>`), and over no other block. Record every sha below in `reviewed`, fixed or not, with the reason its commit message gives, if any.',
+    ...commits.map((c) => `- ${c.sha}: ${c.pages.join(', ')}`),
+    ...(fixes?.length ? ['Style fixes already on this PR\'s lists, on these pages: a block whose hand edit puts one\'s «було» back is the owner undoing that fix; leave the block out.', ...fixes.map((x) => `- ${x.n}: ${at(x)}: ${q(x.before)}`)] : []),
   ];
 }

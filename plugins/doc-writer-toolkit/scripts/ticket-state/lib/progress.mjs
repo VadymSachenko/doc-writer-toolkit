@@ -37,7 +37,7 @@ const CHAIN_LABELS = {
   build: 'Building the site',
   visualPack: 'Checking the screenshots',
 };
-const STAGE_LABEL = { ...Object.fromEntries(TICKET_ROWS), ...CHAIN_LABELS, close: 'Closing the ticket', resync: 'Re-syncing after a change in UA', answerComments: 'Answering the review comments', move: 'Moving the card', follow: 'Following the card', readyForMerge: 'Marking ready for merge' };
+const STAGE_LABEL = { ...Object.fromEntries(TICKET_ROWS), ...CHAIN_LABELS, close: 'Closing the ticket', resync: 'Re-syncing after a change in UA', answerComments: 'Answering the review comments', styleCheck: 'Style check of hand edits', move: 'Moving the card', follow: 'Following the card', readyForMerge: 'Marking ready for merge' };
 export const labelOf = (stage) => STAGE_LABEL[stage] ?? String(stage);
 
 // ------------------------------------------------------------------ small formats
@@ -250,7 +250,7 @@ function runSection(run, flights, now, live, { starts = null, startHours = null,
     out.push(`- ${run.triage.outcome === 'done' ? '✅' : run.triage.outcome ? '❌' : '⬜'} Triaging: ${run.triage.keys?.length ?? run.triage.due ?? 0} intake card(s)${run.triage.outcome ? ` — ${run.triage.outcome}${session ? `, ${duration(session.durationMs)}` : ''}` : ' due'}`);
   }
   else if (run?.intakeDue) out.push(`- ⬜ Triaging: ${run.intakeDue} intake card(s) due`);
-  for (const s of run?.steps ?? []) out.push(`- ${s.outcome === 'done' ? '✅' : s.outcome === 'failed' ? '❌' : '⏸'} ${labelOf(s.stage)} — ${(s.keys ?? []).join(', ')}${s.pr ? ` (${s.pr})` : ''}${s.outcome && s.outcome !== 'done' ? `: ${s.outcome}${s.note ? ` (${oneLine(s.note, 100)})` : ''}` : ''}`);
+  for (const s of run?.steps ?? []) out.push(`- ${s.outcome === 'done' ? '✅' : s.outcome === 'failed' ? '❌' : '⏸'} ${labelOf(s.stage)} — ${(s.keys ?? []).join(', ')}${s.pr ? ` (${s.pr})` : ''}${s.outcome && s.outcome !== 'done' ? `: ${s.outcome}${s.note ? ` (${oneLine(s.note, 100)})` : ''}` : s.note ? ` — ${oneLine(s.note, 100)}` : ''}`);
   if (run?.picked?.length) out.push(`- ✅ Picked: ${run.picked.join(', ')}`);
   for (const n of run?.notStarted ?? []) out.push(`- ⬜ Not started: ${n.keys?.join(', ') ?? n.group} — ${(n.reasons ?? []).join('; ')}`);
   for (const g of run?.guard ?? []) out.push(`- ⏸ ${g.what ? `${g.what}: ` : ''}${g.reason}`);

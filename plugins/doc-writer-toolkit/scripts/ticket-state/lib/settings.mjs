@@ -208,6 +208,11 @@ export function validateSettings(merged, { root, stateRootDefault }) {
   const workFolder = merged.workFolder ?? null;
   if (workFolder !== null && (typeof workFolder !== 'string' || !workFolder.includes('<key>') || path.isAbsolute(workFolder) || workFolder.split(/[\\/]/).includes('..'))) fail('workFolder must be a path from the host root with <key> in it, such as "work/tickets/<key>"');
 
+  // The style check of hand commits (D-081, D-082) reads no commit made before `styleCheck.since` (an ISO date-time):
+  // it is built for the PRs to come, not for what is already there (D-080). Absent: no cutoff.
+  const styleCheck = { since: merged.styleCheck?.since ?? null };
+  if (styleCheck.since !== null && (typeof styleCheck.since !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d(:\d\d(\.\d+)?)?(Z|[+-]\d\d:\d\d)$/.test(styleCheck.since) || Number.isNaN(Date.parse(styleCheck.since)))) fail('styleCheck.since must be an ISO date-time with its zone, such as 2026-11-08T12:00:00Z');
+
   const stateRel = typeof merged.state === 'string' && merged.state.trim() ? merged.state : stateRootDefault;
   return {
     root,
@@ -224,6 +229,7 @@ export function validateSettings(merged, { root, stateRootDefault }) {
     readyComment,
     hostRules: merged.hostRules ?? {},
     hostJobs: validateJobs(merged.hostJobs ?? [], root),
+    styleCheck,
     limits,
     schedule,
     roles,
