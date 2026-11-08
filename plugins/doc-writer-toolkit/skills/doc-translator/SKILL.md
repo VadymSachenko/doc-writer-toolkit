@@ -10,7 +10,7 @@ You are translating an approved Ukrainian documentation page of the host product
 ## Scope
 
 - **In scope:** any Markdown/MDX page under a declared root pair's UA content root that has been approved in Ukrainian. Produces the English version at the corresponding path under that pair's EN i18n root (see Path mapping).
-- **Out of scope:** writing new content, changing structure, fixing errors in the Ukrainian source, a page outside every declared root pair.
+- **Out of scope:** writing new content, changing structure, fixing errors in the Ukrainian source, a page outside every declared root pair. The one change it makes to UA pages is Step 5b's: the missing heading ids and the links to their old fragments.
 
 ## Path mapping
 
@@ -76,7 +76,7 @@ UA headings from `##` down carry an id comment, per `heading-anchors.md`: `## П
 When translating to English:
 - The text inside `{/* #... */}` is the canonical EN anchor slug. Derive the EN heading from it (convert kebab-case to title/sentence words).
 - **Remove** the `{/* #... */}` comment from the EN output — EN headings do not carry anchor comments; Docusaurus generates their anchors automatically from the heading text.
-- Use the id's words even when a closer translation of the UA text exists (`## Перегляд транзакцій {/* #transaction-list */}` → `## Transaction list`). Only when the id's words can't head the section (the id names a parent, such as `reference-information-<slug>`, or its words say something the UA heading no longer says), write the EN heading naturally and give it the id explicitly, never as a comment: `## Reference information {#reference-information-create-payment}`. The EN heading's id always equals the UA comment's id.
+- Use the id's words even when a closer translation of the UA text exists (`## Перегляд транзакцій {/* #transaction-list */}` → `## Transaction list`). Only when the id's words can't head the section (the id names a parent, such as `reference-information-<slug>`, or its words say something the UA heading no longer says), write the EN heading naturally and give it the id explicitly, never as a comment: `## Reference information \{#reference-information-create-payment}`, with the backslash (a bare `{#…}` breaks the MDX build in some hosts; `heading-anchors.md` rule 6). The EN heading's id always equals the UA comment's id.
 
 ```md
 UA:  ## Передумови {/* #prerequisites */}
@@ -89,7 +89,7 @@ UA:  ## Сторінка Архів {/* #archive-page */}
 EN:  ## Archive page
 ```
 
-If a UA heading has no anchor comment (legacy content), derive the EN heading directly from the UA text. Flag it in the Step 6 report as a missing anchor.
+If a UA heading has no anchor comment (legacy content), derive the EN heading directly from the UA text, as a natural EN heading. Step 5b then gives the UA heading that EN heading's anchor and rewrites the links to its old fragment (`heading-anchors.md`, "Who adds a missing id"). Keep an EN heading that already exists as it is, unless its id can't be valid (Step 5b): links may already use its anchor.
 
 ### Terminology
 
@@ -259,8 +259,10 @@ Use when an EN page already exists and only part of the UA page changed. Nothing
 3. **Map each block to its EN counterpart** by heading path (headings are matched by position within the parent section when the UA heading itself was renamed) and, inside a section, by block order — paragraph to paragraph, list item to list item, table row to table row. A block that cannot be mapped is reported with the UA text quoted — never translated into a guessed place.
 4. **Re-translate only the mapped blocks**, with every rule of this skill; leave every other EN byte identical. A UA section added / removed / moved → add / remove / move the EN section accordingly (translating an added one). A changed block inside an admonition or MDX component → the block boundary is that body. Frontmatter `title`/`description`/`sidebar_label` changed → update only the mirrored EN values.
 5. **Manual EN edits inside a re-translated block are overwritten** — list them in the report under "EN edits overwritten" with the old EN text.
-6. Steps 4 (self-review, applied to the re-translated blocks) and 5 (save, `last_update.date` in both files) run as usual; then run `doc-alignment-checker` on the pair and include its result in the report.
-7. Report: blocks replaced, added, removed; unmapped blocks; EN edits overwritten; the alignment result. State the source of "what changed" (report / diff base / list) as `changed-blocks.md` requires.
+6. Steps 4 (self-review, applied to the re-translated blocks), 5 (save, `last_update.date` in EN) and 5b (the missing UA heading ids, over the **whole page**, not only the changed blocks) run as usual; then run `doc-alignment-checker` on the pair and include its result in the report.
+7. Report: blocks replaced, added, removed; unmapped blocks; EN edits overwritten; the ids added and the links rewritten (Step 5b); the alignment result. State the source of "what changed" (report / diff base / list) as `changed-blocks.md` requires.
+
+A UA change that is only heading ids and the link fragments rewritten to them (`changed-blocks.md`, "Heading ids and link fragments") has no block to re-translate.
 
 ### Step 2 — Pre-translation scan
 
@@ -293,8 +295,9 @@ Before saving, check:
 - Every page-to-page link path is byte-identical to the UA source (`internal-links.md`); no route was localized or "corrected"
 - All code blocks are byte-for-byte identical to the source
 - No `{/* #anchor */}` comments appear in EN headings
-- Every EN heading's id, generated from its text or explicit `{#id}`, equals its UA heading's comment id (`heading-anchors.md`)
-- No explicit `{#id}` contains a `{…}` placeholder (`heading-anchors.md` rule 9); a placeholder in the UA comment is reported, not carried into EN
+- Every EN heading's id, generated from its text or explicit `\{#id}` (an existing `{#id}` counts too), equals its UA heading's comment id (`heading-anchors.md`)
+- No explicit `\{#id}` contains a `{…}` placeholder (`heading-anchors.md` rule 9); a placeholder in the UA comment is reported, not carried into EN
+- Every EN heading whose UA heading has no id slugs to lowercase ASCII kebab-case, or has an explicit `\{#id}` that is, so Step 5b can give the UA heading its id
 - The product's own name follows `glossary-en.md`'s rule for translated pages
 - `## Передумови` translated as `## Prerequisites` with the correct EN sentence (Variant A if a single reference section; Variant B if multiple)
 - After colons in prose: first word is capitalized if it is a regular word (not a UI element name, proper name, or code value)
@@ -318,9 +321,27 @@ Write the English file to `<pair's EN i18n root>/<relative-path>.md`, using the 
 
 Copy the icon files the page needs. An icon crop or SVG (`*-icon.png`, `*-icon.svg`, Ж8) doesn't depend on the language, but the EN page resolves `require('./.assets/…')` against its own folder. For each `*-icon.*` file the page references, copy it from the UA page's `.assets/` into the EN page's `.assets/` when it is missing there. Never overwrite a file that exists, and copy no other image: screenshots have their own EN versions.
 
-Set `last_update.date` in the English output to today's date (format: `M/D/YYYY`).
+Set `last_update.date` in the English output to the UA page's `last_update.date`, as the UA page writes it (Check 1 of the alignment check compares the two). A UA page without one: none in EN either.
 
-Also update `last_update.date` in the Ukrainian source file to today's date. This is the only permitted change to the Ukrainian source.
+Leave the UA page's `last_update.date` as it is. The only change to UA pages is Step 5b's, and it must stay an id-only change (`heading-anchors.md`), which a date change would spoil.
+
+### Step 5b — Add the missing UA heading ids
+
+Every UA heading of the page from `##` down without a `{/* #id */}` comment gets one now, from its EN heading, with the links to its old fragment rewritten in the same change (`heading-anchors.md`, "Who adds a missing id", rule 8). The script computes both; you never type an id or a link by hand. Run it after the EN page is saved, so a heading new to EN gets its id from the text you just wrote (rule 2):
+
+```bash
+node ${CLAUDE_PLUGIN_ROOT}/scripts/doc-align/doc-align.mjs <UA page> <EN page> --ua main --propose-ids --root <UA content root>=<UA URL prefix> --root <EN i18n root>=<UA URL prefix> --write
+```
+
+Give one `--root` pair (UA content root and EN i18n root, each with the pair's UA URL prefix) for every root pair the project declares (`project-paths.md`), so links from every pair are found. The fields are in `${CLAUDE_PLUGIN_ROOT}/scripts/doc-align/README.md`, "Proposing the missing ids"; read it only when the output is unclear.
+
+- **`proposals` without a `problem`** are written: the comment onto the UA heading line, and each link in `links` gets the new fragment, on the UA page, on the EN page and on the other pages that link to the heading. Nothing else changes in any file.
+- **A proposal with a `problem`** is not written. Not kebab-case (`Fees & limits` slugs to `fees--limits`): reword the EN heading so it slugs to a valid id, or give it an explicit `\{#id}` (rule 6); an id another UA heading has: give the EN heading an explicit `\{#…-<what it belongs to>}` (rule 3). Save EN and run the command again. Change only those EN headings.
+- **`skipped`, or a `reason`** (the heading counts differ): the EN page doesn't mirror UA. Fix the translation (Step 4) and run again. A UA heading with an explicit `\{#id}` (or `{#id}`) is replaced by hand only if the user asks; report it.
+- **`unresolved`** links: list them in the report; don't edit them.
+- With no heading missing an id, the script writes nothing.
+
+The UA diff of the run then holds only the id comments and the rewritten link fragments: an id-only change. Never commit; the user does.
 
 Do not modify any sidebar config file (`sidebars.ts`, or a project's custom-id equivalent like `sidebarsPortal.ts`), `docusaurus.config.ts`, or any JSON files.
 
@@ -331,6 +352,7 @@ After saving, report:
 - Source path read (as `<pair>:<path>` when the project declares more than one root pair)
 - Output path written
 - Each icon file copied into the EN page's `.assets/`, or "none"
+- The UA heading ids added in Step 5b (UA line, heading, id, and whether it came from an explicit or a generated EN anchor), the links rewritten (file, line, old → new), the `unresolved` links, and each proposal not written with its `problem` or `skipped` reason; or "none". Say that the UA change is id-only (`heading-anchors.md`, "Id-only changes")
 - Any `{/* NEEDS CONFIRMATION */}` items (including unconfirmed glossary terms)
 - Any `{/* ToDo */}` items carried over from the source
 - Any UA terms found in prose that had no glossary entry (flag these for the user to decide)

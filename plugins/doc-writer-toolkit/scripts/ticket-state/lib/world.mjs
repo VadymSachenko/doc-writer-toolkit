@@ -9,7 +9,7 @@ import { createAdapter as createForgeAdapter } from '../../forge/adapters/index.
 import { spawnGh } from '../../forge/adapters/github/gh.mjs';
 import { FLOW_STATUSES } from './settings.mjs';
 import { prId } from './ledger.mjs';
-import { isIdOnlyChange } from './ids.mjs';
+import { isIdOnlyChange } from '../../doc-align/lib/idonly.mjs';
 
 // What the ticket flow reads: the tracker and the forge through their modules (this script composes no tracker or
 // forge request itself), and git in the target repos the settings name: reads, and one fetch of an open PR's branch into
@@ -186,7 +186,7 @@ export function makeGit(settings, opts = {}) {
       const out = gitOut(cwd, ['rev-list', to, '--not', from]);
       return out === null ? null : out.split('\n').filter(Boolean);
     },
-    // The files under the roots that changed between two commits, leaving out an id-only change (D-073, lib/ids.mjs):
+    // The files under the roots that changed between two commits, leaving out an id-only change (D-073, ../../doc-align/lib/idonly.mjs):
     // such a change keeps every stage recorded on the page. With `base`, only the PR's own pages (`ownOnly`): a merge of
     // the base brings no page of another PR into the count. Null when either commit isn't here.
     changedUnder(target, from, to, roots, base = null) {

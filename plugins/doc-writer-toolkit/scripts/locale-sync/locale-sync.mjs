@@ -15,6 +15,7 @@ import { runApply } from './lib/apply.mjs';
 import { addTerms, dropTerms, lookupTerms } from './lib/terms.mjs';
 import { termUsage } from './lib/usage.mjs';
 import { runStray } from './lib/stray.mjs';
+import { runSplice } from './lib/splice.mjs';
 
 const USAGE = `locale-sync <command> [<page|folder>…] [options]
 
@@ -23,6 +24,9 @@ Commands
   blocks <page>…            The UA blocks to translate, with the matching translated text (blob A -> B, changed-blocks.md),
                             the label strings and the term-memory rows for those blocks.
   apply <page>              Writes a candidate file from the translations of the blocks: { "c1": "…" } or { "full": "…" }.
+                            Heading anchors and link fragments the script splices itself go in with them.
+  splice [<page|folder>…]   Carries id-only UA changes (heading anchor comments, link fragments rewritten to them) into
+                            every locale with no translator, and records each page that passes its checks.
   bind [<page|folder>…]     Binding pass: records the span decisions the script can make; lists the rest for the model.
   bind --decisions <file>   Records the model's decisions { "<page>": { "<span>": "label:<key>|unverified|term|emphasis" } }.
                             A key "<span>@<heading>" (heading title or #anchor) scopes a decision to that heading.
@@ -55,7 +59,9 @@ Project options (default: the 'Documentation toolkit configuration' block of <ro
 
 status / blocks / bind:  --overwrite (translate pages that have a locale file but no state)  --threshold <n> (default 10)
 bind / terms --add / terms --drop:  --dry-run
-apply:                   --translations <file.json>  --out <candidate file>  (one page, one locale)
+apply:                   --translations <file.json> (not needed when every change is spliced)  --out <candidate file>
+                         (one page, one locale)
+splice:                  --dry-run  --date <YYYY-MM-DD>
 blocks / apply:   --redo <lines|all>  re-translate blocks of a current page: target line numbers ("12,14-16") pick
                   the blocks they fall in; "all" the whole page (a category is always whole)
 blocks:           --with-old (include the previous UA text of each changed block)
@@ -127,6 +133,11 @@ async function main() {
       if (selectors.length !== 1) throw new CliError('Usage: locale-sync apply <page> --locales <locale> --translations <file.json> --out <candidate file>', { code: 2 });
       printJson(await runApply(s, selectors[0], { translations: values.translations, out: values.out, redo: values.redo }));
       return 0;
+    }
+    case 'splice': {
+      const out = await runSplice(s, { selectors, date: values.date, dryRun: values['dry-run'] });
+      printJson(out);
+      return out.ok ? 0 : 1;
     }
     case 'bind': {
       if (values.decisions) {

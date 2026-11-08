@@ -1,5 +1,5 @@
 import {
-  CliError, PAGE_STAGES, SCHEMA_VERSION, SECTION_STAGES, STATUSES, dateOnlyChange, dirOf, enPathOf, fileHash, headCommit,
+  CliError, PAGE_STAGES, SCHEMA_VERSION, SECTION_STAGES, STATUSES, approvedChange, otherPages, dirOf, enPathOf, fileHash, headCommit,
   inside, isDir, listPages, norm, pageId, readJsonFile, readLedger, refuse, sectionFile, writeLedger,
 } from './ledger.mjs';
 import { readPlan, syncPages } from './plan.mjs';
@@ -123,7 +123,7 @@ export async function runRecord(root, section, opts) {
     }
     const pages = findPages(ledger, refs);
     if (savedAs) await moveSaved(root, ledger, pages[0], savedAs, log, { at, seq });
-    if (stage === 'translate' && status === 'done') for (const p of pages) await carryDateBump(root, p, log, { at, seq });
+    if (stage === 'translate' && status === 'done') for (const p of pages) await carryApproved(root, ledger, p, log, { at, seq });
     const st = await computeStatus(root, section, ledger);
     const prev = PAGE_STAGES[PAGE_STAGES.indexOf(stage) - 1];
     const head = stage === 'translate' && status === 'done' ? await headCommit(root) : null;
@@ -183,17 +183,20 @@ async function moveSaved(root, ledger, page, savedAs, log, { at, seq }) {
   Object.assign(page, { path: to, id: pageId(ledger, to), enPath: enPathOf(ledger, to) });
 }
 
-// The translator sets `last_update.date` in the UA page too. When that is the only difference from the approved
+// The translator adds the missing heading ids to the UA page, with the links to them (an id-only change, heading-anchors.md);
+// a translator of an earlier version set its `last_update.date` too. When that is the only difference from the approved
 // version (which is in a commit reachable from HEAD), the records made on the approved version carry over to the new hash.
-async function carryDateBump(root, page, log, { at, seq }) {
+// The approval keeps the version before the ids (`idBase`), so a link another page rewrites to them can be checked later.
+async function carryApproved(root, ledger, page, log, { at, seq }) {
   const approved = page.stages?.uaApproval?.uaHash;
   const cur = await fileHash(root, page.path);
   if (!approved || cur === null || cur === approved) return;
-  const { committed, dateOnly } = await dateOnlyChange(root, page.path, approved);
-  if (!committed) throw refuse(`${page.id}: the approved version is not committed, so a date change can't be told from an edit; commit the approved page, then translate`);
-  if (!dateOnly) return;
+  const { committed, dateOnly, idOnly } = await approvedChange(root, page.path, approved, await otherPages(root, ledger, page));
+  if (!committed) throw refuse(`${page.id}: the approved version is not committed, so an id-only or date change can't be told from an edit; commit the approved page, then translate`);
+  if (!dateOnly && !idOnly) return;
+  if (idOnly) page.stages.uaApproval.idBase ??= approved;
   for (const rec of Object.values(page.stages)) if (rec.uaHash === approved) rec.uaHash = cur;
   if (page.uaHash === approved) page.uaHash = cur;
   if (page.review?.hash === approved) page.review = { ...page.review, hash: cur };
-  log.push({ at, seq, stage: 'translate', page: page.id, outcome: 'date-bump', note: 'the UA last_update date changed; the earlier records carry over' });
+  log.push({ at, seq, stage: 'translate', page: page.id, outcome: idOnly ? 'id-only' : 'date-bump', note: idOnly ? 'heading ids and the links to them changed; the earlier records carry over' : 'the UA last_update date changed; the earlier records carry over' });
 }

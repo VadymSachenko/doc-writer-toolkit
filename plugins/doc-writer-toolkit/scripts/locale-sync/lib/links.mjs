@@ -55,13 +55,16 @@ function linkIndex(s) {
       (async () => {
         const byRoute = new Map();
         const byPath = new Map();
+        const byForm = new Map(); // the two declared link forms (internal-links.md): URL prefix + path, and `/` + file path
         for (const page of (await listUaPages(s, s.declaredPairs)).all) {
           const text = await cachedBlob(s.root, page.blob);
           const entry = { page, uaTitle: pageTitle(text) };
           byRoute.set(docRoute(page.ps, page, text), entry);
           byPath.set(page.path, entry);
+          byForm.set(posix.join('/', ...page.ps.urlPrefix.split('/').filter(Boolean), `${page.id}/`), entry);
+          byForm.set(`/${page.rel}/`, entry);
         }
-        return { byRoute, byPath };
+        return { byRoute, byPath, byForm };
       })(),
     );
   }
@@ -80,6 +83,22 @@ function resolveLink(index, fromPage, url) {
   if (clean.startsWith('/')) return index.byRoute.get(clean.endsWith('/') ? clean : clean + '/') ?? null;
   if (/\.mdx?$/.test(clean)) return index.byPath.get(posix.normalize(posix.join(posix.dirname(fromPage.path), clean))) ?? null;
   return null;
+}
+
+// The UA page a link path reaches, for the heading-anchor splice: the route Docusaurus gives it, either declared link
+// form (`internal-links.md`), or a relative path to its file. Null when it reaches none.
+export async function linkedPage(s, fromPage, linkPath) {
+  const index = await linkIndex(s);
+  const hit = resolveLink(index, fromPage, linkPath);
+  if (hit) return hit.page;
+  let clean = linkPath.replace(/[?#].*$/, '');
+  try {
+    clean = decodeURI(clean);
+  } catch {
+    /* keep as written */
+  }
+  if (!clean.startsWith('/')) return null;
+  return index.byForm.get(clean.endsWith('/') ? clean : `${clean}/`)?.page ?? null;
 }
 
 // Does a link text name a title, in any grammatical form? Same words, each one starting with the title's word minus
