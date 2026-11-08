@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import { CliError, Refused } from './errors.mjs';
 import { checkKey, findPr, keyOf, newLedger, newPr, prId, readLedger, writeLedger } from './ledger.mjs';
 import { lockOf, renewLock } from './locks.mjs';
-import { CARD_STATUS_OF, CHAIN, LABEL_OF, PR_ORDER, PR_STAGE_OF_STATUS, PR_STAGES, STATUSES, TICKET_STAGES, followsMove } from './stages.mjs';
+import { CARD_STATUS_OF, CHAIN, LABEL_OF, PR_ORDER, PR_STAGE_OF_STATUS, PR_STAGES, STATUSES, TICKET_STAGES, followsMove, stageLabelOf } from './stages.mjs';
 import { labelCheck } from './intake.mjs';
 import { KINDS, recordedSize } from './cleanup.mjs';
 import { imagePairsAt } from './pairs.mjs';
@@ -360,7 +360,7 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
             // Who a move into or out of the review took along: a pending request then moves no card back (row 9).
             if (to === 'smeReview' || p.stage === 'smeReview') addAll(p.reviewersRequested, ((await clients.forge.prState({ repo: p.repo, number: p.number })).reviewRequests ?? []).map((r) => r.login ?? r.team ?? r));
             p.stage = PR_STAGE_OF_STATUS[to];
-            const label = targetOf(p)?.labels?.[LABEL_OF[p.stage]];
+            const label = targetOf(p)?.labels?.[stageLabelOf(p.stage, targetOf(p))];
             if (label) p.label = label;
           }
         }
@@ -420,6 +420,7 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         if (stage === 'readyForMerge') {
           pr.readyForMerge.push({ head: st.headCommit, at });
           pr.stage = 'readyForMerge';
+          pr.label = targetOf(pr)?.labels?.[stageLabelOf(pr.stage, targetOf(pr))] ?? pr.label;
         }
         // The re-sync no longer makes the PR ready by itself: the rule checks the images, then `readyForMerge` does. A
         // chain stage finished after a person moved the card back changes no PR stage: the move stands.

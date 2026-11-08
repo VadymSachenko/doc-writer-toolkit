@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { LISTS, NOW, ago, card, gitRepo, pr, tmp } from './fakes.mjs';
+import { LISTS, NOW, ago, card, gitRepo, pr, rawSettings, tmp } from './fakes.mjs';
 import { ledger, read, world } from './helpers.mjs';
-import { runDaily } from '../lib/runner.mjs';
+import { runDaily, scriptedCalls } from '../lib/runner.mjs';
 import { runRecord } from '../lib/record.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
 import { codeClonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureWorktree, listWorktrees, canon, prsForStep, worktreePath } from '../lib/worktree.mjs';
@@ -604,6 +604,32 @@ test('after the chain: the card goes back to the owner\'s queue with one comment
   l = read(t.w, '1501');
   assert.equal(l.prs[0].stage, 'readyForMerge');
   assert.deepEqual((await t.w.one('1501')).steps, []);
+});
+
+test('the end of the chain gives a PR its final review label back, at once, while the card waits for its other PR', async () => {
+  const withTranslation = { targets: rawSettings().targets.map((x) => (x.id === 'guide' ? { ...x, labels: { ...x.labels, translation: 'In translation' } } : x)) };
+  const t = finalReviewTicket({ done: CHAIN, extra: withTranslation });
+  t.forgePr.labels = ['In translation'];
+  // A second PR of the ticket, still in the chain: the card stays in In translation.
+  const second = pr({ repo: 'guide-docs', number: 72, head: 'ticket-72', labels: ['In translation'] });
+  t.w.forge.prs.push(second);
+  const l0 = read(t.w, '1501');
+  l0.prs.push({ ...l0.prs[0], number: 72, branch: 'ticket-72', pipelineCommits: [], chain: {} });
+  writeLedger(t.w.settings.state, l0);
+  assert.deepEqual(scriptedCalls({ stage: 'readyForMerge', pr: 'guide-docs#71', keys: ['1501'] }, l0, t.w.settings), ['forge set-stage-label --target guide --number 71 --stage finalReview']);
+  const io = {
+    readUsage: usage,
+    now: () => NOW,
+    ensureWorktree: (s, p) => (p.number === 72 ? { repo: p.repo, branch: p.branch, path: '/nowhere', push: '', linked: [], missing: [], notes: [], stuck: [] } : ensureWorktree(s, p)),
+    spawnClaude: async () => ({ code: 1, stdout: '', stderr: 'stop here' }),
+  };
+  const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io, options: { trigger: 'watcher', named: ['1501'] } });
+  assert.deepEqual(out.ran.map((r) => r.stage).slice(0, 1), ['readyForMerge']);
+  assert.ok(!out.ran.some((r) => r.stage === 'move'), 'the card stays with the PR still in the chain');
+  assert.equal(t.c.placeId, LISTS.translation.id);
+  assert.deepEqual([t.forgePr.labels, second.labels], [['In final review'], ['In translation']]);
+  const l = read(t.w, '1501');
+  assert.deepEqual(l.prs.map((p) => [p.stage, p.label ?? null]), [['readyForMerge', 'In final review'], ['translation', null]]);
 });
 
 test('two PRs: the card goes back only when both are ready', async () => {
