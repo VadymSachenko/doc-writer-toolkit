@@ -470,7 +470,7 @@ function prStep(l, p, w, out, prs) {
     // image, and no re-sync.
     const ready = pr.readyForMerge?.at(-1);
     if (p.stage === 'readyForMerge' && ready && head && ready.head !== head) {
-      const changed = w.git?.changedUnder(target, ready.head, head, uaRoots(pr, w, target)) ?? null;
+      const changed = w.git?.changedUnder(target, ready.head, head, uaRoots(pr, w, target), baseOf(pr, target)) ?? null;
       if (changed === null) out.notes.push(`${id}: ready for merge at ${String(ready.head).slice(0, 7)}, the head is ${String(head).slice(0, 7)}, and git here can't compare them`);
       else if (changed.length) return step('move', { pr: id, to: 'finalReview', uaChanged: changed.length, since: ready.head });
       else if (hand.length) {
@@ -483,7 +483,7 @@ function prStep(l, p, w, out, prs) {
   // An id-only change (heading ids, link fragments) keeps it (D-073).
   if (pr.approval?.head && head && pr.approval.head !== head && ['translation', 'readyForMerge'].includes(p.stage)) {
     const roots = uaRoots(pr, w, target);
-    const changed = w.git?.changedUnder(target, pr.approval.head, head, roots) ?? null;
+    const changed = w.git?.changedUnder(target, pr.approval.head, head, roots, baseOf(pr, target)) ?? null;
     const v = out.prs.find((x) => x.id === id);
     if (changed?.length) {
       v.approvalStale = changed.length;
@@ -531,7 +531,7 @@ function resyncAfterReady(pr, w, target, head, out) {
   const id = prId(pr);
   const ready = pr.readyForMerge.at(-1);
   if (ready.head !== head) {
-    const changed = w.git?.changedUnder(target, ready.head, head, uaRoots(pr, w, target)) ?? null;
+    const changed = w.git?.changedUnder(target, ready.head, head, uaRoots(pr, w, target), baseOf(pr, target)) ?? null;
     if (changed === null) {
       out.notes.push(`${id}: ready for merge at ${String(ready.head).slice(0, 7)}, the head is ${String(head).slice(0, 7)}, and git here can't compare them`);
       return null;
@@ -551,7 +551,7 @@ function readyAgain(pr, w, target, head, out) {
   const id = prId(pr);
   const pack = pr.chain?.visualPack;
   if (pack?.head && pack.head !== head) {
-    const images = w.git?.imagesChanged?.(target, pack.head, head) ?? null;
+    const images = w.git?.imagesChanged?.(target, pack.head, head, baseOf(pr, target)) ?? null;
     if (images === null) out.notes.push(`${id}: the visual pack saw ${String(pack.head).slice(0, 7)}, the head is ${String(head).slice(0, 7)}, and git here can't compare their images`);
     else if (images.length) return step('visualPack', { pr: id, head, images: images.length });
   }
@@ -573,7 +573,7 @@ function chainStep(l, p, w, out, target, head) {
     const numbered = stage === 'enReview' ? { nextEdit: nextEditNumber(pr) } : {};
     if (!rec || rec.status !== 'done') return step(stage, { pr: id, head, ...numbered });
     if (rec.head && head && rec.head !== head) {
-      const changed = w.git?.changedUnder(target, rec.head, head, roots) ?? null;
+      const changed = w.git?.changedUnder(target, rec.head, head, roots, baseOf(pr, target)) ?? null;
       if (changed === null) out.notes.push(`${id}: ${stage} saw ${String(rec.head).slice(0, 7)}, the head is ${String(head).slice(0, 7)}, and git here can't compare them`);
       else if (changed.length) return step(stage, { pr: id, head, stale: changed.length, ...numbered });
     }
@@ -581,6 +581,9 @@ function chainStep(l, p, w, out, target, head) {
   // Every stage is done for this head: ready again. So a person's move here with nothing changed starts no model step.
   return step('readyForMerge', { pr: id, head });
 }
+
+// The PR's base: a page or an image the base brought into the branch (a merge of the base) is never the PR's change.
+const baseOf = (pr, target) => pr.base ?? target?.base ?? 'main';
 
 function uaRoots(pr, w, target) {
   const roots = (pr.targets ?? []).map((tid) => w.settings.targets.find((t) => t.id === tid)?.uaRoot).filter(Boolean);

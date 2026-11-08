@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { computeStatus } from './status.mjs';
+import { makeGit } from './world.mjs';
 import { readAllLedgers, readLedger, findPr, prId } from './ledger.mjs';
 import { allLocks, takeLock, releaseLock, renewLock } from './locks.mjs';
 import { runRecord, cardStatusFor } from './record.mjs';
@@ -393,12 +394,11 @@ function worktreeLines(trees) {
   ].join('\n');
 }
 
-// The targets a step's tickets name (their triage's, their PRs'), one per clone, or every target while they name none.
+// The targets a step's tickets name (their triage's, their PRs'), one per clone; none while they name none.
 function targetsOf(settings, ledgers) {
   const ids = new Set(ledgers.filter(Boolean).flatMap((l) => [...(l.triage?.targets ?? []), ...(l.prs ?? []).flatMap((p) => p.targets ?? [])]));
-  const named = settings.targets.filter((t) => ids.has(t.id));
   const seen = new Set();
-  return (named.length ? named : settings.targets).filter((t) => {
+  return settings.targets.filter((t) => ids.has(t.id)).filter((t) => {
     const c = clonePath(settings, t);
     if (!c || seen.has(c)) return false;
     seen.add(c);
@@ -409,7 +409,7 @@ function targetsOf(settings, ledgers) {
 // What the brief says about a target clone a step with no worktree reads, when it isn't at its origin's base.
 function cloneLines(clones) {
   const noted = clones.filter((c) => c.notes?.length);
-  return noted.length ? ['Target clones, read as they stand (the runner never moves them):', ...noted.map((c) => `- ${c.repo}: ${c.clone}, on ${c.base}; ${c.notes.join('; ')}.`)].join('\n') : null;
+  return noted.length ? ['Target clones, read as they stand (the runner never moves them):', ...noted.map((c) => `- ${c.repo}: ${c.clone}; ${c.notes.join('; ')}.`)].join('\n') : null;
 }
 
 // What the brief says about the code the session may read: the checkout at the commit the runner just fetched.
@@ -824,6 +824,9 @@ export async function runDaily(args) {
 }
 
 async function runDailyRun({ settings, clients, io = {}, options = {} }, holder) {
+  // One set of tried fetches for the whole run (lib/world.mjs, `fetchHeads`): a branch is fetched at most once a run.
+  const fetchesTried = new Set();
+  const runGit = () => makeGit(settings, { asked: fetchesTried });
   // `progress.begun` turns true once the run starts its first step: a caller can tell a run that failed before doing
   // anything (safe to start again) from one that failed part way.
   // `startPass`: the watcher's start pass when a slot frees between morning runs (lib/watch.mjs): a scheduled run with
@@ -895,7 +898,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
   // The tickets this run already started or tried to: a start that failed holds no slot in the run's later
   // calculations, so the run tries the next group; the failed one waits as any failed step does.
   const tried = new Set();
-  const status = () => computeStatus({ settings, clients, usage, now: clock(), ignoreLocks: own, tried, retryWaiting });
+  const status = () => computeStatus({ settings, clients, usage, git: runGit(), now: clock(), ignoreLocks: own, tried, retryWaiting });
   st = await status();
   out.before = summary(st);
   live.write();
@@ -1014,7 +1017,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
 
   // After a live run, the state as the next run finds it: a start that failed in this run waits (for a person or the
   // next morning run), and the report says so.
-  st = planOnly ? st : await computeStatus({ settings, clients, usage, now: clock(), ignoreLocks: own });
+  st = planOnly ? st : await computeStatus({ settings, clients, usage, git: runGit(), now: clock(), ignoreLocks: own });
   out.after = summary(st);
   out.notStarted = st.notStarted;
   out.guard = log.filter((e) => e.kind === 'guard');
@@ -1063,7 +1066,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
     try {
       let step = first;
       if (recheck) {
-        const fresh = await computeStatus({ settings, clients, usage, now: clock(), only: first.keys, ignoreLocks: own });
+        const fresh = await computeStatus({ settings, clients, usage, git: runGit(), now: clock(), only: first.keys, ignoreLocks: own });
         const again = collectSteps(fresh, { named: first.keys, includeStart: manual && named.length > 0, retryWaiting })[0] ?? null;
         step = stillNext(first, again);
         if (!step) {
@@ -1077,7 +1080,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         done.push(r);
         ran(r);
         if (r.outcome !== 'done') break;
-        const now = await computeStatus({ settings, clients, usage, now: clock(), only: step.keys, ignoreLocks: own });
+        const now = await computeStatus({ settings, clients, usage, git: runGit(), now: clock(), only: step.keys, ignoreLocks: own });
         const next = collectSteps(now, { named: step.keys, includeStart: false, retryWaiting })[0] ?? null;
         step = next ? { ...next, keys: next.keys.filter((k) => step.keys.includes(k)) } : null;
       }
@@ -1137,15 +1140,13 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         // With no other session running (no live lock but this step's), the checkouts of other commits go.
         const mine = new Set([step.group ?? step.keys[0], ...held]);
         const othersRunning = allLocks(settings.state, clock()).some((l) => l.live && !mine.has(l.group));
-        // A step with no worktree reads the ticket's target clones as they stand: one off its base starts no session,
-        // the same way (lib/worktree.mjs, `checkClone`); one behind its origin is said in the brief.
+        // A step with no worktree reads the ticket's target clones as they stand: one off its base or behind its origin
+        // is said in the brief, with how to read the base instead (lib/worktree.mjs, `checkClone`).
         const clones = !trees.length && step.role !== 'triage' ? targetsOf(settings, step.keys.map((k) => readLedger(settings.state, k))).map((t) => (io.checkClone ?? checkClone)(settings, t)).filter(Boolean) : [];
-        const off = clones.filter((c) => c.off);
-        if (off.length) throw Object.assign(new Error(`${off.map((c) => c.off).join('; ')}. Check out the base there, then ${step.keys.map((k) => `\`ticket-state set retry ${k}\``).join(', ')}`), { clone: true });
         const codeTrees = CODE_ROLES.has(step.role) ? (settings.appRepos ?? []).map((a) => (io.ensureCodeTree ?? ensureCodeTree)(settings, a, { othersRunning })) : [];
         step = { ...step, worktrees: trees, codeTrees, clones };
       } catch (e) {
-        const note = `${e.clone ? 'the clone' : 'the worktree'}: ${String(e.message).slice(0, 400)}`;
+        const note = `the worktree: ${String(e.message).slice(0, 400)}`;
         for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'failed', pr: step.pr, note, now: clock() }).catch(() => {});
         // A failed step like a failed session, so the failed-step rules apply (it waits for a person, then holds), with
         // no `start`: no session ran, so it counts toward no cap, cost or report of sessions.
@@ -1239,7 +1240,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
   // read now, a bare mark: then only `ticket-state set retry` or the morning run gives the step another try.
   async function marksOf(step) {
     try {
-      const now = await computeStatus({ settings, clients, usage, now: clock(), only: step.keys, ignoreLocks: own, marks: step.keys });
+      const now = await computeStatus({ settings, clients, usage, git: runGit(), now: clock(), only: step.keys, ignoreLocks: own, marks: step.keys });
       return Object.fromEntries(now.tickets.filter((t) => t.mark).map((t) => [t.key, t.mark]));
     } catch {
       return Object.fromEntries(step.keys.map((k) => [k, { at: new Date(clock()).toISOString(), list: null, comments: null, prs: {} }]));

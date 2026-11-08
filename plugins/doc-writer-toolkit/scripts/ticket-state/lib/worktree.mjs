@@ -261,32 +261,35 @@ export function writtenIn(settings, pr) {
 }
 
 // A target clone as a step with no worktree reads it (the plan, the answers: their session reads the clone's files as
-// they stand). Off its base, the session would read another branch's pages as the site's: a checked-out branch that
-// isn't the base, or a detached HEAD, is `off`, and the runner starts no session. Behind or ahead of `origin/<base>` (the
-// owner merges on the forge, so a clone is behind after each merge) is a note for the brief. The base is fetched into
-// its remote-tracking ref first, as for a worktree; the runner never checks out, pulls or resets the clone. Null for a
-// clone that isn't on this machine. Returns { repo, clone, base, branch, off, notes }.
+// they stand). Off its base (a checked-out branch that isn't the base, or a detached HEAD: the owner's branch work), or
+// behind `origin/<base>` (the owner merges on the forge, so a clone is behind after each merge), its files aren't the
+// site's: a note for the brief says so and how to read the base instead. No session is held for it. The base is fetched
+// into its remote-tracking ref first, as for a worktree; the runner never checks out, pulls or resets the clone. Null
+// for a clone that isn't on this machine. Returns { repo, clone, base, branch, off, notes }.
 export function checkClone(settings, target) {
   const clone = clonePath(settings, target);
   if (!clone || !fs.existsSync(clone) || !checkoutKind(clone)) return null;
   const base = target.base ?? 'main';
-  const out = { repo: target.repo, clone, base, branch: null, off: null, notes: [] };
+  const out = { repo: target.repo, clone, base, branch: null, off: false, notes: [] };
   out.branch = tryRun(clone, ['symbolic-ref', '-q', '--short', 'HEAD']);
-  if (out.branch !== base) {
-    const at = (tryRun(clone, ['rev-parse', '--short', 'HEAD']) ?? '').slice(0, 7);
-    out.off = `${clone} is ${out.branch ? `on the branch ${out.branch}` : `at a detached HEAD${at ? ` (${at})` : ''}`}, not on ${base}: a session would read its pages as the site's`;
-    return out;
-  }
   try {
-    quiet(['-C', clone, 'fetch', '-q', '--no-tags', 'origin', `+refs/heads/${base}:refs/remotes/origin/${base}`]);
+    execFileSync('git', ['-C', clone, 'fetch', '-q', '--no-tags', '--no-write-fetch-head', 'origin', `+refs/heads/${base}:refs/remotes/origin/${base}`], { stdio: ['ignore', 'ignore', 'ignore'], timeout: 30000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
   } catch {
     out.notes.push(`could not fetch ${base} from origin`);
   }
-  if (!hasRef(clone, `refs/remotes/origin/${base}`)) return out;
+  const fetched = hasRef(clone, `refs/remotes/origin/${base}`);
+  const readBase = fetched ? `read pages with \`git -C ${clone} show origin/${base}:<path>\`, never its working tree` : `read pages with \`git -C ${clone} show ${base}:<path>\`, never its working tree`;
+  if (out.branch !== base) {
+    const at = (tryRun(clone, ['rev-parse', '--short', 'HEAD']) ?? '').slice(0, 7);
+    out.off = true;
+    out.notes.push(`${out.branch ? `on the branch ${out.branch}` : `at a detached HEAD${at ? ` (${at})` : ''}`}, not on its base ${base}: its files are that branch's, not the site's; ${readBase}`);
+    return out;
+  }
+  if (!fetched) return out;
   const count = (range) => Number(tryRun(clone, ['rev-list', '--count', range]) ?? 0);
   const behind = count(`HEAD..origin/${base}`);
   const ahead = count(`origin/${base}..HEAD`);
-  if (behind) out.notes.push(`${behind} commit(s) behind origin/${base}: a page merged since is not in its files; read it with \`git -C ${clone} show origin/${base}:<path>\``);
+  if (behind) out.notes.push(`${behind} commit(s) behind origin/${base}: a page merged since is not in its files; ${readBase}`);
   if (ahead) out.notes.push(`${ahead} commit(s) on ${base} that origin doesn't have: its files hold them`);
   return out;
 }

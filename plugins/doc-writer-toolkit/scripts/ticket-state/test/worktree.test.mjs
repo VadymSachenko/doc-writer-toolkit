@@ -624,9 +624,40 @@ test('fetchHeads: one fetch per clone and branch for a check; an origin that can
   const h3 = t.handEdit({ 'docs/x/index.md': '# Сторінка\n\nОфлайн.\n' });
   t.forgePr.headCommit = h3;
   t.clone.g('remote', 'set-url', 'origin', path.join(tmp('gone-'), 'nowhere.git'));
-  assert.deepEqual(makeGit(t.w.settings).fetchHeads([{ ...wanted[0], head: h3 }]).map((f) => f.fetched), [false]);
+  const runTried = new Set();
+  assert.deepEqual(makeGit(t.w.settings, { asked: runTried }).fetchHeads([{ ...wanted[0], head: h3 }]).map((f) => f.fetched), [false]);
+  assert.deepEqual(makeGit(t.w.settings, { asked: runTried }).fetchHeads([{ ...wanted[0], head: h3 }]), [], 'a run shares one set: not tried again in it');
   const tk = await t.w.one('1501', { git: makeGit(t.w.settings) });
   assert.ok(tk.notes.some((n) => /is not fetched here/.test(n)), JSON.stringify(tk.notes));
+});
+
+// The forge's "Update branch" after ready for merge: the base, with another PR's UA page, merged into the PR's branch.
+function updateBranch(t, { ownEdit = false } = {}) {
+  t.clone.g('checkout', '-q', 'main');
+  t.clone.commit({ 'docs/y/other.md': '# Інша сторінка\n' }, 'Another PR, merged');
+  t.clone.g('push', '-q', 'origin', 'main');
+  t.clone.g('checkout', '-q', 'ticket-71');
+  t.clone.g('merge', '-q', '--no-edit', 'main');
+  if (ownEdit) t.clone.commit({ 'docs/x/index.md': '# Сторінка\n\nПравка власника.\n' }, 'Fix: by hand');
+  t.clone.g('push', '-q', 'origin', 'ticket-71');
+  return t.clone.g('rev-parse', 'HEAD');
+}
+
+test('a merge of the base into a ready PR (the forge\'s "Update branch") that brings another PR\'s UA page keeps it ready: no bounce to the owner\'s queue', async () => {
+  const t = finalReviewTicket({ done: CHAIN, stage: 'readyForMerge' });
+  t.forgePr.headCommit = updateBranch(t);
+  const tk = await t.w.one('1501', { git: makeGit(t.w.settings) });
+  assert.deepEqual([tk.next?.stage, tk.next?.head], ['readyForMerge', t.forgePr.headCommit]);
+  // The plain count would have taken the other PR's page as this one's.
+  assert.deepEqual(makeGit(t.w.settings).changedUnder(t.w.settings.targets[0], t.h1, t.forgePr.headCommit, ['docs/']), ['docs/y/other.md']);
+  assert.deepEqual(makeGit(t.w.settings).changedUnder(t.w.settings.targets[0], t.h1, t.forgePr.headCommit, ['docs/'], 'main'), []);
+});
+
+test('a merge of the base plus the owner\'s edit of a PR page after ready: back to the owner\'s queue, counting only the PR\'s page', async () => {
+  const t = finalReviewTicket({ done: CHAIN, stage: 'readyForMerge' });
+  t.forgePr.headCommit = updateBranch(t, { ownEdit: true });
+  const tk = await t.w.one('1501', { git: makeGit(t.w.settings) });
+  assert.deepEqual([tk.next?.stage, tk.next?.to, tk.next?.uaChanged], ['move', 'finalReview', 1]);
 });
 
 test('changedUnder and pagesOf read a UA page with a Cyrillic name (which git quotes in line output)', () => {
@@ -996,9 +1027,9 @@ test('an answer pushed while the owner moved a ready card to In translation is n
   assert.equal(read(t.w, '1501').prs[0].approval.head, h2);
 });
 
-// A step with no worktree (the plan, the answers, a start) reads the target clones as they stand: one on another
-// branch starts no session; one behind its origin is said in the brief.
-function planTicket({ onBase = true, behind = 0, status = 'inProgress', stages = { start: 'done' }, left = 'same' } = {}) {
+// A step with no worktree (the plan, the answers, a start) reads the target clones as they stand: one off its base or
+// behind its origin is said in the brief, with how to read the base; nothing is held for it.
+function planTicket({ onBase = true, behind = 0, status = 'inProgress', stages = { start: 'done' }, left = 'same', targets = ['guide'] } = {}) {
   const c = card({ number: 1601, status });
   const w = world({ cards: [c] });
   const fx = withClone(w);
@@ -1009,45 +1040,42 @@ function planTicket({ onBase = true, behind = 0, status = 'inProgress', stages =
     fx.clone.g('push', '-q', 'origin', 'main');
     fx.clone.g('reset', '-q', '--hard', `HEAD~${behind}`);
   }
-  ledger(w, c, { stages, left, triage: { verdict: 'docs-required', targets: ['guide'], size: 'edit' } });
+  ledger(w, c, { stages, left, triage: { verdict: 'docs-required', targets, size: 'edit' } });
   return { w, c, ...fx };
 }
 
-test('a plan step with the target clone on another branch starts no session: failed with the clone named, and what to do', async () => {
+const briefsOf = async (t) => {
+  const briefs = [];
+  const spawnClaude = async (cmd) => (briefs.push(briefOf(cmd)), { code: 0, stdout: RESULT, stderr: '' });
+  const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1601'] } });
+  return { out, briefs };
+};
+
+test('a plan step with the target clone on another branch runs: the brief names the branch and says to read the base, never the working tree', async () => {
   const t = planTicket({ onBase: false });
   const before = t.clone.g('rev-parse', 'HEAD');
-  const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude: () => assert.fail('no session on a clone off its base') }, options: { trigger: 'watcher', named: ['1601'] } });
-  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['plan', 'failed']]);
-  const l = read(t.w, '1601');
-  assert.match(l.runs.at(-1).note, /^the clone: .*guide-docs is on the branch ticket-71, not on main: a session would read its pages as the site's\. Check out the base there, then `ticket-state set retry 1601`/);
-  assert.deepEqual([l.runs.at(-1).session, 'start' in l.runs.at(-1), l.runs.at(-1).failures], [null, false, 1]);
+  const { briefs } = await briefsOf(t);
+  assert.ok(briefs.length >= 1, 'the session started: an off-base clone holds nothing');
+  assert.match(briefs[0], /Target clones, read as they stand \(the runner never moves them\):\n- guide-docs: .*guide-docs; on the branch ticket-71, not on its base main: its files are that branch's, not the site's; read pages with `git -C .*guide-docs show origin\/main:<path>`, never its working tree\./);
   assert.deepEqual([t.clone.g('symbolic-ref', '--short', 'HEAD'), t.clone.g('rev-parse', 'HEAD')], ['ticket-71', before], 'the runner never moves the clone');
-  // The failed-step rules: it waits for a person, as a stuck worktree does.
-  const tk = await t.w.one('1601');
-  assert.match(tk.next.waits, /a person acting on the ticket/);
   // A detached HEAD is off its base too.
   t.clone.g('checkout', '-q', '--detach', 'main');
-  assert.match(checkClone(t.w.settings, t.w.settings.targets[0]).off, /is at a detached HEAD \(\w+\), not on main/);
+  const c = checkClone(t.w.settings, t.w.settings.targets[0]);
+  assert.equal(c.off, true);
+  assert.match(c.notes.join(' '), /at a detached HEAD \(\w+\), not on its base main/);
 });
 
-test('a start (a person\'s move into In progress) with the target clone off its base starts no session either', async () => {
-  const t = planTicket({ onBase: false, stages: {}, left: 'ready' });
-  const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude: () => assert.fail('no session') }, options: { trigger: 'watcher', named: ['1601'] } });
-  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['start', 'failed']]);
-  assert.match(read(t.w, '1601').runs.at(-1).note, /^the clone: .*on the branch ticket-71/);
-});
-
-test('a scheduled start of an owner\'s card in the ready status checks the clone of the target its label names: off its base, no session', async () => {
+test('a start of an owner\'s card in the ready status names the clone of the target its label names, and a ticket that names no target gets no clone note', async () => {
   const c = card({ number: 1602, status: 'ready', labels: ['Guide'] });
   const w = world({ cards: [c] });
-  const fx = withClone(w);
-  const out = await runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude: () => assert.fail('no session') }, options: {} });
-  const l = read(w, '1602');
-  assert.deepEqual(l.triage.targets, ['guide'], 'the start recorded the target before the check');
-  assert.deepEqual([l.runs.at(-1).stage, l.runs.at(-1).outcome, l.runs.at(-1).session], ['start', 'failed', null]);
-  assert.match(l.runs.at(-1).note, /^the clone: .*guide-docs is on the branch ticket-71, not on main/);
-  assert.ok(JSON.stringify(out.starts).includes('failed'), JSON.stringify(out.starts));
-  assert.equal(fx.clone.g('symbolic-ref', '--short', 'HEAD'), 'ticket-71');
+  withClone(w);
+  const briefs = [];
+  await runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude: async (cmd) => (briefs.push(briefOf(cmd)), { code: 0, stdout: RESULT, stderr: '' }) }, options: {} });
+  assert.deepEqual(read(w, '1602').triage.targets, ['guide'], 'the start recorded the target before the check');
+  assert.match(briefs[0], /Stage `start`[\s\S]*- guide-docs: .*on the branch ticket-71, not on its base main/);
+  const none = planTicket({ onBase: false, targets: [] });
+  const { briefs: b2 } = await briefsOf(none);
+  assert.doesNotMatch(b2[0], /Target clones/, 'no target named: no clone checked');
 });
 
 test('a plan step with the target clone on its base but behind origin runs, and the brief says how far behind and how to read a merged page', async () => {
@@ -1059,7 +1087,7 @@ test('a plan step with the target clone on its base but behind origin runs, and 
   };
   await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1601'] } });
   assert.ok(briefs.length >= 1, 'the session started');
-  assert.match(briefs[0], /Target clones, read as they stand \(the runner never moves them\):\n- guide-docs: .*guide-docs, on main; 2 commit\(s\) behind origin\/main: a page merged since is not in its files; read it with `git -C .*guide-docs show origin\/main:<path>`\./);
+  assert.match(briefs[0], /Target clones, read as they stand \(the runner never moves them\):\n- guide-docs: .*guide-docs; 2 commit\(s\) behind origin\/main: a page merged since is not in its files; read pages with `git -C .*guide-docs show origin\/main:<path>`, never its working tree\./);
   assert.equal(t.clone.g('rev-list', '--count', 'HEAD..origin/main'), '2', 'still behind: never pulled');
   // At origin's base, the brief says nothing of the clone.
   const u = planTicket();
