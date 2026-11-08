@@ -5,23 +5,26 @@ import crypto from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { computeStatus } from './status.mjs';
+import { makeGit } from './world.mjs';
 import { readAllLedgers, readLedger, findPr, prId } from './ledger.mjs';
 import { allLocks, takeLock, releaseLock, renewLock } from './locks.mjs';
 import { runRecord, cardStatusFor } from './record.mjs';
 import { runUnlock } from './handover.mjs';
 import { allowanceOf, parseUsage } from './allowance.mjs';
-import { LABEL_OF, PR_STAGE_OF_STATUS, PRIORITY_RANK, finishRank, followsMove } from './stages.mjs';
+import { PR_STAGE_OF_STATUS, PRIORITY_RANK, finishRank, followsMove, stageLabelOf } from './stages.mjs';
 import { callExperts, expertCalls } from './experts.mjs';
 import { appendRunLog, localDate, readRunLog, renderReport, writeReport } from './report.mjs';
 import { ROLES } from './settings.mjs';
 import { cleanupTicket } from './cleanup.mjs';
 import { removeClosedMarkdown } from './import.mjs';
 import { DOWNLOAD_DIRS_VARIABLE, ROLE_SESSION_VARIABLE, childEnv, sessionChildEnv } from './env.mjs';
-import { clonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureWorktree, prsForStep, worktreePath } from './worktree.mjs';
+import { checkClone, clonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureWorktree, prsForStep, worktreePath } from './worktree.mjs';
 import { BUSY_NAME, LOCK_NAME, busyEnded, freeBrowserLock } from './browser-lock.mjs';
 import { HOOK_VARIABLE, commandsOfRules, hookSettings } from './role-hook.mjs';
 import { parseClaudeConfig } from '../../ui-labels/lib/config.mjs';
 import { liveProgress } from './progress.mjs';
+import { runsGoingIn } from './forge-state.mjs';
+import { replyLines, resyncItemLines, suggestionLines } from './edits.mjs';
 
 // The daily run (design §7): finish first, then triage the quiet intake cards (mornings, and the watcher's start pass
 // when a slot frees), then start ready groups while
@@ -356,11 +359,16 @@ export function briefFor(step, settings) {
     step.interrupted ? 'The last run of this stage was interrupted: read what it left and finish it.' : null,
     step.withoutVideo ? 'The owner moved the card back before every video part had its transcript: go on without the video, and say so in the plan comment.' : null,
     step.changed ? 'The section plan file changed after its gate: post the new plan and move the card back to Blocked (a new gate).' : null,
-    step.stage === 'resync' && step.since ? `UA changed since ready for merge at ${step.since}: re-sync the blocks changed in ${step.since}..${step.head ?? 'HEAD'}.` : null,
+    step.stage === 'resync' && step.since ? `UA changed since ready for merge at ${step.since}, and the owner moved the card to In translation: re-sync the blocks changed in ${step.since}..${step.head ?? 'HEAD'}, the whole range at once.` : null,
+    ...resyncItemLines(step.items),
+    step.nextEdit ? `A numbered list of edits you post on this PR starts at ${step.nextEdit}: the numbers already posted keep their items.` : null,
+    ...replyLines(step.replies),
+    ...suggestionLines(step.suggestions),
     step.stale ? `The UA pages changed after this stage last ran (${step.stale} file(s)): run it again on the current head.` : null,
     step.cards ? `Cards, highest priority first:\n${step.cards.map((c) => `- ${c.key}: ${c.url ?? c.shortLink} (${c.priority})`).join('\n')}` : null,
     step.worktrees?.length ? worktreeLines(step.worktrees) : null,
     step.codeTrees?.length ? codeLines(step.codeTrees) : null,
+    step.clones?.length ? cloneLines(step.clones) : null,
     '',
     `Host repo: ${root}`,
     `The toolkit's scripts folder: ${path.join(PLUGIN_ROOT, 'scripts')}`,
@@ -384,6 +392,24 @@ function worktreeLines(trees) {
     'Worktrees (the runner made them; work only there, and never create, move or remove a worktree, or link a file into one). Run git there as `git -C <the path exactly as below, unquoted> <command>`. A read (status, diff, log, show) may also run as plain `git <command>` after a `cd` to it as a separate call; an add, a commit, a push and a fetch run only as `git -C` (this session starts in the hub, whose checkout a plain one would change). Other spellings are denied, a quoted path and `cd <path> && git …` among them.',
     ...trees.map((t) => `- ${t.repo} ${t.branch}: ${t.path}${t.linked?.length ? ` (linked from the clone: ${t.linked.join(', ')})` : ''}. It is detached at origin/${t.branch} as the runner fetched it; push with \`${t.push}\`, fetch with \`git -C ${t.path} fetch origin\`.${t.notes?.length ? ` Note: ${t.notes.join('; ')}.` : ''}`),
   ].join('\n');
+}
+
+// The targets a step's tickets name (their triage's, their PRs'), one per clone; none while they name none.
+function targetsOf(settings, ledgers) {
+  const ids = new Set(ledgers.filter(Boolean).flatMap((l) => [...(l.triage?.targets ?? []), ...(l.prs ?? []).flatMap((p) => p.targets ?? [])]));
+  const seen = new Set();
+  return settings.targets.filter((t) => ids.has(t.id)).filter((t) => {
+    const c = clonePath(settings, t);
+    if (!c || seen.has(c)) return false;
+    seen.add(c);
+    return true;
+  });
+}
+
+// What the brief says about a target clone a step with no worktree reads, when it isn't at its origin's base.
+function cloneLines(clones) {
+  const noted = clones.filter((c) => c.notes?.length);
+  return noted.length ? ['Target clones, read as they stand (the runner never moves them):', ...noted.map((c) => `- ${c.repo}: ${c.clone}; ${c.notes.join('; ')}.`)].join('\n') : null;
 }
 
 // What the brief says about the code the session may read: the checkout at the commit the runner just fetched.
@@ -573,7 +599,11 @@ export function collectSteps(st, { named = [], includeStart = false, retryWaitin
 export function scriptedCalls(step, ledger, settings) {
   const card = ledger?.card?.shortLink ?? ledger?.card?.id ?? step.card?.shortLink;
   const target = (pr) => settings.targets.find((t) => t.id === pr.targets?.[0]) ?? settings.targets.find((t) => t.repo === pr.repo);
-  const label = (pr, stage) => (LABEL_OF[stage] && target(pr) ? [`forge set-stage-label --target ${target(pr).id} --number ${pr.number} --stage ${LABEL_OF[stage]}`] : []);
+  const label = (pr, stage) => {
+    const t = target(pr);
+    const key = stageLabelOf(stage, t);
+    return key && t?.labels?.[key] ? [`forge set-stage-label --target ${t.id} --number ${pr.number} --stage ${key}`] : [];
+  };
   switch (step.stage) {
     case 'move': {
       if (step.pr) {
@@ -588,9 +618,16 @@ export function scriptedCalls(step, ledger, settings) {
     case 'follow':
       return [
         ...ledger.prs.filter((p) => p.number && followsMove(p.stage, ledger.left?.status, step.to)).flatMap((p) => label(p, PR_STAGE_OF_STATUS[step.to])),
+        ...ledger.prs.filter((p) => p.number && (step.takeReady ?? []).some((t) => t.pr === prId(p))).flatMap((p) => label(p, 'translation')),
         ...(step.to === 'smeReview' ? expertCalls(settings, ledger.prs.filter((p) => p.number && followsMove(p.stage, ledger.left?.status, step.to)), [card]) : []),
-        ...cardsMovedWith(step, ledger, settings).map((o) => `tracker move ${o.card?.shortLink ?? o.card?.id} --to ${step.to}`),
+        ...cardsMovedWith(step, ledger, settings).flatMap((o) => [
+          `tracker move ${o.card?.shortLink ?? o.card?.id} --to ${step.to}`,
+          // The other card's own PRs its record moves (a shared one is labelled once, above).
+          ...o.prs.filter((p) => p.number && !ledger.prs.some((x) => prId(x) === prId(p)) && followsMove(p.stage, o.left?.status, step.to)).flatMap((p) => label(p, PR_STAGE_OF_STATUS[step.to])),
+        ]),
       ];
+    case 'readyForMerge':
+      return label(findPr(ledger, step.pr), 'readyForMerge');
     case 'close':
       return step.card?.status === 'done' ? [] : [`tracker move ${card} --to done`];
     case 'videoBlock':
@@ -609,7 +646,8 @@ function cardsMovedWith(step, ledger, settings) {
   const from = ledger.left?.status;
   if (step.to !== 'translation' && from !== 'translation') return [];
   const shared = new Set((ledger.prs ?? []).filter((p) => p.number).map(prId));
-  return readAllLedgers(settings.state).filter((o) => o.key !== ledger.key && !step.keys.includes(o.key) && o.group === ledger.group && o.mode === 'pipeline' && o.left?.status === from && o.stages?.close?.status !== 'done' && (o.prs ?? []).some((p) => p.number && shared.has(prId(p)) && followsMove(p.stage, from, step.to)));
+  const taken = new Set((step.takeReady ?? []).map((x) => x.pr));
+  return readAllLedgers(settings.state).filter((o) => o.key !== ledger.key && !step.keys.includes(o.key) && o.group === ledger.group && o.mode === 'pipeline' && o.left?.status === from && o.stages?.close?.status !== 'done' && (o.prs ?? []).some((p) => p.number && shared.has(prId(p)) && (followsMove(p.stage, from, step.to) || taken.has(prId(p)))));
 }
 
 async function runScripted(step, ctx) {
@@ -620,9 +658,19 @@ async function runScripted(step, ctx) {
   const target = (pr) => settings.targets.find((t) => t.id === pr.targets?.[0]) ?? settings.targets.find((t) => t.repo === pr.repo);
   const setLabel = async (pr, stage) => {
     const t = target(pr);
-    if (LABEL_OF[stage] && t?.labels?.[LABEL_OF[stage]]) await clients.forge.setStageLabel({ target: t.id, number: pr.number, stage: LABEL_OF[stage] });
+    const key = stageLabelOf(stage, t);
+    if (key && t?.labels?.[key]) await clients.forge.setStageLabel({ target: t.id, number: pr.number, stage: key });
   };
   const rec = (k, extra = {}) => runRecord({ settings, clients, key: k, stage: step.stage, status: 'done', pr: step.pr, now: (io.now ?? Date.now)(), ...extra });
+  // A label set after the step's record stood: a failure is a warning, not a failed step (the record would stand anyway).
+  const warnings = [];
+  const afterRecord = async (pr, stage) => {
+    try {
+      await setLabel(pr, stage);
+    } catch (err) {
+      warnings.push(`${prId(pr)}: the stage label for '${stage}' was not set: ${err.message}`);
+    }
+  };
   const cardsOf = (keys) => keys.map((k) => readLedger(settings.state, k).card).map((c) => c.shortLink ?? c.id);
   switch (step.stage) {
     case 'move': {
@@ -663,22 +711,38 @@ async function runScripted(step, ctx) {
       // A person's move to the review status calls each following PR's expert (lib/experts.mjs).
       if (step.to === 'smeReview') await callExperts({ settings, clients, prs: following, cards: cardsOf(step.keys) });
       // The other card first: a stop here leaves this ticket's move still to follow, and the run starts it again.
-      for (const o of cardsMovedWith(step, ledger, settings)) {
+      const others = cardsMovedWith(step, ledger, settings);
+      const before = new Map([...others, ...step.keys.map((k) => readLedger(settings.state, k))].map((l) => [l.key, new Map(l.prs.map((x) => [prId(x), x.stage]))]));
+      for (const o of others) {
         await clients.tracker.move({ card: o.card.shortLink ?? o.card.id, to: step.to });
-        await runRecord({ settings, clients, key: o.key, stage: 'follow', status: 'done', to: step.to, now: (io.now ?? Date.now)() });
+        await runRecord({ settings, clients, key: o.key, stage: 'follow', status: 'done', to: step.to, now: (io.now ?? Date.now)(), ...(step.takeReady?.length ? { result: JSON.stringify({ takeReady: step.takeReady }) } : {}) });
       }
-      for (const k of step.keys) await rec(k, { to: step.to });
-      return;
+      for (const k of step.keys) await rec(k, { to: step.to, ...(step.takeReady?.length ? { result: JSON.stringify({ takeReady: step.takeReady }) } : {}) });
+      // Every other PR the records moved: a ready PR taken along (`takeReady`, which the record may leave when its head
+      // moved again) and the other card's own PRs. Labelled after the records stood, so a failure is a warning.
+      const labelled = new Set(following.map(prId));
+      for (const k of before.keys()) {
+        for (const p of readLedger(settings.state, k).prs.filter((x) => x.number && !labelled.has(prId(x)) && x.stage !== before.get(k).get(prId(x)))) {
+          labelled.add(prId(p));
+          await afterRecord(p, p.stage);
+        }
+      }
+      return warnings;
     }
     case 'close': {
       // The PRs first: the cleanup removes nothing unless every one is merged.
       const states = new Map();
-      for (const p of ledger.prs.filter((x) => x.number)) states.set(prId(p), (await clients.forge.prState({ repo: p.repo, number: p.number })).state);
+      const heads = [];
+      for (const p of ledger.prs.filter((x) => x.number)) {
+        const st = await clients.forge.prState({ repo: p.repo, number: p.number });
+        states.set(prId(p), st.state);
+        heads.push(st.headCommit);
+      }
       const now = await clients.tracker.findCards({ link: card });
       if (now.cards[0]?.status !== 'done') await clients.tracker.move({ card, to: 'done' });
       for (const k of step.keys) {
         const l = readLedger(settings.state, k);
-        const cleanup = cleanupTicket({ settings, ledger: l, prState: (p) => states.get(prId(p)) ?? null, trashDir: trashOf(settings, io) });
+        const cleanup = cleanupTicket({ settings, ledger: l, prState: (p) => states.get(prId(p)) ?? null, forgeHeads: heads, trashDir: trashOf(settings, io) });
         await rec(k, { result: JSON.stringify({ cleanup }) });
       }
       return;
@@ -687,7 +751,10 @@ async function runScripted(step, ctx) {
       // Its record checks the UA → EN image pairs in the PR's worktree: made or brought up to date first.
       for (const p of prsForStep({ ...step, stage: 'align' }, [ledger])) (io.ensureWorktree ?? ensureWorktree)(settings, p);
       for (const k of step.keys) await rec(k, { head: step.head });
-      return;
+      // The chain is done for this PR: its label goes back to the final review's now, not when the card's other PRs
+      // are ready too (a target with no translation label has it already).
+      await afterRecord(findPr(ledger, step.pr), 'readyForMerge');
+      return warnings;
     case 'planApproval':
       for (const k of step.keys) await rec(k);
       return;
@@ -757,6 +824,9 @@ export async function runDaily(args) {
 }
 
 async function runDailyRun({ settings, clients, io = {}, options = {} }, holder) {
+  // One set of tried fetches for the whole run (lib/world.mjs, `fetchHeads`): a branch is fetched at most once a run.
+  const fetchesTried = new Set();
+  const runGit = () => makeGit(settings, { asked: fetchesTried });
   // `progress.begun` turns true once the run starts its first step: a caller can tell a run that failed before doing
   // anything (safe to start again) from one that failed part way.
   // `startPass`: the watcher's start pass when a slot frees between morning runs (lib/watch.mjs): a scheduled run with
@@ -828,7 +898,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
   // The tickets this run already started or tried to: a start that failed holds no slot in the run's later
   // calculations, so the run tries the next group; the failed one waits as any failed step does.
   const tried = new Set();
-  const status = () => computeStatus({ settings, clients, usage, now: clock(), ignoreLocks: own, tried, retryWaiting });
+  const status = () => computeStatus({ settings, clients, usage, git: runGit(), now: clock(), ignoreLocks: own, tried, retryWaiting });
   st = await status();
   out.before = summary(st);
   live.write();
@@ -841,8 +911,8 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
       if (step.stage === 'close' && l) {
         // What the close step would remove after the merge: listed, nothing removed.
         const views = st.tickets.find((t) => t.key === l.key)?.prs ?? [];
-        const c = cleanupTicket({ settings, ledger: l, prState: (p) => views.find((v) => v.id === prId(p))?.state ?? (p.merged ? 'merged' : null), dryRun: true, trashDir: trashOf(settings, io) });
-        d.cleanup = { mode: c.mode, wouldRemove: c.removed, keeps: c.kept, freesBytes: c.freedBytes, blocked: c.blocked, worktrees: c.worktrees.map((t) => t.path) };
+        const c = cleanupTicket({ settings, ledger: l, prState: (p) => views.find((v) => v.id === prId(p))?.state ?? (p.merged ? 'merged' : null), forgeHeads: views.map((v) => v.head), dryRun: true, trashDir: trashOf(settings, io) });
+        d.cleanup = { mode: c.mode, wouldRemove: c.removed, keeps: c.kept, ...(c.deletedWithWorktree.length ? { wouldDeleteWithWorktree: c.deletedWithWorktree } : {}), freesBytes: c.freedBytes, blocked: c.blocked, worktrees: c.worktrees.map((t) => t.path) };
       }
       return d;
     }
@@ -858,7 +928,18 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
   if (planOnly) {
     out.planned.push(...finishing.map(describe));
   } else {
-    await pool(finishing, sessionNear() ? 1 : settings.limits.parallel, (step) => advance(step));
+    // `limits.parallel` counts the runs of other processes too (the full check's, a manual one, those the forge check
+    // started): the live group locks and the forge check's runs that hold none yet (lib/forge-state.mjs `runsGoing`),
+    // as the forge check counts them. A run always gets one slot, so the tickets it was handed are not dropped.
+    const groupOf = (k) => {
+      try {
+        return readLedger(settings.state, k)?.group ?? k;
+      } catch {
+        return k;
+      }
+    };
+    const others = runsGoingIn(settings.state, { locks: allLocks(settings.state, clock()), now: clock(), exceptPid: process.pid, groupOf }).size;
+    await pool(finishing, Math.max(1, (sessionNear() ? 1 : settings.limits.parallel) - others), (step) => advance(step, { recheck: true }));
   }
 
   // Mornings and the watcher's start pass: triage every intake card quiet for its hours, high priority first, in one
@@ -936,7 +1017,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
 
   // After a live run, the state as the next run finds it: a start that failed in this run waits (for a person or the
   // next morning run), and the report says so.
-  st = planOnly ? st : await computeStatus({ settings, clients, usage, now: clock(), ignoreLocks: own });
+  st = planOnly ? st : await computeStatus({ settings, clients, usage, git: runGit(), now: clock(), ignoreLocks: own });
   out.after = summary(st);
   out.notStarted = st.notStarted;
   out.guard = log.filter((e) => e.kind === 'guard');
@@ -965,8 +1046,11 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
 
   // ---------------------------------------------------------------- advancing one group
 
-  // Runs a group's steps one after another, as far as it goes: a scripted step, or one session per step.
-  async function advance(first) {
+  // Runs a group's steps one after another, as far as it goes: a scripted step, or one session per step. `recheck`: a
+  // finishing step was planned from the run's first status and may have waited in the pool behind another group's
+  // chain; once the lock is taken it is read again, and run only if it is still the ticket's next step (another run,
+  // a run the forge check started, may have done it meanwhile).
+  async function advance(first, { recheck = false } = {}) {
     progress.begun = true;
     const kind = manual ? 'manual' : 'schedule';
     const group = first.group ?? first.keys[0];
@@ -981,13 +1065,22 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
     const done = [];
     try {
       let step = first;
+      if (recheck) {
+        const fresh = await computeStatus({ settings, clients, usage, git: runGit(), now: clock(), only: first.keys, ignoreLocks: own });
+        const again = collectSteps(fresh, { named: first.keys, includeStart: manual && named.length > 0, retryWaiting })[0] ?? null;
+        step = stillNext(first, again);
+        if (!step) {
+          say({ kind: 'lock', group, outcome: 'skipped', note: `${first.stage}${first.pr ? ` on ${first.pr}` : ''} is no longer the next step (${again ? `now ${again.stage}${again.pr ? ` on ${again.pr}` : ''}` : 'none'}): another run took it while this one waited` });
+          return { group, skipped: 'stale' };
+        }
+      }
       for (let i = 0; step && i < settings.limits.stepsPerTicket; i++) {
         if (step.role && !guard(step.stage, step.group)) break;
         const r = await live.tracked(step, () => (step.role ? runModelStep(step) : runScriptedStep(step)));
         done.push(r);
         ran(r);
         if (r.outcome !== 'done') break;
-        const now = await computeStatus({ settings, clients, usage, now: clock(), only: step.keys, ignoreLocks: own });
+        const now = await computeStatus({ settings, clients, usage, git: runGit(), now: clock(), only: step.keys, ignoreLocks: own });
         const next = collectSteps(now, { named: step.keys, includeStart: false, retryWaiting })[0] ?? null;
         step = next ? { ...next, keys: next.keys.filter((k) => step.keys.includes(k)) } : null;
       }
@@ -1004,9 +1097,10 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
 
   async function runScriptedStep(step) {
     try {
-      await runScripted(step, { settings, clients, io });
-      say({ kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, outcome: 'done' });
-      return { ...pick(step), outcome: 'done' };
+      const warnings = (await runScripted(step, { settings, clients, io })) ?? [];
+      const note = warnings.length ? warnings.join('; ').slice(0, 300) : null;
+      say({ kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, outcome: 'done', ...(note ? { note } : {}) });
+      return { ...pick(step), outcome: 'done', ...(warnings.length ? { warnings } : {}) };
     } catch (e) {
       const note = `${e.message}`.slice(0, 300);
       for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'failed', pr: step.pr, note, now: clock() }).catch(() => {});
@@ -1046,8 +1140,11 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         // With no other session running (no live lock but this step's), the checkouts of other commits go.
         const mine = new Set([step.group ?? step.keys[0], ...held]);
         const othersRunning = allLocks(settings.state, clock()).some((l) => l.live && !mine.has(l.group));
+        // A step with no worktree reads the ticket's target clones as they stand: one off its base or behind its origin
+        // is said in the brief, with how to read the base instead (lib/worktree.mjs, `checkClone`).
+        const clones = !trees.length && step.role !== 'triage' ? targetsOf(settings, step.keys.map((k) => readLedger(settings.state, k))).map((t) => (io.checkClone ?? checkClone)(settings, t)).filter(Boolean) : [];
         const codeTrees = CODE_ROLES.has(step.role) ? (settings.appRepos ?? []).map((a) => (io.ensureCodeTree ?? ensureCodeTree)(settings, a, { othersRunning })) : [];
-        step = { ...step, worktrees: trees, codeTrees };
+        step = { ...step, worktrees: trees, codeTrees, clones };
       } catch (e) {
         const note = `the worktree: ${String(e.message).slice(0, 400)}`;
         for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'failed', pr: step.pr, note, now: clock() }).catch(() => {});
@@ -1143,7 +1240,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
   // read now, a bare mark: then only `ticket-state set retry` or the morning run gives the step another try.
   async function marksOf(step) {
     try {
-      const now = await computeStatus({ settings, clients, usage, now: clock(), only: step.keys, ignoreLocks: own, marks: step.keys });
+      const now = await computeStatus({ settings, clients, usage, git: runGit(), now: clock(), only: step.keys, ignoreLocks: own, marks: step.keys });
       return Object.fromEntries(now.tickets.filter((t) => t.mark).map((t) => [t.key, t.mark]));
     } catch {
       return Object.fromEntries(step.keys.map((k) => [k, { at: new Date(clock()).toISOString(), list: null, comments: null, prs: {} }]));
@@ -1208,6 +1305,16 @@ function summary(st) {
 
 export function readyGroupsOf(st) {
   return (st.groups ?? []).filter((g) => !g.failedStart).map((g) => g.group).sort();
+}
+
+// A planned finishing step against the ticket's next step read again under its lock (lib/runner.mjs `advance`): the
+// step to run, or null when another run took it meanwhile. The same stage and PR is the same step; it runs as the
+// status gives it now (both come from collectSteps), with today's fields: a follow's `takeReady` as it stands (left
+// out when it no longer holds), never compared by identity. Only the planned tickets that still have it run.
+export function stillNext(first, again) {
+  if (!again || again.stage !== first.stage || (again.pr ?? null) !== (first.pr ?? null)) return null;
+  const keys = first.keys.filter((k) => again.keys.includes(k));
+  return keys.length ? { ...again, keys } : null;
 }
 
 async function pool(items, size, fn) {

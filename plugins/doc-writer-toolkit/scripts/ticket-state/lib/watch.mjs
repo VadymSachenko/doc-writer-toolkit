@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { computeStatus } from './status.mjs';
 import { makeGit } from './world.mjs';
-import { readLedgersApart } from './ledger.mjs';
+import { readLedger, readLedgersApart } from './ledger.mjs';
 import { runDaily, readUsageTried, noUsageReading, parseResult, readyGroupsOf } from './runner.mjs';
 import { parseStartHours } from './settings.mjs';
 import { allowanceOf } from './allowance.mjs';
@@ -13,6 +13,8 @@ import { ALERT_MS, HOLD_MS, WINDOW_MS, advance, pauseMs, readFeed, readSource, s
 import { jobCommand, jobDue, jobEnv, listChanges, listMatcher, spawnJob, updateWatchState, writeJobLog } from './jobs.mjs';
 import { notificationsOf, notify, startedOf } from './notify.mjs';
 import { progressAfterCheck } from './progress.mjs';
+import { commentWait } from './quiet.mjs';
+import { liveHandOnKeys } from './forge-state.mjs';
 
 // One check of the watcher (design §5, D-048), started by launchd every few minutes. No model call of its own:
 //   1. read every source since its cursor; a check that finds nothing ends here, with no status, no runner, no claude;
@@ -26,11 +28,14 @@ import { progressAfterCheck } from './progress.mjs';
 //   6. the host jobs that are due; 7. the notifications.
 // An error in one part is caught there, reported and notified, and the rest of the check goes on.
 // One check at a time: a lock in `<state>/watch/active/`, freed when its process is gone.
+// Between full checks, the forge check (lib/forge-watch.mjs, D-126): the PRs that changed only, for the comments on
+// them, in its own process, lock and state. Both hand a ticket whose next step answers comments on only once the
+// comments are quiet (lib/quiet.mjs); a ticket the forge check handed on is held as a locked one is.
 
 const iso = (ms) => new Date(ms).toISOString();
 const STALE_MS = 12 * 3600 * 1000;
 
-const alive = (pid) => {
+export const alive = (pid) => {
   try {
     process.kill(pid, 0);
     return true;
@@ -39,8 +44,9 @@ const alive = (pid) => {
   }
 };
 
-export function takeWatchLock(state, { pid = process.pid, now = Date.now(), isAlive = alive } = {}) {
-  const dir = path.join(watchDir(state), 'active');
+// `name`: the lock's folder, `active` for the full check, `forge-active` for the forge check.
+export function takeWatchLock(state, { pid = process.pid, now = Date.now(), isAlive = alive, name = 'active' } = {}) {
+  const dir = path.join(watchDir(state), name);
   fs.mkdirSync(watchDir(state), { recursive: true });
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -72,6 +78,21 @@ const localMinutes = (ms) => {
   const d = new Date(ms);
   return d.getHours() * 60 + d.getMinutes();
 };
+
+// Who holds a watcher lock now (its owner), or null when it is free or its holder is gone. Reads only.
+export function watchLockHolder(state, { now = Date.now(), isAlive = alive, name = 'active' } = {}) {
+  const dir = path.join(watchDir(state), name);
+  if (!fs.existsSync(dir)) return null;
+  let owner = null;
+  try {
+    owner = JSON.parse(fs.readFileSync(path.join(dir, 'owner.json'), 'utf8'));
+  } catch {
+    // Being written: held for a minute from the folder's time, as takeWatchLock counts it; after that, stale.
+    return now - fs.statSync(dir).mtimeMs <= 60000 ? { pid: null, startedAt: null } : null;
+  }
+  const age = now - Date.parse(owner.startedAt ?? '');
+  return isAlive(owner.pid) && !(age > STALE_MS) ? owner : null;
+}
 
 // The next time the morning run is due after `ms`: today's `schedule.morning` if it is still ahead, else tomorrow's.
 export function nextMorning(ms, hhmm) {
@@ -168,7 +189,7 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
   const clock = io.now ?? Date.now;
   const checkStart = clock();
   const today = localDate(checkStart);
-  const out = { mode: settings.mode, dryRun, at: iso(checkStart), sources: [], events: 0, unmapped: 0, tickets: [], handed: [], pending: [], morning: null, run: null, jobs: [], errors: [], capped: [], notified: [], notes: [...(options.notes ?? [])] };
+  const out = { kind: 'full', mode: settings.mode, dryRun, at: iso(checkStart), sources: [], events: 0, unmapped: 0, tickets: [], handed: [], waiting: [], pending: [], morning: null, run: null, jobs: [], errors: [], capped: [], notified: [], notes: [...(options.notes ?? [])] };
   if (settings.mode === 'off') {
     out.stopped = 'mode off: nothing runs';
     return out;
@@ -190,6 +211,10 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
     const sinceLast = checkStart - Date.parse(feed.checkedAt ?? '');
     const awakeSince = feed.awakeSince && sinceLast <= pauseMs(settings) ? Date.parse(feed.awakeSince) : checkStart;
     next.awakeSince = iso(awakeSince);
+    // When the last full check began: the watcher's tick runs the next one `watchMinutes` after it (checkKindOf).
+    next.fullAt = iso(checkStart);
+    // Written now, not after the check's run: a full check that crashes part way isn't started again at every tick.
+    if (!dryRun) writeFeed(settings.state, { ...feed, fullAt: next.fullAt });
     const afterMorning = localMinutes(checkStart) >= minutesOf(settings.schedule.morning);
 
     // 1. The sources. One that fails keeps its cursor; after HOLD_MS of failing the gap is reported and it starts again.
@@ -331,16 +356,25 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
         // A failed step that waits for a person is not handed on: the runner would read /usage for nothing. A start is
         // handed on only for a card already in work (a person's move, or a recorded start that goes on).
         const runnable = st.tickets.filter((t) => t.next && !t.locked && !t.hand && !t.next.waits && (t.next.stage !== 'start' || t.next.byHand || t.next.again)).map((t) => t.key);
-        // A ticket a run holds now is looked at again on the next check, so a change made during that run isn't lost.
+        // A ticket a run holds now is looked at again on the next check, so a change made during that run isn't lost. So
+        // is one the forge check handed on whose run may not have taken its lock yet (lib/forge-state.mjs).
+        const forgeHeld = liveHandOnKeys(settings.state, { now: checkStart, ...(io.isAlive ? { isAlive: io.isAlive } : {}) });
         next.pending = st.tickets.filter((t) => t.locked).map((t) => t.key);
         out.handed = wanted;
-        if (runnable.length) {
-          say({ kind: 'watch', keys: runnable, outcome: 'handed', note: `${fresh.length} new event(s); the runner finishes ${runnable.join(', ')}` });
+        const handing = [];
+        for (const key of runnable) {
+          if (forgeHeld.has(key)) next.pending.push(key);
+          // Comments to answer go on once they are quiet (lib/quiet.mjs); until then the ticket waits in `pending`.
+          else if (await waits(st.tickets.find((t) => t.key === key))) next.pending.push(key);
+          else handing.push(key);
+        }
+        if (handing.length) {
+          say({ kind: 'watch', keys: handing, outcome: 'handed', note: `${fresh.length} new event(s); the runner finishes ${handing.join(', ')}` });
           try {
-            out.run = await run({ settings, clients, io: runnerIo, options: { dryRun, trigger: 'watcher', named: runnable, claude } });
+            out.run = await run({ settings, clients, io: runnerIo, options: { dryRun, trigger: 'watcher', named: handing, claude } });
           } catch (e) {
             failed('the run', e);
-            next.pending = [...new Set([...next.pending, ...runnable])];
+            next.pending = [...new Set([...next.pending, ...handing])];
           }
         }
       }
@@ -419,8 +453,25 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
       progressAfterCheck({ settings, now: clock(), notify: io.notify, notifyIo: io.notifyIo ?? {} });
     }
     out.log = log;
-    out.quiet = !fresh.length && !wanted.length && !out.morning && !out.startPass && !out.errors.length && !out.jobs.some((j) => j.due !== false) && out.sources.every((s) => s.outcome !== 'failed' && s.outcome !== 'gap');
+    out.quiet = !fresh.length && !wanted.length && !out.waiting.length && !out.morning && !out.startPass && !out.errors.length && !out.jobs.some((j) => j.due !== false) && out.sources.every((s) => s.outcome !== 'failed' && s.outcome !== 'gap');
     return out;
+
+    // Whether a ticket whose next step answers comments waits for them to be quiet (then it is in `out.waiting`). A
+    // read that fails hands it on, as before the rule.
+    async function waits(t) {
+      if (t?.next?.stage !== 'answerComments') return false;
+      let w;
+      try {
+        w = await commentWait({ settings, clients, ledger: readLedger(settings.state, t.key), prIds: t.next.pr ? [t.next.pr] : null, now: clock() });
+      } catch (e) {
+        out.notes.push(`${t.key}: the comments' times could not be read (${errorText(e)}): handed on`);
+        return false;
+      }
+      if (w.ready || !w.dueAt) return false;
+      out.waiting.push({ key: t.key, until: iso(w.dueAt), why: w.why, new: true });
+      say({ kind: 'watch', keys: [t.key], outcome: 'waits', note: `comments on ${w.prs.join(', ')}: not quiet before ${iso(w.dueAt)} (${w.why}); looked at again at the next check` });
+      return true;
+    }
 
     // The start pass between morning runs: the runner's triage and starts, as a scheduled run makes them (the same
     // limits, allowance and start order), once per change of what a start depends on (`startPrint`). The memory is

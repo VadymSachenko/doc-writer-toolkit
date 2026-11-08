@@ -3,12 +3,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { LISTS, NOW, ago, card, gitRepo, pr, tmp } from './fakes.mjs';
+import { LISTS, NOW, ago, card, gitRepo, pr, rawSettings, tmp } from './fakes.mjs';
 import { ledger, read, world } from './helpers.mjs';
-import { runDaily } from '../lib/runner.mjs';
+import { runDaily, scriptedCalls } from '../lib/runner.mjs';
 import { runRecord } from '../lib/record.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
-import { codeClonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureWorktree, listWorktrees, canon, prsForStep, worktreePath } from '../lib/worktree.mjs';
+import { checkClone, codeClonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureWorktree, listWorktrees, canon, prsForStep, unsavedWork, worktreePath } from '../lib/worktree.mjs';
+import { makeGit } from '../lib/world.mjs';
 import { commandFor } from '../lib/runner.mjs';
 import { spentOf } from '../lib/limits.mjs';
 import { writeLedger } from '../lib/ledger.mjs';
@@ -73,8 +74,8 @@ function withClone(w, { declare = true } = {}) {
     og('add', '-A');
     og('commit', '-q', '-m', 'Fix: by hand');
     og('push', '-q', 'origin', 'ticket-71');
-    // The target clone sees it, as when the owner pushes from it (status reads git there and fetches nothing).
-    clone.g('fetch', '-q', 'origin');
+    // The target clone isn't fetched: the commit reaches it as one made on the forge would, by status's own fetch
+    // (lib/world.mjs, `fetchHeads`) or the worktree's.
     return og('rev-parse', 'HEAD');
   };
   // The owner rewrites the branch (a rebase onto the base, then a force push), as after a squash of the drafts.
@@ -296,7 +297,7 @@ test('AC-5: the close step removes the ticket\'s worktrees with git, prunes, and
 });
 
 // A merged ticket whose worktree holds work no remote has: `make` leaves it so before the close.
-async function closeWith(make, { files = [] } = {}) {
+async function closeWith(make, { files = [], reported = () => [] } = {}) {
   const c = card({ number: 1504, status: 'finalReview' });
   const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 71, head: 'ticket-71', state: 'merged' })] });
   gitRepo(w.root).commit({ '.gitignore': '.flow/\nrepos/\n', 'docs/index.md': '# Host\n' });
@@ -305,7 +306,7 @@ async function closeWith(make, { files = [] } = {}) {
   ensureWorktree(w.settings, p);
   const wt = worktreePath(w.settings, p);
   make(wt, fx, w);
-  ledger(w, c, { stages: { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' }, prs: [{ ...p, number: 71, review: 'sme', stage: 'readyForMerge', pipelineCommits: [fx.h1], readyForMerge: [{ head: fx.h1, at: ago(2) }] }], files: files.map((f) => ({ path: path.relative(w.root, path.join(wt, f)), kind: 'other', bytes: 0, stage: 'write', at: ago(30) })) });
+  ledger(w, c, { stages: { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' }, prs: [{ ...p, number: 71, review: 'sme', stage: 'readyForMerge', pipelineCommits: [fx.h1, ...reported()], readyForMerge: [{ head: fx.h1, at: ago(2) }] }], files: files.map((f) => ({ path: path.relative(w.root, path.join(wt, f)), kind: 'other', bytes: 0, stage: 'write', at: ago(30) })) });
   const trash = path.join(tmp('fake-trash-'), '.Trash');
   const out = await runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: usage, trashDir: trash, now: () => NOW, spawnClaude: () => assert.fail('no model step') }, options: {} });
   assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['close', 'done']]);
@@ -324,6 +325,30 @@ test('AC-5: the close step keeps a worktree with a commit no remote has, and the
   assert.match(tree.kept, /1 commit\(s\) on no remote branch/);
   assert.match(tree.todo, /push origin HEAD:refs\/heads\/ticket-71.*worktree remove --force/);
   assert.match(report, /worktree\(s\) kept: .*1 commit\(s\) on no remote branch.*worktree remove --force/);
+});
+
+test('AC-4: a commit a session reported (pipelineCommits) whose push never reached the forge keeps the worktree', async () => {
+  let mine;
+  const { wt, tree, l } = await closeWith((wt) => { mine = commitIn(wt, 'docs/x/index.md', 'push rejected\n'); }, { reported: () => [mine] });
+  assert.ok(l.prs[0].pipelineCommits.includes(mine), 'the session listed it');
+  assert.equal(fs.existsSync(wt), true);
+  assert.equal(execFileSync('git', ['-C', wt, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), mine, 'the commit is still there');
+  assert.equal(tree.removed, false);
+  assert.match(tree.kept, /1 commit\(s\) on no remote branch/);
+});
+
+test('unsavedWork: a head behind one the forge had was on the forge, with no remote-tracking ref left; one off it was not', () => {
+  const repo = gitRepo(path.join(tmp('unsaved-'), 'repo'));
+  const c1 = repo.commit({ 'a.md': 'a\n' }, 'one');
+  const c2 = repo.commit({ 'a.md': 'b\n' }, 'two');
+  const wt = path.join(path.dirname(repo.dir), 'wt');
+  repo.g('worktree', 'add', '-q', '--detach', wt, c1);
+  assert.deepEqual(unsavedWork(wt, [c2]), [], 'c1 is behind c2, a head the forge had');
+  assert.deepEqual(unsavedWork(wt, [c1]), [], 'the head itself');
+  assert.deepEqual(unsavedWork(wt, []), ['1 commit(s) on no remote branch']);
+  // A session's commit on c1, beside c2: no head the forge had holds it.
+  commitIn(wt, 'a.md', 'session\n');
+  assert.deepEqual(unsavedWork(wt, [c1, c2]), ['2 commit(s) on no remote branch']);
 });
 
 test('AC-5: the close step keeps a worktree with a tracked change, and the report says what to do', async () => {
@@ -384,7 +409,11 @@ test('AC-5: a file on the cleanup.keep list keeps the worktree too; the build ou
   const gone = await closeWith((wt) => put(wt, { 'build/index.html': '<html>', 'build/assets/a.js': 'x', '.docusaurus/client.js': 'x' }), { files: ['build'] });
   assert.deepEqual([gone.tree.removed, gone.tree.kept], [true, undefined]);
   assert.equal(fs.existsSync(gone.wt), false);
-  assert.match(gone.l.stages.close.result.cleanup.kept.find((k) => k.path.endsWith('build')).reason, /^inside the worktree .*, removed with it/);
+  // The recorded build folder went with the worktree: deleted by git, not in the Trash, and said so plainly.
+  const cleanup = gone.l.stages.close.result.cleanup;
+  assert.equal(cleanup.kept.find((k) => k.path.endsWith('build')), undefined, 'not reported as kept');
+  assert.deepEqual(cleanup.deletedWithWorktree.map((d) => [d.path.endsWith('build'), canon(d.worktree)]), [[true, canon(gone.wt)]]);
+  assert.match(gone.report, /deleted with the worktree, not in the Trash: `[^`]*build`/);
 });
 
 // Git quotes a non-ASCII path in line output (`".sources/\320\262…"`), so these are read with `-z`.
@@ -414,6 +443,16 @@ test('listWorktrees reads a worktree path with Cyrillic letters and a double quo
   clone.g('worktree', 'lock', wt);
   const list = listWorktrees(clone.dir);
   assert.deepEqual(list.map((x) => [canon(x.path), x.locked]), [[canon(clone.dir), false], [canon(wt), true]]);
+});
+
+// Git prints a worktree path with a newline raw in line output, so only `-z` keeps it whole.
+test('listWorktrees reads a worktree path with a newline in it as one path', () => {
+  const root = tmp('wt-newline-');
+  const clone = gitRepo(path.join(root, 'repo'));
+  clone.commit({ 'a.md': 'a\n' }, 'base');
+  const wt = path.join(root, '.worktrees', 'two\nlines');
+  clone.g('worktree', 'add', '-q', '--detach', wt, 'HEAD');
+  assert.deepEqual(listWorktrees(clone.dir).map((x) => canon(x.path)), [canon(clone.dir), canon(wt)]);
 });
 
 test('AC-4: a hand commit that changes an image with a Cyrillic name after ready for merge runs the pack again', async () => {
@@ -457,11 +496,19 @@ test('AC-5: a recorded folder that is a repository of its own is kept whole, nev
   assert.deepEqual(read(w, '1503').stages.close.result.cleanup.kept.map((k) => k.reason), ['a repository of its own: kept whole, never split']);
 });
 
-// A ready-for-merge PR, then a hand commit; the session stand-in records each model stage at the head it was given.
-async function afterReady(files) {
+// A ready-for-merge PR, then a commit (a hand edit, or the pipeline's own with `pipeline`); the session stand-in
+// records each model stage at the head it was given. A UA change sends the PR back to the owner's queue with no
+// session (`first`); then, unless `move` is false, the owner moves the card to In translation and the run goes on
+// (`out`, its follow left out).
+async function afterReady(files, { pipeline = false, move = true } = {}) {
   const t = finalReviewTicket({ done: CHAIN, stage: 'readyForMerge' });
   const h2 = t.handEdit(files);
   t.forgePr.headCommit = h2;
+  if (pipeline) {
+    const l0 = read(t.w, '1501');
+    l0.prs[0].pipelineCommits.push(h2);
+    writeLedger(t.w.settings.state, l0);
+  }
   const stages = [];
   const briefs = {};
   const spawnClaude = async (cmd) => {
@@ -471,9 +518,25 @@ async function afterReady(files) {
     await runRecord({ settings: t.w.settings, clients: t.w.clients(), key: '1501', stage, pr: 'guide-docs#71', status: 'done', head: h2, result: {}, now: NOW });
     return { code: 0, stdout: RESULT, stderr: '' };
   };
-  const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1501'] } });
-  return { t, h2, out, stages, briefs, l: read(t.w, '1501') };
+  const go = () => runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1501'] } });
+  const first = await go();
+  const sessionsFirst = stages.length;
+  const back = read(t.w, '1501');
+  if (!move || back.prs[0].stage !== 'finalReview') return { t, h2, first, sessionsFirst, back, out: first, stages, briefs, l: back };
+  t.c.placeId = LISTS.translation.id;
+  const run2 = await go();
+  const out = { ...run2, ran: run2.ran.filter((r) => !(r.stage === 'follow' || (r.stage === 'move' && !r.pr))) };
+  return { t, h2, first, sessionsFirst, back, out, run2, stages, briefs, l: read(t.w, '1501') };
 }
+
+test('a UA change after ready for merge: back to the owner\'s queue with no session; the owner\'s move then re-syncs, and the card comes back', async () => {
+  const { first, sessionsFirst, back, run2, t } = await afterReady({ 'docs/x/index.md': '# Сторінка\n\nВиправлений абзац.\n' });
+  assert.deepEqual(first.ran.map((r) => [r.stage, r.outcome]), [['move', 'done']]);
+  assert.equal(sessionsFirst, 0, 'no model step');
+  assert.deepEqual([back.prs[0].stage, back.left.status, back.prs[0].readyForMerge.length], ['finalReview', 'finalReview', 1]);
+  assert.deepEqual(run2.ran.map((r) => r.stage), ['follow', 'resync', 'readyForMerge', 'move']);
+  assert.equal(t.c.placeId, LISTS.finalReview.id, 'ready again: the card back in the owner\'s queue');
+});
 
 test('AC-4: a hand commit that changes an image after ready for merge: the re-sync, the visual pack, then ready again', async () => {
   const { t, h2, out, l } = await afterReady({ [UK_IMG]: 'uk v2', [EN_IMG]: 'en v2' });
@@ -489,9 +552,124 @@ test('AC-4: a hand commit that changes an image after ready for merge: the re-sy
 test('AC-4: a hand commit that changes only text after ready for merge: the re-sync, then ready again, with no pack', async () => {
   const { t, h2, out, l, briefs } = await afterReady({ 'docs/x/index.md': '# Сторінка\n\nВиправлений абзац.\n' });
   assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['resync', 'done'], ['readyForMerge', 'done']]);
-  assert.ok(briefs.resync.includes(`UA changed since ready for merge at ${t.h1}: re-sync the blocks changed in ${t.h1}..${h2}.`), "the session's brief names the range");
+  assert.ok(briefs.resync.includes(`UA changed since ready for merge at ${t.h1}, and the owner moved the card to In translation: re-sync the blocks changed in ${t.h1}..${h2}, the whole range at once.`), "the session's brief names the range");
   assert.notEqual(l.prs[0].chain.visualPack.head, h2);
   assert.equal(l.prs[0].readyForMerge.at(-1).head, h2);
+});
+
+// What the owner's checkout shows: its branch, the local branches, HEAD, the working tree, a page and the tags, to
+// prove the fetch of status changes none of it.
+const checkoutOf = (clone) => ({
+  branch: clone.g('symbolic-ref', '--short', 'HEAD'),
+  local: clone.g('rev-parse', 'refs/heads/ticket-71'),
+  main: clone.g('rev-parse', 'refs/heads/main'),
+  head: clone.g('rev-parse', 'HEAD'),
+  status: clone.g('status', '--porcelain'),
+  page: fs.readFileSync(path.join(clone.dir, 'docs/x/index.md'), 'utf8'),
+  tags: clone.g('tag', '-l'),
+});
+
+test('AC-1: a commit made on the forge after ready for merge is fetched by status and takes the hand-commit path; the owner\'s checkout is untouched', async () => {
+  const t = finalReviewTicket({ done: CHAIN, stage: 'readyForMerge' });
+  // Pushed from elsewhere (as an edit in the browser would be), and a tag on it, which status never brings in.
+  const h2 = t.handEdit({ 'docs/x/index.md': '# Сторінка\n\nПравка в браузері.\n' });
+  execFileSync('git', ['-C', t.bare, 'tag', 'v-forge', h2]);
+  t.forgePr.headCommit = h2;
+  const before = checkoutOf(t.clone);
+  assert.throws(() => t.clone.g('cat-file', '-e', `${h2}^{commit}`), 'not in the clone yet');
+  // With no fetch, the head is noted as not fetched, and nothing is checked.
+  const noFetch = { ...makeGit(t.w.settings), fetchHeads: () => [] };
+  const blind = await t.w.one('1501', { git: noFetch });
+  assert.equal(blind.next, null);
+  assert.ok(blind.notes.some((n) => /is not fetched here/.test(n)), JSON.stringify(blind.notes));
+  // A check that names other tickets fetches nothing for this one.
+  await t.w.status({ git: makeGit(t.w.settings), only: ['1999'] });
+  assert.throws(() => t.clone.g('cat-file', '-e', `${h2}^{commit}`), 'still not fetched');
+  // Status's own fetch brings the head in: a UA change after ready, back to the owner's queue (D-112).
+  const tk = await t.w.one('1501', { git: makeGit(t.w.settings) });
+  assert.deepEqual([tk.next?.stage, tk.next?.to, tk.next?.uaChanged], ['move', 'finalReview', 1]);
+  assert.equal(t.clone.g('rev-parse', 'refs/remotes/origin/ticket-71'), h2, 'into the remote-tracking ref');
+  assert.deepEqual(checkoutOf(t.clone), before, 'no local branch, HEAD, file or tag changed');
+});
+
+// An image under the UA root is a UA change (back to the owner's queue, then the re-sync and the pack: the `afterReady`
+// cases above, whose hand commits now reach the clone only by status's fetch). One outside it leaves UA alone.
+test('AC-1: a commit made on the forge that changes an image outside the UA root: status fetches it, and the run takes the pack, then ready again, with no re-sync', async () => {
+  const t = finalReviewTicket({ done: CHAIN, stage: 'readyForMerge' });
+  const h2 = t.handEdit({ 'static/img/logo.png': 'logo v2' });
+  t.forgePr.headCommit = h2;
+  const stages = [];
+  const spawnClaude = async (cmd) => {
+    stages.push(stageOf(cmd));
+    await runRecord({ settings: t.w.settings, clients: t.w.clients(), key: '1501', stage: stageOf(cmd), pr: 'guide-docs#71', status: 'done', head: h2, result: {}, now: NOW });
+    return { code: 0, stdout: RESULT, stderr: '' };
+  };
+  const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1501'] } });
+  assert.deepEqual(out.ran.filter((r) => !(r.stage === 'move' && !r.pr)).map((r) => [r.stage, r.outcome]), [['visualPack', 'done'], ['readyForMerge', 'done']]);
+  assert.deepEqual(stages, ['visualPack']);
+  assert.equal(read(t.w, '1501').prs[0].readyForMerge.at(-1).head, h2);
+});
+
+test('fetchHeads: one fetch per clone and branch for a check; an origin that can\'t be reached leaves the head noted, and nothing throws', async () => {
+  const t = finalReviewTicket({ done: CHAIN, stage: 'readyForMerge' });
+  const h2 = t.handEdit({ 'docs/x/index.md': '# Сторінка\n\nЩе правка.\n' });
+  t.forgePr.headCommit = h2;
+  const git = makeGit(t.w.settings);
+  const target = t.w.settings.targets[0];
+  const wanted = [{ target, branch: 'ticket-71', base: 'main', head: h2 }];
+  assert.deepEqual(git.fetchHeads(wanted).map((f) => [f.fetched, f.refs]), [[true, ['+refs/heads/main:refs/remotes/origin/main', '+refs/heads/ticket-71:refs/remotes/origin/ticket-71']]]);
+  assert.deepEqual(git.fetchHeads(wanted), [], 'not again in the same check');
+  assert.deepEqual(makeGit(t.w.settings).fetchHeads(wanted), [], 'a head the clone has is never fetched');
+  // Offline: the next commit can't be fetched; the rule notes it as before.
+  const h3 = t.handEdit({ 'docs/x/index.md': '# Сторінка\n\nОфлайн.\n' });
+  t.forgePr.headCommit = h3;
+  t.clone.g('remote', 'set-url', 'origin', path.join(tmp('gone-'), 'nowhere.git'));
+  const runTried = new Set();
+  assert.deepEqual(makeGit(t.w.settings, { asked: runTried }).fetchHeads([{ ...wanted[0], head: h3 }]).map((f) => f.fetched), [false]);
+  assert.deepEqual(makeGit(t.w.settings, { asked: runTried }).fetchHeads([{ ...wanted[0], head: h3 }]), [], 'a run shares one set: not tried again in it');
+  const tk = await t.w.one('1501', { git: makeGit(t.w.settings) });
+  assert.ok(tk.notes.some((n) => /is not fetched here/.test(n)), JSON.stringify(tk.notes));
+});
+
+// The forge's "Update branch" after ready for merge: the base, with another PR's UA page, merged into the PR's branch.
+function updateBranch(t, { ownEdit = false } = {}) {
+  t.clone.g('checkout', '-q', 'main');
+  t.clone.commit({ 'docs/y/other.md': '# Інша сторінка\n' }, 'Another PR, merged');
+  t.clone.g('push', '-q', 'origin', 'main');
+  t.clone.g('checkout', '-q', 'ticket-71');
+  t.clone.g('merge', '-q', '--no-edit', 'main');
+  if (ownEdit) t.clone.commit({ 'docs/x/index.md': '# Сторінка\n\nПравка власника.\n' }, 'Fix: by hand');
+  t.clone.g('push', '-q', 'origin', 'ticket-71');
+  return t.clone.g('rev-parse', 'HEAD');
+}
+
+test('a merge of the base into a ready PR (the forge\'s "Update branch") that brings another PR\'s UA page keeps it ready: no bounce to the owner\'s queue', async () => {
+  const t = finalReviewTicket({ done: CHAIN, stage: 'readyForMerge' });
+  t.forgePr.headCommit = updateBranch(t);
+  const tk = await t.w.one('1501', { git: makeGit(t.w.settings) });
+  assert.deepEqual([tk.next?.stage, tk.next?.head], ['readyForMerge', t.forgePr.headCommit]);
+  // The plain count would have taken the other PR's page as this one's.
+  assert.deepEqual(makeGit(t.w.settings).changedUnder(t.w.settings.targets[0], t.h1, t.forgePr.headCommit, ['docs/']), ['docs/y/other.md']);
+  assert.deepEqual(makeGit(t.w.settings).changedUnder(t.w.settings.targets[0], t.h1, t.forgePr.headCommit, ['docs/'], 'main'), []);
+});
+
+test('a merge of the base plus the owner\'s edit of a PR page after ready: back to the owner\'s queue, counting only the PR\'s page', async () => {
+  const t = finalReviewTicket({ done: CHAIN, stage: 'readyForMerge' });
+  t.forgePr.headCommit = updateBranch(t, { ownEdit: true });
+  const tk = await t.w.one('1501', { git: makeGit(t.w.settings) });
+  assert.deepEqual([tk.next?.stage, tk.next?.to, tk.next?.uaChanged], ['move', 'finalReview', 1]);
+});
+
+test('changedUnder and pagesOf read a UA page with a Cyrillic name (which git quotes in line output)', () => {
+  const t = finalReviewTicket({ done: CHAIN, stage: 'readyForMerge' });
+  const page = 'docs/x/оплата "нова".md';
+  const h2 = t.clone.commit({ [page]: '# Оплата\n' }, 'a Cyrillic page');
+  t.clone.g('push', '-q', 'origin', 'HEAD:main');
+  t.clone.g('fetch', '-q', 'origin');
+  const git = makeGit(t.w.settings);
+  const target = t.w.settings.targets[0];
+  assert.deepEqual(git.changedUnder(target, t.h1, h2, ['docs/']), [page]);
+  assert.ok(git.pagesOf(target).includes('x/оплата "нова"'), JSON.stringify(git.pagesOf(target)));
 });
 
 test('AC-3: record align is refused while a UA image changed without its EN counterpart, naming it; both changed passes', async () => {
@@ -606,6 +784,46 @@ test('after the chain: the card goes back to the owner\'s queue with one comment
   assert.deepEqual((await t.w.one('1501')).steps, []);
 });
 
+test('the end of the chain gives a PR its final review label back, at once, while the card waits for its other PR', async () => {
+  const withTranslation = { targets: rawSettings().targets.map((x) => (x.id === 'guide' ? { ...x, labels: { ...x.labels, translation: 'In translation' } } : x)) };
+  const t = finalReviewTicket({ done: CHAIN, extra: withTranslation });
+  t.forgePr.labels = ['In translation'];
+  // A second PR of the ticket, still in the chain: the card stays in In translation.
+  const second = pr({ repo: 'guide-docs', number: 72, head: 'ticket-72', labels: ['In translation'] });
+  t.w.forge.prs.push(second);
+  const l0 = read(t.w, '1501');
+  l0.prs.push({ ...l0.prs[0], number: 72, branch: 'ticket-72', pipelineCommits: [], chain: {} });
+  writeLedger(t.w.settings.state, l0);
+  assert.deepEqual(scriptedCalls({ stage: 'readyForMerge', pr: 'guide-docs#71', keys: ['1501'] }, l0, t.w.settings), ['forge set-stage-label --target guide --number 71 --stage finalReview']);
+  const io = {
+    readUsage: usage,
+    now: () => NOW,
+    ensureWorktree: (s, p) => (p.number === 72 ? { repo: p.repo, branch: p.branch, path: '/nowhere', push: '', linked: [], missing: [], notes: [], stuck: [] } : ensureWorktree(s, p)),
+    spawnClaude: async () => ({ code: 1, stdout: '', stderr: 'stop here' }),
+  };
+  const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io, options: { trigger: 'watcher', named: ['1501'] } });
+  assert.deepEqual(out.ran.map((r) => r.stage).slice(0, 1), ['readyForMerge']);
+  assert.ok(!out.ran.some((r) => r.stage === 'move'), 'the card stays with the PR still in the chain');
+  assert.equal(t.c.placeId, LISTS.translation.id);
+  assert.deepEqual([t.forgePr.labels, second.labels], [['In final review'], ['In translation']]);
+  const l = read(t.w, '1501');
+  assert.deepEqual(l.prs.map((p) => [p.stage, p.label ?? null]), [['readyForMerge', 'In final review'], ['translation', null]]);
+});
+
+test('a label the forge refuses at ready for merge is a warning: the step is done, its record stands', async () => {
+  const withTranslation = { targets: rawSettings().targets.map((x) => (x.id === 'guide' ? { ...x, labels: { ...x.labels, translation: 'In translation' } } : x)) };
+  const t = finalReviewTicket({ done: CHAIN, extra: withTranslation });
+  t.forgePr.labels = ['In translation'];
+  t.w.forge.changeLabels = async () => {
+    throw new Error('the label request failed');
+  };
+  const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude: async () => assert.fail('a session started') }, options: { trigger: 'watcher', named: ['1501'] } });
+  const ready = out.ran.find((r) => r.stage === 'readyForMerge');
+  assert.equal(ready.outcome, 'done');
+  assert.match(ready.warnings[0], /^guide-docs#71: the stage label for 'readyForMerge' was not set: .*the label request failed/);
+  assert.equal(read(t.w, '1501').prs[0].stage, 'readyForMerge');
+});
+
 test('two PRs: the card goes back only when both are ready', async () => {
   const c = card({ number: 1505, status: 'translation' });
   const w = world({ cards: [c], prs: [pr({ repo: 'portal-docs', number: 91, head: 'a' }), pr({ repo: 'portal-docs', number: 92, head: 'b' })] });
@@ -617,36 +835,74 @@ test('two PRs: the card goes back only when both are ready', async () => {
 
 // ------------------------------------------------------------------ a UA change after ready for merge
 
-// An answer to a comment at ready for merge: the pipeline's own commit, so in `pipelineCommits`.
-async function answeredAfterReady(files) {
-  const t = finalReviewTicket({ done: CHAIN, stage: 'readyForMerge' });
-  const h2 = t.handEdit(files);
-  t.forgePr.headCommit = h2;
-  const l0 = read(t.w, '1501');
-  l0.prs[0].pipelineCommits.push(h2);
-  writeLedger(t.w.settings.state, l0);
-  const stages = [];
-  const spawnClaude = async (cmd) => {
-    const stage = stageOf(cmd);
-    stages.push(stage);
-    await runRecord({ settings: t.w.settings, clients: t.w.clients(), key: '1501', stage, pr: 'guide-docs#71', status: 'done', head: h2, result: {}, now: NOW });
-    return { code: 0, stdout: RESULT, stderr: '' };
-  };
-  const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1501'] } });
-  return { t, h2, out, stages, l: read(t.w, '1501') };
-}
+// An answer to a comment at ready for merge is the pipeline's own commit, so in `pipelineCommits` (`pipeline`).
 
-test('a commit of the pipeline that changes UA after ready for merge: the re-sync, then ready for the new head', async () => {
-  const { h2, out, l } = await answeredAfterReady({ 'docs/x/index.md': '# Сторінка\n\nВиправлено за коментарем.\n' });
+test('a commit of the pipeline that changes UA after ready for merge: the owner\'s queue first; after the move, the re-sync, then ready for the new head', async () => {
+  const { h2, first, sessionsFirst, out, l } = await afterReady({ 'docs/x/index.md': '# Сторінка\n\nВиправлено за коментарем.\n' }, { pipeline: true });
+  assert.deepEqual([first.ran.map((r) => r.stage), sessionsFirst], [['move'], 0]);
   assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['resync', 'done'], ['readyForMerge', 'done']]);
   assert.equal(l.prs[0].readyForMerge.at(-1).head, h2);
   assert.equal(l.prs[0].stage, 'readyForMerge');
 });
 
 test('a commit of the pipeline that adds only heading ids after ready for merge keeps the PR ready (the id-only change)', async () => {
-  const { out, l, t } = await answeredAfterReady({ 'docs/x/index.md': '# Сторінка {/* #page */}\n\nНовий абзац.\n' });
+  const { out, l, t } = await afterReady({ 'docs/x/index.md': '# Сторінка {/* #page */}\n\nНовий абзац.\n' }, { pipeline: true });
   assert.deepEqual(out.ran, []);
+  assert.equal(l.prs[0].stage, 'readyForMerge');
   assert.equal(l.prs[0].readyForMerge.at(-1).head, t.h1);
+});
+
+test('AC-5: several rounds of UA changes after ready for merge, then one move to In translation: one re-sync over the whole range', async () => {
+  const { t, h2, stages, briefs } = await afterReady({ 'docs/x/index.md': '# Сторінка\n\nПерший раунд.\n' }, { pipeline: true, move: false });
+  // A second round in the owner's queue: an answer to another comment, then the owner's own edit. Nothing runs.
+  const h3 = t.handEdit({ 'docs/x/index.md': '# Сторінка\n\nДругий раунд.\n' });
+  const l0 = read(t.w, '1501');
+  l0.prs[0].pipelineCommits.push(h3);
+  writeLedger(t.w.settings.state, l0);
+  const h4 = t.handEdit({ 'docs/x/index.md': '# Сторінка\n\nТретій раунд, рукою.\n' });
+  t.forgePr.headCommit = h4;
+  const spawnClaude = async (cmd) => {
+    const stage = stageOf(cmd);
+    stages.push(stage);
+    briefs[stage] = briefOf(cmd);
+    await runRecord({ settings: t.w.settings, clients: t.w.clients(), key: '1501', stage, pr: 'guide-docs#71', status: 'done', head: t.forgePr.headCommit, result: {}, now: NOW });
+    return { code: 0, stdout: RESULT, stderr: '' };
+  };
+  const go = () => runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1501'] } });
+  assert.deepEqual((await go()).ran, [], 'in the owner\'s queue, a new round starts nothing');
+  assert.deepEqual(stages, []);
+  t.c.placeId = LISTS.translation.id;
+  const out = await go();
+  assert.deepEqual(out.ran.map((r) => r.stage), ['follow', 'resync', 'readyForMerge', 'move']);
+  assert.deepEqual(stages, ['resync'], 'one session');
+  assert.ok(briefs.resync.includes(`${t.h1}..${h4}`), 'from the head marked ready to the last round');
+  assert.notEqual(h2, h4);
+  const l = read(t.w, '1501');
+  assert.deepEqual(l.prs[0].readyForMerge.map((r) => r.head), [t.h1, h4]);
+  assert.equal(l.prs[0].approval.head, h4, 'the move approved what the owner read');
+});
+
+test('a hand edit at ready for merge and the owner\'s move in the same check: the move takes the PR along, and the re-sync runs', async () => {
+  const t = finalReviewTicket({ done: CHAIN, stage: 'readyForMerge' });
+  const h2 = t.handEdit({ 'docs/x/index.md': '# Сторінка\n\nВиправлено й одразу передано.\n' });
+  t.forgePr.headCommit = h2;
+  t.c.placeId = LISTS.translation.id;
+  const stages = [];
+  const spawnClaude = async (cmd) => {
+    stages.push(stageOf(cmd));
+    await runRecord({ settings: t.w.settings, clients: t.w.clients(), key: '1501', stage: stageOf(cmd), pr: 'guide-docs#71', status: 'done', head: h2, result: {}, now: NOW });
+    return { code: 0, stdout: RESULT, stderr: '' };
+  };
+  const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1501'] } });
+  assert.deepEqual(out.ran.map((r) => r.stage), ['follow', 'resync', 'readyForMerge', 'move'], 'not sent back to the owner, who just moved it');
+  assert.deepEqual(stages, ['resync']);
+  assert.equal(t.c.placeId, LISTS.finalReview.id);
+});
+
+test('a hand commit after ready for merge that leaves UA alone: ready for its head, with no session', async () => {
+  const { first, sessionsFirst, l, h2 } = await afterReady({ [`${EN}/x/index.md`]: '# Page\n\nEdited by hand.\n' });
+  assert.deepEqual([first.ran.map((r) => r.stage), sessionsFirst], [['readyForMerge'], 0]);
+  assert.equal(l.prs[0].readyForMerge.at(-1).head, h2);
 });
 
 // ------------------------------------------------------------------ code read at a fetched commit
@@ -738,4 +994,139 @@ test('a writer\'s session gets the checkout and the commit; every role is denied
   const translator = commandFor({ stage: 'build', role: 'translator', keys: ['1'], group: '1', pr: 'x#1', worktrees: [] }, w.settings, { model: 'm', agentsPath: '/a.json', roots: [] });
   assert.ok(!translator.args.includes(tree));
   assert.ok(translator.args.includes(`Read(//${clone.replace(/^\/+/, '')}/**)`));
+});
+
+test('an answer pushed while the owner moved a ready card to In translation is not taken along: the owner reads it first, nothing is translated', async () => {
+  const t = finalReviewTicket({ done: CHAIN, stage: 'readyForMerge' });
+  // The answer session's commit (the pipeline's own: in pipelineCommits), pushed while the owner moved the card.
+  const h2 = t.handEdit({ 'docs/x/index.md': '# Сторінка\n\nКоротше, як просив власник.\n' });
+  t.forgePr.headCommit = h2;
+  const l0 = read(t.w, '1501');
+  l0.prs[0].pipelineCommits.push(h2);
+  writeLedger(t.w.settings.state, l0);
+  t.c.placeId = LISTS.translation.id;
+  const stages = [];
+  const spawnClaude = async (cmd) => {
+    stages.push(stageOf(cmd));
+    await runRecord({ settings: t.w.settings, clients: t.w.clients(), key: '1501', stage: stageOf(cmd), pr: 'guide-docs#71', status: 'done', head: h2, result: {}, now: NOW });
+    return { code: 0, stdout: RESULT, stderr: '' };
+  };
+  const go = () => runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1501'] } });
+  const out = await go();
+  assert.deepEqual(out.ran.map((r) => [r.stage, r.pr ?? null, r.outcome]), [['follow', null, 'done'], ['move', 'guide-docs#71', 'done']]);
+  assert.deepEqual(stages, [], 'no re-sync of a rewrite the owner never read');
+  assert.ok(!t.w.tracker.log.some((e) => e[0] === 'comment'), 'not said ready: it goes back to the owner');
+  const l = read(t.w, '1501');
+  assert.equal(l.prs[0].stage, 'finalReview');
+  assert.equal(l.prs[0].approval ?? null, null, 'the move approved nothing it did not see');
+  assert.equal(t.c.placeId, LISTS.finalReview.id, "the card back in the owner's queue");
+  // The owner reads it and moves the card again: now the re-sync runs.
+  t.c.placeId = LISTS.translation.id;
+  const again = await go();
+  assert.deepEqual(again.ran.map((r) => r.stage), ['follow', 'resync', 'readyForMerge', 'move']);
+  assert.equal(read(t.w, '1501').prs[0].approval.head, h2);
+});
+
+// A step with no worktree (the plan, the answers, a start) reads the target clones as they stand: one off its base or
+// behind its origin is said in the brief, with how to read the base; nothing is held for it.
+function planTicket({ onBase = true, behind = 0, status = 'inProgress', stages = { start: 'done' }, left = 'same', targets = ['guide'] } = {}) {
+  const c = card({ number: 1601, status });
+  const w = world({ cards: [c] });
+  const fx = withClone(w);
+  if (onBase) fx.clone.g('checkout', '-q', 'main');
+  // Merged on the forge: on origin, not in the clone's own main.
+  if (behind) {
+    for (let i = 0; i < behind; i++) fx.clone.commit({ [`docs/merged-${i}.md`]: '# Злито\n' }, `merged ${i}`);
+    fx.clone.g('push', '-q', 'origin', 'main');
+    fx.clone.g('reset', '-q', '--hard', `HEAD~${behind}`);
+  }
+  ledger(w, c, { stages, left, triage: { verdict: 'docs-required', targets, size: 'edit' } });
+  return { w, c, ...fx };
+}
+
+const briefsOf = async (t) => {
+  const briefs = [];
+  const spawnClaude = async (cmd) => (briefs.push(briefOf(cmd)), { code: 0, stdout: RESULT, stderr: '' });
+  const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1601'] } });
+  return { out, briefs };
+};
+
+test('a plan step with the target clone on another branch runs: the brief names the branch and says to read the base, never the working tree', async () => {
+  const t = planTicket({ onBase: false });
+  const before = t.clone.g('rev-parse', 'HEAD');
+  const { briefs } = await briefsOf(t);
+  assert.ok(briefs.length >= 1, 'the session started: an off-base clone holds nothing');
+  assert.match(briefs[0], /Target clones, read as they stand \(the runner never moves them\):\n- guide-docs: .*guide-docs; on the branch ticket-71, not on its base main: its files are that branch's, not the site's; read pages with `git -C .*guide-docs show origin\/main:<path>`, never its working tree\./);
+  assert.deepEqual([t.clone.g('symbolic-ref', '--short', 'HEAD'), t.clone.g('rev-parse', 'HEAD')], ['ticket-71', before], 'the runner never moves the clone');
+  // A detached HEAD is off its base too.
+  t.clone.g('checkout', '-q', '--detach', 'main');
+  const c = checkClone(t.w.settings, t.w.settings.targets[0]);
+  assert.equal(c.off, true);
+  assert.match(c.notes.join(' '), /at a detached HEAD \(\w+\), not on its base main/);
+});
+
+test('a start of an owner\'s card in the ready status names the clone of the target its label names, and a ticket that names no target gets no clone note', async () => {
+  const c = card({ number: 1602, status: 'ready', labels: ['Guide'] });
+  const w = world({ cards: [c] });
+  withClone(w);
+  const briefs = [];
+  await runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude: async (cmd) => (briefs.push(briefOf(cmd)), { code: 0, stdout: RESULT, stderr: '' }) }, options: {} });
+  assert.deepEqual(read(w, '1602').triage.targets, ['guide'], 'the start recorded the target before the check');
+  assert.match(briefs[0], /Stage `start`[\s\S]*- guide-docs: .*on the branch ticket-71, not on its base main/);
+  const none = planTicket({ onBase: false, targets: [] });
+  const { briefs: b2 } = await briefsOf(none);
+  assert.doesNotMatch(b2[0], /Target clones/, 'no target named: no clone checked');
+});
+
+test('a plan step with the target clone on its base but behind origin runs, and the brief says how far behind and how to read a merged page', async () => {
+  const t = planTicket({ behind: 2 });
+  const briefs = [];
+  const spawnClaude = async (cmd) => {
+    briefs.push(briefOf(cmd));
+    return { code: 0, stdout: RESULT, stderr: '' };
+  };
+  await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1601'] } });
+  assert.ok(briefs.length >= 1, 'the session started');
+  assert.match(briefs[0], /Target clones, read as they stand \(the runner never moves them\):\n- guide-docs: .*guide-docs; 2 commit\(s\) behind origin\/main: a page merged since is not in its files; read pages with `git -C .*guide-docs show origin\/main:<path>`, never its working tree\./);
+  assert.equal(t.clone.g('rev-list', '--count', 'HEAD..origin/main'), '2', 'still behind: never pulled');
+  // At origin's base, the brief says nothing of the clone.
+  const u = planTicket();
+  const seen = [];
+  await runDaily({ settings: u.w.settings, clients: u.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude: async (cmd) => (seen.push(briefOf(cmd)), { code: 0, stdout: RESULT, stderr: '' }) }, options: { trigger: 'watcher', named: ['1601'] } });
+  assert.doesNotMatch(seen[0], /Target clones/);
+});
+
+test('the translation label on a ready PR: taken along by the owner\'s move it is in translation for the re-sync and back in the final review at ready; sent back by row 8 it never leaves the final review', async () => {
+  const withTranslation = { targets: rawSettings().targets.map((x) => (x.id === 'guide' ? { ...x, labels: { ...x.labels, translation: 'In translation' } } : x)) };
+  for (const pipeline of [false, true]) {
+    const t = finalReviewTicket({ done: CHAIN, stage: 'readyForMerge', extra: withTranslation });
+    t.forgePr.labels = ['In final review'];
+    const h2 = t.handEdit({ 'docs/x/index.md': `# Сторінка\n\nВиправлено${pipeline ? ' відповіддю' : ''}.\n` });
+    t.forgePr.headCommit = h2;
+    if (pipeline) {
+      const l0 = read(t.w, '1501');
+      l0.prs[0].pipelineCommits.push(h2);
+      writeLedger(t.w.settings.state, l0);
+    }
+    t.c.placeId = LISTS.translation.id;
+    const seen = [];
+    const spawnClaude = async (cmd) => {
+      seen.push([stageOf(cmd), [...t.forgePr.labels]]);
+      await runRecord({ settings: t.w.settings, clients: t.w.clients(), key: '1501', stage: stageOf(cmd), pr: 'guide-docs#71', status: 'done', head: h2, result: {}, now: NOW });
+      return { code: 0, stdout: RESULT, stderr: '' };
+    };
+    const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1501'] } });
+    const changes = t.w.forge.log.filter((e) => e[0] === 'changeLabels').map((e) => [e[3], e[4]]);
+    if (!pipeline) {
+      assert.deepEqual(out.ran.map((r) => r.stage), ['follow', 'resync', 'readyForMerge', 'move']);
+      assert.deepEqual(seen, [['resync', ['In translation']]], 'taken along: in translation for the re-sync');
+      assert.deepEqual(changes, [[['In translation'], ['In final review']], [['In final review'], ['In translation']]]);
+    } else {
+      // An answer the owner hasn't read: not taken, back to the owner's queue (row 8), the label untouched.
+      assert.deepEqual(out.ran.map((r) => [r.stage, r.pr ?? null]), [['follow', null], ['move', 'guide-docs#71']]);
+      assert.deepEqual(seen, []);
+      assert.deepEqual(changes, [], 'never in translation');
+    }
+    assert.deepEqual([t.forgePr.labels, read(t.w, '1501').prs[0].label], [['In final review'], 'In final review']);
+  }
 });

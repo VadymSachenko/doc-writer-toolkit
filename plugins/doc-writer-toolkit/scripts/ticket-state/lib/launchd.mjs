@@ -6,10 +6,14 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { CliError } from './errors.mjs';
 import { watchDir } from './feed.mjs';
+import { tickSecondsOf } from './settings.mjs';
 
 // The LaunchAgent that starts the watcher (macOS, launchd): one per host, in ~/Library/LaunchAgents, running
-// `watcher.mjs --quiet` every `schedule.watchMinutes`. launchd runs a missed interval once after the Mac wakes, and never
-// two copies of one job at once. The plist holds paths only: no token, no key (it is a plain file); the watcher reads
+// `watcher.mjs --quiet` at each tick: every `schedule.forgeSeconds` the forge check, and every `schedule.watchMinutes`
+// the full check started as a process of its own (lib/forge-watch.mjs, D-126); without a forge check, the full check
+// every `watchMinutes`, in the tick. One agent: install, uninstall and the one-agent-per-host cleanup stay as they were.
+// `AbandonProcessGroup`: a detached full check or run outlives its tick. launchd runs a missed interval once after the
+// Mac wakes, and never two copies of the tick at once. The plist holds paths only: no token, no key (it is a plain file); the watcher reads
 // the token from `schedule.tokenFile` itself. The morning run needs no agent of its own: the watcher starts it at the
 // first check after `schedule.morning`.
 
@@ -44,6 +48,8 @@ export function plistText({ label, programArguments, workingDirectory, intervalS
     `  <key>WorkingDirectory</key>\n  <string>${esc(workingDirectory)}</string>`,
     `  <key>StartInterval</key>\n  <integer>${intervalSeconds}</integer>`,
     '  <key>RunAtLoad</key>\n  <true/>',
+    // The full check and the forge check's runs go on in processes of their own after the tick ends (lib/forge-watch.mjs).
+    '  <key>AbandonProcessGroup</key>\n  <true/>',
     '  <key>ProcessType</key>\n  <string>Background</string>',
     '  <key>EnvironmentVariables</key>',
     '  <dict>',
@@ -78,7 +84,7 @@ export function agentFor(settings, { noop = false, io = {} } = {}) {
   const args = [node, io.watcher ?? WATCHER, noop ? '--noop' : '--quiet', '--root', settings.root, ...(settings.file && !noop ? ['--settings', settings.file] : []), ...(found.claude && !noop ? ['--claude', found.claude] : [])];
   const logFile = path.join(watchDir(settings.state), noop ? 'launchd-noop.log' : 'launchd.log');
   const file = path.join(agentsDirOf(io), `${label}.plist`);
-  const text = plistText({ label, programArguments: args, workingDirectory: settings.root, intervalSeconds: Math.round(settings.schedule.watchMinutes * 60), env: { PATH: [...new Set(dirs)].join(':'), HOME: io.home ?? os.homedir() }, logFile });
+  const text = plistText({ label, programArguments: args, workingDirectory: settings.root, intervalSeconds: tickSecondsOf(settings), env: { PATH: [...new Set(dirs)].join(':'), HOME: io.home ?? os.homedir() }, logFile });
   return { label, file, text, logFile, missing, optionalMissing, programArguments: args };
 }
 
@@ -89,10 +95,29 @@ const defaultLaunchctl = (args) => {
 
 const domainOf = (io) => `gui/${io.uid ?? process.getuid()}`;
 
+// The interval an installed plist runs at (s), or null.
+export function intervalOf(file) {
+  try {
+    const m = /<key>StartInterval<\/key>\s*<integer>(\d+)<\/integer>/.exec(fs.readFileSync(file, 'utf8'));
+    return m ? Number(m[1]) : null;
+  } catch {
+    return null;
+  }
+}
+
 export function agentState(label, file, io = {}) {
   const launchctl = io.launchctl ?? defaultLaunchctl;
   const loaded = launchctl(['print', `${domainOf(io)}/${label}`]).status === 0;
-  return { label, file, fileExists: fs.existsSync(file), loaded };
+  const fileExists = fs.existsSync(file);
+  return { label, file, fileExists, loaded, ...(fileExists ? { everySeconds: intervalOf(file) } : {}) };
+}
+
+// `status` with the settings when they load: the interval they ask for, and whether the plist needs an install again.
+export function wantedInterval(state, settings) {
+  if (!settings) return state;
+  const want = tickSecondsOf(settings);
+  const forge = want < Math.round(settings.schedule.watchMinutes * 60);
+  return { ...state, wantSeconds: want, checks: forge ? `the forge check every ${want} s, the full check every ${settings.schedule.watchMinutes} min` : `the full check every ${settings.schedule.watchMinutes} min`, ...(state.fileExists ? { installAgain: state.everySeconds !== want } : {}) };
 }
 
 export function install(settings, { noop = false, io = {} } = {}) {
@@ -113,7 +138,7 @@ export function install(settings, { noop = false, io = {} } = {}) {
     fs.rmSync(agent.file, { force: true });
     throw new CliError(`launchctl bootstrap failed: ${boot.stderr.trim() || `exit ${boot.status}`}; the plist was removed`, { code: 1 });
   }
-  return { installed: true, noop, ...agentState(agent.label, agent.file, io), ...(agent.optionalMissing.length ? { optionalMissing: agent.optionalMissing } : {}), logFile: agent.logFile, programArguments: agent.programArguments, everySeconds: Math.round(settings.schedule.watchMinutes * 60) };
+  return { installed: true, noop, ...agentState(agent.label, agent.file, io), ...(agent.optionalMissing.length ? { optionalMissing: agent.optionalMissing } : {}), logFile: agent.logFile, programArguments: agent.programArguments, everySeconds: tickSecondsOf(settings), fullEveryMinutes: settings.schedule.watchMinutes };
 }
 
 // The agents of a host: the one its label names, and any other of ours whose plist starts the watcher for this root

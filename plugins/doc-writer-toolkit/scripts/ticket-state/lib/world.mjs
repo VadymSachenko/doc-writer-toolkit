@@ -12,8 +12,9 @@ import { prId } from './ledger.mjs';
 import { isIdOnlyChange } from '../../doc-align/lib/idonly.mjs';
 
 // What the ticket flow reads: the tracker and the forge through their modules (this script composes no tracker or
-// forge request itself), and git, read only, in the target repos the settings name. Every request the modules send is
-// traced (method and path, never a query string or a credential), so a run can show it sent nothing but reads.
+// forge request itself), and git in the target repos the settings name: reads, and one fetch of an open PR's branch into
+// its remote-tracking ref when the forge's head isn't there yet (`fetchHeads`). Every request the modules send is traced
+// (method and path, never a query string or a credential), so a run can show it sent nothing but reads.
 
 export function makeClients({ settings, env = process.env, io = {}, dryRun = false }) {
   const trace = { tracker: [], forge: [] };
@@ -100,7 +101,7 @@ export function makeClients({ settings, env = process.env, io = {}, dryRun = fal
   };
 }
 
-// ------------------------------------------------------------------ git, read only
+// ------------------------------------------------------------------ git: reads, and the fetch of a missing head
 
 const gitOut = (cwd, args) => {
   try {
@@ -110,9 +111,22 @@ const gitOut = (cwd, args) => {
   }
 };
 
+// The fetch of `fetchHeads`: it never waits for a password (one that needs it fails) and gives up after 30 seconds.
+const gitFetch = (cwd, refspecs) => {
+  try {
+    execFileSync('git', ['-C', cwd, 'fetch', '-q', '--no-tags', '--no-write-fetch-head', 'origin', ...refspecs], { stdio: ['ignore', 'ignore', 'ignore'], timeout: 30000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+// A `-z` list of paths (`diff --name-only`, `ls-tree --name-only`): never quoted, so a non-ASCII name is read as it is.
+const zList = (out) => (out ?? '').split('\0').filter(Boolean);
+
 export const IMAGE = /\.(png|jpe?g|gif|webp|avif|svg)$/i;
 
-export function makeGit(settings) {
+export function makeGit(settings, opts = {}) {
   const repoPath = (target) => (target?.path ? path.resolve(settings.root, target.path) : null);
   const hasCommit = (cwd, sha) => Boolean(sha) && gitOut(cwd, ['cat-file', '-e', `${sha}^{commit}`]) !== null;
   const baseRef = (cwd, base) => {
@@ -120,8 +134,42 @@ export function makeGit(settings) {
     return null;
   };
   const pages = new Map();
+  // The fetches tried: one reader per check, or one set shared by every status of a run (`opts.asked`).
+  const asked = opts.asked ?? new Set();
+  // The files of a change between two heads of a PR that are the PR's own: a file the PR's diff against its base held at
+  // `from` or holds at `to` (each against its merge-base with `origin/<base>`). A file that changed only because the base
+  // was merged into the branch (the forge's "Update branch": other PRs' pages from the base) is not the PR's change. With
+  // no `origin/<base>` here (never the owner's local base, which may be anywhere), or a head already on it, every file
+  // counts.
+  const ownOnly = (cwd, from, to, base, files) => {
+    const ref = base && gitOut(cwd, ['rev-parse', '--verify', '-q', `refs/remotes/origin/${base}`]) !== null ? `refs/remotes/origin/${base}` : null;
+    const mbFrom = ref && gitOut(cwd, ['merge-base', from, ref])?.trim();
+    const mbTo = ref && gitOut(cwd, ['merge-base', to, ref])?.trim();
+    if (!mbFrom || !mbTo || mbFrom === from || mbTo === to) return files;
+    const blob = (c, f) => gitOut(cwd, ['rev-parse', '-q', '--verify', `${c}:${f}`])?.trim() ?? null;
+    return files.filter((f) => blob(from, f) !== blob(mbFrom, f) || blob(to, f) !== blob(mbTo, f));
+  };
   return {
     repoPath,
+    // The forge's heads of the open PRs, brought into the target clones: per clone, one fetch of the branches whose head
+    // it doesn't have, with their base, into the remote-tracking refs only (`+refs/heads/<b>:refs/remotes/origin/<b>`,
+    // the worktree's own fetch, lib/worktree.mjs). Never a local branch, the checkout or its files. So a commit made on
+    // the forge (a suggestion accepted in the PR, an upload, an edit in the browser) is read like one pushed from the
+    // clone. At most once per clone and branch for this reader's `asked` set (a check, or a whole run). A fetch that fails leaves the clone as it was,
+    // and the rule notes the head as not fetched. `wanted`: [{ target, branch, base, head }]; returns [{ clone, refs, fetched }].
+    fetchHeads(wanted) {
+      const byClone = new Map();
+      for (const w of wanted ?? []) {
+        const cwd = repoPath(w.target);
+        const key = `${cwd}\0${w.branch}`;
+        if (!cwd || !w.branch || !w.head || asked.has(key) || !fs.existsSync(cwd) || hasCommit(cwd, w.head)) continue;
+        asked.add(key);
+        const refs = byClone.get(cwd) ?? new Set();
+        for (const b of [w.base, w.branch]) if (b) refs.add(`+refs/heads/${b}:refs/remotes/origin/${b}`);
+        byClone.set(cwd, refs);
+      }
+      return [...byClone].map(([cwd, refs]) => ({ clone: cwd, refs: [...refs], fetched: gitFetch(cwd, [...refs]) }));
+    },
     // The commits on the PR's branch that are not on its base, newest first. Null when the head or the base isn't here.
     branchCommits(target, head, base) {
       const cwd = repoPath(target);
@@ -131,30 +179,36 @@ export function makeGit(settings) {
       const out = gitOut(cwd, ['rev-list', head, '--not', ref]);
       return out === null ? null : out.split('\n').filter(Boolean);
     },
+    // The commits after `from` up to `to`, newest first. Null when either commit isn't here.
+    commitsBetween(target, from, to) {
+      const cwd = repoPath(target);
+      if (!cwd || !hasCommit(cwd, from) || !hasCommit(cwd, to)) return null;
+      const out = gitOut(cwd, ['rev-list', to, '--not', from]);
+      return out === null ? null : out.split('\n').filter(Boolean);
+    },
     // The files under the roots that changed between two commits, leaving out an id-only change (D-073, ../../doc-align/lib/idonly.mjs):
-    // such a change keeps every stage recorded on the page. Null when either commit isn't here.
-    changedUnder(target, from, to, roots) {
+    // such a change keeps every stage recorded on the page. With `base`, only the PR's own pages (`ownOnly`): a merge of
+    // the base brings no page of another PR into the count. Null when either commit isn't here.
+    changedUnder(target, from, to, roots, base = null) {
       const cwd = repoPath(target);
       if (!cwd || !hasCommit(cwd, from) || !hasCommit(cwd, to)) return null;
       if (from === to) return [];
-      const out = gitOut(cwd, ['diff', '--name-only', '--no-renames', from, to, '--', ...roots]);
+      // `-z`: a non-ASCII page name is never quoted, so never missed.
+      const out = gitOut(cwd, ['diff', '-z', '--name-only', '--no-renames', from, to, '--', ...roots]);
       if (out === null) return null;
-      const changeSet = out
-        .split('\n')
-        .filter(Boolean)
-        .map((f) => ({ path: f, before: gitOut(cwd, ['show', `${from}:${f}`]), after: gitOut(cwd, ['show', `${to}:${f}`]) }));
-      return changeSet.filter((page) => !isIdOnlyChange(page, changeSet)).map((page) => page.path);
+      const changeSet = zList(out).map((f) => ({ path: f, before: gitOut(cwd, ['show', `${from}:${f}`]), after: gitOut(cwd, ['show', `${to}:${f}`]) }));
+      return ownOnly(cwd, from, to, base, changeSet.filter((page) => !isIdOnlyChange(page, changeSet)).map((page) => page.path));
     },
     // The images (anywhere in the repo but a `.sources/` folder) that changed between two commits, for the visual pack
-    // after a hand commit. Null when either commit isn't here.
-    imagesChanged(target, from, to) {
+    // after a hand commit; with `base`, the PR's own only. Null when either commit isn't here.
+    imagesChanged(target, from, to, base = null) {
       const cwd = repoPath(target);
       if (!cwd || !hasCommit(cwd, from) || !hasCommit(cwd, to)) return null;
       if (from === to) return [];
       // `-z`: a non-ASCII image name is never quoted, so never missed.
       const out = gitOut(cwd, ['diff', '-z', '--name-only', '--no-renames', from, to]);
       if (out === null) return null;
-      return out.split('\0').filter((f) => f && IMAGE.test(f) && !f.split('/').includes('.sources'));
+      return ownOnly(cwd, from, to, base, zList(out).filter((f) => IMAGE.test(f) && !f.split('/').includes('.sources')));
     },
     // The UA page paths of a target at its base (relative to the UA root, without the extension), for the text check.
     pagesOf(target) {
@@ -163,9 +217,8 @@ export function makeGit(settings) {
       let list = [];
       if (cwd && fs.existsSync(cwd)) {
         const ref = baseRef(cwd, target.base) ?? 'HEAD';
-        const out = gitOut(cwd, ['ls-tree', '-r', '--name-only', ref, '--', target.uaRoot]);
-        list = (out ?? '')
-          .split('\n')
+        const out = gitOut(cwd, ['ls-tree', '-r', '-z', '--name-only', ref, '--', target.uaRoot]);
+        list = zList(out)
           .filter((f) => /\.mdx?$/.test(f) && !f.split('/').some((p) => p.startsWith('.')))
           .map((f) => f.slice(target.uaRoot.length).replace(/\.mdx?$/, ''));
       }
@@ -220,7 +273,8 @@ export async function readPrs({ settings, forge, ledgers }) {
 // summary) asks nothing of the pipeline and starts no session. A line comment of a review the pipeline posted (its id
 // in `posted`, as `review-on-lines` gives it) is the pipeline's too, whether or not its own id was recorded: the
 // pipeline posts from the owner's login, so it would read as the owner's. A submitted review takes no new comment: a
-// person's reply opens a review of their own.
+// person's reply opens a review of their own. Each carries its text (`body`): the rule reads the owner's reply by number
+// and suggestion blocks in it (lib/edits.mjs).
 export function unhandled(ledger, pr, activity, self) {
   const posted = new Set((ledger.posted?.pr ?? []).map(String));
   const ownReview = (c) => c.reviewId !== null && c.reviewId !== undefined && posted.has(String(c.reviewId));
@@ -230,13 +284,13 @@ export function unhandled(ledger, pr, activity, self) {
   const who = (author) => (self && author === self ? 'owner' : 'reviewer');
   const out = [];
   for (const t of activity.threads ?? []) {
-    for (const c of t.comments ?? []) if (fresh(c) && !ownReview(c)) out.push({ id: c.id, kind: 'review-comment', thread: t.id, author: c.author, by: who(c.author), path: c.path ?? t.path ?? null, line: c.line ?? t.line ?? null, updatedAt: c.updatedAt });
+    for (const c of t.comments ?? []) if (fresh(c) && !ownReview(c)) out.push({ id: c.id, kind: 'review-comment', thread: t.id, author: c.author, by: who(c.author), path: c.path ?? t.path ?? null, line: c.line ?? t.line ?? null, updatedAt: c.updatedAt, body: c.body ?? '' });
   }
-  for (const c of activity.comments ?? []) if (fresh(c)) out.push({ id: c.id, kind: 'comment', author: c.author, by: who(c.author), updatedAt: c.updatedAt });
+  for (const c of activity.comments ?? []) if (fresh(c)) out.push({ id: c.id, kind: 'comment', author: c.author, by: who(c.author), updatedAt: c.updatedAt, body: c.body ?? '' });
   for (const r of activity.reviews ?? []) {
     if (!String(r.body ?? '').trim()) continue; // a verdict with no text asks nothing
     const c = { id: r.id, author: r.author, authorBot: r.authorBot, updatedAt: r.submittedAt };
-    if (fresh(c)) out.push({ id: r.id, kind: 'review', state: r.state, author: r.author, by: who(r.author), updatedAt: r.submittedAt });
+    if (fresh(c)) out.push({ id: r.id, kind: 'review', state: r.state, author: r.author, by: who(r.author), updatedAt: r.submittedAt, body: r.body ?? '' });
   }
   return out;
 }

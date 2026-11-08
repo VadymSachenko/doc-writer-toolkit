@@ -7,6 +7,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { parseSwitch } from '../lib/config.mjs';
+import { nameStatus } from '../lib/pairs.mjs';
 
 const run = promisify(execFile);
 const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'screenshot-locales.mjs');
@@ -582,6 +583,12 @@ test('pairs: a UA image with a Cyrillic name (which git quotes in line output) i
   r = await cli(h.root, 'pairs', '--base', 'main');
   assert.equal(r.code, 0, JSON.stringify(r.out));
   assert.deepEqual([r.out.checked, r.out.missing], [1, []]);
+});
+
+test('pairs: the name-status reader takes a rename or a copy as three fields, so the records after it stay aligned', () => {
+  const out = ['M', 'a.png', 'R100', 'old/b.png', 'new/b.png', 'C75', 'c.png', 'd.png', 'A', 'e.png', 'D', 'f.png', ''].join('\0');
+  assert.deepEqual([...nameStatus(out)], [['a.png', 'M'], ['old/b.png', 'D'], ['new/b.png', 'A'], ['d.png', 'A'], ['e.png', 'A'], ['f.png', 'D']]);
+  assert.deepEqual([...nameStatus('')], []);
 });
 
 test('pairs: a host whose screenshot locales leave out en, or that declares none, has nothing to check', async () => {

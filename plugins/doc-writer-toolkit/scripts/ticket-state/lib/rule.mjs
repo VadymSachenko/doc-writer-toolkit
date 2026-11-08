@@ -1,5 +1,6 @@
 import { CARD_STATUS_OF, CHAIN, IN_PROGRESS, PR_ORDER, PR_STAGE_OF_STATUS, ROLE_OF, WAITING } from './stages.mjs';
 import { prId } from './ledger.mjs';
+import { editsOf, mergedEdits, nextEditNumber, parseReply, resolveReply, suggestionOf } from './edits.mjs';
 
 // The next-step rule of the ticket flow (context/ticket-flow.md, "The rule"). A pure function of a ledger and what the
 // tracker, the forge, git and the files show now: the world wins over the ledger. First match wins:
@@ -11,8 +12,9 @@ import { prId } from './ledger.mjs';
 //    5 a PR closed unmerged                           outside; reported
 //    6 the card's list differs from left.list        a person moved it: follow the move
 //    7 a stage recorded running, no live lock         interrupted; run it again
-//    8-12 per PR: a hand edit, or a UA change after ready for merge; finalReview with a new review requested; new
-//         comments; translation: the first chain stage not done for the head
+//    8-12 per PR: a hand edit, or a UA change after ready for merge (back to the owner's queue); finalReview with a new
+//         review requested; new comments; translation: the first chain stage not done for the head, or after ready
+//         for merge the re-sync of the whole range since the ready head
 //   13 videoGate                                      the automatic try, the fallback, or the import
 //   14 ready and a free slot                          start (the `startable` groups, see limits.mjs)
 //   15 otherwise                                      the state's own next step
@@ -41,13 +43,14 @@ const dayOf = (ms, timeZone) => new Intl.DateTimeFormat('en-CA', { timeZone, yea
 // when its record was made later (`seq`).
 const doneAfter = (l, stage, after) => l.stages?.[stage]?.status === 'done' && (!after || (l.stages?.[after]?.status === 'done' && l.stages[stage].seq > l.stages[after].seq));
 
-// A chain stage left running on a PR that isn't at `translation` now (an old ledger, a person's move back) waits for a
-// person's move like the rest of the chain: no session starts for it.
+// A chain stage or a re-sync left running on a PR that isn't at `translation` now (an old ledger, a person's move back,
+// a re-sync the earlier rule started at ready for merge) waits for a person's move like the rest of the chain: no
+// session starts for it.
 function runningStage(l) {
   for (const [stage, rec] of Object.entries(l.stages ?? {})) if (rec?.status === 'running') return { stage };
   for (const pr of l.prs ?? []) {
     for (const [stage, rec] of Object.entries({ ...(pr.chain ?? {}), ...(pr.steps ?? {}) })) {
-      if (rec?.status === 'running' && (!CHAIN.includes(stage) || pr.stage === 'translation')) return { stage, pr: prId(pr) };
+      if (rec?.status === 'running' && ((!CHAIN.includes(stage) && stage !== 'resync') || pr.stage === 'translation')) return { stage, pr: prId(pr) };
     }
   }
   return null;
@@ -142,7 +145,7 @@ export function deriveTicket(l, w) {
     t.failed = failed;
     if (failed.held) {
       t.steps = [];
-      t.gate = { who: 'owner', why: `${failed.stage}${failed.pr ? ` on ${failed.pr}` : ''} ${failed.noSession ? `failed ${failed.sessions === 2 ? 'twice' : `${failed.sessions} times`} with no one acting in between, the last time before any session started (${failed.noSession.slice(0, 200)})` : `failed in ${failed.sessions} sessions with no one acting in between`}: a comment on the card or the PR gives it one more try (so do a review, a commit, a move of the card, or \`ticket-state set retry ${l.key}\`)` };
+      t.gate = { who: 'owner', why: `${heldWhy(failed)}: a comment on the card or the PR gives it one more try (so do a review, a commit, a move of the card, or \`ticket-state set retry ${l.key}\`)` };
       t.held = true;
     } else if (!failed.acted && t.steps.length) t.steps[0] = { ...t.steps[0], prior: failed.sessions, waits: 'a person acting on the ticket, or the next morning run' };
   }
@@ -206,10 +209,26 @@ function failedStep(l, w, steps) {
   const last = (l.runs ?? []).findLast((r) => r.outcome !== 'busy');
   const s = steps[0];
   if (!s || last?.outcome !== 'failed' || !last.after || last.stage !== s.stage || (last.pr ?? null) !== (s.pr ?? null)) return null;
+  // `sessions`: the failures in a row, a session's or not (the runner's count).
   const sessions = last.failures ?? 1;
   const acted = actedAfter(l, w, last.after);
-  // A failure with no session (no `start`: a worktree that couldn't be made or was stuck) says so, with its reason.
-  return { stage: last.stage, ...(last.pr ? { pr: last.pr } : {}), at: last.after.at, sessions, ...(last.start ? {} : { noSession: String(last.note ?? 'no session started') }), ...(acted ? { acted } : { held: sessions >= 2 }) };
+  // A failure with no session (no `start`: a worktree that couldn't be made or was stuck) says so, with its reason. So
+  // do the earlier failures of the row that had none: a stuck worktree, then a failed session, is two failures and one
+  // session.
+  const row = (l.runs ?? []).filter((r) => r.outcome !== 'busy').slice(-sessions).filter((r) => r.outcome === 'failed' && r.stage === last.stage && (r.pr ?? null) === (last.pr ?? null));
+  const withoutSession = row.filter((r) => !r.start).length;
+  return { stage: last.stage, ...(last.pr ? { pr: last.pr } : {}), at: last.after.at, sessions, ...(withoutSession ? { withoutSession } : {}), ...(last.start ? {} : { noSession: String(last.note ?? 'no session started') }), ...(acted ? { acted } : { held: sessions >= 2 }) };
+}
+
+const times = (n) => (n === 1 ? 'once' : n === 2 ? 'twice' : `${n} times`);
+
+// Why a failed step is held, in words that count its failures right: "in N sessions" only when each failure was a
+// session's.
+function heldWhy(failed) {
+  const where = `${failed.stage}${failed.pr ? ` on ${failed.pr}` : ''}`;
+  if (failed.noSession) return `${where} failed ${times(failed.sessions)} with no one acting in between, the last time before any session started (${failed.noSession.slice(0, 200)})`;
+  if (failed.withoutSession) return `${where} failed ${times(failed.sessions)} with no one acting in between, ${times(failed.withoutSession)} before any session started`;
+  return `${where} failed in ${failed.sessions} sessions with no one acting in between`;
 }
 
 // The sessions the ticket's next step already had today (since a `set retry`, if later), when they reach the cap.
@@ -303,7 +322,9 @@ function derive(l, w) {
     // translation with every PR ready for merge: the chain is done, and the card says so.
     const expected = CARD_STATUS_OF[PR_ORDER[least]];
     // Never into In translation by itself: only a person's move (or the other card of the same PR, lib/runner.mjs) goes there.
-    if (expected && expected !== status && expected !== 'translation' && card.list?.id === l.left?.list?.id && !out.steps.some((s) => s.stage === 'move' && !s.pr)) {
+    // A PR's own move takes the card where it belongs, so the card isn't moved first (nor said ready when a PR goes back
+    // to the owner's queue).
+    if (expected && expected !== status && expected !== 'translation' && card.list?.id === l.left?.list?.id && !out.steps.some((s) => s.stage === 'move')) {
       out.steps.unshift(step('move', { to: expected, card: true, ...(status === 'translation' && PR_ORDER[least] === 'readyForMerge' ? { ready: true } : {}) }));
     }
     // A place from the code with no reference at a commit: its comment is posted, so the record stood; it is reported.
@@ -403,8 +424,28 @@ function personMoved(l, w, out, prs) {
     return out;
   }
   out.state = ['finalReview', 'translation', 'smeReview'].includes(to) ? to : to === 'inProgress' ? 'reworkWait' : stateOf(l, prs, to, phase);
-  out.steps.push(step('follow', { to, ...(PR_STAGE_OF_STATUS[to] ? { prStage: PR_STAGE_OF_STATUS[to] } : {}) }));
+  // A move to In translation also takes a ready PR whose head moved only by the owner's own commits since it was marked
+  // ready (a hand edit the rule had no time to send back): the owner read what they wrote. A commit of the pipeline's
+  // in that range (an answer to a comment, pushed while the owner moved the card) is not read yet: that PR stays, and
+  // row 8 sends it back to the owner's queue.
+  const takeReady = to === 'translation' ? prs.map((p) => ownEditsSinceReady(l, p, w)).filter(Boolean) : [];
+  out.steps.push(step('follow', { to, ...(PR_STAGE_OF_STATUS[to] ? { prStage: PR_STAGE_OF_STATUS[to] } : {}), ...(takeReady.length ? { takeReady } : {}) }));
   return out;
+}
+
+// A model session on the PR since it was marked ready, done or failed, may have pushed what no record names (an answer
+// whose record failed): then the change isn't known to be the owner's alone, and the PR is not taken.
+function ownEditsSinceReady(l, p, w) {
+  const { pr, world } = p;
+  const ready = pr.readyForMerge?.at(-1);
+  const head = world?.headCommit;
+  if (!pr.number || p.merged || p.stage !== 'readyForMerge' || !ready?.head || !head || head === ready.head) return null;
+  const after = (r) => (ready.seq !== undefined && r.seq !== undefined ? r.seq > ready.seq : String(r.start ?? r.at ?? '') > String(ready.at ?? ''));
+  if ((l.runs ?? []).some((r) => r.role && r.pr === prId(pr) && after(r))) return null;
+  const target = w.settings.targets.find((t) => t.id === pr.targets?.[0]) ?? w.settings.targets.find((t) => t.repo === pr.repo);
+  const commits = w.git?.commitsBetween?.(target, ready.head, head) ?? null;
+  const mine = (sha) => (pr.pipelineCommits ?? []).some((c) => c && sha.startsWith(String(c)));
+  return commits?.length && !commits.some(mine) ? { pr: prId(pr), head } : null;
 }
 
 // Rows 8 to 12 for one PR. First match wins.
@@ -422,15 +463,18 @@ function prStep(l, p, w, out, prs) {
   if (hand === null) out.notes.push(`${id}: the head ${String(head ?? '').slice(0, 7)} is not fetched here: hand edits and stale chain stages are not checked`);
   else {
     if (hand.length && p.stage !== 'readyForMerge') out.mismatch.push(`${id}: ${hand.length} commit(s) on the branch the pipeline didn't make: a hand edit, kept; the next stage reads the branch`);
-    // A UA change after ready for merge, whoever made it (the owner's final edit, an answer to a comment): the re-sync,
-    // then the visual pack if it changed an image, then ready again. An id-only change keeps the PR ready (D-073,
-    // `changedUnder`), and so does a commit that left UA alone, unless a person made it.
+    // A UA change after ready for merge, whoever made it (the owner's final edit, an answer to a comment), translates
+    // nothing by itself (D-112): the PR goes back to the owner's queue, and the owner's move to In translation re-syncs
+    // the whole range since the ready head (row 12). An id-only change keeps the PR ready (D-073, `changedUnder`), and
+    // so does a commit that left UA alone: a person's is made ready for its head, with the pack again if it changed an
+    // image, and no re-sync.
     const ready = pr.readyForMerge?.at(-1);
     if (p.stage === 'readyForMerge' && ready && head && ready.head !== head) {
-      const changed = w.git?.changedUnder(target, ready.head, head, uaRoots(pr, w, target)) ?? null;
-      if (changed === null && !hand.length) out.notes.push(`${id}: ready for merge at ${String(ready.head).slice(0, 7)}, the head is ${String(head).slice(0, 7)}, and git here can't compare them`);
-      if (hand.length || changed?.length) {
-        const after = handAfterReady(pr, p, w, target, head, hand.length, out);
+      const changed = w.git?.changedUnder(target, ready.head, head, uaRoots(pr, w, target), baseOf(pr, target)) ?? null;
+      if (changed === null) out.notes.push(`${id}: ready for merge at ${String(ready.head).slice(0, 7)}, the head is ${String(head).slice(0, 7)}, and git here can't compare them`);
+      else if (changed.length) return step('move', { pr: id, to: 'finalReview', uaChanged: changed.length, since: ready.head });
+      else if (hand.length) {
+        const after = readyAgain(pr, w, target, head, out);
         if (after) return after;
       }
     }
@@ -439,7 +483,7 @@ function prStep(l, p, w, out, prs) {
   // An id-only change (heading ids, link fragments) keeps it (D-073).
   if (pr.approval?.head && head && pr.approval.head !== head && ['translation', 'readyForMerge'].includes(p.stage)) {
     const roots = uaRoots(pr, w, target);
-    const changed = w.git?.changedUnder(target, pr.approval.head, head, roots) ?? null;
+    const changed = w.git?.changedUnder(target, pr.approval.head, head, roots, baseOf(pr, target)) ?? null;
     const v = out.prs.find((x) => x.id === id);
     if (changed?.length) {
       v.approvalStale = changed.length;
@@ -452,8 +496,8 @@ function prStep(l, p, w, out, prs) {
   if (p.stage === 'finalReview' && newReviewRequests(pr, world).length) return step('move', { pr: id, to: 'smeReview' });
   // Row 11.
   if (world.newComments?.length) {
-    const owner = world.newComments.filter((c) => c.by === 'owner').length;
-    return step('answerComments', { pr: id, comments: world.newComments.length, owner, reviewer: world.newComments.length - owner });
+    const owner = world.newComments.filter((c) => c.by === 'owner');
+    return step('answerComments', { pr: id, comments: world.newComments.length, owner: owner.length, reviewer: world.newComments.length - owner.length, ...ownerForms(pr, owner, w) });
   }
   // Two PRs: an approved PR goes on to the owner's queue by itself while the card stands where the slower PR is. That
   // starts nothing: both wait for the card.
@@ -467,20 +511,51 @@ function prStep(l, p, w, out, prs) {
 
 const newReviewRequests = (pr, world) => (world.reviewRequests ?? []).map((r) => r.login ?? r.team ?? r).filter((r) => !(pr.reviewersRequested ?? []).map(String).includes(String(r)));
 
-// Row 8 after ready for merge: the changed blocks re-synced (`resync`), then, when an image changed since the visual
-// pack saw the branch, the pack again (`visualPack`), and only then `readyForMerge` for the new head.
-function handAfterReady(pr, p, w, target, head, commits, out) {
+// The owner's comments in the two forms the writer takes as they are: a reply by number to the PR's lists of edits
+// (only once the PR has a list: before that a numbered comment is an ordinary instruction), resolved item by item
+// against the lists; and a review comment with a `suggestion` block, its block to be put in verbatim.
+function ownerForms(pr, owner, w) {
+  const edits = mergedEdits(w.editsByPr?.get(prId(pr)) ?? [editsOf(pr)]);
+  const replies = edits.length
+    ? owner.filter((c) => c.kind !== 'review-comment').map((c) => ({ id: c.id, parsed: parseReply(c.body) })).filter((x) => x.parsed).map((x) => ({ id: x.id, items: resolveReply(x.parsed, edits), ...(x.parsed.rest ? { rest: x.parsed.rest } : {}) }))
+    : [];
+  const suggestions = owner.filter((c) => c.kind === 'review-comment').map((c) => ({ c, s: suggestionOf(c.body) })).filter((x) => x.s).map(({ c, s }) => ({ id: c.id, path: c.path ?? null, line: c.line ?? null, ...(s.several ? { several: s.several } : { text: s.text, note: s.note }) }));
+  return { nextEdit: nextEditNumber({ edits }), ...(replies.length ? { replies } : {}), ...(suggestions.length ? { suggestions } : {}) };
+}
+
+// After ready for merge, once the owner moved the card to In translation: the blocks changed since the ready head
+// re-synced (`resync`, once over the whole range, whatever rounds of comments made it), then, when an image changed
+// since the visual pack saw the branch, the pack again (`visualPack`), and only then `readyForMerge` for the new head.
+// The numbered edits made since the ready head go with the re-sync, so it records their EN side.
+function resyncAfterReady(pr, w, target, head, out) {
   const id = prId(pr);
-  if (pr.readyForMerge.at(-1).head === head) return null;
-  const synced = pr.steps?.resync?.status === 'done' && pr.steps.resync.head === head;
-  if (!synced) return step('resync', { pr: id, head, since: pr.readyForMerge.at(-1).head, commits });
+  const ready = pr.readyForMerge.at(-1);
+  if (ready.head !== head) {
+    const changed = w.git?.changedUnder(target, ready.head, head, uaRoots(pr, w, target), baseOf(pr, target)) ?? null;
+    if (changed === null) {
+      out.notes.push(`${id}: ready for merge at ${String(ready.head).slice(0, 7)}, the head is ${String(head).slice(0, 7)}, and git here can't compare them`);
+      return null;
+    }
+    const synced = pr.steps?.resync?.status === 'done' && pr.steps.resync.head === head;
+    if (changed.length && !synced) {
+      const since = (e) => (ready.seq !== undefined && e.seq !== undefined ? e.seq > ready.seq : String(e.at ?? '') > String(ready.at ?? ''));
+      const items = editsOf(pr).filter(since).map((e) => ({ n: e.n, page: e.page, block: e.block, en: Boolean(e.en) }));
+      return step('resync', { pr: id, head, since: ready.head, pages: changed.length, ...(items.length ? { items } : {}) });
+    }
+  }
+  return readyAgain(pr, w, target, head, out);
+}
+
+// The pack again when an image changed since it saw the branch, then ready for this head.
+function readyAgain(pr, w, target, head, out) {
+  const id = prId(pr);
   const pack = pr.chain?.visualPack;
   if (pack?.head && pack.head !== head) {
-    const images = w.git?.imagesChanged?.(target, pack.head, head) ?? null;
+    const images = w.git?.imagesChanged?.(target, pack.head, head, baseOf(pr, target)) ?? null;
     if (images === null) out.notes.push(`${id}: the visual pack saw ${String(pack.head).slice(0, 7)}, the head is ${String(head).slice(0, 7)}, and git here can't compare their images`);
     else if (images.length) return step('visualPack', { pr: id, head, images: images.length });
   }
-  return p.stage === 'readyForMerge' ? step('readyForMerge', { pr: id, head }) : null;
+  return step('readyForMerge', { pr: id, head });
 }
 
 // The first chain stage not done for the current head. UA pages changed after a stage's head make it (and so every
@@ -489,18 +564,26 @@ function chainStep(l, p, w, out, target, head) {
   const { pr } = p;
   const id = prId(pr);
   const roots = uaRoots(pr, w, target);
+  // Ready for merge before, every chain stage done: the UA changes since then are re-synced as one range, not by the
+  // chain again.
+  if (pr.readyForMerge?.length && CHAIN.every((s) => pr.chain?.[s]?.status === 'done')) return resyncAfterReady(pr, w, target, head, out);
   for (const stage of CHAIN) {
     const rec = pr.chain?.[stage];
-    if (!rec || rec.status !== 'done') return step(stage, { pr: id, head });
+    // The EN review posts its rewrites on the description's numbered list, going on from the PR's last number.
+    const numbered = stage === 'enReview' ? { nextEdit: nextEditNumber(pr) } : {};
+    if (!rec || rec.status !== 'done') return step(stage, { pr: id, head, ...numbered });
     if (rec.head && head && rec.head !== head) {
-      const changed = w.git?.changedUnder(target, rec.head, head, roots) ?? null;
+      const changed = w.git?.changedUnder(target, rec.head, head, roots, baseOf(pr, target)) ?? null;
       if (changed === null) out.notes.push(`${id}: ${stage} saw ${String(rec.head).slice(0, 7)}, the head is ${String(head).slice(0, 7)}, and git here can't compare them`);
-      else if (changed.length) return step(stage, { pr: id, head, stale: changed.length });
+      else if (changed.length) return step(stage, { pr: id, head, stale: changed.length, ...numbered });
     }
   }
   // Every stage is done for this head: ready again. So a person's move here with nothing changed starts no model step.
   return step('readyForMerge', { pr: id, head });
 }
+
+// The PR's base: a page or an image the base brought into the branch (a merge of the base) is never the PR's change.
+const baseOf = (pr, target) => pr.base ?? target?.base ?? 'main';
 
 function uaRoots(pr, w, target) {
   const roots = (pr.targets ?? []).map((tid) => w.settings.targets.find((t) => t.id === tid)?.uaRoot).filter(Boolean);

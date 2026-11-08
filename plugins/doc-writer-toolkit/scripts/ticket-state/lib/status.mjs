@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { keyOf, readAllLedgers } from './ledger.mjs';
+import { keyOf, prId, readAllLedgers } from './ledger.mjs';
 import { allLocks } from './locks.mjs';
 import { deriveTicket, hasLabel, rebuiltState } from './rule.mjs';
 import { readCards, readPrs, prLinks, makeGit } from './world.mjs';
@@ -11,7 +11,8 @@ import { fileHash } from './record.mjs';
 import { readRearm, rearmedAt } from './setlocal.mjs';
 
 // `status`: every ticket's state, next step, open gate and mismatches, the intake, the WIP counts and the groups a
-// scheduled run may start now. It reads the ledgers, the tracker, the forge and git, and writes nothing.
+// scheduled run may start now. It reads the ledgers, the tracker, the forge and git, and writes nothing: the one change
+// it makes is the fetch of a head the forge has and a target clone doesn't, into that clone's remote-tracking refs.
 
 const bare = (t) => String(t ?? '').replace(/‌/g, '').trim();
 const OPEN_STATES = new Set(['ready', 'needsInfo', 'new', 'closed', 'outside', 'merged']);
@@ -24,6 +25,11 @@ export async function computeStatus({ settings, clients, now = Date.now(), only 
   const { cards, byStatus } = await readCards({ settings, tracker: clients.tracker, ledgers });
   const needsForge = ledgers.some((l) => (l.prs ?? []).some((p) => p.number && !p.merged) && l.stages?.close?.status !== 'done');
   const prWorld = needsForge ? await readPrs({ settings, forge: clients.forge, ledgers }) : new Map();
+  // A head the forge has and the target clone doesn't (a commit made on the forge): fetched into the clone's
+  // remote-tracking refs once for this check, so the rule reads it as it reads a push from the clone (lib/world.mjs).
+  // Only the tickets asked for (`only`), when the check names them.
+  const targetOfPr = (pr) => settings.targets.find((t) => t.id === pr.targets?.[0]) ?? settings.targets.find((t) => t.repo === pr.repo);
+  git.fetchHeads?.(ledgers.filter((l) => !only || only.includes(l.key)).flatMap((l) => (l.prs ?? []).map((pr) => ({ pr, world: prWorld.get(`${l.key}/${prId(pr)}`) })).filter((x) => x.world?.state === 'open' && x.pr.branch).map(({ pr, world }) => ({ target: targetOfPr(pr), branch: pr.branch, base: pr.base ?? targetOfPr(pr)?.base ?? 'main', head: world.headCommit }))));
   // The runner's own locks (the group it is advancing) don't hide that group from it.
   const locks = new Map(allLocks(settings.state, now).filter((x) => !ignoreLocks?.has(x.group)).map((x) => [x.group, x]));
   const fileExists = (rel) => fs.existsSync(path.resolve(settings.root, rel));
@@ -48,9 +54,13 @@ export async function computeStatus({ settings, clients, now = Date.now(), only 
     }
   }
 
+  // The numbered edits of each PR across the ledgers that share it (a PR with two cards): a reply is read against both.
+  const editsByPr = new Map();
+  for (const l of ledgers) for (const p of l.prs ?? []) if (p.number && p.edits?.length) editsByPr.set(`${p.repo}#${p.number}`, [...(editsByPr.get(`${p.repo}#${p.number}`) ?? []), p.edits]);
+
   // Tickets with a ledger.
   const tickets = ledgers.map((l) =>
-    deriveTicket(l, { now, card: l.card?.id && cards.has(l.card.id) ? cards.get(l.card.id) : l.stages?.close?.status === 'done' ? undefined : null, lock: locks.get(l.group) ?? null, prWorld, git, settings, fileExists, fileHash: hashOf, cardComments: cardComments.get(l.key) ?? null, cardMoves: cardMoves.get(l.key) ?? null, rearmedAt: rearmedAt(rearm, l.key), mark: Boolean(marks?.includes(l.key)) }),
+    deriveTicket(l, { now, editsByPr, card: l.card?.id && cards.has(l.card.id) ? cards.get(l.card.id) : l.stages?.close?.status === 'done' ? undefined : null, lock: locks.get(l.group) ?? null, prWorld, git, settings, fileExists, fileHash: hashOf, cardComments: cardComments.get(l.key) ?? null, cardMoves: cardMoves.get(l.key) ?? null, rearmedAt: rearmedAt(rearm, l.key), mark: Boolean(marks?.includes(l.key)) }),
   );
 
   // Cards with no ledger: the intake, ready tickets the pipeline hasn't started, tickets whose ledger is missing, and
