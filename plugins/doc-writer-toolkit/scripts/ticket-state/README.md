@@ -1,11 +1,11 @@
 # ticket-state
 
-The ticket ledger of a docs pipeline, its daily run and its watcher. `ticket-state.mjs` keeps one ledger per ticket and derives, from the tracker, the forge, git and the files, each ticket's state, its next step and the gate that is open; it records a stage only when the world supports it. `runner.mjs` runs the day: finish first, triage the intake in the morning, start ready groups within the limits, one `claude -p` session per step that needs a model. `watcher.mjs` is started by launchd every few minutes: it reads what changed on the boards and the PRs, and has the runner finish the tickets that changed; once a day it starts the morning run; inside the start hours it has the runner start the next ticket when a slot frees; and it starts the host's jobs. `launchd.mjs` installs and uninstalls its LaunchAgent. Node, no dependencies. No AI in any of them: they decide, and the role sessions do the work.
+The ticket ledger of a docs pipeline, its daily run and its watcher. `ticket-state.mjs` keeps one ledger per ticket and derives, from the tracker, the forge, git and the files, each ticket's state, its next step and the gate that is open; it records a stage only when the world supports it. `runner.mjs` runs the day: finish first, triage the intake in the morning, start ready groups within the limits, one `claude -p` session per step that needs a model. `watcher.mjs` is started by launchd every few minutes: it reads what changed on the boards and the PRs, and has the runner finish the tickets that changed; once a day it starts the morning run; inside the start hours it has the runner start the next ticket when a slot frees; and it starts the host's jobs. Between these full checks, every minute, its forge check picks up the comments on the pipeline's PRs. `launchd.mjs` installs and uninstalls its LaunchAgent. Node, no dependencies. No AI in any of them: they decide, and the role sessions do the work.
 
 ```
 node ${CLAUDE_PLUGIN_ROOT}/scripts/ticket-state/ticket-state.mjs <command> [<key>] [options]
 node ${CLAUDE_PLUGIN_ROOT}/scripts/ticket-state/runner.mjs [--dry-run] [--morning] [--manual --ticket <key>] [options]
-node ${CLAUDE_PLUGIN_ROOT}/scripts/ticket-state/watcher.mjs [--dry-run] [--quiet] [options]
+node ${CLAUDE_PLUGIN_ROOT}/scripts/ticket-state/watcher.mjs [--full|--forge] [--dry-run] [--quiet] [options]
 node ${CLAUDE_PLUGIN_ROOT}/scripts/ticket-state/launchd.mjs print|install|uninstall|status [--noop] [options]
 ```
 
@@ -48,7 +48,9 @@ The shared file (committed in the host) holds `state`, `workFolder`, `tracker`, 
 | `limits.estimates` | `{}` | Percent of the week per size (`edit`, `newPage`, `newSection`) until finished tickets give measured ones. |
 | `limits.lockLeaseMinutes`, `limits.triageBatch`, `limits.stepsPerTicket` | `120`, `10`, `12` | A lock's lease; cards per morning triage session; steps one group may take in one run. |
 | `limits.sessionsPerStageDay` | `3` | Model sessions one ticket may have for one stage (and PR) in a day; beyond it the ticket is held for the owner until the next day (see "A failed step"). |
-| `schedule.morning`, `schedule.watchMinutes` | `07:00`, `5` | The morning run starts at the watcher's first check after this local time; the watcher runs every `watchMinutes` (its LaunchAgent takes the value when installed). |
+| `schedule.morning`, `schedule.watchMinutes` | `07:00`, `5` | The morning run starts at the watcher's first check after this local time; the watcher's full check runs every `watchMinutes`. |
+| `schedule.forgeSeconds` | `60` | How often the LaunchAgent ticks (30 at the least): between full checks, each tick is a forge check, which picks up the comments on the pipeline's PRs (see "The forge check"). None (`null`), or not shorter than `watchMinutes`: no forge check, a tick every `watchMinutes`. The LaunchAgent takes the interval when installed: install again after a change (`launchd.mjs status` says so, `installAgain`). |
+| `schedule.commentQuietMinutes` | `2` | How long single comments on a PR stay quiet before the session that answers them starts; a submitted review starts at once (see "The forge check"). |
 | `schedule.tokenFile` | none | A file, readable by its owner only (`chmod 600`), holding the long-lived sign-in token from `claude setup-token` on its first line. The watcher gives it to every `claude` it starts as `CLAUDE_CODE_OAUTH_TOKEN`, and to nothing else. None: the CLI's own sign-in. |
 | `roles.<role>` | see below | `model`, `effort`, `maxTurns`, `maxBudgetUsd` for `triage`, `writer`, `reviewer`, `translator`, in either file; `allowedTools`, `disallowedTools` only from the shared file at HEAD. |
 | `modelLadder` | haiku, sonnet, opus (`claude-*-5-5`) | The one retry of a failed step takes the next model up. |
@@ -126,8 +128,11 @@ The runner takes no command.
 
 | | |
 |---|---|
+| (none) | The tick decides: the full check when `schedule.watchMinutes` have passed since the last one began, else the forge check (see "The forge check"). |
+| `--full` | Runs the full check now, whatever the tick would run. |
+| `--forge` | Runs the forge check now, whatever the tick would run. |
 | `--dry-run` | Reads the sources and plans: the runner plans as in its own dry run, and a due job is shown with its command line. Writes no cursor, no job state, no run log, no notification. |
-| `--quiet` | Prints nothing for a quiet check, one line otherwise (what the LaunchAgent uses, for its log). |
+| `--quiet` | Prints nothing for a quiet check, one line otherwise (what the LaunchAgent uses, for its log). A forge check is quiet unless it handed a ticket on, a wait began or moved, or a part failed. |
 | `--noop` | Does nothing and exits 0, reading no settings: for an install check of the LaunchAgent. |
 | `--claude <bin>` | The `claude` command. |
 | `--root`, `--settings`, `--origin` | As above. |
@@ -139,7 +144,7 @@ The runner takes no command.
 | `print` | The plist it would install and where; installs nothing. `missing` names `claude`, `git` or `gh` not found on the PATH; `optionalMissing`, `ffmpeg` or `ffprobe` (the video gate's cut needs them; the install doesn't). |
 | `install` | Writes `~/Library/LaunchAgents/<label>.plist` and loads it (`launchctl bootstrap gui/<uid>`); an existing one is replaced. Stops if `claude`, `git` or `gh` is missing; a missing `ffmpeg` or `ffprobe` is only named (`optionalMissing`). If loading fails, the plist is removed. |
 | `uninstall` | Unloads it (`launchctl bootout`) and removes the plist, and any other agent of ours started for the same root (`others`). `left` is `false` when neither a job nor a file remains. Reads no settings. |
-| `status` | `fileExists` and `loaded`. Reads no settings. |
+| `status` | `fileExists`, `loaded` and the installed interval (`everySeconds`). When the settings load (they are not needed): the interval they ask for (`wantSeconds`), the checks in words, and `installAgain` when the plist runs at another interval. |
 
 | Option | |
 |---|---|
@@ -317,13 +322,13 @@ Right after a failed session the runner reads the ticket once more and keeps tha
 
 ## The watcher
 
-One check, every `schedule.watchMinutes`, with no model call of its own (design §5):
+One full check, every `schedule.watchMinutes`, with no model call of its own (design §5), and between them the forge check (below):
 
 1. **The sources:** the board in the settings, each `tracker.watchBoards` board and each host job's board (the actions since a time), and for each target repo the PRs that changed and the PR events (a review request or a label may not move a PR's update time, so both are read).
 2. **The cursor**, one per source in `<state>/watch/feed.json`: the window starts 10 minutes before `lastCheck`, and an id already in `seen` is dropped, so the overlap costs nothing. `lastCheck` moves to the start of the check once every event of the window was handed on, or its ticket was kept in `pending` for the next check. A source that fails keeps its `lastCheck`, and the others move on; once 24 hours have passed since its last good read, the gap is written to the run log (the report shows it) and the source starts again from now, still `failingSince` its first failure. A source with no cursor starts from now. The file is written to a temp file and renamed. After a sleep, launchd runs the missed interval once, and that check reads everything since `lastCheck`; if it fails more than 24 hours after `lastCheck`, it is the gap above, and the events of the sleep are never read.
 3. **The watched lists:** a host job's board that had events has its list matched (on another board, its lists are read). A list that can't be matched (renamed, gone) fails that board's source for this check, as a failed read would: its cursor stays, none of its events is used, and the reason is in `lastError`.
 4. **The tickets:** each event maps to a ticket through the ledgers (a card by id or short link, the ticket's original card, a PR by number or head branch). Events that map to no open ledger (intake cards, other cards) are left to the morning run, and to the start pass when the card is in the ready or intake list. After a `set retry`, the tickets with a session in their ledger are looked at too (`status` decides which were re-armed). While a ledger file doesn't read, nothing is handed on: `status` reads every ledger, so it fails too. The tickets of the check's events (and the bad file's) wait in `pending`, the cursors move, and the check reports the bad file (the part is `the ledger <key>`). A morning run due meanwhile fails before its first step (its own `status`) and is tried again at each check, each time reading `/usage`: no triage and no starts until the file reads. Once it reads, the next check hands the waiting tickets on. A check that finds no event and no ticket waiting ends here: no status, no runner, no `/usage`, no `claude`, unless the start pass has something to look at (below).
-5. **The decision is `status`'s:** the watcher asks `ticket-state status` (the same module, in process) about the tickets that changed, and hands those with a next step, not locked, not in the owner's hands and not waiting after a failure, to the runner (`--watcher`) in one run, so each runs once. A ticket a run holds now is kept in `pending` and looked at again on the next check. The watcher never decides a step.
+5. **The decision is `status`'s:** the watcher asks `ticket-state status` (the same module, in process) about the tickets that changed, and hands those with a next step, not locked, not in the owner's hands and not waiting after a failure, to the runner (`--watcher`) in one run, so each runs once. A ticket a run holds now is kept in `pending` and looked at again on the next check. A ticket whose next step answers comments goes on only once they are quiet (the start rule, in "The forge check"); until then it waits in `commentWaits`, and the first check of either kind after its quiet ends looks at it again with no event. The watcher never decides a step.
 6. **The morning run:** at the first check after `schedule.morning` each day (the Mac may have slept through it), the runner's morning run instead: finishing, triage and starts. It covers every ticket, so the events of that check need nothing more. It waits for a check whose own board (the settings' `tracker.board`) was read: a Mac just awake, with its network still coming up, runs it at the next check (the output's `notes` says why). A board that stays unreadable is told after an hour (below). A morning run that throws before its first step is started again at the next check; one that throws part way counts as that day's, so its triage, starts and retries aren't repeated at every check.
 7. **The start pass** (below), in a check that is not the morning run's.
 8. **Host jobs** (below), then the notifications.
@@ -333,6 +338,22 @@ One check, every `schedule.watchMinutes`, with no model call of its own (design 
 **A source that keeps failing** (a token revoked or expired, credentials the LaunchAgent can't see, a long outage) is a failed part once its read has failed for an hour of the watcher's awake time (`ALERT_MS` in `lib/feed.mjs`): one part per client, `the tracker` for the boards and `the forge` for the PRs, so a token that is gone is told once, not once per board or repo. The text names the client's error (`HTTP 401 …`) and what to check: the tracker's token and key (`tracker.credentials`) or the forge's sign-in, and the network. It is raised from the first check after `schedule.morning` each day, so a board dead overnight is told in the morning, not at midnight; meanwhile the morning run keeps waiting for the board. Its 24-hour gap is one more part (`the tracker's events`, `the forge's events`), notified at the gap. The hour counts from the later of the source's `failingSince` and `awakeSince`, the first check after a pause in the checks longer than both an hour and three intervals (`pauseMs`: the Mac asleep, the agent off; `checkedAt` in the feed is when the last check ended, so a long run inside a check is not a pause). So a network still coming up after a wake stays quiet, even when the source was already failing as the Mac went to sleep, and a gap that is mostly a sleep is only logged. An hour is twelve checks at the default 5 minutes: long enough for a wake, a VPN or a short outage; short enough that a token gone overnight is told the same morning.
 
 One check at a time: a lock in `<state>/watch/active/`, freed when its process is gone. `mode off`: nothing is read and the cursors stay. `mode observe`: the runner plans and writes the report only, and a due job is logged as planned, not run.
+
+### The forge check
+
+A comment the owner leaves on a pipeline PR would wait up to `watchMinutes` for the full check. The forge check picks it up within a minute: the LaunchAgent ticks every `schedule.forgeSeconds` (60), and each tick runs the full check when `watchMinutes` have passed since the last one began (`fullAt` in the feed; half a tick early counts, as launchd's interval drifts; a feed with no `fullAt`, or a clock gone back, runs it), the forge check otherwise. One agent, one process deciding each tick: the full check never loses its turn to a forge check, and launchd never runs two at once. Webhooks were left out: they need admin rights in every docs repo and a relay to reach the Mac, for seconds gained.
+
+What a forge check does, with no model call of its own:
+
+1. **The PRs that changed**, per repo of the targets (`changedPrsSince`), with cursors of its own (`forgeCheck` in the feed), so the full check's cursors and reads stay as they were. Not the PR events: they carry no comment (a review request, a label, a merge), and the full check reads them. A cursor older than the 10-minute window (a sleep, a long run inside a check) starts from now: the full check reads that stretch. A read that fails keeps the cursor; a source that keeps failing is the full check's to tell.
+2. **The tickets** of those PRs, through the ledgers on disk, and those in `commentWaits` whose quiet ended. A closed ticket, or one in the owner's hands (`mode hand`), is left alone. A ticket a run holds (its group's lock) waits for that run to end: looked at again at the next tick, with no forge read meanwhile; a comment that arrives while its session runs waits for the next session.
+3. **The comments**: each changed PR's activity (`prActivity`), and the comments and reviews no record handled (the owner's and a reviewer's; the pipeline's own and a bot's don't count, as for `status`). A review not yet submitted is never read: the forge leaves out a draft review and its comments.
+4. **The start rule** (`lib/quiet.mjs`). A submitted review is a batch: its session starts at once. A review is a batch when it has text of its own, gives a verdict (approved, changes requested) or holds more than one line comment. Single comments (a conversation comment, a line comment added on its own, a reply in a thread) start a session once the newest of them is `schedule.commentQuietMinutes` old (2) with no newer one, the owner's and a reviewer's alike. So three comments 30 s apart start one session, not three; an owner's comment is handed on within about 3 minutes (the quiet, then the next tick), a submitted review within about a minute. Until then the ticket waits in `commentWaits` (`prs`, `dueAt`, `why`, `since`); the run log gets one `waits` line when a wait begins or a newer comment moves it. The full check holds the same rule at its own hand-on, so a full check in the middle of a burst doesn't start a session either.
+5. **The hand-on**: the tickets whose comments are ready, to the runner (`--watcher`) in one run, as the full check hands on. The runner reads what any run reads (`/usage`, then `status`, which reads the tracker). A run that throws leaves its tickets in `pending` for the full check, not for the next tick (each try reads `/usage`).
+
+No tracker read of its own, no morning run, no start pass, no host job, no `/usage` and no `claude` unless it hands a ticket on. It writes its cursors, `commentWaits` and the run log, and, after a hand-on, the notifications and the progress file. It never changes `checkedAt`, `awakeSince` or `fullAt`, so the full check's hour of failing and its pauses count as before. It shares the watcher's lock: one check at a time, the forge check skipping while a full check (or its run) holds it, and the other way round.
+
+**The rate.** The forge check's reads are GraphQL queries through `gh`, against GitHub's 5,000 points an hour. One `ChangedPrs` per repo per tick, 2 points each (50 PRs with their labels, assignees and review requests): 3 repos at 60 s are 180 queries and 360 points an hour, with nothing new. Each changed PR of a ticket costs 4 queries of 1 point (`PrByNumber`, `PrReviews`, `PrThreads`, `PrComments`), and 4 more when its wait ends: a busy hour of 30 comments, about 240 points. So about 600 points an hour, an eighth of the limit, at 30 s twice the `ChangedPrs` share (720). The full check adds its own reads every 5 minutes as before (per repo a `ChangedPrs` and a REST events page, and `status`'s reads of each open PR).
 
 ### The start pass
 
@@ -377,7 +398,7 @@ The plist holds absolute paths (node, the watcher in the plugin's folder as inst
 
 ## The live progress file
 
-`<state>/watch/progress.md` is a checklist of the work as it happens, for reading in an editor. A script writes it with no model and no network (`lib/progress.mjs`): at the start and the end of each step of a run, and at the end of each watcher check, so it also shows the pipeline while it only waits. The `watch/` folder is under the state folder, which a host keeps out of git.
+`<state>/watch/progress.md` is a checklist of the work as it happens, for reading in an editor. A script writes it with no model and no network (`lib/progress.mjs`): at the start and the end of each step of a run, and at the end of each full watcher check (a forge check only after it handed a ticket on), so it also shows the pipeline while it only waits. The `watch/` folder is under the state folder, which a host keeps out of git.
 
 **To follow it:** open `progress.md` in VS Code and press `Cmd+K V` (Markdown: open preview to the side). The file is replaced as a whole (a temp file, then a rename), so a preview never shows half of it. Whether the preview refreshes by itself while the runner writes has to be seen on a live pass; if it does not, reopen the preview (the file is a plain Markdown file, so any viewer that reloads on change works).
 
@@ -458,7 +479,8 @@ What it never prints: a tool's result (apart from the first line of a refusal), 
 | `lib/runner.mjs`, `lib/report.mjs`, `lib/locks.mjs` | The daily run, the report, the locks. |
 | `lib/trace.mjs` | `trace`: the transcripts' actions per run (read only). |
 | `lib/progress.mjs` | The live progress file `watch/progress.md` and the "your turn" notification ("The live progress file"). |
-| `lib/watch.mjs`, `lib/feed.mjs`, `lib/jobs.mjs`, `lib/rearm.mjs`, `lib/notify.mjs` | The watcher's check, its sources and cursor, the host jobs and their re-arm, the notifications. |
+| `lib/watch.mjs`, `lib/feed.mjs`, `lib/jobs.mjs`, `lib/rearm.mjs`, `lib/notify.mjs` | The watcher's checks (the full one, the forge check, the tick), its sources and cursor, the host jobs and their re-arm, the notifications. |
+| `lib/quiet.mjs` | The start rule for comments: a submitted review at once, single comments once quiet. |
 | `lib/launchd.mjs`, `lib/env.mjs`, `lib/setlocal.mjs` | The LaunchAgent; the environment of every `claude` (no API key, the sign-in token); `set`. |
 | `lib/ledger.mjs`, `lib/stages.mjs`, `lib/settings.mjs`, `lib/errors.mjs` | The ledger file, the stage vocabulary, the settings, the errors. |
 | `test/` | The tests, the in-memory adapters (`test/fakes.mjs`, invented data only). |
@@ -468,6 +490,8 @@ What it never prints: a tool's result (apart from the first line of a refusal), 
 - The stages' own work (triage rules, writing, the review chain, the video transcriber) belongs to the host's skills and the role sessions; the runner only starts them and checks their records. With no transcriber adapter, an automatic video try fails at once and the gate goes to the person.
 - The watcher and its LaunchAgent are macOS-first: on another system run `watcher.mjs --quiet` from any scheduler; nothing else changes, and no notification is sent.
 - The watcher reads events only for tickets with a ledger; whatever it misses, the morning run reconciles from the full state.
+- No tick runs while a session runs inside a check (one check at a time, and launchd never starts a job twice): an owner's comment made meanwhile is picked up at the first tick after that check ends.
+- The morning run, and a run that finishes a ticket for another step, answer comments with no quiet wait: the start rule is held at the watcher's hand-on only. A review submitted with one line comment and no text reads as a single comment, and waits its 2 minutes.
 - `status` reads git in the target repos at `targets[].path`; a head that isn't fetched there is noted, and hand edits and stale stages aren't checked for it.
 - The daily session cap (`limits.sessionsPerStageDay`) counts every session of the stage, the ones that succeeded too, and it holds a manual run as well: by design, as a safety net for a loop of any cause. `set retry <key>` lifts it.
 - The retry up the model ladder runs right after the failed session, with no look at the cap in between, so a pair that starts below the cap can end one session over it.

@@ -4,17 +4,20 @@ import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { CliError } from './lib/errors.mjs';
 import { loadSettings } from './lib/settings.mjs';
-import { agentFor, agentState, install, labelOf, agentsDirOf, uninstall } from './lib/launchd.mjs';
+import { agentFor, agentState, install, labelOf, agentsDirOf, uninstall, wantedInterval } from './lib/launchd.mjs';
 
 const USAGE = `launchd <command> [options]
 
-The LaunchAgent that starts the ticket flow's watcher on macOS, every schedule.watchMinutes (one per host repo).
+The LaunchAgent that starts the ticket flow's watcher on macOS (one per host repo): a tick every
+schedule.forgeSeconds (the forge check), the full check every schedule.watchMinutes; without schedule.forgeSeconds,
+every schedule.watchMinutes. Install again after changing either.
 
 Commands
   print       the plist it would install, and where (installs nothing)
   install     writes ~/Library/LaunchAgents/<label>.plist and loads it (an existing one is replaced)
   uninstall   unloads it and removes the plist; 'left' says whether anything of it remains
-  status      whether the plist exists and the job is loaded
+  status      whether the plist exists and the job is loaded, its interval, and (when the settings load) the interval
+              they ask for and whether it needs an install again
 
 Options
   --noop                    a test agent under its own label: it runs 'watcher.mjs --noop', which reads nothing and
@@ -45,6 +48,16 @@ export async function main(argv, io = {}) {
   else if (command === 'status') {
     const label = labelOf(root, { noop });
     result = agentState(label, path.join(agentsDirOf(io), `${label}.plist`), io);
+    // The settings are optional here: a host whose settings don't load still gets its state.
+    if (!noop) {
+      let settings = null;
+      try {
+        settings = await loadSettings({ root, settings: values.settings });
+      } catch {
+        /* the state alone */
+      }
+      result = wantedInterval(result, settings);
+    }
   } else {
     const settings = await loadSettings({ root, settings: values.settings });
     if (command === 'print') {
