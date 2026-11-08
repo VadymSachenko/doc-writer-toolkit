@@ -217,16 +217,20 @@ export async function readPrs({ settings, forge, ledgers }) {
 
 // Comments and reviews on a PR that the pipeline didn't post and no record handled (an edit after the handling counts
 // as new). Each says whether the owner wrote it (an instruction) or a reviewer did. A bot's (a preview notice, a CI
-// summary) asks nothing of the pipeline and starts no session.
+// summary) asks nothing of the pipeline and starts no session. A line comment of a review the pipeline posted (its id
+// in `posted`, as `review-on-lines` gives it) is the pipeline's too, whether or not its own id was recorded: the
+// pipeline posts from the owner's login, so it would read as the owner's. A submitted review takes no new comment: a
+// person's reply opens a review of their own.
 export function unhandled(ledger, pr, activity, self) {
   const posted = new Set((ledger.posted?.pr ?? []).map(String));
+  const ownReview = (c) => c.reviewId !== null && c.reviewId !== undefined && posted.has(String(c.reviewId));
   const handled = new Map((ledger.reviewComments ?? []).filter((c) => c.repo === pr.repo && Number(c.pr) === Number(pr.number)).map((c) => [String(c.id), c.updatedAt ?? c.at ?? '']));
   const isBot = (c) => c.authorBot === true || /\[bot\]$/.test(c.author ?? '');
   const fresh = (c) => !isBot(c) && !posted.has(String(c.id)) && !(handled.has(String(c.id)) && (handled.get(String(c.id)) ?? '') >= (c.updatedAt ?? c.submittedAt ?? ''));
   const who = (author) => (self && author === self ? 'owner' : 'reviewer');
   const out = [];
   for (const t of activity.threads ?? []) {
-    for (const c of t.comments ?? []) if (fresh(c)) out.push({ id: c.id, kind: 'review-comment', thread: t.id, author: c.author, by: who(c.author), path: c.path ?? t.path ?? null, line: c.line ?? t.line ?? null, updatedAt: c.updatedAt });
+    for (const c of t.comments ?? []) if (fresh(c) && !ownReview(c)) out.push({ id: c.id, kind: 'review-comment', thread: t.id, author: c.author, by: who(c.author), path: c.path ?? t.path ?? null, line: c.line ?? t.line ?? null, updatedAt: c.updatedAt });
   }
   for (const c of activity.comments ?? []) if (fresh(c)) out.push({ id: c.id, kind: 'comment', author: c.author, by: who(c.author), updatedAt: c.updatedAt });
   for (const r of activity.reviews ?? []) {

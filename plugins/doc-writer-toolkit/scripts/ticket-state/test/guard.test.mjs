@@ -76,6 +76,41 @@ test('AC-2: no usage reading, no scheduled start; a manual run is not guarded', 
   assert.deepEqual(seen[0], ['answers', '12'], 'the owner started it: past the allowance');
 });
 
+// A stand-in claude whose `/usage` gives no reading for its first `fails` runs, then answers a low week. `runs()` counts them.
+function flakyUsage(fails) {
+  const dir = tmp();
+  const count = path.join(dir, 'runs');
+  const fake = path.join(dir, 'claude');
+  fs.writeFileSync(fake, `#!/bin/sh\nn=$(cat "${count}" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "${count}"\nif [ "$n" -le ${fails} ]; then echo "no reading this time" >&2; exit 1; fi\necho "Current session: 10% used · resets 2pm (UTC)"\necho "Current week (all models): 5% used · resets Nov 14 at 6am (UTC)"\n`, { mode: 0o755 });
+  return { fake, runs: () => Number(fs.existsSync(count) ? fs.readFileSync(count, 'utf8').trim() : 0) };
+}
+
+test('AC-2: a /usage run that gives no reading is tried again, 10 s later: one failure followed by a reading runs the step', async () => {
+  const w = answeredWorld();
+  const { fake, runs } = flakyUsage(1);
+  const seen = [];
+  const sleeps = [];
+  const out = await runDaily({ settings: w.settings, clients: w.clients(), io: { now: () => NOW, spawnClaude: recorder(w, seen), sleep: async (ms) => void sleeps.push(ms) }, options: { trigger: 'watcher', named: ['11'], claude: fake } });
+  assert.deepEqual(out.guard, []);
+  assert.deepEqual(seen[0], ['answers', '11'], 'the step ran on the second reading');
+  assert.equal(out.usage.week.percent, 5);
+  assert.deepEqual(sleeps, [10000], 'one wait, between the failed run and the good one');
+  assert.ok(runs() >= 2);
+});
+
+test('AC-2: three /usage runs with no reading stop the step; the guard says how many tries failed', async () => {
+  const w = answeredWorld();
+  const { fake, runs } = flakyUsage(99);
+  const sleeps = [];
+  const out = await runDaily({ settings: w.settings, clients: w.clients(), io: { now: () => NOW, spawnClaude: () => assert.fail('no reading'), sleep: async (ms) => void sleeps.push(ms) }, options: { trigger: 'watcher', named: ['11'], claude: fake } });
+  assert.ok(out.guard.length >= 1);
+  assert.ok(out.guard.every((g) => g.reason === 'no usage reading after 3 tries: no scheduled start'));
+  assert.equal(runs(), 3);
+  assert.deepEqual(sleeps, [10000, 10000], 'no wait after the last try');
+  const notes = notificationsOf({ run: out, today: '2026-11-10' });
+  assert.ok(notes.length && notes.every((n) => n.title === 'Ticket flow: no usage reading'), 'still a reading problem, not a limit reached');
+});
+
 test('AC-2: with maxWeekPercent set the guard stops at the cap even when the day allows more', async () => {
   const w = answeredWorld({ limits: { dailyPercent: 15, maxWeekPercent: 50 } });
   const out = await runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: () => usageAt(50), now: () => NOW, spawnClaude: () => assert.fail('at the cap') }, options: {} });
@@ -112,7 +147,7 @@ test('the plan pays: no API key or auth token reaches a claude; the sign-in toke
   const u = fs.mkdtempSync(path.join(tmp(), 'u-'));
   const fake = path.join(u, 'claude');
   fs.writeFileSync(fake, `#!/bin/sh\n[ -z "$ANTHROPIC_API_KEY" ] && echo "Current week (all models): 7% used · resets Nov 14 at 6am (UTC)"\n`, { mode: 0o755 });
-  assert.equal(readUsageFromClaude(fake, env).week.percent, 7, '/usage is read without the key too');
+  assert.equal((await readUsageFromClaude(fake, env)).week.percent, 7, '/usage is read without the key too');
 
   // The token file: mode 600 is used; a file others can read is refused; the notes name no value.
   const root = tmp();

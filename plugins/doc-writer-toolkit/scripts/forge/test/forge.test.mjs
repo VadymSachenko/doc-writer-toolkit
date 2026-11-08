@@ -300,6 +300,35 @@ test('prActivity: with a time, only what was posted or edited since, and which c
   assert.deepEqual(none.counts, { reviews: 0, threads: 0, comments: 0 });
 });
 
+test('prActivity: the comments of a review not yet submitted are left out, and a thread it opened with them; once submitted they are read', async () => {
+  // GitHub gives a draft review's line comments to their author, and the forge acts from the owner's own login.
+  const draft = (state) => {
+    const threads = fixture('gql-threads');
+    const nodes = threads.data.repository.pullRequest.reviewThreads.nodes;
+    const reply = { ...nodes[0].comments.nodes[1], id: 'PRRC_620', databaseId: 620, author: { __typename: 'User', login: 'pat' }, body: 'Say it as the app does.', replyTo: { databaseId: 601 }, pullRequestReview: { databaseId: 530, state } };
+    nodes[0].comments.nodes.push(reply);
+    nodes.push({
+      id: 'PRRT_3', isResolved: false, isOutdated: false, path: 'docs/export.md', line: 20,
+      comments: { pageInfo: { hasNextPage: false }, nodes: [{ ...reply, id: 'PRRC_621', databaseId: 621, line: 20, body: 'Name the button.', replyTo: null }] },
+    });
+    for (const c of nodes[0].comments.nodes.slice(0, 2)) c.pullRequestReview.state = 'COMMENTED';
+    return threads;
+  };
+  const read = async (state) => {
+    const { forge, calls } = setup({ routes: { 'graphql PrReviews': fixture('gql-reviews'), 'graphql PrThreads': draft(state), 'graphql PrComments': fixture('gql-comments') } });
+    const a = await forge.prActivity({ repo: 'guide-docs', number: 7 });
+    assert.match(calls.find((c) => c.kind === 'graphql' && /query PrThreads/.test(c.query)).query, /pullRequestReview \{ databaseId state \}/);
+    return a;
+  };
+  const pending = await read('PENDING');
+  assert.deepEqual(pending.threads.map((t) => [t.id, t.comments.map((c) => c.id)]), [['PRRT_1', [601, 602]], ['PRRT_2', [610]]], 'the draft reply and the thread the draft opened are not there');
+  assert.equal(pending.counts.threads, 2);
+  const sent = await read('COMMENTED');
+  assert.deepEqual(sent.threads.map((t) => [t.id, t.comments.map((c) => c.id)]), [['PRRT_1', [601, 602, 620]], ['PRRT_2', [610]], ['PRRT_3', [621]]]);
+  assert.deepEqual(sent.threads[2].comments.map((c) => [c.author, c.reviewId]), [['pat', 530]]);
+  assert.equal(sent.counts.threads, 3);
+});
+
 test('prActivity: a comment stamped a second after it was created (a new review\'s) is not reported as edited', async () => {
   const threads = fixture('gql-threads');
   threads.data.repository.pullRequest.reviewThreads.nodes[0].comments.nodes[0].updatedAt = '2026-11-04T09:00:01Z';

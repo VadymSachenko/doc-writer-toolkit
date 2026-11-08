@@ -22,8 +22,9 @@
 //   prByHead({repo, head})                -> Pr | null; an open PR of that head branch in the same repo, else the most recent
 //   openPrByHead({repo, head})            -> Pr | null; an open one only
 //   changedPrs({repo, since})             -> [Pr], newest update first, every state, read until one is older than `since`
-//   reviews({repo, number})               -> [Review]
-//   threads({repo, number})               -> [Thread]
+//   reviews({repo, number})               -> [Review], submitted ones only: never a review not yet sent (a draft)
+//   threads({repo, number})               -> [Thread], never a comment of a review not yet sent, nor a thread with
+//                                            nothing else
 //   issueComments({repo, number})         -> [Comment], the PR's conversation comments
 //   reviewComments({repo, number})        -> [Comment], every review comment, flat, with `inReplyTo`
 //   reviewComment({repo, id})             -> Comment & { number }, one review comment and the PR it is on

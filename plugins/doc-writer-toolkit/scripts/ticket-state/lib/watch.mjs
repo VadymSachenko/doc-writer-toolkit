@@ -3,7 +3,7 @@ import path from 'node:path';
 import { computeStatus } from './status.mjs';
 import { makeGit } from './world.mjs';
 import { readLedgersApart } from './ledger.mjs';
-import { runDaily, readUsageFromClaude, parseResult, readyGroupsOf } from './runner.mjs';
+import { runDaily, readUsageTried, noUsageReading, parseResult, readyGroupsOf } from './runner.mjs';
 import { parseStartHours } from './settings.mjs';
 import { allowanceOf } from './allowance.mjs';
 import { appendRunLog, localDate } from './report.mjs';
@@ -508,9 +508,10 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
         return { name: job.name, due: true, planned: true, command: shown };
       }
       if (cmd.model) {
-        const usage = await (io.readUsage ?? (() => readUsageFromClaude(claude, io.claudeEnv)))();
+        const read = io.readUsage ? { usage: await io.readUsage(), tries: null } : await readUsageTried(claude, io.claudeEnv, io.sleep ? { sleep: io.sleep } : {});
+        const usage = read.usage;
         const a = allowanceOf(usage, settings.limits, new Date(clock()));
-        const held = !a ? 'no usage reading: no scheduled start' : a.remaining <= 0 ? `the week is at ${a.used}%, the allowance by now is ${a.cap}%` : null;
+        const held = !a ? noUsageReading(usage ? null : read.tries) : a.remaining <= 0 ? `the week is at ${a.used}%, the allowance by now is ${a.cap}%` : null;
         if (held) {
           next.jobs[job.name] = { ...state, heldUntil: iso(checkStart + 3600000) };
           say({ kind: 'guard', what: `job ${job.name}`, reason: held });

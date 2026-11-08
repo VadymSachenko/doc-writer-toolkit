@@ -46,7 +46,7 @@ A pure function of the ledger and the world. First match wins:
 | 5 | A PR closed unmerged | `outside`; reported |
 | 6 | The card's list differs from the one the ledger left it in | a person moved it: follow the move (below) |
 | 7 | A stage recorded `running` with no live lock | interrupted: run it again |
-| 8–12 | Per PR, each on its own: commits the pipeline didn't make (a hand edit: kept and noted; after ready for merge, `resync`); a PR at `finalReview` with a new review a person requested → `move` to `smeReview`, with the target's card members; new review comments (not the pipeline's own; the owner's are instructions) → `answerComments`; `translation` → the first chain stage not done for the head, then `readyForMerge` | the least advanced PR's |
+| 8–12 | Per PR, each on its own: commits the pipeline didn't make (a hand edit: kept and noted; after ready for merge, `resync`); a PR at `finalReview` with a new review a person requested → `move` to `smeReview`, with the target's card members; new review comments (not the pipeline's own, a line comment of a review it posted included; not a review the owner hasn't submitted yet; the owner's are instructions) → `answerComments`; `translation` → the first chain stage not done for the head, then `readyForMerge` | the least advanced PR's |
 | 13 | `videoGate` | the automatic try (`partsPerDay` parts a day), the fallback to the person (Blocked, with the gate comment), or the import once every part has its transcript |
 | 14 | `ready` and a free slot | `start` (the `startable` groups) |
 | 15 | Otherwise | the state's own step: `start`, `plan`, `write`, `uaReview`, `pr` |
@@ -86,7 +86,7 @@ A pure function of the ledger and the world. First match wins:
 | `prs[]` | Per PR: `repo`, `targets`, `review` (`sme` or `places`), `branch`, `base`, `number`, `url`, `stage`, `resumeTo`, `label`, `pipelineCommits`, `reviewersRequested` (the requests a move to or from the review took along), `expertReview` (the writer's recommendation and why), `approval` (the head a person's move to In translation saw), `chain` (each stage's record and head), `steps`, `readyForMerge` (heads), `merged`. |
 | `video` | The videos, their parts (file, start, transcript, tries), the gate comment. |
 | `places` | Each place: `repo`, `pr`, `page`, `line`, `claim`, `why`, `source`, `reason`, `refs`, `state`; `noRef` when a `code` place came with no reference at a commit (it is reported). |
-| `reviewComments`, `summaries`, `posted` | Review comments handled (by id and edit time); the summary comments; the ids of every comment the pipeline posted, so it never answers itself. |
+| `reviewComments`, `summaries`, `posted` | Review comments handled (by id and edit time); the summary comments; the ids of every comment and review the pipeline posted, so it never answers itself (a line comment of a review whose id is there counts as posted too). |
 | `files` | The work files outside git the stages created or downloaded: `path`, `kind`, `bytes`, `stage`, `at`. |
 | `runs` | Each session: role, model, effort, start, turns, the CLI's cost estimate, tokens, the week bar before and after, outcome, `retryOf`, the share of a group session; a failed one also `failures` (failed sessions in a row) and `after` (what the ticket looked like when it ended). |
 | `log` | Append-only: `seq`, `at`, `stage`, `pr`, `outcome`, `note`. |
