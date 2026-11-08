@@ -1,0 +1,64 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviews": {
+          "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+          },
+          "nodes": [
+            {
+              "id": "PRR_501",
+              "databaseId": 501,
+              "author": {
+                "login": "rev-one"
+              },
+              "state": "COMMENTED",
+              "body": "",
+              "submittedAt": "2026-11-04T09:00:00Z",
+              "commit": {
+                "oid": "7d1c0de5a1b2c3d4e5f60718293a4b5c6d7e8f90"
+              }
+            },
+            {
+              "id": "PRR_502",
+              "databaseId": 502,
+              "author": {
+                "login": "rev-two"
+              },
+              "state": "APPROVED",
+              "body": "Looks fine.",
+              "submittedAt": "2026-11-04T09:20:00Z",
+              "commit": {
+                "oid": "7d1c0de5a1b2c3d4e5f60718293a4b5c6d7e8f90"
+              }
+            },
+            {
+              "id": "PRR_503",
+              "databaseId": 503,
+              "author": {
+                "login": "rev-two"
+              },
+              "state": "PENDING",
+              "body": "draft",
+              "submittedAt": null,
+              "commit": {
+                "oid": "7d1c0de5a1b2c3d4e5f60718293a4b5c6d7e8f90"
+              }
+            },
+            {
+              "id": "PRR_400",
+              "databaseId": 400,
+              "author": null,
+              "state": "COMMENTED",
+              "body": "old",
+              "submittedAt": "2026-10-20T09:00:00Z",
+              "commit": null
+            }
+          ]
+        }
+      }
+    }
+  }
+}

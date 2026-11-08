@@ -1,0 +1,94 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+          },
+          "nodes": [
+            {
+              "id": "PRRT_1",
+              "isResolved": false,
+              "isOutdated": false,
+              "path": "docs/export.md",
+              "line": 12,
+              "comments": {
+                "pageInfo": {
+                  "hasNextPage": false
+                },
+                "nodes": [
+                  {
+                    "id": "PRRC_601",
+                    "databaseId": 601,
+                    "author": {
+                      "login": "rev-one"
+                    },
+                    "body": "Is this value right?",
+                    "createdAt": "2026-11-04T09:00:00Z",
+                    "updatedAt": "2026-11-04T09:00:00Z",
+                    "path": "docs/export.md",
+                    "line": 12,
+                    "replyTo": null,
+                    "pullRequestReview": {
+                      "databaseId": 501
+                    }
+                  },
+                  {
+                    "id": "PRRC_602",
+                    "databaseId": 602,
+                    "author": {
+                      "login": "docs-writer"
+                    },
+                    "body": "Checked, it is right.",
+                    "createdAt": "2026-11-04T09:10:00Z",
+                    "updatedAt": "2026-11-04T09:12:00Z",
+                    "path": "docs/export.md",
+                    "line": 12,
+                    "replyTo": {
+                      "databaseId": 601
+                    },
+                    "pullRequestReview": {
+                      "databaseId": 501
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "PRRT_2",
+              "isResolved": true,
+              "isOutdated": true,
+              "path": "docs/old.md",
+              "line": null,
+              "comments": {
+                "pageInfo": {
+                  "hasNextPage": true
+                },
+                "nodes": [
+                  {
+                    "id": "PRRC_610",
+                    "databaseId": 610,
+                    "author": {
+                      "login": "rev-one"
+                    },
+                    "body": "Is this value right?",
+                    "createdAt": "2026-10-20T09:00:00Z",
+                    "updatedAt": "2026-10-20T09:00:00Z",
+                    "path": "docs/old.md",
+                    "line": null,
+                    "replyTo": null,
+                    "pullRequestReview": {
+                      "databaseId": 501
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

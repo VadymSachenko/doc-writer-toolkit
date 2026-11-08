@@ -83,6 +83,7 @@ flowchart TD
 | Icon-only controls | `identify-ui-icon` | Finds the Iconify id, SVG or screenshot crop for a control with no text; the writers call it by name |
 | Screenshots from a recording | `extract-sme-screenshots` | Pulls deduplicated screenshots (and, if needed, a transcript) from an SME recording in `.sources/` |
 | SME notes | `convert-sme-input` | Turns a transcript or raw notes into a structured `.sources/sme-interview.md` |
+| Ticket flow | `ticket-flow` | Shows each docs ticket's state and next step, prints the daily runner's plan, and runs the named tickets by hand (outside the WIP limits) through the `ticket-state` runner |
 
 The full per-page pipeline from an SME video to a style-reviewed draft (`/doc-from-interview`) and the link-TODO repair (`/fix-doc-todos`) are commands, listed below. See [`SKILLS-INDEX.md`](plugins/doc-writer-toolkit/SKILLS-INDEX.md) for the canonical list with invocation examples.
 

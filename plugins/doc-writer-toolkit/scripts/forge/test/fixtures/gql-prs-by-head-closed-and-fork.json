@@ -1,0 +1,124 @@
+{
+  "data": {
+    "repository": {
+      "pullRequests": {
+        "nodes": [
+          {
+            "id": "PR_kwDOAAAAAc7",
+            "number": 12,
+            "url": "https://github.com/acme-docs/guide-docs/pull/7",
+            "title": "Describe the export screen",
+            "body": "Adds the export page.",
+            "state": "OPEN",
+            "isDraft": false,
+            "merged": false,
+            "mergedAt": null,
+            "closedAt": null,
+            "createdAt": "2026-11-03T08:00:00Z",
+            "updatedAt": "2026-11-04T09:30:00Z",
+            "headRefName": "docs/export-screen",
+            "headRefOid": "7d1c0de5a1b2c3d4e5f60718293a4b5c6d7e8f90",
+            "baseRefName": "main",
+            "reviewDecision": null,
+            "mergeable": "MERGEABLE",
+            "mergeStateStatus": "CLEAN",
+            "author": {
+              "login": "docs-writer"
+            },
+            "mergeCommit": null,
+            "headRepository": {
+              "nameWithOwner": "outsider/guide-docs"
+            },
+            "labels": {
+              "nodes": [
+                {
+                  "name": "in SME review"
+                }
+              ]
+            },
+            "assignees": {
+              "nodes": [
+                {
+                  "login": "pat"
+                }
+              ]
+            },
+            "reviewRequests": {
+              "nodes": [
+                {
+                  "requestedReviewer": {
+                    "__typename": "User",
+                    "login": "rev-one"
+                  }
+                },
+                {
+                  "requestedReviewer": {
+                    "__typename": "Team",
+                    "slug": "tech-writers"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "id": "PR_kwDOAAAAAc7",
+            "number": 5,
+            "url": "https://github.com/acme-docs/guide-docs/pull/7",
+            "title": "Describe the export screen",
+            "body": "Adds the export page.",
+            "state": "CLOSED",
+            "isDraft": false,
+            "merged": false,
+            "mergedAt": null,
+            "closedAt": "2026-10-01T00:00:00Z",
+            "createdAt": "2026-11-03T08:00:00Z",
+            "updatedAt": "2026-11-04T09:30:00Z",
+            "headRefName": "docs/export-screen",
+            "headRefOid": "7d1c0de5a1b2c3d4e5f60718293a4b5c6d7e8f90",
+            "baseRefName": "main",
+            "reviewDecision": null,
+            "mergeable": "MERGEABLE",
+            "mergeStateStatus": "CLEAN",
+            "author": {
+              "login": "docs-writer"
+            },
+            "mergeCommit": null,
+            "headRepository": {
+              "nameWithOwner": "acme-docs/guide-docs"
+            },
+            "labels": {
+              "nodes": [
+                {
+                  "name": "in SME review"
+                }
+              ]
+            },
+            "assignees": {
+              "nodes": [
+                {
+                  "login": "pat"
+                }
+              ]
+            },
+            "reviewRequests": {
+              "nodes": [
+                {
+                  "requestedReviewer": {
+                    "__typename": "User",
+                    "login": "rev-one"
+                  }
+                },
+                {
+                  "requestedReviewer": {
+                    "__typename": "Team",
+                    "slug": "tech-writers"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}
