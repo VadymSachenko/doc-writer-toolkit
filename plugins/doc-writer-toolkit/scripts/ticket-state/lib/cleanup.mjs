@@ -128,14 +128,17 @@ export function moveToTrash(abs, trashDir) {
 }
 
 // What the close step removes for one ticket, and does. `prState(pr)`: the forge's state of a PR of the ticket
-// (`merged`, `open`, `closed`). With `dryRun` nothing is removed: the list says what would go.
-export function cleanupTicket({ settings, ledger, prState, dryRun = false, trashDir = path.join(os.homedir(), '.Trash') }) {
+// (`merged`, `open`, `closed`); `forgeHeads`: the heads the forge gives for them now. With `dryRun` nothing is removed:
+// the list says what would go.
+export function cleanupTicket({ settings, ledger, prState, forgeHeads = [], dryRun = false, trashDir = path.join(os.homedir(), '.Trash') }) {
   const { mode, keep } = settings.cleanup;
-  const out = { mode, dryRun, removed: [], kept: [], freedBytes: 0, blocked: null, worktrees: [] };
+  const out = { mode, dryRun, removed: [], kept: [], deletedWithWorktree: [], freedBytes: 0, blocked: null, worktrees: [] };
   const files = ledger.files ?? [];
   // The ticket's worktrees: one per PR branch, made by the runner.
-  // The heads the forge had for the ticket's PRs: a worktree at one of them holds nothing unpushed.
-  const pushed = (ledger.prs ?? []).flatMap((p) => [p.lastSeenHead, ...(p.readyForMerge ?? []).map((r) => r.head), ...(p.pipelineCommits ?? [])]).filter(Boolean);
+  // The heads the forge had for the ticket's PRs, as the forge gave them (a record's check, the close step's read): a
+  // worktree at one of them, or behind one, holds nothing unpushed. Never `pipelineCommits`: that is what a session
+  // reported, whether or not its push went through.
+  const pushed = [...(ledger.prs ?? []).flatMap((p) => [p.lastSeenHead, ...(p.readyForMerge ?? []).map((r) => r.head)]), ...forgeHeads].filter(Boolean);
   const trees = (ledger.prs ?? [])
     .map((p) => ({ path: worktreePath(settings, p), clone: clonePath(settings, targetOf(settings, p)), branch: p.branch }))
     .filter((t) => t.path && t.clone && listWorktrees(t.clone).some((x) => canon(x.path) === canon(t.path)));
@@ -164,10 +167,13 @@ export function cleanupTicket({ settings, ledger, prState, dryRun = false, trash
   };
   for (const entry of files) {
     const abs = path.resolve(settings.root, entry.path);
-    // A recorded file a session wrote inside a ticket worktree went, or stays, with that worktree.
+    // A recorded file a session wrote inside a ticket worktree went, or stays, with that worktree. One that went was an
+    // ignored file outside `.sources/` and the keep list (a pack's output, say): git deleted it with the worktree, so it
+    // is not in the Trash, and the record says so.
     const inTree = out.worktrees.find((t) => inside(canon(abs), canon(t.path)));
     if (inTree) {
-      out.kept.push({ path: entry.path, reason: inTree.removed || inTree.wouldRemove ? `inside the worktree ${inTree.path}, removed with it (it held no work file)` : `inside the worktree ${inTree.path}, kept with it` });
+      if (inTree.removed || inTree.wouldRemove) out.deletedWithWorktree.push({ path: entry.path, worktree: inTree.path, kind: entry.kind ?? 'other' });
+      else out.kept.push({ path: entry.path, reason: `inside the worktree ${inTree.path}, kept with it` });
       continue;
     }
     if (!roots.some((r) => inside(abs, r))) {

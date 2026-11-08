@@ -20,7 +20,7 @@ You are proposing the documentation structure for one section. You read what alr
 
 ## Sources to load
 
-1. `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — resolve the section folder's root pair (its content root) and the content language.
+1. `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — resolve the section folder's root pair (its content root) and the content language. When a code source is declared (the `Code repos:` field, or `appRepos` in the ticket flow settings), its "Code repos" section also says where Step 3 reads the code from.
 2. `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` — the shared slug/title/filename convention. It is authoritative for every proposed slug and title (see "Slug rules" / "Title rules" below).
 3. `${CLAUDE_PLUGIN_ROOT}/context/style-guide-registry.md` — resolve the project's declared style guide token, then load **only the naming and titles topic file** from that corpus (via its ROUTING.md). Do not load the full corpus — only the file(s) that cover filename conventions, page title conventions, and topic-type naming rules (e.g. imperative mood for task-based titles). This is the only style-guide loading this skill does.
 4. The section's `.sources/section-readiness.json` — **required**. If absent, tell the user to run `section-readiness` first.
@@ -94,6 +94,8 @@ List anything the plan cannot decide from available evidence:
 - Flows not present in `app-notes.md` and with no SME backing (mark as `inferred`)
 - Pages where the merge/split decision is genuinely ambiguous — present both options with a default
 - Anything that requires a human or SME decision before writing can start
+
+When a code source is declared (the "Code repos" section of `project-paths.md`, sources item 1), a question about a product fact (a name, a value, a limit, a field, what a column holds) is looked up in the app's code, read as that section says, before it goes on this list. Only what the code states counts, never behavior inferred from its logic. A question the code answers is not an open question; where the answer shapes the plan, the page's rationale names the repo and the commit. `app-notes.md` ranks above the code: when they disagree, the app's answer stands, and the disagreement goes on this list with the repo and the commit. When the code and `sme-interview.md` disagree, both answers go on this list.
 
 ## Step 4 — Write section-plan.md
 

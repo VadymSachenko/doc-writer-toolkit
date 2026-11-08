@@ -46,7 +46,10 @@ export const LOCAL_DEFAULTS = {
     startHours: '10-22',
   },
   // `tokenFile`: a file (mode 600) with the long-lived sign-in token the watcher's runs use; none: the CLI's own sign-in.
-  schedule: { morning: '07:00', watchMinutes: 5, tokenFile: null },
+  // `forgeSeconds`: how often the forge check looks for comments on the pipeline's PRs between full checks (none: only
+  // the full check, every `watchMinutes`). `commentQuietMinutes`: how long single comments on a PR stay quiet before
+  // their session starts (a submitted review starts at once; lib/quiet.mjs).
+  schedule: { morning: '07:00', watchMinutes: 5, forgeSeconds: 60, commentQuietMinutes: 2, tokenFile: null },
   roles: {
     triage: { model: 'claude-sonnet-5-5', effort: 'medium', maxTurns: 40 },
     writer: { model: 'claude-opus-5-5', effort: 'high', maxTurns: 200 },
@@ -62,6 +65,14 @@ export const LOCAL_DEFAULTS = {
   // `stepsFile`: a file of the owner's own planned steps, shown as is at the end of the progress file (none: no block).
   progress: { stepsFile: null },
 };
+
+// The LaunchAgent's interval (s): `schedule.forgeSeconds` when it is shorter than the full check's `watchMinutes`, else
+// `watchMinutes`, and every tick is a full check.
+export function tickSecondsOf(settings) {
+  const full = Math.round(settings.schedule.watchMinutes * 60);
+  const forge = settings.schedule.forgeSeconds;
+  return typeof forge === 'number' && forge < full ? Math.round(forge) : full;
+}
 
 // The statuses the ticket flow reads by name. Each must be a status of tracker.statuses.
 export const REQUIRED_STATUSES = ['intake', 'ready', 'inProgress', 'blocked', 'finalReview', 'translation', 'done'];
@@ -178,6 +189,8 @@ export function validateSettings(merged, { root, stateRootDefault }) {
   const schedule = deepMerge(LOCAL_DEFAULTS.schedule, merged.schedule ?? {});
   if (typeof schedule.morning !== 'string' || !/^([01]?\d|2[0-3]):[0-5]\d$/.test(schedule.morning)) fail('schedule.morning must be a time such as 07:00');
   num(schedule.watchMinutes, 'schedule.watchMinutes', { min: 1 });
+  if (schedule.forgeSeconds !== null) num(schedule.forgeSeconds, 'schedule.forgeSeconds', { min: 30 });
+  num(schedule.commentQuietMinutes, 'schedule.commentQuietMinutes');
   if (schedule.tokenFile !== null && (typeof schedule.tokenFile !== 'string' || !schedule.tokenFile.trim())) fail('schedule.tokenFile must be a file path');
   const video = deepMerge(LOCAL_DEFAULTS.video, merged.video ?? {});
   num(video.partsPerDay, 'video.partsPerDay', { min: 1 });

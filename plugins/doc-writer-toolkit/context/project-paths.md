@@ -157,6 +157,30 @@ A second root pair, next to the primary pair's fields in the same block:
 
 Do not restate this procedure in the calling skill's own file — the calling skill's relevant step should be a short pointer into this file, not a paraphrase of it.
 
+## Code repos
+
+These fields are read by the skills that use the app's code as evidence (`resolve-markers`, and `section-planner` before it lists an open question). A project that lets no skill read its code declares none. In a ticket flow writer or reviewer session the brief names the code checkouts, and step 1 below is the whole procedure.
+
+| Field | Required | Value | If absent |
+|---|---|---|---|
+| `Code repos:` | no | The app repos, one backtick span each: `<name> <remote> <branch the test environment runs>`. `<remote>` is a git remote URL, any URL `git clone` accepts (`https://…`, `git@host:org/repo.git`, `file:///…`), or `clone=<path>` when the host knows the repo only as a local clone, the path from the repo root. A host that has `appRepos` in its ticket flow settings (`repo`, `url`, `base`, `path`) declares no `Code repos:`: the skills read that list instead (`ticket-state config` prints it), and if both exist `appRepos` wins; the two are never merged. `appRepos` takes an `https://` URL only | no code is read; the run says so |
+
+```md
+- **Code repos:** `web-app https://github.com/example-org/web-app.git test`, `api clone=../api main`
+```
+
+**Where the code is read from.** A question is looked up in every listed repo, not only in the first that matches.
+
+1. **A brief that names code checkouts** (a ticket flow writer or reviewer session): the path and the commit the brief gives, read with Read and Grep. No fetch, no clone and no `git grep` there (all denied). Inside any ticket flow session the brief is the only source: a repo it marks as unavailable, or does not name, is unavailable, with no fall-back to step 2.
+2. **Any other run:** the pipeline's own bare clone of each repo, fetched from the repo's remote. No git command ever runs in a clone of the owner's but the one read below: no fetch, checkout, pull, reset, stash or worktree there, and none of its files is read (they may be weeks old). The owner's branch, HEAD, refs and working tree stay as they were.
+   - **The URL:** the `<remote>` as declared, or `url` in `appRepos`. For `clone=<path>`: `git -C <path> config --get remote.origin.url`, the only command run in that clone. With no URL there, the repo is unavailable.
+   - **The clone:** `<state>/code/<name>.git` when `ticket-state config` prints a `state` (the ticket flow's git-ignored folder, where its runner keeps the same clone); else `~/.cache/doc-writer-toolkit/code/<name>.git`. Never anywhere else in the host repo: `<Toolkit state root>` is committed, so an app's code there would show as untracked files, and a `git add -A` would commit it into the docs repo.
+   - **Clone and fetch:** if the clone doesn't exist yet, `git clone -q --bare -- <url> <clone>` (git makes the missing folders). If it exists and `git -C <clone> config --get remote.origin.url` is not `<url>` (a repo of the same name from another host, or one that moved): `git -C <clone> remote set-url origin <url>` and `git -C <clone> update-ref -d refs/remotes/origin/<branch>`, so no commit of the other repo is ever read as this one's. Then `git -C <clone> fetch -q origin +refs/heads/<branch>:refs/remotes/origin/<branch>` and `git -C <clone> rev-parse refs/remotes/origin/<branch>`: that commit is fixed for the whole run.
+   - **Read** it with no checkout: `git -C <clone> grep -n -e <pattern> <commit> -- <path>` and `git -C <clone> show <commit>:<path>`.
+   - **A fetch that fails** reads the commit fetched last, and the run says so next to each fact read from it. With none fetched, the repo is unavailable.
+
+A repo that can't be reached is reported as unavailable. It never stops the run, and a fact only that code could answer stays a marker.
+
 ## Pipeline measures
 
 These fields are read by the `pipeline-measures` script (`${CLAUDE_PLUGIN_ROOT}/scripts/pipeline-measures/`), which measures a docs pipeline from the repo's git history, its pull requests and its tracker. No skill reads them. A project that doesn't measure its pipeline declares none. Each flag of the script overrides its field.
@@ -205,7 +229,7 @@ The keys the `ticket-state` scripts add to that file. The shared file is committ
 | `hostRules`, `hostJobs` | shared | The host's rule files for the role sessions; the host's jobs the watcher starts (a watched list quiet for `quietHours`, or `every` minutes; a `script` or a `skill`) | none |
 | `mode` | local | `off`, `observe` or `on` | `observe` |
 | `limits` | local | `inProgress`, `waiting`, `parallel`, `dailyPercent`, `maxWeekPercent`, `estimates`, `lockLeaseMinutes`, `sessionPercent`, `triageBatch`, `stepsPerTicket`, `sessionsPerStageDay` | `3`, `5`, `3`, `10`, none, none, `120`, `80`, `10`, `12`, `3` |
-| `schedule` | local | `morning` (the morning run starts at the watcher's first check after it), `watchMinutes` (the watcher's interval), `tokenFile` (a `chmod 600` file with the long-lived sign-in token for unattended runs) | `07:00`, `5`, none |
+| `schedule` | local | `morning` (the morning run starts at the watcher's first check after it), `watchMinutes` (the watcher's full check), `forgeSeconds` (the LaunchAgent's tick: between full checks, the forge check for comments on the pipeline's PRs; none: no forge check), `commentQuietMinutes` (how long single comments stay quiet before their session starts), `tokenFile` (a `chmod 600` file with the long-lived sign-in token for unattended runs) | `07:00`, `5`, `60`, `2`, none |
 | `roles`, `modelLadder`, `video` | local | Each role's model, effort and tool rules; the retry ladder; the video gate | see the README |
 | `cleanup.mode` | local | What the close step does with a merged ticket's recorded work files: `trash` (into the Trash) or `delete` | `trash` |
 | `cleanup.keep` | local | Globs, from the host root, of work files the cleanup never removes | `["**/sme-interview.md", "**/app-notes.md"]` |

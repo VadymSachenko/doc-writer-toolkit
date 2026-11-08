@@ -687,6 +687,27 @@ test('setStageLabel: a PR already at the stage changes nothing; a stage the targ
   assert.equal(calls.length, 0);
 });
 
+test('setStageLabel: the optional translation stage takes the final review label off and gives it back; a target without it refuses the stage', async () => {
+  const s = settingsJson();
+  const withTranslation = validateForge(s.forge, s.targets.map((t) => (t.id === 'guide' ? { ...t, labels: { ...guideLabels, translation: 'in translation' } } : t)));
+  assert.ok(withTranslation.addable.has('in translation') && withTranslation.removable.has('in translation'));
+  const adapter = memoryAdapter();
+  const forge = createForge({ adapter, forge: withTranslation });
+  await forge.setStageLabel({ target: 'guide', number: 1, stage: 'finalReview' });
+  const into = await forge.setStageLabel({ target: 'guide', number: 1, stage: 'translation' });
+  assert.deepEqual([into.label, into.added, into.removed], ['in translation', ['in translation'], ['In final review']]);
+  assert.deepEqual(adapter.log.at(-1), ['changeLabels', ['in translation'], ['In final review']], 'one request');
+  const back = await forge.setStageLabel({ target: 'guide', number: 1, stage: 'finalReview' });
+  assert.deepEqual([back.added, back.removed], [['In final review'], ['in translation']]);
+  assert.deepEqual((await forge.prState({ repo: 'guide-docs', number: 1 })).labels, ['In final review']);
+  // A target that names no translation label: the stage is refused before any request.
+  const before = adapter.log.length;
+  await rejects(forge.setStageLabel({ target: 'api', number: 1, stage: 'translation' }), 'notNamed');
+  const plain = createForge({ adapter, forge: forgeSettings() });
+  await rejects(plain.setStageLabel({ target: 'guide', number: 1, stage: 'translation' }), 'notNamed');
+  assert.equal(adapter.log.length, before);
+});
+
 test('setStageLabel: two targets of one repo keep their own review labels; a label shared by two stages is never removed', async () => {
   const api = fixture('gql-pr-7');
   api.data.repository.pullRequest.labels.nodes = [{ name: 'In tech review' }, { name: 'In SME review' }];
