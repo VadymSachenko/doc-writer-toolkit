@@ -12,8 +12,9 @@ import { prId } from './ledger.mjs';
 import { isIdOnlyChange } from './ids.mjs';
 
 // What the ticket flow reads: the tracker and the forge through their modules (this script composes no tracker or
-// forge request itself), and git, read only, in the target repos the settings name. Every request the modules send is
-// traced (method and path, never a query string or a credential), so a run can show it sent nothing but reads.
+// forge request itself), and git in the target repos the settings name: reads, and one fetch of an open PR's branch into
+// its remote-tracking ref when the forge's head isn't there yet (`fetchHeads`). Every request the modules send is traced
+// (method and path, never a query string or a credential), so a run can show it sent nothing but reads.
 
 export function makeClients({ settings, env = process.env, io = {}, dryRun = false }) {
   const trace = { tracker: [], forge: [] };
@@ -100,7 +101,7 @@ export function makeClients({ settings, env = process.env, io = {}, dryRun = fal
   };
 }
 
-// ------------------------------------------------------------------ git, read only
+// ------------------------------------------------------------------ git: reads, and the fetch of a missing head
 
 const gitOut = (cwd, args) => {
   try {
@@ -109,6 +110,19 @@ const gitOut = (cwd, args) => {
     return null;
   }
 };
+
+// The fetch of `fetchHeads`: it never waits for a password (one that needs it fails) and never runs past a minute.
+const gitFetch = (cwd, refspecs) => {
+  try {
+    execFileSync('git', ['-C', cwd, 'fetch', '-q', '--no-tags', 'origin', ...refspecs], { stdio: ['ignore', 'ignore', 'ignore'], timeout: 60000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+// A `-z` list of paths (`diff --name-only`, `ls-tree --name-only`): never quoted, so a non-ASCII name is read as it is.
+const zList = (out) => (out ?? '').split('\0').filter(Boolean);
 
 export const IMAGE = /\.(png|jpe?g|gif|webp|avif|svg)$/i;
 
@@ -120,8 +134,28 @@ export function makeGit(settings) {
     return null;
   };
   const pages = new Map();
+  const asked = new Set();
   return {
     repoPath,
+    // The forge's heads of the open PRs, brought into the target clones: per clone, one fetch of the branches whose head
+    // it doesn't have, with their base, into the remote-tracking refs only (`+refs/heads/<b>:refs/remotes/origin/<b>`,
+    // the worktree's own fetch, lib/worktree.mjs). Never a local branch, the checkout or its files. So a commit made on
+    // the forge (a suggestion accepted in the PR, an upload, an edit in the browser) is read like one pushed from the
+    // clone. At most once per clone and branch for this reader (one check). A fetch that fails leaves the clone as it was,
+    // and the rule notes the head as not fetched. `wanted`: [{ target, branch, base, head }]; returns [{ clone, refs, fetched }].
+    fetchHeads(wanted) {
+      const byClone = new Map();
+      for (const w of wanted ?? []) {
+        const cwd = repoPath(w.target);
+        const key = `${cwd}\0${w.branch}`;
+        if (!cwd || !w.branch || !w.head || asked.has(key) || !fs.existsSync(cwd) || hasCommit(cwd, w.head)) continue;
+        asked.add(key);
+        const refs = byClone.get(cwd) ?? new Set();
+        for (const b of [w.base, w.branch]) if (b) refs.add(`+refs/heads/${b}:refs/remotes/origin/${b}`);
+        byClone.set(cwd, refs);
+      }
+      return [...byClone].map(([cwd, refs]) => ({ clone: cwd, refs: [...refs], fetched: gitFetch(cwd, [...refs]) }));
+    },
     // The commits on the PR's branch that are not on its base, newest first. Null when the head or the base isn't here.
     branchCommits(target, head, base) {
       const cwd = repoPath(target);
@@ -144,12 +178,10 @@ export function makeGit(settings) {
       const cwd = repoPath(target);
       if (!cwd || !hasCommit(cwd, from) || !hasCommit(cwd, to)) return null;
       if (from === to) return [];
-      const out = gitOut(cwd, ['diff', '--name-only', '--no-renames', from, to, '--', ...roots]);
+      // `-z`: a non-ASCII page name is never quoted, so never missed.
+      const out = gitOut(cwd, ['diff', '-z', '--name-only', '--no-renames', from, to, '--', ...roots]);
       if (out === null) return null;
-      const changeSet = out
-        .split('\n')
-        .filter(Boolean)
-        .map((f) => ({ path: f, before: gitOut(cwd, ['show', `${from}:${f}`]), after: gitOut(cwd, ['show', `${to}:${f}`]) }));
+      const changeSet = zList(out).map((f) => ({ path: f, before: gitOut(cwd, ['show', `${from}:${f}`]), after: gitOut(cwd, ['show', `${to}:${f}`]) }));
       return changeSet.filter((page) => !isIdOnlyChange(page, changeSet)).map((page) => page.path);
     },
     // The images (anywhere in the repo but a `.sources/` folder) that changed between two commits, for the visual pack
@@ -161,7 +193,7 @@ export function makeGit(settings) {
       // `-z`: a non-ASCII image name is never quoted, so never missed.
       const out = gitOut(cwd, ['diff', '-z', '--name-only', '--no-renames', from, to]);
       if (out === null) return null;
-      return out.split('\0').filter((f) => f && IMAGE.test(f) && !f.split('/').includes('.sources'));
+      return zList(out).filter((f) => IMAGE.test(f) && !f.split('/').includes('.sources'));
     },
     // The UA page paths of a target at its base (relative to the UA root, without the extension), for the text check.
     pagesOf(target) {
@@ -170,9 +202,8 @@ export function makeGit(settings) {
       let list = [];
       if (cwd && fs.existsSync(cwd)) {
         const ref = baseRef(cwd, target.base) ?? 'HEAD';
-        const out = gitOut(cwd, ['ls-tree', '-r', '--name-only', ref, '--', target.uaRoot]);
-        list = (out ?? '')
-          .split('\n')
+        const out = gitOut(cwd, ['ls-tree', '-r', '-z', '--name-only', ref, '--', target.uaRoot]);
+        list = zList(out)
           .filter((f) => /\.mdx?$/.test(f) && !f.split('/').some((p) => p.startsWith('.')))
           .map((f) => f.slice(target.uaRoot.length).replace(/\.mdx?$/, ''));
       }

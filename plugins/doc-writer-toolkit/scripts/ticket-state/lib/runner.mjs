@@ -17,7 +17,7 @@ import { ROLES } from './settings.mjs';
 import { cleanupTicket } from './cleanup.mjs';
 import { removeClosedMarkdown } from './import.mjs';
 import { DOWNLOAD_DIRS_VARIABLE, ROLE_SESSION_VARIABLE, childEnv, sessionChildEnv } from './env.mjs';
-import { clonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureWorktree, prsForStep, worktreePath } from './worktree.mjs';
+import { checkClone, clonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureWorktree, prsForStep, worktreePath } from './worktree.mjs';
 import { BUSY_NAME, LOCK_NAME, busyEnded, freeBrowserLock } from './browser-lock.mjs';
 import { HOOK_VARIABLE, commandsOfRules, hookSettings } from './role-hook.mjs';
 import { parseClaudeConfig } from '../../ui-labels/lib/config.mjs';
@@ -367,6 +367,7 @@ export function briefFor(step, settings) {
     step.cards ? `Cards, highest priority first:\n${step.cards.map((c) => `- ${c.key}: ${c.url ?? c.shortLink} (${c.priority})`).join('\n')}` : null,
     step.worktrees?.length ? worktreeLines(step.worktrees) : null,
     step.codeTrees?.length ? codeLines(step.codeTrees) : null,
+    step.clones?.length ? cloneLines(step.clones) : null,
     '',
     `Host repo: ${root}`,
     `The toolkit's scripts folder: ${path.join(PLUGIN_ROOT, 'scripts')}`,
@@ -390,6 +391,25 @@ function worktreeLines(trees) {
     'Worktrees (the runner made them; work only there, and never create, move or remove a worktree, or link a file into one). Run git there as `git -C <the path exactly as below, unquoted> <command>`. A read (status, diff, log, show) may also run as plain `git <command>` after a `cd` to it as a separate call; an add, a commit, a push and a fetch run only as `git -C` (this session starts in the hub, whose checkout a plain one would change). Other spellings are denied, a quoted path and `cd <path> && git …` among them.',
     ...trees.map((t) => `- ${t.repo} ${t.branch}: ${t.path}${t.linked?.length ? ` (linked from the clone: ${t.linked.join(', ')})` : ''}. It is detached at origin/${t.branch} as the runner fetched it; push with \`${t.push}\`, fetch with \`git -C ${t.path} fetch origin\`.${t.notes?.length ? ` Note: ${t.notes.join('; ')}.` : ''}`),
   ].join('\n');
+}
+
+// The targets a step's tickets name (their triage's, their PRs'), one per clone, or every target while they name none.
+function targetsOf(settings, ledgers) {
+  const ids = new Set(ledgers.filter(Boolean).flatMap((l) => [...(l.triage?.targets ?? []), ...(l.prs ?? []).flatMap((p) => p.targets ?? [])]));
+  const named = settings.targets.filter((t) => ids.has(t.id));
+  const seen = new Set();
+  return (named.length ? named : settings.targets).filter((t) => {
+    const c = clonePath(settings, t);
+    if (!c || seen.has(c)) return false;
+    seen.add(c);
+    return true;
+  });
+}
+
+// What the brief says about a target clone a step with no worktree reads, when it isn't at its origin's base.
+function cloneLines(clones) {
+  const noted = clones.filter((c) => c.notes?.length);
+  return noted.length ? ['Target clones, read as they stand (the runner never moves them):', ...noted.map((c) => `- ${c.repo}: ${c.clone}, on ${c.base}; ${c.notes.join('; ')}.`)].join('\n') : null;
 }
 
 // What the brief says about the code the session may read: the checkout at the commit the runner just fetched.
@@ -680,12 +700,17 @@ async function runScripted(step, ctx) {
     case 'close': {
       // The PRs first: the cleanup removes nothing unless every one is merged.
       const states = new Map();
-      for (const p of ledger.prs.filter((x) => x.number)) states.set(prId(p), (await clients.forge.prState({ repo: p.repo, number: p.number })).state);
+      const heads = [];
+      for (const p of ledger.prs.filter((x) => x.number)) {
+        const st = await clients.forge.prState({ repo: p.repo, number: p.number });
+        states.set(prId(p), st.state);
+        heads.push(st.headCommit);
+      }
       const now = await clients.tracker.findCards({ link: card });
       if (now.cards[0]?.status !== 'done') await clients.tracker.move({ card, to: 'done' });
       for (const k of step.keys) {
         const l = readLedger(settings.state, k);
-        const cleanup = cleanupTicket({ settings, ledger: l, prState: (p) => states.get(prId(p)) ?? null, trashDir: trashOf(settings, io) });
+        const cleanup = cleanupTicket({ settings, ledger: l, prState: (p) => states.get(prId(p)) ?? null, forgeHeads: heads, trashDir: trashOf(settings, io) });
         await rec(k, { result: JSON.stringify({ cleanup }) });
       }
       return;
@@ -848,8 +873,8 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
       if (step.stage === 'close' && l) {
         // What the close step would remove after the merge: listed, nothing removed.
         const views = st.tickets.find((t) => t.key === l.key)?.prs ?? [];
-        const c = cleanupTicket({ settings, ledger: l, prState: (p) => views.find((v) => v.id === prId(p))?.state ?? (p.merged ? 'merged' : null), dryRun: true, trashDir: trashOf(settings, io) });
-        d.cleanup = { mode: c.mode, wouldRemove: c.removed, keeps: c.kept, freesBytes: c.freedBytes, blocked: c.blocked, worktrees: c.worktrees.map((t) => t.path) };
+        const c = cleanupTicket({ settings, ledger: l, prState: (p) => views.find((v) => v.id === prId(p))?.state ?? (p.merged ? 'merged' : null), forgeHeads: views.map((v) => v.head), dryRun: true, trashDir: trashOf(settings, io) });
+        d.cleanup = { mode: c.mode, wouldRemove: c.removed, keeps: c.kept, ...(c.deletedWithWorktree.length ? { wouldDeleteWithWorktree: c.deletedWithWorktree } : {}), freesBytes: c.freedBytes, blocked: c.blocked, worktrees: c.worktrees.map((t) => t.path) };
       }
       return d;
     }
@@ -1077,9 +1102,14 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         const mine = new Set([step.group ?? step.keys[0], ...held]);
         const othersRunning = allLocks(settings.state, clock()).some((l) => l.live && !mine.has(l.group));
         const codeTrees = CODE_ROLES.has(step.role) ? (settings.appRepos ?? []).map((a) => (io.ensureCodeTree ?? ensureCodeTree)(settings, a, { othersRunning })) : [];
-        step = { ...step, worktrees: trees, codeTrees };
+        // A step with no worktree reads the ticket's target clones as they stand: one off its base starts no session,
+        // the same way (lib/worktree.mjs, `checkClone`); one behind its origin is said in the brief.
+        const clones = !trees.length && step.role !== 'triage' ? targetsOf(settings, step.keys.map((k) => readLedger(settings.state, k))).map((t) => (io.checkClone ?? checkClone)(settings, t)).filter(Boolean) : [];
+        const off = clones.filter((c) => c.off);
+        if (off.length) throw Object.assign(new Error(`${off.map((c) => c.off).join('; ')}. Check out the base there, then ${step.keys.map((k) => `\`ticket-state set retry ${k}\``).join(', ')}`), { clone: true });
+        step = { ...step, worktrees: trees, codeTrees, clones };
       } catch (e) {
-        const note = `the worktree: ${String(e.message).slice(0, 400)}`;
+        const note = `${e.clone ? 'the clone' : 'the worktree'}: ${String(e.message).slice(0, 400)}`;
         for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'failed', pr: step.pr, note, now: clock() }).catch(() => {});
         // A failed step like a failed session, so the failed-step rules apply (it waits for a person, then holds), with
         // no `start`: no session ran, so it counts toward no cap, cost or report of sessions.

@@ -145,7 +145,7 @@ export function deriveTicket(l, w) {
     t.failed = failed;
     if (failed.held) {
       t.steps = [];
-      t.gate = { who: 'owner', why: `${failed.stage}${failed.pr ? ` on ${failed.pr}` : ''} ${failed.noSession ? `failed ${failed.sessions === 2 ? 'twice' : `${failed.sessions} times`} with no one acting in between, the last time before any session started (${failed.noSession.slice(0, 200)})` : `failed in ${failed.sessions} sessions with no one acting in between`}: a comment on the card or the PR gives it one more try (so do a review, a commit, a move of the card, or \`ticket-state set retry ${l.key}\`)` };
+      t.gate = { who: 'owner', why: `${heldWhy(failed)}: a comment on the card or the PR gives it one more try (so do a review, a commit, a move of the card, or \`ticket-state set retry ${l.key}\`)` };
       t.held = true;
     } else if (!failed.acted && t.steps.length) t.steps[0] = { ...t.steps[0], prior: failed.sessions, waits: 'a person acting on the ticket, or the next morning run' };
   }
@@ -209,10 +209,26 @@ function failedStep(l, w, steps) {
   const last = (l.runs ?? []).findLast((r) => r.outcome !== 'busy');
   const s = steps[0];
   if (!s || last?.outcome !== 'failed' || !last.after || last.stage !== s.stage || (last.pr ?? null) !== (s.pr ?? null)) return null;
+  // `sessions`: the failures in a row, a session's or not (the runner's count).
   const sessions = last.failures ?? 1;
   const acted = actedAfter(l, w, last.after);
-  // A failure with no session (no `start`: a worktree that couldn't be made or was stuck) says so, with its reason.
-  return { stage: last.stage, ...(last.pr ? { pr: last.pr } : {}), at: last.after.at, sessions, ...(last.start ? {} : { noSession: String(last.note ?? 'no session started') }), ...(acted ? { acted } : { held: sessions >= 2 }) };
+  // A failure with no session (no `start`: a worktree that couldn't be made or was stuck) says so, with its reason. So
+  // do the earlier failures of the row that had none: a stuck worktree, then a failed session, is two failures and one
+  // session.
+  const row = (l.runs ?? []).filter((r) => r.outcome !== 'busy').slice(-sessions).filter((r) => r.outcome === 'failed' && r.stage === last.stage && (r.pr ?? null) === (last.pr ?? null));
+  const withoutSession = row.filter((r) => !r.start).length;
+  return { stage: last.stage, ...(last.pr ? { pr: last.pr } : {}), at: last.after.at, sessions, ...(withoutSession ? { withoutSession } : {}), ...(last.start ? {} : { noSession: String(last.note ?? 'no session started') }), ...(acted ? { acted } : { held: sessions >= 2 }) };
+}
+
+const times = (n) => (n === 1 ? 'once' : n === 2 ? 'twice' : `${n} times`);
+
+// Why a failed step is held, in words that count its failures right: "in N sessions" only when each failure was a
+// session's.
+function heldWhy(failed) {
+  const where = `${failed.stage}${failed.pr ? ` on ${failed.pr}` : ''}`;
+  if (failed.noSession) return `${where} failed ${times(failed.sessions)} with no one acting in between, the last time before any session started (${failed.noSession.slice(0, 200)})`;
+  if (failed.withoutSession) return `${where} failed ${times(failed.sessions)} with no one acting in between, ${times(failed.withoutSession)} before any session started`;
+  return `${where} failed in ${failed.sessions} sessions with no one acting in between`;
 }
 
 // The sessions the ticket's next step already had today (since a `set retry`, if later), when they reach the cap.
