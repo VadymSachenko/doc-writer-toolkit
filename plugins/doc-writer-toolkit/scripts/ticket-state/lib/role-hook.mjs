@@ -120,7 +120,7 @@ function checkGit(words, cfg, cwd) {
   return null;
 }
 
-function checkNode(words, cfg) {
+function checkNode(words, cfg, cwd) {
   const script = words[1]?.value;
   if (script === undefined || words[1].glob) return 'node with no script by name';
   if (script.startsWith('-')) return `node ${script} (roles run scripts by name, no node option)`;
@@ -134,10 +134,26 @@ function checkNode(words, cfg) {
       if (own && cmds.denied.includes(own.value)) return `${rel} ${own.value} (the runner's alone)`;
       const flags = SCRIPT_FLAGS[rel] ?? [];
       const bad = words.slice(2).find((w) => flags.some((f) => flagIs(w.value, f)));
-      return bad ? `${rel} ${bad.value.split('=')[0]} (it runs code)` : null;
+      if (bad) return `${rel} ${bad.value.split('=')[0]} (it runs code)`;
+      return readCheckoutArg(rel, words.slice(2), cfg, cwd);
     }
   }
   return `${script}${words[2] ? ` ${words[2].value}` : ''} (not one of this role's scripts)`;
+}
+
+// A script that would work in a read checkout (staging or promoting screenshots, patching labels): what it writes there
+// is not the clone's and goes at the next re-point. Refused when the shell stands in one, or a word (or a flag's
+// `=value`) names a path in one, but for its `.sources/` folders, which are the clone's.
+function readCheckoutArg(rel, args, cfg, cwd) {
+  if (!(cfg.read ?? []).length) return null;
+  if (cwd && readOnlyIn(path.resolve(cwd), cfg)) return `${rel} run from a read checkout (${cwd}), which is read-only: run it on the clone or the worktree`;
+  for (const w of args) {
+    const v = w.value.startsWith('-') ? (w.value.includes('=') ? w.value.slice(w.value.indexOf('=') + 1) : null) : w.value;
+    if (!v) continue;
+    const file = path.resolve(cwd ?? '/', v.replace(/^~(?=\/|$)/, process.env.HOME ?? '~'));
+    if (readOnlyIn(file, cfg)) return `${rel} with ${v}: a path in a read checkout, which is read-only but for its .sources/ folders; give it the clone's path`;
+  }
+  return null;
 }
 
 function checkNpx(words, cfg) {
@@ -170,6 +186,13 @@ function inside(file, dir) {
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 }
 
+// The read checkout a path is in, when it is not under one of its `.sources/` folders (the clone's, through a link):
+// read-only there. Null elsewhere.
+function readOnlyIn(file, cfg) {
+  const d = (cfg.read ?? []).find((r) => inside(file, r));
+  return d && !path.relative(d, file).split('/').includes('.sources') ? d : null;
+}
+
 // A folder only where a session may write: not a lock, not a protected folder, and inside the step's own folders.
 function checkMkdir(words, cfg, cwd) {
   for (let i = 1; i < words.length; i++) {
@@ -184,10 +207,10 @@ function checkMkdir(words, cfg, cwd) {
     const segments = file.split('/');
     if (segments.some((s) => LOCK.test(s))) return 'a browser lock made by hand (browser-lock.mjs takes and frees it)';
     if (segments.some((s) => PROTECTED.has(s.toLowerCase()))) return `a folder under ${segments.find((s) => PROTECTED.has(s.toLowerCase()))}`;
-    // A read checkout is read-only, even where a clone's `.sources/` would reach into it (the hub as a target, holding
-    // the state folder).
-    if ((cfg.read ?? []).some((d) => inside(file, d))) return `mkdir in a read checkout, which is read-only: ${file}`;
-    const open = (cfg.write ?? []).some((d) => inside(file, d)) || (cfg.sources ?? []).some((c) => inside(file, c) && path.relative(c, file).split('/').includes('.sources'));
+    // A read checkout is read-only but for its `.sources/` folders, the clone's (lib/worktree.mjs).
+    const reading = readOnlyIn(file, cfg);
+    if (reading) return `mkdir in a read checkout, which is read-only but for its .sources/ folders: ${file}`;
+    const open = (cfg.write ?? []).some((d) => inside(file, d)) || (cfg.sources ?? []).some((c) => inside(file, c) && path.relative(c, file).split('/').includes('.sources')) || (cfg.read ?? []).some((d) => inside(file, d));
     if (!open) return `mkdir outside the folders in your brief: ${file}`;
   }
   return null;
@@ -277,7 +300,7 @@ function checkSimple(words, cfg, cwd) {
     case 'git':
       return checkGit(words, cfg, cwd);
     case 'node':
-      return checkNode(words, cfg);
+      return checkNode(words, cfg, cwd);
     case 'npx':
       return checkNpx(words, cfg);
     case 'npm':

@@ -683,7 +683,7 @@ test('a step with no worktree may create only its own specs: one rule per key pe
   assert.match(readRole('writer').prompt, /`_plan-<key>-<what>\.spec\.ts`/);
 });
 
-test('a step with no worktree reads pages in its read checkouts: in --add-dir and the git read rules, closed to writes where a clone\'s .sources/ rule would reach, named in the brief in place of the clone\'s note', () => {
+test('a step with no worktree works in its read checkouts: in --add-dir and the git read rules, writable only in their .sources/ folders, named in the brief in place of the clone\'s note', () => {
   const { w } = busyWorld();
   // The hub is a target too, so its `.sources/` rule reaches the state folder inside it.
   const settings = { ...w.settings, targets: [...w.settings.targets, { ...w.settings.targets[0], id: 'the-hub', path: '.' }] };
@@ -702,11 +702,13 @@ test('a step with no worktree reads pages in its read checkouts: in --add-dir an
   const reads = (dir) => allowed.filter((r) => r.startsWith(`Bash(git -C ${dir} `)).map((r) => r.replace(dir, '<dir>'));
   assert.ok(reads(clone).length > 0);
   assert.deepEqual(reads(rc), reads(clone), 'the git reads of a clone run in its read checkout too');
-  assert.ok(!allowed.some((r) => r.startsWith('Edit(') && r.includes(`${state}/read`)), 'no write rule names it');
-  if (state.startsWith(`${w.root}/`)) assert.ok(allowed.includes(`Edit(/${w.root}/**/.sources/**)`), 'the hub\'s .sources/ rule reaches into the state folder');
-  assert.ok(denied.includes(`Edit(/${path.join(state, 'read')}/**)`), 'and the deny closes the read checkouts');
+  // Its `.sources/` folders only (the clone's, through links): no rule opens its pages, and no deny closes the links.
+  assert.deepEqual(allowed.filter((r) => r.startsWith('Edit(') && r.includes(`${state}/read`)), [`Edit(/${rc}/**/.sources/**)`]);
+  assert.ok(!denied.some((r) => r.includes(`${state}/read`)), 'a deny there would beat the .sources/ rule');
+  assert.ok(denied.includes(`Edit(/${path.join(state, 'tickets')}/**)`), 'the state\'s own folders stay closed');
   const brief = briefFor(step(withRead), settings);
-  assert.match(brief, new RegExp(`Read checkouts \\(the runner made them, detached at \`origin/<base>\`[^\\n]*never in the clones[^\\n]*\`\\.sources/\` folder[^\\n]*in the clone\\b[^\\n]*\\n- guide-docs: ${rc}, origin/main at aaaaaaa; its clone: ${clone}\\.`));
+  assert.match(brief, new RegExp(`Read checkouts \\(the runner made them, detached at \`origin/<base>\`[^\\n]*give every skill the read checkout's path[^\\n]*never the clone's[^\\n]*pages, images and configuration are read-only\\. Its \`\\.sources/\` folders are the clone's \\(links\\)[^\\n]*moved into the clone when the session ends[^\\n]*\\n- guide-docs: ${rc}, origin/main at aaaaaaa; its clone: ${clone}\\.`));
+  assert.match(brief, /only in: [^\n]*, and the `\.sources\/` folders of the target repos \(in a read checkout, its `\.sources\/` folders: they are the clone's\)\./);
   assert.doesNotMatch(brief, /Target clones|on the branch ticket-71|git -C x show/, 'the off-base note goes with the read checkout');
   assert.match(briefFor(step([{ ...withRead[0], unfetched: true }]), settings), /aaaaaaa; its clone: .*\. Note: could not fetch main from origin, so this is origin\/main as last fetched\./);
   // None made: the clone, its note and why, as before.

@@ -8,12 +8,12 @@ import { ledger, read, world } from './helpers.mjs';
 import { runDaily, scriptedCalls } from '../lib/runner.mjs';
 import { runRecord } from '../lib/record.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
-import { checkClone, codeClonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureReadCheckout, ensureWorktree, listWorktrees, canon, readCheckoutPath, prsForStep, unsavedWork, worktreePath } from '../lib/worktree.mjs';
+import { adoptSources, checkClone, codeClonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureReadCheckout, ensureWorktree, listWorktrees, canon, readCheckoutPath, prsForStep, unsavedWork, worktreePath } from '../lib/worktree.mjs';
 import { makeGit } from '../lib/world.mjs';
 import { commandFor } from '../lib/runner.mjs';
 import { spentOf } from '../lib/limits.mjs';
 import { writeLedger } from '../lib/ledger.mjs';
-import { releaseLock, takeLock } from '../lib/locks.mjs';
+import { allLocks, releaseLock, takeLock } from '../lib/locks.mjs';
 import { localDate, renderReport } from '../lib/report.mjs';
 
 // The ticket worktree (lib/worktree.mjs): the runner makes it, with the clone's node_modules linked and excluded, so
@@ -892,10 +892,13 @@ test('AC-5: several rounds of UA changes after ready for merge, then one move to
   writeLedger(t.w.settings.state, l0);
   const h4 = t.handEdit({ 'docs/x/index.md': '# Сторінка\n\nТретій раунд, рукою.\n' });
   t.forgePr.headCommit = h4;
+  // The group's lock, as another group's read checkout reads it, during each session.
+  const lockStages = {};
   const spawnClaude = async (cmd) => {
     const stage = stageOf(cmd);
     stages.push(stage);
     briefs[stage] = briefOf(cmd);
+    lockStages[stage] = allLocks(t.w.settings.state, NOW).filter((l) => l.live).map((l) => l.stage);
     await runRecord({ settings: t.w.settings, clients: t.w.clients(), key: '1501', stage, pr: 'guide-docs#71', status: 'done', head: t.forgePr.headCommit, result: resultOf(cmd), now: NOW });
     return { code: 0, stdout: RESULT, stderr: '' };
   };
@@ -907,6 +910,7 @@ test('AC-5: several rounds of UA changes after ready for merge, then one move to
   const out = await go();
   assert.deepEqual(out.ran.map((r) => r.stage), ['follow', 'resync', 'readyForMerge', 'move']);
   assert.deepEqual(stages, ['styleCheck', 'resync'], 'one session after the move');
+  assert.deepEqual(lockStages.resync, ['resync'], 'the lock, taken at follow, names the session\'s stage while it runs');
   assert.ok(briefs.resync.includes(`${t.h1}..${h4}`), 'from the head marked ready to the last round');
   assert.notEqual(h2, h4);
   const l = read(t.w, '1501');
@@ -1104,7 +1108,7 @@ test('a plan step with the target clone on another branch runs on a read checkou
   assert.ok(sessions[0].dirs.includes(rc), 'the read checkout is one of the session\'s folders');
   assert.equal(sessions[0].pages[rc], '# Сторінка\n', 'origin/main\'s page, not the branch draft');
   assert.match(sessions[0].pages[t.clone.dir], /Новий абзац/, 'the clone\'s working tree is the owner\'s draft, and the brief doesn\'t send the session there');
-  assert.match(briefs[0], new RegExp(`Read checkouts \\(the runner made them[^\\n]*never in the clones[^\\n]*\\n- guide-docs: ${rc}, origin/main at ${t.clone.g('rev-parse', '--short=7', 'origin/main')}; its clone: ${t.clone.dir}\\.`));
+  assert.match(briefs[0], new RegExp(`Read checkouts \\(the runner made them[^\\n]*never the clone[^\\n]*\\n- guide-docs: ${rc}, origin/main at ${t.clone.g('rev-parse', '--short=7', 'origin/main')}; its clone: ${t.clone.dir}\\.`));
   assert.doesNotMatch(briefs[0], /Target clones|on the branch ticket-71|show origin\/main:<path>/, 'no off-base note with a read checkout');
   assert.deepEqual([t.clone.g('symbolic-ref', '--short', 'HEAD'), t.clone.g('rev-parse', 'HEAD')], ['ticket-71', before], 'the runner never moves the clone');
   assert.equal(t.clone.g('status', '--porcelain', '--untracked-files=no'), '');
@@ -1155,7 +1159,7 @@ test('a second run re-points the read checkout at the base merged since, unless 
   assert.ok(third.sessions.length >= 1, 'never blocks the step');
   assert.ok(!third.sessions[0].dirs.includes(rc));
   assert.ok(third.sessions[0].dirs.includes(t.clone.dir));
-  assert.match(third.briefs[0], /Target clones, read as they stand \(the runner never moves them\):\n- guide-docs: .*guide-docs; no read checkout \(.*exists and is not a read checkout of guide-docs\); on the branch ticket-71, not on its base main: its files are that branch's, not the site's; read pages with `git -C .*guide-docs show origin\/main:<path>`, never its working tree\./);
+  assert.match(third.briefs[0], /Target clones, read as they stand \(the runner never moves them\):\n- guide-docs: .*guide-docs; no read checkout \(.*exists and is not a read checkout of guide-docs: move it away, and the next step makes it again\); on the branch ticket-71, not on its base main: its files are that branch's, not the site's; read pages with `git -C .*guide-docs show origin\/main:<path>`, never its working tree\./);
   assert.doesNotMatch(third.briefs[0], /Read checkouts/);
   assert.deepEqual(third.out.log.filter((e) => e.kind === 'readCheckout').map((e) => [e.stage, e.repo, e.outcome]), [['plan', 'guide-docs', 'failed']]);
   assert.match(third.out.log.find((e) => e.kind === 'readCheckout').note, /^no read checkout of guide-docs, so the session reads its clone: .*exists and is not a read checkout/);
@@ -1307,4 +1311,124 @@ test('no read checkout when its folder holds something else, the base was never 
   assert.match(ensureReadCheckout(t.w.settings, { ...target, id: 'other', base: 'release' }).error, /no origin\/release fetched/);
   assert.match(ensureReadCheckout(t.w.settings, { ...target, id: '../x' }).error, /not a plain name/);
   assert.equal(listWorktrees(t.clone.dir).length, 1, 'no worktree registered');
+});
+
+test('a read checkout left by a clone that moved (targets[].path changed) names the command that clears it', () => {
+  const t = planTicket({ onBase: false });
+  const target = t.w.settings.targets[0];
+  const rc = ensureReadCheckout(t.w.settings, target).path;
+  // The same repo, cloned again elsewhere, and the settings pointed at it.
+  const moved = path.join(t.w.root, 'repos', 'guide-docs-2');
+  execFileSync('git', ['clone', '-q', t.bare, moved]);
+  const err = ensureReadCheckout(t.w.settings, { ...target, path: 'repos/guide-docs-2' }).error;
+  assert.match(err, new RegExp(`it is a worktree of [^ ]*/repos/guide-docs \\(did targets\\[\\]\\.path change\\?\\); clear it with \`git -C [^ ]*/repos/guide-docs worktree remove --force ${rc}\``));
+  execFileSync('git', ['-C', t.clone.dir, 'worktree', 'remove', '--force', rc]);
+  assert.equal(ensureReadCheckout(t.w.settings, { ...target, path: 'repos/guide-docs-2' }).error, undefined, 'made again from the new clone');
+});
+
+test('a read checkout\'s .sources/ folders are the clone\'s: linked at the same path, written through, a new one moved into the clone, and never lost when it is made again', () => {
+  const t = planTicket({ onBase: false });
+  const target = t.w.settings.targets[0];
+  // The clone's work files (git-ignored), in a section the base has, and in one only the owner's branch has.
+  fs.mkdirSync(path.join(t.clone.dir, 'docs/x/.sources'), { recursive: true });
+  fs.writeFileSync(path.join(t.clone.dir, 'docs/x/.sources/sme-interview.md'), 'interview\n');
+  fs.mkdirSync(path.join(t.clone.dir, 'docs/draft/.sources'), { recursive: true });
+  fs.writeFileSync(path.join(t.clone.dir, 'docs/draft/.sources/notes.md'), 'notes\n');
+  checkClone(t.w.settings, target);
+  const r = ensureReadCheckout(t.w.settings, target);
+  assert.deepEqual(r.linked.sort(), ['docs/draft/.sources', 'docs/x/.sources']);
+  const link = path.join(r.path, 'docs/x/.sources');
+  assert.ok(fs.lstatSync(link).isSymbolicLink());
+  assert.equal(fs.readlinkSync(link), path.join(t.clone.dir, 'docs/x/.sources'));
+  assert.equal(pageIn(r.path, 'docs/x/.sources/sme-interview.md'), 'interview\n');
+  assert.equal(pageIn(r.path, 'docs/draft/.sources/notes.md'), 'notes\n');
+  assert.equal(execFileSync('git', ['-C', r.path, 'status', '--porcelain', '--untracked-files=no'], { encoding: 'utf8' }), '', 'no tracked change');
+  // A skill writes its report through the link: it lands in the clone.
+  fs.writeFileSync(path.join(link, 'section-readiness.json'), '{}\n');
+  assert.equal(pageIn(t.clone.dir, 'docs/x/.sources/section-readiness.json'), '{}\n');
+  // A section with no `.sources/` yet: the session makes a real one in the read checkout; it goes into the clone.
+  fs.mkdirSync(path.join(r.path, 'docs/new/.sources/frames'), { recursive: true });
+  fs.writeFileSync(path.join(r.path, 'docs/new/.sources/app-notes.md'), 'notes from the app\n');
+  fs.writeFileSync(path.join(r.path, 'docs/new/.sources/frames/a.png'), 'png');
+  // Not while another session may still write there.
+  assert.deepEqual(ensureReadCheckout(t.w.settings, target, { othersRunning: true }).adopted.moved, []);
+  assert.ok(!fs.lstatSync(path.join(r.path, 'docs/new/.sources')).isSymbolicLink());
+  const a = adoptSources(t.w.settings, t.clone.dir, r.path);
+  assert.deepEqual(a, { moved: ['docs/new/.sources'], kept: [] });
+  assert.equal(pageIn(t.clone.dir, 'docs/new/.sources/app-notes.md'), 'notes from the app\n');
+  assert.equal(pageIn(t.clone.dir, 'docs/new/.sources/frames/a.png'), 'png');
+  assert.ok(fs.lstatSync(path.join(r.path, 'docs/new/.sources')).isSymbolicLink(), 'a link in its place');
+  // One the clone made meanwhile too: file by file, the clone's kept, the session's beside it.
+  fs.mkdirSync(path.join(r.path, 'docs/both/.sources'), { recursive: true });
+  fs.writeFileSync(path.join(r.path, 'docs/both/.sources/plan.md'), 'session\n');
+  fs.mkdirSync(path.join(t.clone.dir, 'docs/both/.sources'), { recursive: true });
+  fs.writeFileSync(path.join(t.clone.dir, 'docs/both/.sources/plan.md'), 'owner\n');
+  assert.deepEqual(adoptSources(t.w.settings, t.clone.dir, r.path).moved, ['docs/both/.sources']);
+  assert.deepEqual([pageIn(t.clone.dir, 'docs/both/.sources/plan.md'), pageIn(t.clone.dir, 'docs/both/.sources/plan.md.from-read-checkout')], ['owner\n', 'session\n']);
+  // Made again (a change to a tracked file): the links go with the folder, never what they lead to; a session's real
+  // folder goes into the clone first.
+  fs.mkdirSync(path.join(r.path, 'docs/late/.sources'), { recursive: true });
+  fs.writeFileSync(path.join(r.path, 'docs/late/.sources/late.md'), 'late\n');
+  fs.writeFileSync(path.join(r.path, 'docs/x/index.md'), 'changed\n');
+  const again = ensureReadCheckout(t.w.settings, target);
+  assert.deepEqual([again.error, again.adopted.moved], [undefined, ['docs/late/.sources']]);
+  assert.equal(pageIn(again.path), '# Сторінка\n', 'made again');
+  for (const [rel, text] of [['docs/x/.sources/sme-interview.md', 'interview\n'], ['docs/x/.sources/section-readiness.json', '{}\n'], ['docs/new/.sources/app-notes.md', 'notes from the app\n'], ['docs/late/.sources/late.md', 'late\n']]) {
+    assert.equal(pageIn(t.clone.dir, rel), text, rel);
+    assert.equal(pageIn(again.path, rel), text, `${rel} through the new link`);
+  }
+  // The clone's folder gone: its link goes.
+  fs.rmSync(path.join(t.clone.dir, 'docs/draft/.sources'), { recursive: true });
+  ensureReadCheckout(t.w.settings, target);
+  assert.throws(() => fs.lstatSync(path.join(r.path, 'docs/draft/.sources')));
+});
+
+test('a read checkout runs none of the clone\'s hooks, never links a .sources/ folder that holds the state folder, and never moves one into it', () => {
+  const t = planTicket({ onBase: false });
+  const target = t.w.settings.targets[0];
+  const marker = path.join(tmp('hook-'), 'ran');
+  const hook = path.join(t.clone.dir, '.git', 'hooks', 'post-checkout');
+  fs.writeFileSync(hook, `#!/bin/sh\necho ran >> '${marker}'\n`);
+  fs.chmodSync(hook, 0o755);
+  const r = ensureReadCheckout(t.w.settings, target);
+  mergeOnForge(t.bare, { 'docs/z.md': '# Z\n' });
+  checkClone(t.w.settings, target);
+  ensureReadCheckout(t.w.settings, target);
+  assert.equal(fs.existsSync(marker), false, 'no post-checkout hook ran');
+  // The hub as a target: its own `.sources/` holds the state folder. Stand-in: a state folder inside the clone's.
+  const inside = { ...t.w.settings, state: path.join(t.clone.dir, '.sources', 'flow') };
+  fs.mkdirSync(path.join(inside.state, 'tickets'), { recursive: true });
+  const rc2 = path.join(inside.state, 'read', 'guide');
+  assert.equal(ensureReadCheckout(inside, target).error, undefined);
+  assert.throws(() => fs.lstatSync(path.join(rc2, '.sources')), 'no link to the folder that holds the state');
+  fs.mkdirSync(path.join(rc2, '.sources', 'flow', 'tickets'), { recursive: true });
+  fs.writeFileSync(path.join(rc2, '.sources', 'flow', 'tickets', 'x.json'), '{}');
+  const a = adoptSources(inside, t.clone.dir, rc2);
+  assert.deepEqual([a.moved, a.kept.map((k) => k.reason)], [[], ['it would land in the state folder or outside the clone']]);
+  assert.ok(!fs.existsSync(path.join(inside.state, 'tickets', 'x.json')));
+  assert.ok(r.path);
+});
+
+test('a plan session works on the read checkout\'s section: the clone\'s .sources/ through the link, a new .sources/ moved into the clone when the session ends, said in the run log', async () => {
+  const t = planTicket({ onBase: false });
+  fs.mkdirSync(path.join(t.clone.dir, 'docs/x/.sources'), { recursive: true });
+  fs.writeFileSync(path.join(t.clone.dir, 'docs/x/.sources/sme-interview.md'), 'interview\n');
+  const rc = readCheckoutOf(t);
+  const seen = [];
+  const spawnClaude = async () => {
+    // As section-readiness would on the read checkout's section: it reads the interview and writes its report; and
+    // app-explorer, on a section with no `.sources/` yet.
+    seen.push(pageIn(rc, 'docs/x/.sources/sme-interview.md'));
+    fs.writeFileSync(path.join(rc, 'docs/x/.sources/section-readiness.json'), '{"x":1}\n');
+    fs.mkdirSync(path.join(rc, 'docs/new/.sources'), { recursive: true });
+    fs.writeFileSync(path.join(rc, 'docs/new/.sources/app-notes.md'), 'app\n');
+    return { code: 0, stdout: RESULT, stderr: '' };
+  };
+  const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1601'] } });
+  assert.equal(seen[0], 'interview\n');
+  assert.equal(pageIn(t.clone.dir, 'docs/x/.sources/section-readiness.json'), '{"x":1}\n');
+  assert.equal(pageIn(t.clone.dir, 'docs/new/.sources/app-notes.md'), 'app\n', 'moved into the clone after the session');
+  assert.ok(fs.lstatSync(path.join(rc, 'docs/new/.sources')).isSymbolicLink());
+  assert.ok(out.log.some((e) => e.kind === 'readCheckout' && e.outcome === 'moved' && /moved into the clone: docs\/new\/\.sources/.test(e.note)), JSON.stringify(out.log.filter((e) => e.kind === 'readCheckout')));
+  assert.equal(execFileSync('git', ['-C', t.clone.dir, 'status', '--porcelain'], { encoding: 'utf8' }), '', 'nothing git sees changed in the clone');
 });

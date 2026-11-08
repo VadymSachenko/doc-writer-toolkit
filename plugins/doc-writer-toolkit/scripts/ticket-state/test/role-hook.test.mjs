@@ -213,7 +213,7 @@ test('a step with no worktree: its folders are the state tmp/, the work folder a
   assert.ok(refusalOf('mkdir x', c, {}), 'no folder known, no pass');
 });
 
-test('a step with no worktree: a read checkout is read-only to mkdir, even where the hub\'s .sources/ rule reaches into the state folder', () => {
+test('a step with no worktree: a read checkout is read-only to mkdir and to the scripts\' paths, but for its .sources/ folders (the clone\'s)', () => {
   const w = world({ extra: { workFolder: 'work/tickets/<key>' } });
   const settings = { ...w.settings, targets: [...w.settings.targets, { ...w.settings.targets[0], id: 'the-hub', path: '.' }] };
   const rc = path.join(path.resolve(settings.state), 'read', 'guide');
@@ -222,8 +222,17 @@ test('a step with no worktree: a read checkout is read-only to mkdir, even where
   const c = JSON.parse(commandFor(stepOf('writer', w, [], { stage: 'plan', clones }), settings, { agentsPath: '/x/agents.json', roots: ROOTS }).env[HOOK_VARIABLE]);
   assert.deepEqual(c.read, [rc]);
   assert.ok(c.sources.includes(path.resolve(settings.root)), 'the hub is a target');
-  assert.match(refusalOf(`mkdir -p ${rc}/docs/a/.sources/frames`, c, { cwd: settings.root }), /mkdir in a read checkout, which is read-only/);
-  assert.equal(refusalOf(`mkdir -p ${clone}/docs/a/.sources/frames`, c, { cwd: settings.root }), null, 'the clone\'s .sources/ stays open');
+  for (const line of [`mkdir -p ${rc}/docs/a`, `mkdir ${rc}/docs/a/.assets`, `mkdir -p ${rc}/screenshot-tests/x`]) assert.match(refusalOf(line, c, { cwd: settings.root }), /mkdir in a read checkout, which is read-only but for its \.sources\/ folders/, line);
+  assert.match(refusalOf('mkdir x', c, { cwd: `${rc}/docs` }), /read-only/, 'a relative folder too');
+  for (const line of [`mkdir -p ${rc}/docs/a/.sources/frames`, `mkdir -p ${clone}/docs/a/.sources/frames`]) assert.equal(refusalOf(line, c, { cwd: settings.root }), null, line);
+  // A script with a path in it, or run from it, is refused; through a `.sources/` folder it is the clone's, and passes.
+  const sl = script('screenshot-locales/screenshot-locales.mjs');
+  const ul = script('ui-labels/ui-labels.mjs');
+  for (const line of [`${sl} status ${rc}/docs/x`, `${sl} status --section=${rc}/docs/x`, `${ul} check --root ${rc}`, `${ul} check --root=${rc}/docs`]) assert.match(refusalOf(line, c, { cwd: settings.root }), /a path in a read checkout, which is read-only but for its \.sources\/ folders/, line);
+  assert.match(refusalOf(`${sl} status docs/x`, c, { cwd: rc }), /run from a read checkout/);
+  assert.match(refusalOf(`${sl} status x`, c, { cwd: `${rc}/docs` }), /run from a read checkout/);
+  for (const line of [`${sl} status ${clone}/docs/x`, `${sl} status --out=${rc}/docs/x/.sources/shots`, `${ul} check --root ${clone}`]) assert.equal(refusalOf(line, c, { cwd: settings.root }), null, line);
+  assert.equal(refusalOf(`${sl} status x`, c, { cwd: `${rc}/docs/x/.sources` }), null, 'standing in a .sources/ folder: the clone\'s');
   // The reads the brief names run there.
   for (const line of [`git -C ${rc} show HEAD:docs/x/index.md`, `git -C ${rc} log -1`, `cd ${rc}`, `ls ${rc}/docs`]) assert.equal(refusalOf(line, c, { cwd: settings.root }), null, line);
   assert.ok(refusalOf(`git -C ${rc} commit -m x`, c, { cwd: settings.root }), 'never a commit there');
