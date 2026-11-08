@@ -9,6 +9,21 @@ import { agentFor, install, labelOf, uninstall } from '../lib/launchd.mjs';
 import { main as launchdMain } from '../launchd.mjs';
 import { main as watcherMain } from '../watcher.mjs';
 import { main as stateMain } from '../ticket-state.mjs';
+import { emptyForge, writeForge } from '../lib/forge-state.mjs';
+
+test('uninstall names the detached processes it leaves running: the full check a tick started and the forge check\'s runs', async () => {
+  const settings = await settingsOf();
+  const agentsDir = tmp('agents-');
+  const env = io(agentsDir, []);
+  install(settings, { io: env });
+  const at = new Date().toISOString();
+  writeForge(settings.state, { ...emptyForge(), handOns: [{ id: 'h1', pid: 4101, keys: ['481'], at }, { id: 'h2', pid: 4102, keys: ['482'], at }] });
+  let out = '';
+  await launchdMain(['uninstall', '--root', settings.root], { ...env, isAlive: (p) => p === 4101, stdout: { write: (s) => (out += s) } });
+  const r = JSON.parse(out);
+  assert.equal(r.left, false);
+  assert.deepEqual(r.stillRunning.map((x) => [x.kind, x.pid, x.tickets]), [['run', 4101, ['481']]]);
+});
 
 // AC-3: install and uninstall leave no stray job (with a stand-in for launchctl here; the evidence of a real install and
 // uninstall on a Mac is in the task's evidence). And `set`: the plain-words settings command edits the local file only.

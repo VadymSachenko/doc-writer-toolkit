@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { CliError } from './lib/errors.mjs';
 import { loadSettings } from './lib/settings.mjs';
 import { agentFor, agentState, install, labelOf, agentsDirOf, uninstall, wantedInterval } from './lib/launchd.mjs';
+import { readForge, handOnLive } from './lib/forge-state.mjs';
+import { watchLockHolder } from './lib/watch.mjs';
 
 const USAGE = `launchd <command> [options]
 
@@ -15,7 +17,8 @@ every schedule.watchMinutes. Install again after changing either.
 Commands
   print       the plist it would install, and where (installs nothing)
   install     writes ~/Library/LaunchAgents/<label>.plist and loads it (an existing one is replaced)
-  uninstall   unloads it and removes the plist; 'left' says whether anything of it remains
+  uninstall   unloads it and removes the plist; 'left' says whether anything of it remains, and 'stillRunning' (when
+              the settings load) the detached full check and runs that go on until they end
   status      whether the plist exists and the job is loaded, its interval, and (when the settings load) the interval
               they ask for and whether it needs an install again
 
@@ -44,7 +47,21 @@ export async function main(argv, io = {}) {
   const noop = Boolean(values.noop);
   let result;
   // `uninstall` and `status` need the path only: they work for a host that moved or whose settings don't load.
-  if (command === 'uninstall') result = uninstall(root, { noop, io });
+  if (command === 'uninstall') {
+    result = uninstall(root, { noop, io });
+    // The detached processes an uninstall doesn't end: the full check a tick started, and the forge check's runs.
+    if (!noop) {
+      try {
+        const settings = await loadSettings({ root, settings: values.settings });
+        const isAlive = io.isAlive;
+        const full = watchLockHolder(settings.state, isAlive ? { isAlive } : {});
+        const runs = (readForge(settings.state).handOns ?? []).filter((h) => handOnLive(h, isAlive ? { isAlive } : {}));
+        result.stillRunning = [...(full?.pid ? [{ kind: 'full check', pid: full.pid, since: full.startedAt }] : []), ...runs.map((h) => ({ kind: 'run', pid: h.pid, tickets: h.keys, since: h.at }))];
+      } catch {
+        /* the settings don't load: the state alone */
+      }
+    }
+  }
   else if (command === 'status') {
     const label = labelOf(root, { noop });
     result = agentState(label, path.join(agentsDirOf(io), `${label}.plist`), io);

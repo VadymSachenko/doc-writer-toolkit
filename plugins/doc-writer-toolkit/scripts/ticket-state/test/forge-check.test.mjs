@@ -2,7 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { NOW, card, pr, quietGit } from './fakes.mjs';
+import { NOW, card, noTree, pr, quietGit } from './fakes.mjs';
+import { runDaily } from '../lib/runner.mjs';
+import { parseUsage } from '../lib/allowance.mjs';
 import { ledger, read, world } from './helpers.mjs';
 import { runRecord } from '../lib/record.mjs';
 import { makeClients } from '../lib/world.mjs';
@@ -299,18 +301,25 @@ test('a second comment while the ticket\'s run is starting waits until that proc
   const reads = w.forge.reads.length;
   out = await t.forge(NOW + MIN);
   assert.deepEqual([out.held, out.handed, [...new Set(w.forge.reads.slice(reads).map((r) => r[0]))]], [['481'], [], ['changedPrs']]);
-  // The process ended before it answered the new one (its run took a snapshot): the next check hands it on.
+  // The process died with no result (a crash): its ticket is looked at again after a full interval, as after a failed
+  // run, so a run that always dies is not started at every tick.
   t.live.delete(t.handOns()[0].pid);
   out = await t.forge(NOW + 3 * MIN);
+  assert.deepEqual([out.handed, t.handOns().length], [[], 1]);
+  assert.match(out.notes.join(' '), /ended with no result: looked at again after 5 min/);
+  // A new comment meanwhile doesn't cut the interval short.
+  say(81, NOW + 3 * MIN + 30 * SEC);
+  out = await t.forge(NOW + 4 * MIN);
+  assert.deepEqual(out.handed, []);
+  out = await t.forge(NOW + 8 * MIN);
   assert.deepEqual([out.handed, t.handOns().length], [['481'], 2]);
-  assert.match(out.notes.join(' '), /ended with no result/);
   // In the owner's hands: the comments are theirs to answer.
-  await t.finish(t.handOns()[1], NOW + 3 * MIN);
+  await t.finish(t.handOns()[1], NOW + 8 * MIN);
   const l = read(w, '481');
   l.mode = 'hand';
   writeLedger(w.settings.state, l);
-  say(81, NOW + 4 * MIN);
-  out = await t.forge(NOW + 7 * MIN);
+  say(81, NOW + 9 * MIN);
+  out = await t.forge(NOW + 12 * MIN);
   assert.deepEqual([out.handed, out.waiting, t.handOns().length], [[], [], 2]);
 });
 
@@ -429,6 +438,76 @@ test('a full check\'s lock with no owner file: held for a minute (being written)
   fs.utimesSync(dir, new Date(NOW - 10 * SEC), new Date(NOW - 10 * SEC));
   out = await t.tick(NOW + SEC);
   assert.equal(out.full.running, true);
+});
+
+test('a step that waited in the pool behind another chain is read again once its lock is taken: done meanwhile by another run, it is not run twice', async () => {
+  // One run at a time (limits.parallel 1): B's answer waits in the pool behind A's session. Meanwhile a run the forge
+  // check started answers B. When A ends, B's planned step is no longer B's next step: skipped, no second session.
+  const { w, say } = commented({ numbers: [81, 82], extra: { limits: { parallel: 1 } } });
+  say(81, NOW - 10 * MIN);
+  say(82, NOW - 10 * MIN);
+  const answer = (n) => {
+    const act = w.forge.activity[idOf(n)];
+    return runRecord({ settings: w.settings, clients: w.clients(), key: String(400 + n), stage: 'answerComments', pr: idOf(n), status: 'done', result: { handled: act.comments.map((x) => ({ id: x.id, updatedAt: x.updatedAt })) }, now: NOW });
+  };
+  const sessions = [];
+  const RESULT = JSON.stringify({ type: 'result', subtype: 'success', is_error: false, num_turns: 3, total_cost_usd: 0.2, session_id: 's' });
+  const spawnClaude = async (cmd) => {
+    const text = JSON.stringify(cmd.args);
+    const n = text.includes(idOf(81)) ? 81 : 82;
+    sessions.push(n);
+    if (n === 81) await answer(82); // the forge check's run answers B while A's session goes on
+    await answer(n);
+    return { code: 0, stdout: RESULT, stderr: '' };
+  };
+  const usage = parseUsage('Current session: 10% used · resets 2pm (UTC)\nCurrent week (all models): 5% used · resets Nov 14 at 6am (UTC)\n');
+  const r = await runDaily({ settings: w.settings, clients: w.clients(), io: { now: () => NOW, git: quietGit, readUsage: () => usage, spawnClaude, ensureWorktree: noTree }, options: { trigger: 'watcher', named: ['481', '482'] } });
+  assert.deepEqual(sessions, [81], 'one session: B was answered by the other run');
+  const log = fs.readFileSync(path.join(w.settings.state, 'runs', '2026-11-10.jsonl'), 'utf8');
+  assert.match(log, /answerComments on guide-docs#82 is no longer the next step \(none\): another run took it while this one waited/);
+  assert.equal(r.named.length, 2);
+});
+
+test('limits.parallel: the forge check and the runner count the same runs: a lock by its group, a forge run by its ticket\'s group, once', async () => {
+  const { runsGoing } = await import('../lib/forge-state.mjs');
+  const live = () => true;
+  const groupOf = (k) => ({ 481: 'g1', 482: 'g1' })[k] ?? k;
+  const locks = [{ group: 'g1', live: true }, { group: 'g2', live: false }];
+  // A forge run of 481 whose group g1 already holds its lock counts once; one of 483, before its lock, counts.
+  const handOns = [{ id: 'a', pid: 1, keys: ['481'], at: iso(NOW) }, { id: 'b', pid: 2, keys: ['483'], at: iso(NOW) }, { id: 'c', pid: 3, keys: ['484'], at: iso(NOW) }];
+  assert.deepEqual([...runsGoing({ locks, handOns, now: NOW, isAlive: live, groupOf })].sort(), ['g1', 'run:b', 'run:c']);
+  // The run itself (its own pid) is not one of the others.
+  assert.deepEqual([...runsGoing({ locks, handOns, now: NOW, isAlive: live, groupOf, exceptPid: 3 })].sort(), ['g1', 'run:b']);
+  // The runner: with two runs going elsewhere and limits.parallel 3, its pool runs one group at a time.
+  const { w, say } = commented({ numbers: [81, 82] });
+  say(81, NOW - 10 * MIN);
+  say(82, NOW - 10 * MIN);
+  for (const g of ['x1', 'x2']) takeLock(w.settings.state, { group: g, kind: 'schedule', leaseMinutes: 120, now: NOW });
+  let running = 0;
+  let most = 0;
+  const RESULT = JSON.stringify({ type: 'result', subtype: 'success', is_error: false, num_turns: 3, total_cost_usd: 0.2, session_id: 's' });
+  const spawnClaude = async (cmd) => {
+    running++;
+    most = Math.max(most, running);
+    await new Promise((r) => setTimeout(r, 20));
+    const n = JSON.stringify(cmd.args).includes(idOf(81)) ? 81 : 82;
+    const act = w.forge.activity[idOf(n)];
+    await runRecord({ settings: w.settings, clients: w.clients(), key: String(400 + n), stage: 'answerComments', pr: idOf(n), status: 'done', result: { handled: act.comments.map((x) => ({ id: x.id, updatedAt: x.updatedAt })) }, now: NOW });
+    running--;
+    return { code: 0, stdout: RESULT, stderr: '' };
+  };
+  const usage = parseUsage('Current session: 10% used · resets 2pm (UTC)\nCurrent week (all models): 5% used · resets Nov 14 at 6am (UTC)\n');
+  await runDaily({ settings: w.settings, clients: w.clients(), io: { now: () => NOW, git: quietGit, readUsage: () => usage, spawnClaude, ensureWorktree: noTree }, options: { trigger: 'watcher', named: ['481', '482'] } });
+  assert.equal(most, 1, 'three slots, two taken elsewhere: one session at a time');
+});
+
+test('the full check writes fullAt when it begins, so a full check that dies part way is not started again at every tick', async () => {
+  const { w, say } = commented();
+  seed(w, NOW - 10 * MIN);
+  say(81, NOW - 10 * MIN);
+  let seen = null;
+  await runCheck({ settings: w.settings, clients: w.clients(), io: { now: () => NOW, git: quietGit, runDaily: async (a) => ((seen = readFeed(w.settings.state).fullAt), { mode: 'on', named: a.options.named, ran: [], starts: [], guard: [] }) }, options: {} });
+  assert.equal(seen, iso(NOW), 'already in the feed while its run goes on');
 });
 
 test('mode off: a tick starts no full check and the forge check reads nothing', async () => {

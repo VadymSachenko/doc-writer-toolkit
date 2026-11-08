@@ -14,7 +14,7 @@ import { tickSecondsOf } from './settings.mjs';
 import { scriptEnv } from './env.mjs';
 import { WATCHER } from './launchd.mjs';
 import { alive, runCheck, takeWatchLock, watchLockHolder } from './watch.mjs';
-import { handOnLive, readForge, takeHandOn, writeForge, writeHandOn } from './forge-state.mjs';
+import { handOnLive, readForge, runsGoing, takeHandOn, writeForge, writeHandOn } from './forge-state.mjs';
 
 // The forge check and the tick (D-126). The owner's and a reviewer's comments on the pipeline's PRs are picked up
 // within a minute, and nothing that runs long can hold that up:
@@ -99,8 +99,9 @@ export async function runForgeCheck({ settings, clients, io = {}, options = {} }
     next.at = iso(checkStart);
     const waits = next.waits;
     const fullMs = settings.schedule.watchMinutes * 60000;
-    const requeue = (keys, why, dueAt) => {
-      for (const k of keys) waits[k] = { prs: waits[k]?.prs ?? null, dueAt: iso(dueAt), why, since: waits[k]?.since ?? iso(checkStart) };
+    // `backoff`: after a run that failed or died, the ticket waits its interval even when a new comment comes.
+    const requeue = (keys, why, dueAt, backoff = false) => {
+      for (const k of keys) waits[k] = { prs: waits[k]?.prs ?? null, dueAt: iso(dueAt), why, since: waits[k]?.since ?? iso(checkStart), ...(backoff ? { backoff: true } : {}) };
     };
 
     // 0. The runs it started that ended: their notifications (a step failed twice, a guard stop), and a run that failed
@@ -114,10 +115,11 @@ export async function runForgeCheck({ settings, clients, io = {}, options = {} }
       const r = takeHandOn(settings.state, h.id);
       if (r?.error) {
         failed('the run', r.error);
-        requeue(h.keys, `its run failed: ${r.error}`, checkStart + fullMs);
+        requeue(h.keys, `its run failed: ${r.error}`, checkStart + fullMs, true);
       } else if (!r) {
-        out.notes.push(`the run of ${h.keys.join(', ')} (pid ${h.pid}) ended with no result: looked at again now`);
-        requeue(h.keys, 'its run ended with no result', checkStart);
+        // A crash, a reboot: after a full interval, as a failed run, so a run that always dies isn't started every tick.
+        out.notes.push(`the run of ${h.keys.join(', ')} (pid ${h.pid}) ended with no result: looked at again after ${settings.schedule.watchMinutes} min`);
+        requeue(h.keys, 'its run ended with no result', checkStart + fullMs, true);
       } else out.finished.push({ id: h.id, keys: h.keys, run: r.run });
     }
 
@@ -150,7 +152,7 @@ export async function runForgeCheck({ settings, clients, io = {}, options = {} }
     for (const b of bad) out.notes.push(`the ledger ${b.key} does not read (${b.error}): the full check reports it`);
     const looks = new Map();
     for (const [key, events] of ticketsOf(fresh, ledgers).keys) looks.set(key, [...new Set(events.map((e) => `${e.repo}#${e.number}`))]);
-    for (const key of dueWaits(prev.waits, checkStart)) if (!looks.has(key)) looks.set(key, prev.waits[key].prs ?? null);
+    for (const key of dueWaits(waits, checkStart)) if (!looks.has(key)) looks.set(key, waits[key].prs ?? null);
     const locks = allLocks(settings.state, checkStart).filter((x) => x.live);
     const running = new Set(next.handOns.flatMap((h) => h.keys));
     const handing = [];
@@ -161,6 +163,8 @@ export async function runForgeCheck({ settings, clients, io = {}, options = {} }
         delete waits[key];
         continue;
       }
+      // Its last run failed or died: it waits out its interval, whatever comes meanwhile.
+      if (waits[key]?.backoff && Date.parse(waits[key].dueAt) > checkStart) continue;
       // A run holds it (its group's lock, or a run of ours that may not have taken it yet): its comments wait for the
       // next session; looked at again at the next tick, with no forge read now.
       if (running.has(key) || locks.some((x) => x.group === (l.group ?? l.key))) {
@@ -183,9 +187,11 @@ export async function runForgeCheck({ settings, clients, io = {}, options = {} }
     }
 
     // 3. The hand-on: one run for the tickets ready now, in a process of its own; this check doesn't wait for it. At
-    // `limits.parallel` runs (the live group locks and our live runs, across processes) the tickets wait for a slot.
+    // `limits.parallel` runs going across processes, counted as the runner counts them (`runsGoing`: the groups with a
+    // live lock, and our live runs that hold none yet), the tickets wait for a slot.
     if (handing.length) {
-      const busy = new Set([...locks.map((x) => `lock:${x.group}`), ...next.handOns.filter((h) => !h.keys.some((k) => locks.some((x) => x.group === k))).map((h) => `run:${h.id}`)]).size;
+      const groupOf = (k) => ledgers.find((x) => x.key === k)?.group ?? k;
+      const busy = runsGoing({ locks, handOns: next.handOns, now: checkStart, isAlive, groupOf }).size;
       const limit = settings.limits.parallel;
       if (typeof limit === 'number' && busy >= limit) {
         out.notes.push(`${busy} run(s) going, limits.parallel ${limit}: ${handing.join(', ')} wait for a slot`);

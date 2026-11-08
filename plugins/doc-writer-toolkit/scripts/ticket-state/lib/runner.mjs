@@ -22,6 +22,7 @@ import { BUSY_NAME, LOCK_NAME, busyEnded, freeBrowserLock } from './browser-lock
 import { HOOK_VARIABLE, commandsOfRules, hookSettings } from './role-hook.mjs';
 import { parseClaudeConfig } from '../../ui-labels/lib/config.mjs';
 import { liveProgress } from './progress.mjs';
+import { runsGoingIn } from './forge-state.mjs';
 
 // The daily run (design §7): finish first, then triage the quiet intake cards (mornings, and the watcher's start pass
 // when a slot frees), then start ready groups while
@@ -858,7 +859,18 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
   if (planOnly) {
     out.planned.push(...finishing.map(describe));
   } else {
-    await pool(finishing, sessionNear() ? 1 : settings.limits.parallel, (step) => advance(step));
+    // `limits.parallel` counts the runs of other processes too (the full check's, a manual one, those the forge check
+    // started): the live group locks and the forge check's runs that hold none yet (lib/forge-state.mjs `runsGoing`),
+    // as the forge check counts them. A run always gets one slot, so the tickets it was handed are not dropped.
+    const groupOf = (k) => {
+      try {
+        return readLedger(settings.state, k)?.group ?? k;
+      } catch {
+        return k;
+      }
+    };
+    const others = runsGoingIn(settings.state, { locks: allLocks(settings.state, clock()), now: clock(), exceptPid: process.pid, groupOf }).size;
+    await pool(finishing, Math.max(1, (sessionNear() ? 1 : settings.limits.parallel) - others), (step) => advance(step, { recheck: true }));
   }
 
   // Mornings and the watcher's start pass: triage every intake card quiet for its hours, high priority first, in one
@@ -965,8 +977,11 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
 
   // ---------------------------------------------------------------- advancing one group
 
-  // Runs a group's steps one after another, as far as it goes: a scripted step, or one session per step.
-  async function advance(first) {
+  // Runs a group's steps one after another, as far as it goes: a scripted step, or one session per step. `recheck`: a
+  // finishing step was planned from the run's first status and may have waited in the pool behind another group's
+  // chain; once the lock is taken it is read again, and run only if it is still the ticket's next step (another run,
+  // a run the forge check started, may have done it meanwhile).
+  async function advance(first, { recheck = false } = {}) {
     progress.begun = true;
     const kind = manual ? 'manual' : 'schedule';
     const group = first.group ?? first.keys[0];
@@ -981,6 +996,16 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
     const done = [];
     try {
       let step = first;
+      if (recheck) {
+        const fresh = await computeStatus({ settings, clients, usage, now: clock(), only: first.keys, ignoreLocks: own });
+        const again = collectSteps(fresh, { named: first.keys, includeStart: manual && named.length > 0, retryWaiting })[0] ?? null;
+        const keys = again ? first.keys.filter((k) => again.keys.includes(k)) : [];
+        if (!again || again.stage !== first.stage || (again.pr ?? null) !== (first.pr ?? null) || !keys.length) {
+          say({ kind: 'lock', group, outcome: 'skipped', note: `${first.stage}${first.pr ? ` on ${first.pr}` : ''} is no longer the next step (${again ? `now ${again.stage}${again.pr ? ` on ${again.pr}` : ''}` : 'none'}): another run took it while this one waited` });
+          return { group, skipped: 'stale' };
+        }
+        step = { ...first, keys };
+      }
       for (let i = 0; step && i < settings.limits.stepsPerTicket; i++) {
         if (step.role && !guard(step.stage, step.group)) break;
         const r = await live.tracked(step, () => (step.role ? runModelStep(step) : runScriptedStep(step)));

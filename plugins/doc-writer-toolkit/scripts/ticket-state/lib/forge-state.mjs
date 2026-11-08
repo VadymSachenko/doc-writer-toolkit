@@ -75,3 +75,28 @@ export function liveHandOnKeys(state, { now = Date.now(), isAlive = alive } = {}
   }
   return new Set((forge.handOns ?? []).filter((h) => handOnLive(h, { now, isAlive })).flatMap((h) => h.keys));
 }
+
+// The runs going now across processes, as groups: each live group lock (a run holds it from its first step on), and
+// each live run the forge check started that holds no lock yet (its /usage reading and its status come first), less
+// those of `exceptPid`. The forge check and the runner count `limits.parallel` against this same set. `groupOf`: a
+// ticket's group (its ledger's).
+export function runsGoing({ locks = [], handOns = [], now = Date.now(), isAlive = alive, exceptPid = null, groupOf = (k) => k } = {}) {
+  const groups = new Set(locks.filter((x) => x.live).map((x) => x.group));
+  for (const h of handOns) {
+    if (h.pid === exceptPid || !handOnLive(h, { now, isAlive })) continue;
+    if (h.keys.map(groupOf).some((g) => groups.has(g))) continue;
+    groups.add(`run:${h.id}`);
+  }
+  return groups;
+}
+
+// The same, read from the state folder: the group locks and the forge check's record (a file that doesn't read: no runs).
+export function runsGoingIn(state, { locks = [], now = Date.now(), isAlive = alive, exceptPid = null, groupOf = (k) => k } = {}) {
+  let handOns = [];
+  try {
+    handOns = readForge(state).handOns ?? [];
+  } catch {
+    /* none */
+  }
+  return runsGoing({ locks, handOns, now, isAlive, exceptPid, groupOf });
+}

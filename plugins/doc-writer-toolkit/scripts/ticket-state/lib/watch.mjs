@@ -213,6 +213,8 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
     next.awakeSince = iso(awakeSince);
     // When the last full check began: the watcher's tick runs the next one `watchMinutes` after it (checkKindOf).
     next.fullAt = iso(checkStart);
+    // Written now, not after the check's run: a full check that crashes part way isn't started again at every tick.
+    if (!dryRun) writeFeed(settings.state, { ...feed, fullAt: next.fullAt });
     const afterMorning = localMinutes(checkStart) >= minutesOf(settings.schedule.morning);
 
     // 1. The sources. One that fails keeps its cursor; after HOLD_MS of failing the gap is reported and it starts again.
