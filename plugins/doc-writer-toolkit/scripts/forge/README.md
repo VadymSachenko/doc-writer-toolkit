@@ -32,7 +32,7 @@ The same ticket flow settings file as the `tracker` script, found the same way: 
 | `forge.owner` | required | The account or organization that owns the repositories. |
 | `forge.self` | no | The login the pipeline writes with. `reply` uses it to see its own earlier reply. |
 | `forge.assignee` | no | Assigned to a PR that `open-pr` creates, unless `--assignee` says another. |
-| `forge.checkLabel` | no | The label that asks the owner to look at a PR. The module may add it, and may remove it: the ticket flow removes it when a person moves the card forward, the owner's check done. |
+| `forge.checkLabel` | no | The label that asks the owner to look at a PR. The module may add it, and may remove it: the ticket flow removes it when a person moves the card past the final review, the owner's check done. |
 | `forge.expertLabel` | no | The label on a PR whose writer recommends an expert review (the ticket flow's `pr` record adds it). The module may add it and never removes it. None: no such label. |
 | `targets[].id`, `targets[].repo` | required | A target's id (unique), and its repository (`name`, or `owner/name` with the forge's owner). |
 | `targets[].reviewers` | no | Logins the module may ask for a review. |

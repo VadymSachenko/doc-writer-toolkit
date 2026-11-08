@@ -606,7 +606,7 @@ export function collectSteps(st, { named = [], includeStart = false, retryWaitin
 // What a scripted step does, as the tracker and forge operations it calls (for the plan of a dry run).
 export function scriptedCalls(step, ledger, settings) {
   const card = ledger?.card?.shortLink ?? ledger?.card?.id ?? step.card?.shortLink;
-  const reviewCommentCall = (pr) => (pr.number ? [`forge comment --repo ${pr.repo} --number ${pr.number} --body-file <the review comment> --unless-header <its first line>`] : []);
+  const reviewCommentCall = (pr) => (pr.number && settings.reviewComment ? [`forge comment --repo ${pr.repo} --number ${pr.number} --body-file <the review comment> --unless-header <its first line>`] : []);
   const target = (pr) => settings.targets.find((t) => t.id === pr.targets?.[0]) ?? settings.targets.find((t) => t.repo === pr.repo);
   const label = (pr, stage) => {
     const t = target(pr);
@@ -629,7 +629,8 @@ export function scriptedCalls(step, ledger, settings) {
       const taken = ledger.prs.filter((p) => p.number && (step.takeReady ?? []).some((t) => t.pr === prId(p)));
       const others = cardsMovedWith(step, ledger, settings).map((o) => ({ o, own: o.prs.filter((p) => p.number && !ledger.prs.some((x) => prId(x) === prId(p)) && followsMove(p.stage, o.left?.status, step.to)) }));
       // A person's forward move: the check label off every PR the move took, once the records stood (D-128).
-      const unchecked = settings.forge.checkLabel && forwardMove(ledger.left?.status, step.to) ? [...following, ...taken.filter((p) => !following.includes(p)), ...others.flatMap((x) => x.own)] : [];
+      // To done, the ticket's open PRs: no PR follows a move there.
+      const unchecked = !settings.forge.checkLabel || !forwardMove(ledger.left?.status, step.to) ? [] : step.to === 'done' ? ledger.prs.filter((p) => p.number && !p.merged) : [...following, ...taken.filter((p) => !following.includes(p)), ...others.flatMap((x) => x.own)];
       return [
         ...following.flatMap((p) => label(p, PR_STAGE_OF_STATUS[step.to])),
         ...taken.flatMap((p) => label(p, 'translation')),
@@ -767,7 +768,8 @@ async function runScripted(step, ctx) {
       // (D-128). After the records stood, so a failure is a warning.
       const check = settings.forge.checkLabel;
       if (check && forwardMove(ledger.left?.status, step.to)) {
-        for (const p of moved) {
+        // To done, the ticket's open PRs: no PR follows a move there.
+        for (const p of step.to === 'done' ? ledger.prs.filter((x) => x.number && !x.merged) : moved) {
           try {
             await clients.forge.removeLabel({ repo: p.repo, number: p.number, label: check });
           } catch (err) {

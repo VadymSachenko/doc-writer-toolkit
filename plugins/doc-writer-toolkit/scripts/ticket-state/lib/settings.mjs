@@ -21,8 +21,9 @@ export const ROLES = ['triage', 'writer', 'reviewer', 'translator'];
 export const SIZES = ['edit', 'newPage', 'newSection'];
 export const START_ORDERS = ['priority', 'easiest'];
 
-// The comment on a PR entering the expert's review, by default: the changes to read, then GitHub's way to approve them.
-export const DEFAULT_REVIEW_COMMENT = 'The changes to review: <files>\nWhen nothing else is needed: «Review changes» → «Approve» → «Submit review».';
+// The comment on a PR entering the expert's review has no default: it is written to the team, in its language, so a host
+// that sets none gets no comment and no text to send.
+export const DEFAULT_REVIEW_COMMENT = null;
 
 export const LOCAL_DEFAULTS = {
   mode: 'observe',

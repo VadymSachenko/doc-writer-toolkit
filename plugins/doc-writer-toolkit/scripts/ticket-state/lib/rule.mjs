@@ -592,13 +592,13 @@ function handToCheck(pr, hand, w, target, head, out, { grace = false } = {}) {
 // How long a hand commit waits before its style check (the owner's push, then the move).
 export const GRACE_MS = 10 * 60000;
 
-// The approving review of a PR in the expert's review, when a reviewer approved since it entered the review (an older
+// The latest approving review of a PR in the expert's review, when one of its experts approved since it entered the review (an older
 // approval, of a review before a move back, moves nothing), and no review asks for changes. With the head it approved.
 function expertApproved(l, p) {
-  const a = p.world?.approved;
-  if (!a || p.world.reviewDecision === 'CHANGES_REQUESTED') return null;
+  if (!p.world?.approvals?.length || p.world.reviewDecision === 'CHANGES_REQUESTED') return null;
   const since = p.pr.smeSince ?? (l.left?.status === 'smeReview' ? l.left.at : null);
-  if (since && Date.parse(a.at) < Date.parse(since)) return null;
+  const a = p.world.approvals.filter((x) => !since || Date.parse(x.at) >= Date.parse(since)).sort((x, y) => Date.parse(x.at) - Date.parse(y.at)).at(-1);
+  if (!a) return null;
   return { id: a.id, login: a.login, head: a.commit ?? p.world.headCommit ?? null, at: a.at };
 }
 

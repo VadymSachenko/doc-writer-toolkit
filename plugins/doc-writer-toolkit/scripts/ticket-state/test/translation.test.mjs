@@ -382,10 +382,6 @@ test('the owner\'s move to the review calls each PR\'s own expert (reviewer, rev
     'forge request-reviewers --repo api-docs --number 33 --reviewer expert-two',
     `tracker add-member ${c.shortLink} --member expert-one`,
     `tracker add-member ${c.shortLink} --member expert-two`,
-    'forge comment --repo guide-docs --number 32 --body-file <the review comment> --unless-header <its first line>',
-    'forge comment --repo api-docs --number 33 --body-file <the review comment> --unless-header <its first line>',
-    'forge remove-label --repo guide-docs --number 32 --label "Look at me"',
-    'forge remove-label --repo api-docs --number 33 --label "Look at me"',
   ]);
   assert.deepEqual(ran(await run(w, noSession, { named: ['531'] })), [['follow', 'smeReview', 'done']]);
   assert.deepEqual(asked(w), [[32, ['expert-one']], [33, ['expert-two']]], 'each PR its own target\'s reviewer');

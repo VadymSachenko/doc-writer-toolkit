@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import { CliError, Refused } from './errors.mjs';
 import { checkKey, findPr, keyOf, newLedger, newPr, prId, readLedger, writeLedger } from './ledger.mjs';
 import { lockOf, renewLock } from './locks.mjs';
-import { CARD_STATUS_OF, CHAIN, LABEL_OF, PR_ORDER, PR_STAGE_OF_STATUS, PR_STAGES, STATUSES, TICKET_STAGES, followsMove, forwardMove, stageLabelOf } from './stages.mjs';
+import { CARD_STATUS_OF, CHAIN, LABEL_OF, PR_ORDER, PR_STAGE_OF_STATUS, PR_STAGES, STATUSES, TICKET_STAGES, followsMove, stageLabelOf } from './stages.mjs';
 import { labelCheck } from './intake.mjs';
 import { KINDS, recordedSize } from './cleanup.mjs';
 import { imagePairsAt } from './pairs.mjs';
@@ -382,7 +382,7 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
               addAll(p.reviewersRequested, (st.reviewRequests ?? []).map((r) => r.login ?? r.team ?? r));
               // A person's move on from the expert's review is the approval, at the head now (D-082): a word of the
               // expert's elsewhere, recorded by the person who heard it.
-              if (p.stage === 'smeReview' && forwardMove(from, to)) p.expertApproval = { head: st.headCommit, at, by: 'person' };
+              if (p.stage === 'smeReview' && (to === 'finalReview' || to === 'translation')) p.expertApproval = { head: st.headCommit, at, by: 'person' };
             }
             // When the PR entered the expert's review: only an approval after it moves the PR on.
             if (to === 'smeReview' && p.stage !== 'smeReview') p.smeSince = at;

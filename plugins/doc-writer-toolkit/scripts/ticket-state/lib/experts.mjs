@@ -55,9 +55,10 @@ export function expertCalls(settings, prs, cards, { request = true } = {}) {
 }
 
 // The comment a PR gets each time it enters the expert's review (D-082): the settings' `reviewComment`, with the PR's
-// Files changed link. The same text is what the report gives the owner to send a quiet expert. Null with no PR link.
+// Files changed link. The same text is what the report gives the owner to send a quiet expert. Null with no PR link or
+// no `reviewComment` set.
 export function reviewCommentFor(settings, url) {
-  if (!url) return null;
+  if (!url || !settings.reviewComment) return null;
   return settings.reviewComment.replaceAll('<files>', `${String(url).replace(/\/+$/, '')}/files`);
 }
 

@@ -8,6 +8,7 @@ import { createForge } from '../../forge/lib/forge.mjs';
 import { createAdapter as createForgeAdapter } from '../../forge/adapters/index.mjs';
 import { spawnGh } from '../../forge/adapters/github/gh.mjs';
 import { FLOW_STATUSES } from './settings.mjs';
+import { expertsOf } from './experts.mjs';
 import { prId } from './ledger.mjs';
 import { isIdOnlyChange } from '../../doc-align/lib/idonly.mjs';
 
@@ -272,7 +273,7 @@ export async function readPrs({ settings, forge, ledgers }) {
       if (st.state === 'open') {
         const activity = await forge.prActivity({ repo: pr.repo, number: pr.number });
         entry.newComments = unhandled(l, pr, activity, settings.forge.self);
-        Object.assign(entry, reviewerSignals(activity, settings.forge.self));
+        Object.assign(entry, reviewerSignals(activity, settings.forge.self, [...expertsOf(settings, pr).reviewers, ...(pr.reviewersRequested ?? [])]));
       }
       out.set(`${l.key}/${prId(pr)}`, entry);
     }
@@ -307,12 +308,14 @@ export function unhandled(ledger, pr, activity, self) {
   return out;
 }
 
-// What the reviewers (anyone but the pipeline's own login and a bot) did on a PR: `reviewerAt`, the time of their
-// latest review or comment, for the report's quiet expert; and `approved`, the latest approving review when each
-// reviewer's last verdict is an approval and none asks for changes, with the commit it approved. Read from the reviews
-// themselves: GitHub fills the PR's review decision only where a branch rule requires a review.
-export function reviewerSignals(activity, self) {
-  const theirs = (author, bot) => Boolean(author) && author !== self && bot !== true && !/\[bot\]$/.test(author);
+// What the PR's experts did on it: only the logins in `experts` (the targets' `reviewers` and the reviewers requested on
+// the PR), never the pipeline's own login or a bot. `reviewerAt`, the time of their latest review or comment, for the
+// report's quiet expert; and `approvals`, each expert's approving review whose last verdict it is, oldest first, with the
+// commit it approved, none when one of them asks for changes (the rule keeps those after the PR entered the review).
+// Read from the reviews themselves: GitHub fills the PR's review decision only where a branch rule requires a review.
+export function reviewerSignals(activity, self, experts = []) {
+  const allowed = new Set(experts.map(String));
+  const theirs = (author, bot) => Boolean(author) && author !== self && bot !== true && !/\[bot\]$/.test(author) && allowed.has(String(author));
   const times = [];
   for (const t of activity.threads ?? []) for (const c of t.comments ?? []) if (theirs(c.author, c.authorBot)) times.push(c.createdAt ?? c.updatedAt);
   for (const c of activity.comments ?? []) if (theirs(c.author, c.authorBot)) times.push(c.createdAt ?? c.updatedAt);
@@ -321,12 +324,11 @@ export function reviewerSignals(activity, self) {
   const last = new Map();
   for (const r of [...reviews].sort((a, b) => Date.parse(a.submittedAt) - Date.parse(b.submittedAt))) if (['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'].includes(r.state)) last.set(r.author, r);
   const verdicts = [...last.values()];
-  const approvals = verdicts.filter((r) => r.state === 'APPROVED');
-  const approved = verdicts.some((r) => r.state === 'CHANGES_REQUESTED') ? null : approvals.at(-1) ?? null;
+  const approvals = verdicts.some((r) => r.state === 'CHANGES_REQUESTED') ? [] : verdicts.filter((r) => r.state === 'APPROVED').sort((a, b) => Date.parse(a.submittedAt) - Date.parse(b.submittedAt));
   const valid = times.filter((x) => x && !Number.isNaN(Date.parse(x)));
   return {
     reviewerAt: valid.length ? new Date(Math.max(...valid.map((x) => Date.parse(x)))).toISOString() : null,
-    approved: approved ? { id: approved.id, login: approved.author, commit: approved.commit ?? null, at: approved.submittedAt } : null,
+    approvals: approvals.map((r) => ({ id: r.id, login: r.author, commit: r.commit ?? null, at: r.submittedAt })),
   };
 }
 
