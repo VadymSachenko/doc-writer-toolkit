@@ -1,6 +1,6 @@
 ---
 name: resolve-markers
-description: 'Resolves every {/* NEEDS CONFIRMATION */} and {/* ToDo */} marker in a section''s doc pages automatically using whatever evidence is available — app-notes.md (if app-explorer has run), sme-interview.md, existing screenshots in .assets/, and direct app observation via Playwright. No questions asked when the answer can be found. Only stops for markers that genuinely cannot be answered from any available source. Use explicitly ("resolve-markers: docs/transactions", "use resolve-markers on the archive section").'
+description: 'Resolves every {/* NEEDS CONFIRMATION */} and {/* ToDo */} marker in a section''s doc pages automatically using whatever evidence is available — app-notes.md (if app-explorer has run), sme-interview.md, existing screenshots in .assets/, direct app observation via Playwright, and the app''s code read at a fetched commit. No questions asked when the answer can be found. Only stops for markers that genuinely cannot be answered from any available source. Use explicitly ("resolve-markers: docs/transactions", "use resolve-markers on the archive section").'
 ---
 
 # resolve-markers
@@ -9,8 +9,8 @@ You are resolving documentation markers — `{/* NEEDS CONFIRMATION: ... */}` an
 
 ## Scope
 
-- **In scope:** resolving `{/* NEEDS CONFIRMATION */}` and `{/* ToDo */}` markers in all doc pages of one section (or only the pages a caller lists, see Arguments), using all available evidence sources. **Targeted, read-only observation of a single screen via Playwright to confirm one specific marker** (see "Full vs. targeted app access" below). Editing the pages in place. Reporting what was resolved and what remains.
-- **Out of scope:** running full app exploration — systematic multi-screen navigation, scenario seeding, or screenshot sweeps (`app-explorer`'s job; see "Full vs. targeted app access" below). Writing new pages. Style review. Translation.
+- **In scope:** resolving `{/* NEEDS CONFIRMATION */}` and `{/* ToDo */}` markers in all doc pages of one section (or only the pages a caller lists, see Arguments), using all available evidence sources. **Targeted, read-only observation of a single screen via Playwright to confirm one specific marker** (see "Full vs. targeted app access" below). Reading the app's code, read-only, at a named commit, as one more evidence source (Step 0, source 5). Editing the pages in place. Reporting what was resolved and what remains.
+- **Out of scope:** changing any app repo (its code is only read). Running full app exploration — systematic multi-screen navigation, scenario seeding, or screenshot sweeps (`app-explorer`'s job; see "Full vs. targeted app access" below). Writing new pages. Style review. Translation.
 
 ### Full vs. targeted app access
 
@@ -33,20 +33,28 @@ You are resolving documentation markers — `{/* NEEDS CONFIRMATION: ... */}` an
 6. If `Admin UI: playwright` is declared in the project's `CLAUDE.md` — also load `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/value-realism.md` and `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-capture.md`. If `CLAUDE.md` also declares `Screenshot locales:`, load `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-locales.md` too (which locales a capture covers, and when new images replace the old ones; `SL` below is the script it names). Without that field, don't load it and don't run `SL`: everything below that starts "With `Screenshot locales:` declared" doesn't apply.
 7. `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` — **only for Ж1a** (UI-label terminal-punctuation normalization), applied when a confirmed UI label is written into a bold span in prose (Step 3). Do not use it to rewrite surrounding prose.
 8. **`uk` pages only:** `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/native-ukrainian.md` — when a confirmed fact is written into the page as Ukrainian prose (Step 3), the words you write follow it. It doesn't license rewriting the rest of that sentence or the sentences around the marker.
+9. **Only when a marker asks what the app's code knows** (a field, a value, a limit, what a column holds) **and a code source is declared:** the "Code repos" section of `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` (the `Code repos:` field, or `appRepos` in the ticket flow settings, and where each repo is read from). With no declared code source, don't load it and skip Step 0, source 5.
 
 Do not load style-guide corpora (formatting-conventions.md and native-ukrainian.md are project rank-0 files, not corpora). This skill edits markers only — it does not rewrite prose beyond filling in the confirmed fact.
 
 ## Step 0 — Build the evidence index
 
-Collect every source of evidence available. Work through them in order — later sources fill gaps the earlier ones leave:
+Collect every source of evidence available. Work through them in order — later sources fill gaps the earlier ones leave. The order is the order of looking things up, not the rank; the rank is below the list:
 
 1. **`app-notes.md`** (if present) — answers to specific questions, screenshot descriptions, observed UI labels. Best source: direct observation.
 2. **`sme-interview.md`** (if present) — confirmed facts from SME or transcript. Good for conceptual and business-rule questions.
 3. **`.assets/` contents** — screenshots already saved. A screenshot of the right UI state can answer a `{/* ToDo: add a screenshot */}` marker directly without needing `app-notes.md`. With `Screenshot locales:` declared, also list, for each image, which screenshot locales have it: the same file name in the `.assets/` next to each locale's page (the locale roots that `SL config` prints).
 4. **Live app via Playwright** (if `Admin UI: playwright` is declared in `CLAUDE.md`) — for markers that none of the above answer, navigate to the relevant screen, observe directly, and record the answer. Do not capture new screenshots unless a `{/* ToDo: add a screenshot */}` marker specifically needs one. When capturing a screenshot, apply the scope, annotation, and blur rules from `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/screenshot-capture.md`. With `Screenshot locales:` declared, capture through the locale contract in `screenshot-locales.md`: resolve the screenshot locales first (its Section 0), and capture in every screenshot locale the host declares, switching the locale the way `SL config` gives it (`switch.capture`; with a `storage` switch, set the value before the page loads and never click the language picker). If they can't be resolved, capture nothing and ask the one question that section prescribes; on any other unexpected `SL` result, stop and report it. This skill seeds nothing, so a re-capture uses the scenario's data the manifest names, and fails the locale when that data is gone (`screenshot-locales.md` Section 4, step 3). Read credentials from `.env` — never hardcode them, never use production. Apply the **"Value realism rule — mandatory"** from `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/value-realism.md` for any values entered into the UI.
+5. **The app's code** (only when sources item 9 applies) — for markers about a name, a value, a limit, a field or the values a column holds that sources 1–4 did not answer. Read it as the "Code repos" section of `project-paths.md` says: the checkout the brief names, else the commit fetched at the start of the run, read with no checkout. Look each question up in every listed repo, not only the first that matches, and pin one commit per repo for the whole run. A fact counts only when the code states it as read (a name, a constant, a schema field, an enum, a limit); behavior inferred from reading logic stays `unresolvable`. A translation key or an identifier is not a UI label: a label comes from what the app shows. Record each fact with its reference:
+   - the repo, the path, the lines and the full commit hash;
+   - a link fixed to the commit, `<web address of the repo>/blob/<commit>/<path>#L<from>-L<to>` (the `url` without a trailing `.git`; in a ticket flow session the brief gives the pattern). A repo with no `url` has no link: the commit is the reference.
+
+   The reference goes into the evidence index and the report (Step 5), never into the page: the page gets the fact only.
+
+**Rank when sources disagree.** What the app shows (sources 1, 3 and 4: `app-notes.md`, screenshots, a live check) ranks above the code, and the code ranks above ticket or card text a caller passes. When the code and the app disagree, the app's answer stands, and the report names the disagreement with the repo and the commit, since the test environment may run another commit. Other conflicts are handled as before (Step 2).
 
 Build an internal index:
-- Every confirmed answer → source + answer text
+- Every confirmed answer → source + answer text (a fact from code: with its reference, as above)
 - Every available screenshot → filename + what it shows
 - Every question with no answer yet → mark as unresolved for now
 
@@ -75,8 +83,8 @@ For each marker, assign one of four verdicts using the evidence index:
 | `unresolvable` | No evidence source answers this — leave the marker, report it |
 
 Rules for `resolvable`:
-- The answer must come from observed app behavior, a confirmed SME fact, or direct Playwright observation — not a guess.
-- If two sources conflict, classify as `unresolvable` and note the conflict.
+- The answer must come from observed app behavior, a confirmed SME fact, direct Playwright observation, or a fact read in the app's code with a complete reference (source 5) — not a guess.
+- If two sources conflict, classify as `unresolvable` and note the conflict. The one exception is the code against the app: the app's answer stands (rank, Step 0) and the conflict goes in the report.
 
 Rules for `screenshot-available`:
 - Applies only to `{/* ToDo: add a screenshot — ... */}` markers (not `recapture`).
@@ -121,6 +129,8 @@ For `unresolvable` markers: leave them exactly as they are.
 1. Every `resolvable` marker replaced with a real, sourced answer.
 2. Every `screenshot-available` marker replaced with a correct image embed.
 3. No invented facts — every replacement is traceable to a source.
+   - Every replacement from code has a complete reference in the report: repo, path, lines, commit, and a link fixed to that commit where the repo has a `url`. No commit or link is in the page.
+   - Nothing was read from the owner's clone of a repo that has a `url`; no app repo was checked out, pulled or written to.
 4. No `unresolvable` markers touched.
 5. Surrounding prose still reads naturally.
 6. With `Screenshot locales:` declared: `SL status` shows every shot of this run `complete`, or lists it in the report with each failed locale and its reason. No shot is `mixed`, and no screenshot marker was removed for a shot that wasn't promoted.
@@ -129,7 +139,7 @@ For `unresolvable` markers: leave them exactly as they are.
 
 Tell the user:
 - How many markers found, how many resolved (confirmed facts vs. screenshots placed)
-- Which evidence sources were used
+- Which evidence sources were used. For each code repo read: the commit and whether its fetch worked, or that the repo was unavailable. For each marker resolved from code: the reference (repo, path, lines, commit, link) and any disagreement with the app
 - What remains unresolved — list each with file, marker text, and why it couldn't be answered
 - Which files were edited
 - With `Screenshot locales:` declared: the shots promoted and their locales, the failed locales with their reasons, and the folders `SL promote` created (`screenshot-locales.md` Section 7)

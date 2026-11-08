@@ -157,6 +157,26 @@ A second root pair, next to the primary pair's fields in the same block:
 
 Do not restate this procedure in the calling skill's own file — the calling skill's relevant step should be a short pointer into this file, not a paraphrase of it.
 
+## Code repos
+
+These fields are read by the skills that use the app's code as evidence (`resolve-markers`). A project that lets no skill read its code declares none. In a ticket flow writer or reviewer session the brief names the code checkouts, and step 1 below is the whole procedure.
+
+| Field | Required | Value | If absent |
+|---|---|---|---|
+| `Code repos:` | no | The app repos, one backtick span each: `<name> <https url> <branch the test environment runs>`, with a fourth word `clone=<path>` for the owner's own clone, from the repo root. A host that has `appRepos` in its ticket flow settings (`repo`, `url`, `base`, `path`) declares no `Code repos:`: the skills read that list instead, and never merge the two | no code is read; the run says so |
+
+```md
+- **Code repos:** `web-app https://github.com/example-org/web-app.git test`, `api https://github.com/example-org/api.git main clone=../api`
+```
+
+**Where the code is read from,** by the first of these that applies to a repo. A question is looked up in every listed repo, not only in the first that matches.
+
+1. **A brief that names code checkouts** (a ticket flow writer or reviewer session): the path and the commit the brief gives, read with Read and Grep. No fetch, no clone and no `git grep` there (all denied).
+2. **A repo with a `url`:** the pipeline's own bare clone, `<state>/code/<name>.git`, where `<state>` is the `state` that `ticket-state config` prints for a host with the ticket flow, else `<Toolkit state root>/code/<name>.git`. If it doesn't exist yet: `git clone -q --bare -- <url> <clone>`. Then `git -C <clone> fetch -q origin +refs/heads/<branch>:refs/remotes/origin/<branch>` and `git -C <clone> rev-parse refs/remotes/origin/<branch>`: that commit is fixed for the whole run. Read it with no checkout: `git -C <clone> grep -n -e <pattern> <commit> -- <path>` and `git -C <clone> show <commit>:<path>`. A fetch that fails reads the commit fetched last, and the run says so next to each fact read from it; with none fetched, the repo is unavailable. The owner's `clone=` of the same repo is never read or fetched.
+3. **A repo with only `clone=`:** the owner's clone. `git -C <clone> fetch -q origin <branch>`, then the same two reads on the commit of `origin/<branch>`. Never a checkout, a pull, a reset, a stash or a worktree, and never the files of its working tree (they may be weeks old): the owner's branch, HEAD and working tree stay as they were.
+
+A repo that can't be reached is reported as unavailable. It never stops the run, and a fact only that code could answer stays a marker.
+
 ## Pipeline measures
 
 These fields are read by the `pipeline-measures` script (`${CLAUDE_PLUGIN_ROOT}/scripts/pipeline-measures/`), which measures a docs pipeline from the repo's git history, its pull requests and its tracker. No skill reads them. A project that doesn't measure its pipeline declares none. Each flag of the script overrides its field.
