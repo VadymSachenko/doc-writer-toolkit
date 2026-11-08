@@ -531,7 +531,7 @@ async function afterReady(files, { pipeline = false, move = true } = {}) {
   return { t, h2, first, sessionsFirst, back, out, run2, stages, briefs, l: read(t.w, '1501') };
 }
 
-test('a UA change after ready for merge: back to the owner\'s queue with no session; the owner\'s move then re-syncs, and the card comes back', async () => {
+test('a UA change after ready for merge: back to the owner\'s queue with no session but the style check of the edit; the owner\'s move then re-syncs, and the card comes back', async () => {
   const { first, sessionsFirst, back, run2, t } = await afterReady({ 'docs/x/index.md': '# Сторінка\n\nВиправлений абзац.\n' });
   assert.deepEqual(first.ran.map((r) => [r.stage, r.outcome]), [['move', 'done'], ['styleCheck', 'done']]);
   assert.equal(sessionsFirst, 1, 'the style check of the owner\'s edit only');

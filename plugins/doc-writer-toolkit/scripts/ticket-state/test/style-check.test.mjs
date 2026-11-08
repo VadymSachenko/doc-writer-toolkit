@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ago, card, pr } from './fakes.mjs';
+import { LISTS, ago, card, pr } from './fakes.mjs';
 import { ledger, read, world } from './helpers.mjs';
 import { briefFor } from '../lib/runner.mjs';
 import { runRecord } from '../lib/record.mjs';
@@ -144,4 +144,30 @@ test('AC-2: a fix that would change what the edit meant is a note in the summary
   assert.deepEqual(l.summaries.at(-1).notes, [note]);
   assert.deepEqual(l.prs[0].edits.map((e) => e.n), [1, 2], 'no item for the note');
   assert.equal(resolveReply(parseReply('3 — поверни'), l.prs[0].edits)[0].do, 'ask', 'a number for a note is asked back');
+});
+
+test('a style check at In translation that fixed the owner\'s edit sends the PR back to the owner\'s queue; the next move goes on, and a check with no fix goes on at once', async () => {
+  const CHAIN = ['translate', 'enReview', 'locales', 'align', 'labelSync', 'build', 'visualPack'];
+  const chain = Object.fromEntries(CHAIN.map((s, i) => [s, { status: 'done', head: OLD, seq: 10 + i }]));
+  const c = card({ number: 809, status: 'translation' });
+  const forgePr = pr({ repo: 'guide-docs', number: 89, headCommit: FIX, labels: ['In final review'] });
+  // The owner pushed HAND and moved the card in one check: the approval saw HAND; the check pushed FIX.
+  const state = { commits: [FIX, HAND], diffs: { [HAND]: [PAGE], [FIX]: [PAGE] }, between: { [`${HAND}..${FIX}`]: [FIX], [`${OLD}..${FIX}`]: [FIX, HAND] }, changed: { [`${OLD}..${FIX}`]: [PAGE] } };
+  const w = world({ cards: [c], prs: [forgePr], git: vcs(state) });
+  const styleCheck = (commits) => ({ status: 'done', seq: 30, at: ago(1), result: { reviewed: [{ sha: HAND }], ...(commits ? { commits } : {}) } });
+  const prOf = (extra) => [{ repo: 'guide-docs', number: 89, targets: ['guide'], review: 'sme', stage: 'translation', pipelineCommits: [OLD, FIX], chain, readyForMerge: [{ head: OLD, at: ago(5), seq: 5 }], styleChecked: [{ sha: HAND, at: ago(1) }], ...extra }];
+  ledger(w, c, { stages: BASE, prs: prOf({ approval: { head: HAND, at: ago(2) }, steps: { styleCheck: styleCheck([FIX]) } }) });
+  const s = (await w.one('809')).steps[0];
+  assert.deepEqual([fmt(s), s.styleFixes], ['move guide-docs#89 -> finalReview', 1]);
+  // The runner's scripted move (the label and the card first, as for a ready PR row 8 sends back), then its record.
+  c.placeId = LISTS.finalReview.id;
+  await runRecord({ settings: w.settings, clients: w.clients(), key: '809', stage: 'move', status: 'done', pr: 'guide-docs#89', to: 'finalReview', now: Date.now() });
+  assert.equal(read(w, '809').prs[0].stage, 'finalReview');
+  // The owner's next move approves the fix: the re-sync goes on.
+  ledger(w, c, { stages: BASE, left: 'translation', prs: prOf({ approval: { head: FIX, at: ago(0) }, steps: { styleCheck: styleCheck([FIX]) } }) });
+  c.placeId = LISTS.translation.id;
+  assert.equal(fmt((await w.one('809')).steps[0]), 'resync guide-docs#89');
+  // A check that fixed nothing: the re-sync at once.
+  ledger(w, c, { stages: BASE, prs: prOf({ approval: { head: HAND, at: ago(2) }, steps: { styleCheck: styleCheck(null) } }) });
+  assert.equal(fmt((await w.one('809')).steps[0]), 'resync guide-docs#89');
 });
