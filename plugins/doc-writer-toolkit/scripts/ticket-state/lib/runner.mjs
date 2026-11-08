@@ -18,7 +18,7 @@ import { ROLES } from './settings.mjs';
 import { cleanupTicket } from './cleanup.mjs';
 import { removeClosedMarkdown } from './import.mjs';
 import { DOWNLOAD_DIRS_VARIABLE, ROLE_SESSION_VARIABLE, childEnv, sessionChildEnv } from './env.mjs';
-import { checkClone, clonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureWorktree, prsForStep, worktreePath } from './worktree.mjs';
+import { checkClone, clonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureReadCheckout, ensureWorktree, prsForStep, worktreePath } from './worktree.mjs';
 import { BUSY_NAME, LOCK_NAME, busyEnded, freeBrowserLock } from './browser-lock.mjs';
 import { HOOK_VARIABLE, commandsOfRules, hookSettings } from './role-hook.mjs';
 import { parseClaudeConfig } from '../../ui-labels/lib/config.mjs';
@@ -212,7 +212,7 @@ export function writeDeniedFor(settings, roots = []) {
     ...[...new Set(own)].map((f) => `Edit(${abs(f)})`),
     ...ENV_FILES.map((f) => `Read(//**/${f})`),
     ...roots.map((r) => `Edit(${abs(r)}/**)`),
-    ...['tickets', 'locks', 'roles', 'watch', 'jobs', 'runs', 'reports', 'code', LOCK_NAME, BUSY_NAME].map((d) => `Edit(${abs(path.join(state, d))}/**)`),
+    ...['tickets', 'locks', 'roles', 'watch', 'jobs', 'runs', 'reports', 'code', 'read', LOCK_NAME, BUSY_NAME].map((d) => `Edit(${abs(path.join(state, d))}/**)`),
     // The browser lock and the busy notes go only through browser-lock.mjs: no holder-less lock, no forged holder.
     ...[LOCK_NAME, BUSY_NAME].map((d) => `Edit(${abs(path.join(state, d))})`),
     ...['rearmed.json', 'roles-proposal.json'].map((f) => `Edit(${abs(path.join(state, f))})`),
@@ -380,8 +380,8 @@ export function briefFor(step, settings) {
     '',
     `Host repo: ${root}`,
     `The toolkit's scripts folder: ${path.join(PLUGIN_ROOT, 'scripts')}`,
-    `Write your files with Write and Edit only in: ${writableFor(step, settings).join(', ')}${noWorktree ? ', and the `.sources/` folders of the target repos' : ''}.`,
-    noWorktree && plainKeys(step).length ? `A Playwright spec on this step goes in the target repo's \`screenshot-tests/\`, named ${plainKeys(step).map((k) => `\`_plan-${k}-<what>.spec.ts\``).join(' or ')}. Use that name, import shared helpers from that folder rather than editing them, and run it from that repo (\`cd\` there as a call of its own, then \`npx playwright test screenshot-tests/<file>\`).` : null,
+    `Write your files with Write and Edit only in: ${writableFor(step, settings).join(', ')}${noWorktree ? ', and the `.sources/` folders of the target clones' : ''}.`,
+    noWorktree && plainKeys(step).length ? `A Playwright spec on this step goes in the target clone's \`screenshot-tests/\`, named ${plainKeys(step).map((k) => `\`_plan-${k}-<what>.spec.ts\``).join(' or ')}. Use that name, import shared helpers from that folder rather than editing them, and run it from that repo (\`cd\` there as a call of its own, then \`npx playwright test screenshot-tests/<file>\`).` : null,
     `Settings (merged): \`${ts} config ${at}\``,
     `The ticket now: \`${ts} status ${at} --ticket ${step.keys[0]}\``,
     rules ? `Host rules:\n${rules}` : null,
@@ -414,10 +414,20 @@ function targetsOf(settings, ledgers) {
   });
 }
 
-// What the brief says about a target clone a step with no worktree reads, when it isn't at its origin's base.
+// What the brief says about the target clones of a step with no worktree: the read checkout each one's pages are read in;
+// for one with none (it couldn't be made), the clone as it stands, when it isn't at its origin's base, or why.
 function cloneLines(clones) {
-  const noted = clones.filter((c) => c.notes?.length);
-  return noted.length ? ['Target clones, read as they stand (the runner never moves them):', ...noted.map((c) => `- ${c.repo}: ${c.clone}; ${c.notes.join('; ')}.`)].join('\n') : null;
+  const read = clones.filter((c) => c.read);
+  const noted = clones.filter((c) => !c.read && (c.notes?.length || c.readError));
+  const out = [];
+  if (read.length) {
+    out.push(
+      'Read checkouts (the runner made them, detached at `origin/<base>` as it fetched it now; read-only): read the target repos\' pages, images and configuration here, by these paths, never in the clones, whose working tree is the owner\'s and may be on another branch or behind. A `.sources/` folder (the evidence you read and write) and the Playwright spec are in the clone, at the same path from the repo\'s top: give a skill the read checkout\'s path for the pages, and write what goes into a `.sources/` folder in the clone\'s.',
+      ...read.map((c) => `- ${c.repo}: ${c.read.path}, ${c.read.ref} at ${c.read.commit.slice(0, 7)}; its clone: ${c.clone}.${c.unfetched ? ` Note: could not fetch ${c.base} from origin, so this is ${c.read.ref} as last fetched.` : ''}`),
+    );
+  }
+  if (noted.length) out.push('Target clones, read as they stand (the runner never moves them):', ...noted.map((c) => `- ${c.repo}: ${c.clone}; ${[...(c.readError ? [`no read checkout (${c.readError})`] : []), ...(c.notes ?? [])].join('; ')}.`));
+  return out.length ? out.join('\n') : null;
 }
 
 // What the brief says about the code the session may read: the checkout at the commit the runner just fetched.
@@ -448,16 +458,19 @@ export function commandFor(step, settings, { model, agentsPath, claude = 'claude
   const trees = step.worktrees ?? [];
   const dirsOf = trees.map((t) => t.path);
   const codeDirs = (step.codeTrees ?? []).filter((t) => !t.error).map((t) => t.path);
-  const readDirs = [...(trees.length ? [] : [...new Set(settings.targets.map((t) => clonePath(settings, t)).filter(Boolean))]), ...codeDirs];
+  // The read checkouts at `origin/<base>` a step with no worktree reads pages in (lib/worktree.mjs, `ensureReadCheckout`).
+  const readCheckouts = trees.length ? [] : (step.clones ?? []).map((c) => c.read?.path).filter(Boolean);
+  const readDirs = [...(trees.length ? [] : [...new Set(settings.targets.map((t) => clonePath(settings, t)).filter(Boolean))]), ...readCheckouts, ...codeDirs];
   const allowed = [...new Set([...withGitC(roleRules, dirsOf), ...cloneReadRules(roleRules, readDirs), ...writeAllowedFor(step, settings), ...scriptRulesFor(roots, step.role), ...pushRulesFor(trees), ...fetchRulesFor(trees), ...lsRemoteRulesFor(trees)])];
   // A role that doesn't run Playwright doesn't get it from the hub's `npx playwright:*`.
   const noPlaywright = roleRules.some((r) => r.startsWith('Bash(npx playwright')) ? [] : ['Bash(npx playwright:*)'];
   const disallowed = [...new Set([...def.disallowedTools, ...(role.disallowedTools ?? []), ...PUSH_DENIED_PLAIN, ...BRANCH_DENIED, ...deniedFor(dirsOf), ...dirsOf.flatMap((d) => [`Bash(git -C ${d} branch:*)`, `Bash(git -C ${d} grep:*)`]), ...ROLE_DENIED, ...noPlaywright, ...scriptFlagsDenied(roots), ...writeDeniedFor(settings, roots), ...(trees.length ? checkoutDeniedFor(settings) : []), ...SETUP_DENIED, ...codeDenied(settings)])];
   // The folders a session may reach (`--add-dir`, and so `cd`): the step's worktrees; a step with none (triage, the plan)
-  // reads the target clones instead.
+  // reads pages in the read checkouts, and reaches the target clones for their `.sources/` and the Playwright spec it
+  // runs there (`writeDeniedFor` keeps the read checkouts closed to Write).
   // The toolkit roots too, so `ls` works where a session reads its scripts: probed, this loads no further skill or plugin,
   // and `writeDeniedFor` keeps them closed to Write and the hook to `mkdir`.
-  const dirs = [...new Set([...(trees.length ? dirsOf : settings.targets.map((t) => (t.path ? path.resolve(settings.root, t.path) : null))), ...codeDirs, ...roots].filter((d) => d && d !== settings.root))];
+  const dirs = [...new Set([...(trees.length ? dirsOf : [...readCheckouts, ...settings.targets.map((t) => (t.path ? path.resolve(settings.root, t.path) : null))]), ...codeDirs, ...roots].filter((d) => d && d !== settings.root))];
   const args = [
     '-p',
     briefFor(step, settings),
@@ -492,6 +505,7 @@ export function sessionEnv(step, settings, { roots, roleRules, trees }) {
     scripts: ROLE_SCRIPTS[step.role] ?? [],
     write: writableFor(step, settings),
     sources: step.role === 'triage' || trees.length ? [] : [...new Set(settings.targets.map((t) => clonePath(settings, t)).filter(Boolean))],
+    read: trees.length ? [] : (step.clones ?? []).map((c) => c.read?.path).filter(Boolean).map((p) => path.resolve(p)),
     playwright: has('Bash(npx playwright'),
     docusaurus: has('Bash(npx docusaurus'),
     npmRun: has('Bash(npm run'),
@@ -1198,9 +1212,18 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         // With no other session running (no live lock but this step's), the checkouts of other commits go.
         const mine = new Set([step.group ?? step.keys[0], ...held]);
         const othersRunning = allLocks(settings.state, clock()).some((l) => l.live && !mine.has(l.group));
-        // A step with no worktree reads the ticket's target clones as they stand: one off its base or behind its origin
-        // is said in the brief, with how to read the base instead (lib/worktree.mjs, `checkClone`).
-        const clones = !trees.length && step.role !== 'triage' ? targetsOf(settings, step.keys.map((k) => readLedger(settings.state, k))).map((t) => (io.checkClone ?? checkClone)(settings, t)).filter(Boolean) : [];
+        // A step with no worktree reads the pages of the ticket's targets at `origin/<base>`, in a read checkout of each
+        // clone, never in the owner's working tree (lib/worktree.mjs, `ensureReadCheckout`). One that can't be made is
+        // said in the run log, and the session reads that clone as it stands: one off its base or behind its origin is
+        // said in the brief, with how to read the base instead (`checkClone`). Neither stops the session.
+        const clones = (!trees.length && step.role !== 'triage' ? targetsOf(settings, step.keys.map((k) => readLedger(settings.state, k))) : []).map((t) => {
+          const c = (io.checkClone ?? checkClone)(settings, t);
+          if (!c) return null;
+          const r = (io.ensureReadCheckout ?? ensureReadCheckout)(settings, t, { othersRunning });
+          if (!r.error) return { ...c, read: r };
+          say({ kind: 'readCheckout', group: step.group, keys: step.keys, stage: step.stage, repo: c.repo, outcome: 'failed', note: `no read checkout of ${c.repo}, so the session reads its clone: ${r.error}`.slice(0, 400) });
+          return { ...c, readError: r.error };
+        }).filter(Boolean);
         const codeTrees = CODE_ROLES.has(step.role) ? (settings.appRepos ?? []).map((a) => (io.ensureCodeTree ?? ensureCodeTree)(settings, a, { othersRunning })) : [];
         step = { ...step, worktrees: trees, codeTrees, clones };
       } catch (e) {

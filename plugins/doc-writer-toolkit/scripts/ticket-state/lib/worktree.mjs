@@ -8,7 +8,9 @@ import { prId } from './ledger.mjs';
 // branch checked out in the owner's clone never blocks it. It links the clone's untracked files the stages need
 // (`targets[].links`, default `node_modules`) and lists each link in the common git dir's `info/exclude`, since a
 // `node_modules/` line in `.gitignore` doesn't match a symlink. The close step removes the worktree with
-// `git worktree remove --force`, then prunes; nothing else ever moves a worktree's `.git` link.
+// `git worktree remove --force`, then prunes; nothing else ever moves a worktree's `.git` link. A step with no worktree
+// gets a read checkout instead (`ensureReadCheckout`): one per target, under the state folder, detached at
+// `origin/<base>`, kept across tickets and never removed by the close step.
 
 // The stages that work on a PR branch, so their session gets the worktree.
 export const TREE_STAGES = ['write', 'uaReview', 'pr', 'answerComments', 'styleCheck', 'translate', 'enReview', 'locales', 'align', 'labelSync', 'build', 'visualPack', 'resync'];

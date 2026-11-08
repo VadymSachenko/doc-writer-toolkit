@@ -653,7 +653,7 @@ test('writes: each ticket\'s work folder when the host declares one; a step with
   const brief = briefFor({ stage: 'write', role: 'writer', keys: ['502'], worktrees: [TREE] }, settings);
   assert.match(brief, new RegExp(`only in: ${WT}, .*/tmp, .*work/tickets/502\\.`));
   assert.doesNotMatch(brief, /other write/, 'a host layer may allow more, so the brief says where to write, not what is refused');
-  assert.match(briefFor({ stage: 'plan', role: 'writer', keys: ['502'] }, settings), /and the `\.sources\/` folders of the target repos/);
+  assert.match(briefFor({ stage: 'plan', role: 'writer', keys: ['502'] }, settings), /and the `\.sources\/` folders of the target clones/);
   assert.doesNotMatch(briefFor({ stage: 'triage', role: 'triage', keys: ['502'] }, settings), /\.sources\/` folders/);
 });
 
@@ -681,6 +681,40 @@ test('a step with no worktree may create only its own specs: one rule per key pe
   assert.doesNotMatch(brief({ keys: ['502'], worktrees: [TREE] }), /_plan-/);
   assert.doesNotMatch(briefFor({ stage: 'triage', role: 'triage', keys: ['502'] }, settings), /_plan-/);
   assert.match(readRole('writer').prompt, /`_plan-<key>-<what>\.spec\.ts`/);
+});
+
+test('a step with no worktree reads pages in its read checkouts: in --add-dir and the git read rules, closed to writes where a clone\'s .sources/ rule would reach, named in the brief in place of the clone\'s note', () => {
+  const { w } = busyWorld();
+  // The hub is a target too, so its `.sources/` rule reaches the state folder inside it.
+  const settings = { ...w.settings, targets: [...w.settings.targets, { ...w.settings.targets[0], id: 'the-hub', path: '.' }] };
+  const state = path.resolve(settings.state);
+  const rc = path.join(state, 'read', 'guide');
+  const clone = path.resolve(settings.root, settings.targets[0].path);
+  const off = { repo: 'guide-docs', clone, base: 'main', branch: 'ticket-71', off: true, notes: ['on the branch ticket-71, not on its base main: its files are that branch\'s, not the site\'s; read pages with `git -C x show origin/main:<path>`, never its working tree'] };
+  const step = (clones) => ({ stage: 'plan', role: 'writer', keys: ['502'], group: '502', worktrees: [], clones });
+  const withRead = [{ ...off, read: { path: rc, ref: 'origin/main', commit: 'a'.repeat(40) } }];
+  const cmd = commandFor(step(withRead), settings, { agentsPath: '/x/agents.json', roots: ROOTS });
+  const addDirs = cmd.args.flatMap((a, i) => (a === '--add-dir' ? [cmd.args[i + 1]] : []));
+  assert.ok(addDirs.includes(rc), 'Read reaches the read checkout');
+  assert.ok(addDirs.includes(clone), 'the clone stays reachable: its .sources/ and the spec run from it');
+  const allowed = cmd.args.slice(cmd.args.indexOf('--allowedTools') + 1, cmd.args.indexOf('--disallowedTools'));
+  const denied = cmd.args.slice(cmd.args.indexOf('--disallowedTools') + 1, cmd.args.indexOf('--add-dir'));
+  const reads = (dir) => allowed.filter((r) => r.startsWith(`Bash(git -C ${dir} `)).map((r) => r.replace(dir, '<dir>'));
+  assert.ok(reads(clone).length > 0);
+  assert.deepEqual(reads(rc), reads(clone), 'the git reads of a clone run in its read checkout too');
+  assert.ok(!allowed.some((r) => r.startsWith('Edit(') && r.includes(`${state}/read`)), 'no write rule names it');
+  if (state.startsWith(`${w.root}/`)) assert.ok(allowed.includes(`Edit(/${w.root}/**/.sources/**)`), 'the hub\'s .sources/ rule reaches into the state folder');
+  assert.ok(denied.includes(`Edit(/${path.join(state, 'read')}/**)`), 'and the deny closes the read checkouts');
+  const brief = briefFor(step(withRead), settings);
+  assert.match(brief, new RegExp(`Read checkouts \\(the runner made them, detached at \`origin/<base>\`[^\\n]*never in the clones[^\\n]*\`\\.sources/\` folder[^\\n]*in the clone\\b[^\\n]*\\n- guide-docs: ${rc}, origin/main at aaaaaaa; its clone: ${clone}\\.`));
+  assert.doesNotMatch(brief, /Target clones|on the branch ticket-71|git -C x show/, 'the off-base note goes with the read checkout');
+  assert.match(briefFor(step([{ ...withRead[0], unfetched: true }]), settings), /aaaaaaa; its clone: .*\. Note: could not fetch main from origin, so this is origin\/main as last fetched\./);
+  // None made: the clone, its note and why, as before.
+  const fallback = [{ ...off, readError: 'x exists and is not a read checkout of guide-docs' }];
+  const plain = commandFor(step(fallback), settings, { agentsPath: '/x/agents.json', roots: ROOTS }).args;
+  assert.ok(!plain.includes(rc));
+  assert.match(briefFor(step(fallback), settings), /Target clones, read as they stand \(the runner never moves them\):\n- guide-docs: .*; no read checkout \(x exists and is not a read checkout of guide-docs\); on the branch ticket-71, not on its base main/);
+  assert.doesNotMatch(briefFor(step(fallback), settings), /Read checkouts/);
 });
 
 test('the deny lists stay as a mistake guard: what runs code later is denied inside a worktree the allow list opens, and git ls-remote is denied', () => {

@@ -184,6 +184,9 @@ function checkMkdir(words, cfg, cwd) {
     const segments = file.split('/');
     if (segments.some((s) => LOCK.test(s))) return 'a browser lock made by hand (browser-lock.mjs takes and frees it)';
     if (segments.some((s) => PROTECTED.has(s.toLowerCase()))) return `a folder under ${segments.find((s) => PROTECTED.has(s.toLowerCase()))}`;
+    // A read checkout is read-only, even where a clone's `.sources/` would reach into it (the hub as a target, holding
+    // the state folder).
+    if ((cfg.read ?? []).some((d) => inside(file, d))) return `mkdir in a read checkout, which is read-only: ${file}`;
     const open = (cfg.write ?? []).some((d) => inside(file, d)) || (cfg.sources ?? []).some((c) => inside(file, c) && path.relative(c, file).split('/').includes('.sources'));
     if (!open) return `mkdir outside the folders in your brief: ${file}`;
   }
@@ -316,7 +319,7 @@ function checkRedirect(r) {
 }
 
 // The reason a command line is refused, or null. `cfg`: { role, trees: [{ path, branch, base }], roots, scripts, write,
-// sources, playwright, docusaurus, npmRun, commands }. `cwd`: the shell's folder, from the hook's input.
+// sources, read, playwright, docusaurus, npmRun, commands }. `cwd`: the shell's folder, from the hook's input.
 export function refusalOf(command, cfg, { cwd } = {}) {
   const parsed = parseShell(command);
   if (parsed.error) return `${parsed.error}: a command this hook can't read without running it. One plain command per call`;

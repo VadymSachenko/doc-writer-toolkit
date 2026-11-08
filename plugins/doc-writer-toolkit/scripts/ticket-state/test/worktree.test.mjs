@@ -298,6 +298,34 @@ test('AC-5: the close step removes the ticket\'s worktrees with git, prunes, and
   assert.deepEqual(cleanup.worktrees.map((x) => [canon(x.path), x.removed]), [[canon(wt), true], [canon(legacy), true]]);
 });
 
+test('the close step leaves the read checkouts: the ticket\'s worktree goes, a read checkout of the same clone stays, kept whole inside a folder recorded by mistake, and a prune keeps it', async () => {
+  const c = card({ number: 1503, status: 'finalReview' });
+  const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 71, head: 'ticket-71', state: 'merged' })] });
+  gitRepo(w.root).commit({ '.gitignore': '.flow/\nrepos/\n', 'docs/index.md': '# Host\n' });
+  const fx = withClone(w);
+  const p = { repo: 'guide-docs', targets: ['guide'], branch: 'ticket-71', base: 'main' };
+  ensureWorktree(w.settings, p);
+  const wt = worktreePath(w.settings, p);
+  const rc = ensureReadCheckout(w.settings, w.settings.targets[0]).path;
+  assert.ok(rc && fs.existsSync(path.join(rc, 'docs/x/index.md')));
+  // The state's read folder recorded as a work file, as a session might by mistake.
+  const recorded = path.relative(w.root, path.dirname(rc));
+  ledger(w, c, { stages: { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' }, prs: [{ ...p, number: 71, review: 'sme', stage: 'readyForMerge' }], files: [{ path: recorded, kind: 'other', bytes: 0, stage: 'plan', at: ago(30) }] });
+  const trash = path.join(tmp('fake-trash-'), '.Trash');
+  const out = await runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: usage, trashDir: trash, now: () => NOW, spawnClaude: () => assert.fail('no model step') }, options: {} });
+  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['close', 'done']]);
+  assert.equal(fs.existsSync(wt), false, 'the ticket\'s worktree went');
+  assert.deepEqual(listWorktrees(fx.clone.dir).map((x) => canon(x.path)).sort(), [canon(fx.clone.dir), canon(rc)].sort());
+  assert.equal(pageIn(rc), '# Сторінка\n');
+  const cleanup = read(w, '1503').stages.close.result.cleanup;
+  assert.ok(!cleanup.worktrees.some((x) => canon(x.path) === canon(rc)), 'never handed to the removal');
+  assert.ok(JSON.stringify(cleanup).includes('the runner\'s read checkout, shared by every ticket'), JSON.stringify(cleanup));
+  // A prune of the clone keeps a read checkout whose folder is there.
+  fx.clone.g('worktree', 'prune');
+  assert.ok(listWorktrees(fx.clone.dir).some((x) => canon(x.path) === canon(rc)));
+  assert.equal(ensureReadCheckout(w.settings, w.settings.targets[0]).error, undefined, 'and the next step finds it as it was');
+});
+
 // A merged ticket whose worktree holds work no remote has: `make` leaves it so before the close.
 async function closeWith(make, { files = [], reported = () => [] } = {}) {
   const c = card({ number: 1504, status: 'finalReview' });
@@ -1032,8 +1060,9 @@ test('an answer pushed while the owner moved a ready card to In translation is n
   assert.equal(read(t.w, '1501').prs[0].approval.head, h2);
 });
 
-// A step with no worktree (the plan, the answers, a start) reads the target clones as they stand: one off its base or
-// behind its origin is said in the brief, with how to read the base; nothing is held for it.
+// A step with no worktree (the plan, the answers, a start) reads pages in a read checkout of each target clone at
+// `origin/<base>`, never in the owner's working tree; with none, the clone as it stands, and one off its base or behind
+// its origin is said in the brief, with how to read the base. Nothing is held for either.
 function planTicket({ onBase = true, behind = 0, status = 'inProgress', stages = { start: 'done' }, left = 'same', targets = ['guide'] } = {}) {
   const c = card({ number: 1601, status });
   const w = world({ cards: [c] });
@@ -1049,20 +1078,35 @@ function planTicket({ onBase = true, behind = 0, status = 'inProgress', stages =
   return { w, c, ...fx };
 }
 
+// Each session's brief, folders (`--add-dir`) and, read while it runs, the page in each folder it may reach.
 const briefsOf = async (t) => {
   const briefs = [];
-  const spawnClaude = async (cmd) => (briefs.push(briefOf(cmd)), { code: 0, stdout: RESULT, stderr: '' });
+  const sessions = [];
+  const spawnClaude = async (cmd) => {
+    briefs.push(briefOf(cmd));
+    const dirs = cmd.args.flatMap((a, i) => (a === '--add-dir' ? [cmd.args[i + 1]] : []));
+    const pages = Object.fromEntries(dirs.filter((d) => fs.existsSync(path.join(d, 'docs/x/index.md'))).map((d) => [d, pageIn(d)]));
+    sessions.push({ brief: briefOf(cmd), dirs, pages });
+    return { code: 0, stdout: RESULT, stderr: '' };
+  };
   const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1601'] } });
-  return { out, briefs };
+  return { out, briefs, sessions };
 };
+const readCheckoutOf = (t) => path.join(path.resolve(t.w.settings.state), 'read', 'guide');
 
-test('a plan step with the target clone on another branch runs: the brief names the branch and says to read the base, never the working tree', async () => {
+test('a plan step with the target clone on another branch runs on a read checkout at origin/<base>: in its folders with the base\'s page, named in the brief, with no off-base note; the clone never moves', async () => {
   const t = planTicket({ onBase: false });
   const before = t.clone.g('rev-parse', 'HEAD');
-  const { briefs } = await briefsOf(t);
+  const { briefs, sessions } = await briefsOf(t);
   assert.ok(briefs.length >= 1, 'the session started: an off-base clone holds nothing');
-  assert.match(briefs[0], /Target clones, read as they stand \(the runner never moves them\):\n- guide-docs: .*guide-docs; on the branch ticket-71, not on its base main: its files are that branch's, not the site's; read pages with `git -C .*guide-docs show origin\/main:<path>`, never its working tree\./);
+  const rc = readCheckoutOf(t);
+  assert.ok(sessions[0].dirs.includes(rc), 'the read checkout is one of the session\'s folders');
+  assert.equal(sessions[0].pages[rc], '# Сторінка\n', 'origin/main\'s page, not the branch draft');
+  assert.match(sessions[0].pages[t.clone.dir], /Новий абзац/, 'the clone\'s working tree is the owner\'s draft, and the brief doesn\'t send the session there');
+  assert.match(briefs[0], new RegExp(`Read checkouts \\(the runner made them[^\\n]*never in the clones[^\\n]*\\n- guide-docs: ${rc}, origin/main at ${t.clone.g('rev-parse', '--short=7', 'origin/main')}; its clone: ${t.clone.dir}\\.`));
+  assert.doesNotMatch(briefs[0], /Target clones|on the branch ticket-71|show origin\/main:<path>/, 'no off-base note with a read checkout');
   assert.deepEqual([t.clone.g('symbolic-ref', '--short', 'HEAD'), t.clone.g('rev-parse', 'HEAD')], ['ticket-71', before], 'the runner never moves the clone');
+  assert.equal(t.clone.g('status', '--porcelain', '--untracked-files=no'), '');
   // A detached HEAD is off its base too.
   t.clone.g('checkout', '-q', '--detach', 'main');
   const c = checkClone(t.w.settings, t.w.settings.targets[0]);
@@ -1070,35 +1114,71 @@ test('a plan step with the target clone on another branch runs: the brief names 
   assert.match(c.notes.join(' '), /at a detached HEAD \(\w+\), not on its base main/);
 });
 
-test('a start of an owner\'s card in the ready status names the clone of the target its label names, and a ticket that names no target gets no clone note', async () => {
+test('a second run re-points the read checkout at the base merged since; one the runner can\'t make leaves the session on the clone with its off-base note, said in the run log', async () => {
+  const t = planTicket({ onBase: false });
+  const before = t.clone.g('rev-parse', 'HEAD');
+  const first = await briefsOf(t);
+  const rc = readCheckoutOf(t);
+  assert.ok(first.sessions[0].dirs.includes(rc));
+  const merged = mergeOnForge(t.bare, { 'docs/x/index.md': '# Сторінка\n\nЗлито.\n' });
+  fs.writeFileSync(path.join(rc, 'marker.local.md'), 'from the first run\n');
+  // The plan step is due again (the stand-in session recorded nothing): a fresh ledger at the same stage.
+  const again = () => ledger(t.w, t.c, { stages: { start: 'done' }, left: 'same', triage: { verdict: 'docs-required', targets: ['guide'], size: 'edit' } });
+  again();
+  const second = await briefsOf(t);
+  assert.ok(second.sessions.length >= 1);
+  assert.equal(second.sessions[0].pages[rc], '# Сторінка\n\nЗлито.\n', 'the page merged since');
+  assert.match(second.briefs[0], new RegExp(`- guide-docs: ${rc}, origin/main at ${merged.slice(0, 7)};`));
+  assert.ok(fs.existsSync(path.join(rc, 'marker.local.md')), 'the same folder, re-pointed, not made again');
+  assert.equal(listWorktrees(t.clone.dir).filter((x) => canon(x.path) === canon(rc)).length, 1);
+  assert.deepEqual([t.clone.g('symbolic-ref', '--short', 'HEAD'), t.clone.g('rev-parse', 'HEAD')], ['ticket-71', before], 'the clone never moves');
+  // Its folder taken by something else (a person's files, say): no read checkout, and the step still runs, on the
+  // clone with today's note; the run log says why.
+  t.clone.g('worktree', 'remove', '--force', rc);
+  fs.mkdirSync(rc, { recursive: true });
+  fs.writeFileSync(path.join(rc, 'notes.md'), 'not a checkout\n');
+  again();
+  const third = await briefsOf(t);
+  assert.ok(third.sessions.length >= 1, 'never blocks the step');
+  assert.ok(!third.sessions[0].dirs.includes(rc));
+  assert.ok(third.sessions[0].dirs.includes(t.clone.dir));
+  assert.match(third.briefs[0], /Target clones, read as they stand \(the runner never moves them\):\n- guide-docs: .*guide-docs; no read checkout \(.*exists and is not a read checkout of guide-docs\); on the branch ticket-71, not on its base main: its files are that branch's, not the site's; read pages with `git -C .*guide-docs show origin\/main:<path>`, never its working tree\./);
+  assert.doesNotMatch(third.briefs[0], /Read checkouts/);
+  assert.deepEqual(third.out.log.filter((e) => e.kind === 'readCheckout').map((e) => [e.stage, e.repo, e.outcome]), [['plan', 'guide-docs', 'failed']]);
+  assert.match(third.out.log.find((e) => e.kind === 'readCheckout').note, /^no read checkout of guide-docs, so the session reads its clone: .*exists and is not a read checkout/);
+  assert.equal(fs.readFileSync(path.join(rc, 'notes.md'), 'utf8'), 'not a checkout\n', 'nothing of it touched');
+});
+
+test('a start of an owner\'s card in the ready status reads the target its label names in a read checkout, and a ticket that names no target gets none', async () => {
   const c = card({ number: 1602, status: 'ready', labels: ['Guide'] });
   const w = world({ cards: [c] });
   withClone(w);
   const briefs = [];
   await runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude: async (cmd) => (briefs.push(briefOf(cmd)), { code: 0, stdout: RESULT, stderr: '' }) }, options: {} });
   assert.deepEqual(read(w, '1602').triage.targets, ['guide'], 'the start recorded the target before the check');
-  assert.match(briefs[0], /Stage `start`[\s\S]*- guide-docs: .*on the branch ticket-71, not on its base main/);
+  assert.match(briefs[0], /Stage `start`[\s\S]*Read checkouts[^\n]*\n- guide-docs: .*read\/guide, origin\/main at \w{7}; its clone: /);
   const none = planTicket({ onBase: false, targets: [] });
-  const { briefs: b2 } = await briefsOf(none);
-  assert.doesNotMatch(b2[0], /Target clones/, 'no target named: no clone checked');
+  const { briefs: b2, sessions } = await briefsOf(none);
+  assert.doesNotMatch(b2[0], /Target clones|Read checkouts/, 'no target named: no clone checked');
+  assert.ok(!sessions[0].dirs.includes(readCheckoutOf(none)));
 });
 
-test('a plan step with the target clone on its base but behind origin runs, and the brief says how far behind and how to read a merged page', async () => {
+test('a plan step with the target clone on its base but behind origin reads the pages merged since in its read checkout; the clone stays behind', async () => {
   const t = planTicket({ behind: 2 });
-  const briefs = [];
-  const spawnClaude = async (cmd) => {
-    briefs.push(briefOf(cmd));
-    return { code: 0, stdout: RESULT, stderr: '' };
-  };
-  await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1601'] } });
+  const { briefs, sessions } = await briefsOf(t);
   assert.ok(briefs.length >= 1, 'the session started');
-  assert.match(briefs[0], /Target clones, read as they stand \(the runner never moves them\):\n- guide-docs: .*guide-docs; 2 commit\(s\) behind origin\/main: a page merged since is not in its files; read pages with `git -C .*guide-docs show origin\/main:<path>`, never its working tree\./);
+  const rc = readCheckoutOf(t);
+  assert.ok(sessions[0].dirs.includes(rc));
+  assert.equal(pageIn(rc, 'docs/merged-1.md'), '# Злито\n', 'the newer page is in the read checkout');
+  assert.ok(!fs.existsSync(path.join(t.clone.dir, 'docs/merged-1.md')));
+  assert.match(briefs[0], new RegExp(`- guide-docs: ${rc}, origin/main at ${t.clone.g('rev-parse', '--short=7', 'origin/main')}; its clone: `));
+  assert.doesNotMatch(briefs[0], /Target clones|behind origin/);
   assert.equal(t.clone.g('rev-list', '--count', 'HEAD..origin/main'), '2', 'still behind: never pulled');
-  // At origin's base, the brief says nothing of the clone.
+  // At origin's base, it reads the read checkout all the same, with no note.
   const u = planTicket();
-  const seen = [];
-  await runDaily({ settings: u.w.settings, clients: u.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude: async (cmd) => (seen.push(briefOf(cmd)), { code: 0, stdout: RESULT, stderr: '' }) }, options: { trigger: 'watcher', named: ['1601'] } });
-  assert.doesNotMatch(seen[0], /Target clones/);
+  const { briefs: seen } = await briefsOf(u);
+  assert.match(seen[0], /Read checkouts/);
+  assert.doesNotMatch(seen[0], /Target clones|could not fetch/);
 });
 
 test('the translation label on a ready PR: taken along by the owner\'s move it is in translation for the re-sync and back in the final review at ready; sent back by row 8 it never leaves the final review', async () => {

@@ -213,6 +213,21 @@ test('a step with no worktree: its folders are the state tmp/, the work folder a
   assert.ok(refusalOf('mkdir x', c, {}), 'no folder known, no pass');
 });
 
+test('a step with no worktree: a read checkout is read-only to mkdir, even where the hub\'s .sources/ rule reaches into the state folder', () => {
+  const w = world({ extra: { workFolder: 'work/tickets/<key>' } });
+  const settings = { ...w.settings, targets: [...w.settings.targets, { ...w.settings.targets[0], id: 'the-hub', path: '.' }] };
+  const rc = path.join(path.resolve(settings.state), 'read', 'guide');
+  const clone = path.resolve(settings.root, settings.targets[0].path);
+  const clones = [{ repo: 'guide-docs', clone, base: 'main', notes: [], read: { path: rc, ref: 'origin/main', commit: 'a'.repeat(40) } }];
+  const c = JSON.parse(commandFor(stepOf('writer', w, [], { stage: 'plan', clones }), settings, { agentsPath: '/x/agents.json', roots: ROOTS }).env[HOOK_VARIABLE]);
+  assert.deepEqual(c.read, [rc]);
+  assert.ok(c.sources.includes(path.resolve(settings.root)), 'the hub is a target');
+  assert.match(refusalOf(`mkdir -p ${rc}/docs/a/.sources/frames`, c, { cwd: settings.root }), /mkdir in a read checkout, which is read-only/);
+  assert.equal(refusalOf(`mkdir -p ${clone}/docs/a/.sources/frames`, c, { cwd: settings.root }), null, 'the clone\'s .sources/ stays open');
+  // A step with a worktree has no read checkout.
+  assert.deepEqual(JSON.parse(commandFor(stepOf('writer', w, [TREE], { clones }), settings, { agentsPath: '/x/agents.json', roots: ROOTS }).env[HOOK_VARIABLE]).read, []);
+});
+
 // ---------------------------------------------------------------- per-role scripts
 
 test('per-role scripts: triage gets ticket-state and the tracker only; each role only what it runs, in the rules and in the hook', () => {
