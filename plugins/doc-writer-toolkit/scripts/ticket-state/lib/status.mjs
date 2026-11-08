@@ -48,9 +48,13 @@ export async function computeStatus({ settings, clients, now = Date.now(), only 
     }
   }
 
+  // The numbered edits of each PR across the ledgers that share it (a PR with two cards): a reply is read against both.
+  const editsByPr = new Map();
+  for (const l of ledgers) for (const p of l.prs ?? []) if (p.number && p.edits?.length) editsByPr.set(`${p.repo}#${p.number}`, [...(editsByPr.get(`${p.repo}#${p.number}`) ?? []), p.edits]);
+
   // Tickets with a ledger.
   const tickets = ledgers.map((l) =>
-    deriveTicket(l, { now, card: l.card?.id && cards.has(l.card.id) ? cards.get(l.card.id) : l.stages?.close?.status === 'done' ? undefined : null, lock: locks.get(l.group) ?? null, prWorld, git, settings, fileExists, fileHash: hashOf, cardComments: cardComments.get(l.key) ?? null, cardMoves: cardMoves.get(l.key) ?? null, rearmedAt: rearmedAt(rearm, l.key), mark: Boolean(marks?.includes(l.key)) }),
+    deriveTicket(l, { now, editsByPr, card: l.card?.id && cards.has(l.card.id) ? cards.get(l.card.id) : l.stages?.close?.status === 'done' ? undefined : null, lock: locks.get(l.group) ?? null, prWorld, git, settings, fileExists, fileHash: hashOf, cardComments: cardComments.get(l.key) ?? null, cardMoves: cardMoves.get(l.key) ?? null, rearmedAt: rearmedAt(rearm, l.key), mark: Boolean(marks?.includes(l.key)) }),
   );
 
   // Cards with no ledger: the intake, ready tickets the pipeline hasn't started, tickets whose ledger is missing, and

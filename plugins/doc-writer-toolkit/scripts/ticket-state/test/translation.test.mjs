@@ -7,6 +7,7 @@ import { renderReport } from '../lib/report.mjs';
 import { runRecord } from '../lib/record.mjs';
 import { runHandover } from '../lib/handover.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
+import { parseReply, resolveReply, suggestionOf } from '../lib/edits.mjs';
 
 // No chain stage runs before a person moved the card to the translation status, on every path. `finalReview` is the
 // owner's queue and starts nothing; the chain's end takes the card back there and says so on the card.
@@ -264,32 +265,50 @@ test('a question during the chain: the answer brings the PR back to the owner\'s
   assert.deepEqual(steps(await w.one('514')), ['move -> finalReview']);
 });
 
-test('a UA change after ready for merge re-syncs, whoever made it: an answer to a comment too; an id-only one keeps the PR ready', async () => {
+test('a UA change after ready for merge goes back to the owner\'s queue, whoever made it, with no model step; an id-only one keeps the PR ready', async () => {
   const old = 'a'.repeat(40);
-  const c = { words: card({ number: 515, status: 'finalReview' }), ids: card({ number: 516, status: 'finalReview' }), en: card({ number: 517, status: 'finalReview' }), synced: card({ number: 518, status: 'finalReview' }) };
+  const c = { words: card({ number: 515, status: 'finalReview' }), ids: card({ number: 516, status: 'finalReview' }), en: card({ number: 517, status: 'finalReview' }) };
   const changed = { [HEAD]: ['docs/a.md'] };
-  const git = { branchCommits: () => [], changedUnder: (t, from, to) => (t.repo === 'guide-docs' && changed[to] && !git.ids.has(t) ? changed[to] : []), pagesOf: () => [], ids: new Set() };
-  const words = pr({ repo: 'guide-docs', number: 41, headCommit: HEAD });
-  const idsPr = pr({ repo: 'api-docs', number: 42, headCommit: HEAD });
-  const en = pr({ repo: 'api-docs', number: 43, headCommit: HEAD });
-  const synced = pr({ repo: 'guide-docs', number: 44, headCommit: HEAD });
-  const w = world({ cards: Object.values(c), prs: [words, idsPr, en, synced], git });
-  const answered = (n, repo, targets, extra = {}) => ({ stages: BASE, prs: [{ repo, number: n, targets, review: 'places', stage: 'readyForMerge', pipelineCommits: ['b'], chain: chainDone(old), readyForMerge: [{ head: old, at: ago(5) }], ...extra }] });
+  const git = { branchCommits: () => [], changedUnder: (t, from, to) => (t.repo === 'guide-docs' && changed[to] ? changed[to] : []), pagesOf: () => [] };
+  const w = world({ cards: Object.values(c), prs: [pr({ repo: 'guide-docs', number: 41, headCommit: HEAD, labels: ['In final review'] }), pr({ repo: 'api-docs', number: 42, headCommit: HEAD }), pr({ repo: 'api-docs', number: 43, headCommit: HEAD })], git });
+  const answered = (n, repo, targets) => ({ stages: BASE, prs: [{ repo, number: n, targets, review: 'places', stage: 'readyForMerge', pipelineCommits: ['b'], chain: chainDone(old), readyForMerge: [{ head: old, at: ago(5) }] }] });
   ledger(w, c.words, answered(41, 'guide-docs', ['guide']));
   ledger(w, c.ids, answered(42, 'api-docs', ['api']));
   ledger(w, c.en, answered(43, 'api-docs', ['api']));
-  ledger(w, c.synced, answered(44, 'guide-docs', ['guide'], { steps: { resync: { status: 'done', head: HEAD } } }));
   const st = await w.status();
   const by = Object.fromEntries(st.tickets.map((t) => [t.key, t]));
-  assert.deepEqual(steps(by['515']), ['resync guide-docs#41'], 'the pipeline\'s own commit, UA changed: the chain\'s languages catch up');
-  const resync = by['515'].steps[0];
-  assert.equal(resync.since, old, 'the step names the ready head');
-  assert.equal(resync.head, HEAD);
-  assert.equal(resync.commits, 0, 'no hand commit: the pipeline made the change');
-  assert.match(briefFor({ ...resync, role: 'translator', keys: ['515'] }, w.settings), new RegExp(`UA changed since ready for merge at ${old}: re-sync the blocks changed in ${old}\\.\\.${HEAD}\\.`));
+  assert.deepEqual(steps(by['515']), ['move guide-docs#41 -> finalReview'], "the pipeline's own commit, UA changed: the owner reads it first");
+  assert.deepEqual(modelSteps(by['515']), [], "nothing is translated before the owner's move");
   assert.deepEqual(by['516'].steps, [], 'an id-only change keeps it ready');
   assert.deepEqual(by['517'].steps, [], 'UA untouched');
-  assert.deepEqual(steps(by['518']), ['readyForMerge guide-docs#44'], 'synced: ready for the new head');
+  // The move itself: the PR in the owner's queue, the card where it is, the ready head kept for the re-sync.
+  await runRecord({ settings: w.settings, clients: w.clients(), key: '515', stage: 'move', status: 'done', pr: 'guide-docs#41', to: 'finalReview', now: NOW });
+  const l = read(w, '515');
+  assert.equal(l.prs[0].stage, 'finalReview');
+  assert.deepEqual(l.prs[0].readyForMerge.map((r) => r.head), [old]);
+  const t = await w.one('515');
+  assert.deepEqual(t.steps, [], 'it waits for the owner');
+  assert.equal(t.state, 'finalReview');
+});
+
+test('the owner\'s move to In translation after a UA change at ready for merge re-syncs the whole range since the ready head, once, then ready', async () => {
+  const old = 'a'.repeat(40);
+  const c = { words: card({ number: 561, status: 'translation' }), synced: card({ number: 562, status: 'translation' }), ids: card({ number: 563, status: 'translation' }) };
+  const git = { branchCommits: () => [], changedUnder: (t, from, to) => (t.repo === 'guide-docs' && from === old && to === HEAD ? ['docs/a.md', 'docs/b.md'] : []), pagesOf: () => [] };
+  const w = world({ cards: Object.values(c), prs: [pr({ repo: 'guide-docs', number: 47, headCommit: HEAD }), pr({ repo: 'guide-docs', number: 48, headCommit: HEAD }), pr({ repo: 'api-docs', number: 49, headCommit: HEAD })], git });
+  const back = (n, repo, targets, extra = {}) => ({ stages: BASE, prs: [{ repo, number: n, targets, review: 'places', stage: 'translation', pipelineCommits: ['b'], chain: chainDone(old), readyForMerge: [{ head: old, at: ago(5) }], ...extra }] });
+  ledger(w, c.words, back(47, 'guide-docs', ['guide']));
+  ledger(w, c.synced, back(48, 'guide-docs', ['guide'], { steps: { resync: { status: 'done', head: HEAD } } }));
+  ledger(w, c.ids, back(49, 'api-docs', ['api']));
+  const st = await w.status();
+  const by = Object.fromEntries(st.tickets.map((t) => [t.key, t]));
+  assert.deepEqual(steps(by['561']), ['resync guide-docs#47'], 'one re-sync, not the chain again');
+  const resync = by['561'].steps[0];
+  assert.equal(resync.since, old, 'the step names the ready head');
+  assert.equal(resync.head, HEAD);
+  assert.ok(briefFor({ ...resync, role: 'translator', keys: ['561'] }, w.settings).includes(`re-sync the blocks changed in ${old}..${HEAD}, the whole range at once.`));
+  assert.deepEqual(steps(by['562']), ['readyForMerge guide-docs#48'], 'synced: ready for the new head');
+  assert.deepEqual(steps(by['563']), ['readyForMerge api-docs#49'], 'nothing in UA to re-sync: ready, no session');
 });
 
 test('a handover of a card in the owner\'s queue starts nothing', async () => {
@@ -457,4 +476,236 @@ test('a card member the board has no member for stops the run like an unmatched 
   const plain = world({ cards: [c] });
   await plain.status();
   assert.ok(!plain.tracker.reads.some((r) => r[0] === 'members'));
+});
+
+// ------------------------------------------------------------------ the list of edits and the reply by number
+
+const EN_PAGE = 'i18n/en/docusaurus-plugin-content-docs/current/x/a.md';
+const item = (n, list, before, after, extra = {}) => ({ n, list, stage: list === 'description' ? 'pr' : 'answerComments', page: 'docs/x/a.md', block: `Крок ${n}`, before, after, at: ago(10), seq: n, ...extra });
+const EDITS = [
+  item(1, 'description', 'Відкрийте розділ.', 'Відкрийте розділ **Платежі**.'),
+  item(2, 'description', 'Натисніть **Зберегти**.', 'Натисніть кнопку **Зберегти**.', { en: { page: EN_PAGE, before: 'Click **Save**.', after: 'Click the **Save** button.' } }),
+  item(3, 'description', 'Поле необовʼязкове.', 'Поле можна залишити порожнім.'),
+  item(4, 'description', 'Дані оновлюються.', 'Дані оновлюються щохвилини.'),
+  item(5, '7001', 'Звіт за день', 'Звіт за добу'),
+  item(6, '7001', 'Оберіть період.', 'Оберіть період звіту.'),
+  item(7, '7001', 'Після того як ви натиснете кнопку, система перевірить усі поля форми й покаже помилки, якщо вони є.', 'Система перевіряє поля форми.'),
+  item(8, '7001', 'Готово.', 'Звіт сформовано.'),
+];
+
+test('AC-2: a reply by number gives a brief that restores item 2 exactly (EN too), puts 5 verbatim and rewrites 7; items not named are untouched', async () => {
+  const c = card({ number: 571, status: 'finalReview' });
+  const body = '2 — поверни; 5 — "Звіт за добу, «Платежі»; підсумок"; 7 — коротше';
+  const w = world({
+    cards: [c],
+    prs: [pr({ repo: 'guide-docs', number: 81, headCommit: HEAD })],
+    activity: { 'guide-docs#81': { comments: [{ id: 9001, author: 'owner-login', body, createdAt: ago(1), updatedAt: ago(1) }, { id: 9002, author: 'reviewer-one', body: '3 — поверни', createdAt: ago(1), updatedAt: ago(1) }] } },
+  });
+  ledger(w, c, { stages: BASE, prs: [{ repo: 'guide-docs', number: 81, targets: ['guide'], review: 'sme', stage: 'readyForMerge', chain: chainDone(), readyForMerge: [{ head: HEAD, at: ago(5) }], edits: EDITS }] });
+  const t = await w.one('571');
+  assert.deepEqual(steps(t), ['answerComments guide-docs#81']);
+  const s = t.steps[0];
+  assert.equal(s.nextEdit, 9, 'a new list goes on from the last number');
+  assert.equal(s.replies.length, 1, "only the owner's comment is a reply; a reviewer's goes the usual way");
+  assert.deepEqual(s.replies[0].items, [
+    { n: 2, do: 'restore', page: 'docs/x/a.md', block: 'Крок 2', now: 'Натисніть кнопку **Зберегти**.', put: 'Натисніть **Зберегти**.', en: { page: EN_PAGE, now: 'Click the **Save** button.', put: 'Click **Save**.' } },
+    { n: 5, do: 'verbatim', page: 'docs/x/a.md', block: 'Крок 5', now: 'Звіт за добу', put: 'Звіт за добу, «Платежі»; підсумок' },
+    { n: 7, do: 'rewrite', page: 'docs/x/a.md', block: 'Крок 7', now: 'Система перевіряє поля форми.', how: 'коротше' },
+  ]);
+  const brief = briefFor({ ...s, role: 'writer', keys: ['571'] }, w.settings);
+  assert.ok(brief.includes('A numbered list of edits you post on this PR starts at 9'));
+  assert.ok(brief.includes(`- 2, restore: docs/x/a.md, Крок 2: put back "Натисніть **Зберегти**." where it reads "Натисніть кнопку **Зберегти**.". EN ${EN_PAGE}: put back "Click **Save**." where it reads "Click the **Save** button.".`));
+  assert.ok(brief.includes('- 5, the owner\'s text: docs/x/a.md, Крок 5: replace "Звіт за добу" with exactly "Звіт за добу, «Платежі»; підсумок".'));
+  assert.ok(brief.includes('- 7, rewrite as the owner describes ("коротше"): docs/x/a.md, Крок 7, which reads "Система перевіряє поля форми.".'));
+  for (const n of [1, 3, 4, 6, 8]) assert.ok(!new RegExp(`^- ${n}, `, 'm').test(brief), `item ${n} is not named: nothing for it`);
+});
+
+test('AC-4: a number that does not exist, or one in two lists, is asked back, never guessed; a numbered comment on a PR with no list is an ordinary instruction', async () => {
+  const c = { asked: card({ number: 572, status: 'finalReview' }), plain: card({ number: 573, status: 'finalReview' }) };
+  const comment = (id, body) => ({ comments: [{ id, author: 'owner-login', body, createdAt: ago(1), updatedAt: ago(1) }] });
+  const w = world({
+    cards: Object.values(c),
+    prs: [pr({ repo: 'guide-docs', number: 82, headCommit: HEAD }), pr({ repo: 'guide-docs', number: 83, headCommit: HEAD })],
+    activity: { 'guide-docs#82': comment(9101, 'Дякую.\n12 — поверни\n3 — поверни\n4 —\n1 — "Відкрийте розділ."'), 'guide-docs#83': comment(9102, '1. Прибери зайве слово.\n2. Додай примітку.') },
+  });
+  // Item 3 is also in a list posted by hand before the numbering went on.
+  ledger(w, c.asked, { stages: BASE, prs: [{ repo: 'guide-docs', number: 82, targets: ['guide'], review: 'sme', stage: 'finalReview', edits: [...EDITS, item(3, '6999', 'Старий текст.', 'Новий текст.')] }] });
+  ledger(w, c.plain, { stages: BASE, prs: [{ repo: 'guide-docs', number: 83, targets: ['guide'], review: 'sme', stage: 'finalReview' }] });
+  const st = await w.status();
+  const asked = st.tickets.find((t) => t.key === '572').steps[0];
+  assert.deepEqual(asked.replies[0].items.map((x) => [x.n, x.do, x.why ?? null]), [
+    [12, 'ask', 'there is no item 12 on this PR (its items are 1–8)'],
+    [3, 'ask', 'item 3 is in 2 lists (the PR description, comment 6999)'],
+    [4, 'ask', 'the reply names item 4 with nothing to do'],
+    [1, 'verbatim', null],
+  ]);
+  const brief = briefFor({ ...asked, role: 'writer', keys: ['572'] }, w.settings);
+  assert.ok(brief.includes('- 12, ask back, change nothing: there is no item 12 on this PR (its items are 1–8).'));
+  assert.ok(brief.includes('- 3, ask back, change nothing: item 3 is in 2 lists (the PR description, comment 6999).'));
+  assert.ok(brief.includes("If an item's words point at another place than that item's block (the owner numbered their own instructions, not the list), change nothing for it and ask back."), 'numbered instructions are never guessed onto items');
+  const plain = st.tickets.find((t) => t.key === '573').steps[0];
+  assert.deepEqual([plain.stage, plain.replies, plain.nextEdit], ['answerComments', undefined, 1], 'no list yet: the owner\'s instructions, applied as before');
+});
+
+test('the reply\'s free form: dictated separators, a quote holding a semicolon, a line going on the item before, and words before the first number', () => {
+  const parsed = parseReply('Добре, кілька правок:\n1. як було\n3: «нова назва; друга частина»\n4) прибери «також»\nі не повторюй слово\n#6 — revert\nпункт 8 - верни назад.\n2 — 5 полів');
+  assert.equal(parsed.rest, 'Добре, кілька правок:');
+  assert.deepEqual(parsed.items.map((x) => [x.n, x.kind, x.text]), [
+    [1, 'restore', 'як було'],
+    [3, 'verbatim', 'нова назва; друга частина'],
+    [4, 'describe', 'прибери «також»\nі не повторюй слово'],
+    [6, 'restore', 'revert'],
+    [8, 'restore', 'верни назад'],
+    [2, 'describe', '5 полів'],
+  ]);
+  assert.equal(parseReply('Гарно, але кнопка називається інакше.'), null, 'no number first: not a reply by number');
+  assert.deepEqual(parseReply('- 2 — поверни, будь ласка\n* 5 — коротше\n• 6 — "Так."').items.map((x) => [x.n, x.kind]), [[2, 'restore'], [5, 'describe'], [6, 'verbatim']], 'a bulleted reply');
+  assert.deepEqual(parseReply('> 3. «а» → «б»\n> ще рядок цитати\n2 — поверни\n> 4. «в» → «г»').items.map((x) => [x.n, x.kind, x.text]), [[2, 'restore', 'поверни']], "a quote reply's quoted lines are not the owner's words");
+  assert.equal(parseReply('5 — «a» і «b»').items[0].kind, 'describe', 'two quotes and words between them are a description');
+  assert.deepEqual(resolveReply(parseReply('5 — поверни; 5 — коротше'), EDITS).map((x) => x.why), ['item 5 is named twice in the reply', 'item 5 is named twice in the reply']);
+});
+
+test('a suggestion the owner left is put in verbatim; only the words outside the block are an instruction', async () => {
+  assert.deepEqual(suggestionOf('Краще так:\n```suggestion\nНатисніть **Зберегти**.\n```\nі без крапки в кінці списку'), { text: 'Натисніть **Зберегти**.', note: 'Краще так:\nі без крапки в кінці списку' });
+  assert.deepEqual(suggestionOf('````suggestion\nА ```код``` тут\n````'), { text: 'А ```код``` тут', note: '' });
+  assert.equal(suggestionOf('Без блоку, просто слова.'), null);
+  const c = card({ number: 574, status: 'finalReview' });
+  const line = { id: 9201, author: 'owner-login', body: '```suggestion\nОберіть **Період** і натисніть **Показати**.\n```', path: 'docs/x/a.md', line: 12, reviewId: 9200, createdAt: ago(1), updatedAt: ago(1) };
+  const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 84, headCommit: HEAD })], activity: { 'guide-docs#84': { reviews: [{ id: 9200, author: 'owner-login', state: 'COMMENTED', body: '', submittedAt: ago(1) }], threads: [{ id: 'th1', path: 'docs/x/a.md', line: 12, comments: [line] }] } } });
+  ledger(w, c, { stages: BASE, prs: [{ repo: 'guide-docs', number: 84, targets: ['guide'], review: 'sme', stage: 'finalReview' }] });
+  const s = (await w.one('574')).steps[0];
+  assert.deepEqual(s.suggestions, [{ id: 9201, path: 'docs/x/a.md', line: 12, text: 'Оберіть **Період** і натисніть **Показати**.', note: '' }]);
+  const brief = briefFor({ ...s, role: 'writer', keys: ['574'] }, w.settings);
+  assert.ok(brief.includes('- comment 9201, docs/x/a.md line 12: "Оберіть **Період** і натисніть **Показати**."'));
+  assert.match(brief, /unless the lines already read so \(the owner committed it, a hand edit: change nothing\)/);
+});
+
+test('the numbered lists in the ledger: the description from 1, a reply going on, a collision kept and warned, the EN side from the re-sync', async () => {
+  const c = card({ number: 575, status: 'inProgress' });
+  const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 85, head: 'ticket-85', headCommit: HEAD, labels: ['In progress'] })] });
+  ledger(w, c, { stages: { start: 'done', plan: 'done', write: 'done', uaReview: 'done' }, prs: [{ repo: 'guide-docs', branch: 'ticket-85', targets: ['guide'], review: 'sme' }] });
+  const rec = (args) => runRecord({ settings: w.settings, clients: w.clients(), key: '575', now: NOW, ...args });
+  const desc = [1, 2].map((n) => ({ n, page: 'docs/x/a.md', block: `Крок ${n}`, before: `було ${n}`, after: `стало ${n}` }));
+  await rec({ stage: 'pr', status: 'done', result: { prs: [{ branch: 'ticket-85', number: 85, expertReview: { recommended: false, why: 'all checked in the UI' }, edits: desc }] } });
+  let p = read(w, '575').prs[0];
+  assert.deepEqual(p.edits.map((e) => [e.n, e.list, e.stage, e.before, e.after]), [[1, 'description', 'pr', 'було 1', 'стало 1'], [2, 'description', 'pr', 'було 2', 'стало 2']]);
+  // A malformed item is a usage error: nothing is written.
+  await assert.rejects(rec({ stage: 'answerComments', status: 'done', pr: 'guide-docs#85', result: { summary: { id: 7101 }, edits: [{ n: 3, page: 'docs/x/a.md', after: 'x' }] } }), (e) => e.exitCode === 2 && /exact "before" and "after"/.test(e.message));
+  await assert.rejects(rec({ stage: 'answerComments', status: 'done', pr: 'guide-docs#85', result: { edits: [] } }), (e) => e.exitCode === 2 && /give "summary"/.test(e.message));
+  const out = await rec({ stage: 'answerComments', status: 'done', pr: 'guide-docs#85', result: { summary: { id: 7101 }, edits: [{ n: 3, page: 'docs/x/a.md', block: 'Крок 3', before: 'стало 2', after: 'було 2' }, { n: 2, page: 'docs/x/b.md', before: 'b', after: 'c' }] } });
+  assert.deepEqual(out.warnings, ['edit 2 is also item 2 of the PR description: a reply naming 2 will be asked back']);
+  p = read(w, '575').prs[0];
+  assert.deepEqual(p.edits.map((e) => [e.n, e.list]), [[1, 'description'], [2, 'description'], [3, '7101'], [2, '7101']]);
+  // The re-sync's EN side lands on the latest item of the number.
+  const l = read(w, '575');
+  l.prs[0].stage = 'translation';
+  l.prs[0].chain = chainDone();
+  const { writeLedger } = await import('../lib/ledger.mjs');
+  writeLedger(w.settings.state, l);
+  await rec({ stage: 'resync', status: 'done', pr: 'guide-docs#85', head: HEAD, result: { edits: [{ n: 3, en: { page: EN_PAGE, before: 'Step two.', after: 'Step one.' } }] } });
+  p = read(w, '575').prs[0];
+  assert.deepEqual(p.edits.find((e) => e.n === 3).en, { page: EN_PAGE, before: 'Step two.', after: 'Step one.' });
+});
+
+test('AC-3: the re-sync after a restore of both languages is told the item\'s EN is set, so it finds nothing to change there', async () => {
+  const old = 'a'.repeat(40);
+  const c = card({ number: 576, status: 'translation' });
+  const git = { branchCommits: () => [], changedUnder: (t, from, to) => (from === old && to === HEAD ? ['docs/x/a.md'] : []), pagesOf: () => [] };
+  const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 86, headCommit: HEAD })], git });
+  // Item 9 (the reply that restored item 2, both languages) and item 10 (a rewrite, UA only) came after the ready head.
+  const edits = [...EDITS, item(9, '7201', 'Натисніть кнопку **Зберегти**.', 'Натисніть **Зберегти**.', { block: 'Крок 2', seq: 40, en: { page: EN_PAGE, before: 'Click the **Save** button.', after: 'Click **Save**.' } }), item(10, '7201', 'Звіт сформовано.', 'Готово.', { seq: 41 })];
+  ledger(w, c, { stages: BASE, prs: [{ repo: 'guide-docs', number: 86, targets: ['guide'], review: 'sme', stage: 'translation', chain: chainDone(old), readyForMerge: [{ head: old, at: ago(5), seq: 30 }], edits }] });
+  const s = (await w.one('576')).steps[0];
+  assert.equal(fmt(s), 'resync guide-docs#86');
+  assert.deepEqual(s.items, [{ n: 9, page: 'docs/x/a.md', block: 'Крок 2', en: true }, { n: 10, page: 'docs/x/a.md', block: 'Крок 10', en: false }], 'only the items since the ready head');
+  const brief = briefFor({ ...s, role: 'translator', keys: ['576'] }, w.settings);
+  assert.ok(brief.includes('- 9: docs/x/a.md, Крок 2 (EN set)'));
+  assert.ok(brief.includes('- 10: docs/x/a.md, Крок 10'));
+  assert.match(brief, /An item marked "EN set" was changed in EN with UA \(a restore of both\): its EN block already matches, leave it\./);
+});
+
+test('the reply\'s traps: no bare-space separator, a general line after a restore stays general, items named together, nested quotes, the owner\'s own numbered list, an assent', () => {
+  const kinds = (t) => parseReply(t)?.items.map((x) => [x.n, x.kind, x.text]) ?? null;
+  assert.equal(parseReply('5 хвилин тому я просив інше'), null, 'a number and a space are no item');
+  assert.equal(parseReply('2.5 мм — замало'), null, 'a decimal point is no separator');
+  const general = parseReply('2 — поверни\nЗагалом зроби весь текст коротшим');
+  assert.deepEqual([kinds('2 — поверни\nЗагалом зроби весь текст коротшим'), general.rest], [[[2, 'restore', 'поверни']], 'Загалом зроби весь текст коротшим'], 'the restore kept, the general line not narrowed to item 2');
+  assert.deepEqual(kinds('7 — коротше\nі без «також»'), [[7, 'describe', 'коротше\nі без «також»']], 'a description still goes on');
+  assert.deepEqual(resolveReply(parseReply('2 і 3 — поверни'), EDITS).map((x) => [x.n, x.do, x.why]), [[2, 'ask', 'the reply names items 2, 3 together: ask for each on its own'], [3, 'ask', 'the reply names items 2, 3 together: ask for each on its own']]);
+  assert.deepEqual(kinds('5 — «Натисніть «Зберегти»»'), [[5, 'verbatim', 'Натисніть «Зберегти»']]);
+  assert.deepEqual(kinds('5 — «А «Б»; В»'), [[5, 'verbatim', 'А «Б»; В']], 'no cut inside a nested quote');
+  const own = resolveReply(parseReply('1. Додай розділ про ліміти\n2. Прибери скриншот з кроку 3'), EDITS);
+  assert.deepEqual(own.map((x) => x.do), ['ask', 'ask'], "the owner's own numbered list is asked back, not applied to items 1 and 2");
+  assert.match(own[0].why, /reads as a numbered list of its own/);
+  assert.deepEqual(resolveReply(parseReply('1. коротше\n2. прибери «також»'), EDITS).map((x) => x.do), ['rewrite', 'rewrite'], 'a quote in an item marks a reply to the list');
+  assert.deepEqual(resolveReply(parseReply('1. коротше\n2 — поверни'), EDITS).map((x) => x.do), ['rewrite', 'restore']);
+  assert.deepEqual(resolveReply(parseReply('3 — ок; 4 — залиш; 6 — не треба; 8 — не потрібно'), EDITS).map((x) => x.do), ['keep', 'keep', 'ask', 'ask'], 'an assent changes nothing; «не треба» may mean undo, so it is asked back');
+});
+
+test('a restore of an item whose block a later item changed is asked back; a rewrite names the later items; the words outside the items reach the brief', async () => {
+  const edits = [...EDITS, item(9, '7301', 'Натисніть кнопку **Зберегти**.', 'Натисніть **Зберегти** унизу.', { block: 'Крок 2' })];
+  const out = resolveReply(parseReply('2 — поверни; 2 — коротше'), edits);
+  assert.equal(out[0].do, 'ask');
+  const restore = resolveReply(parseReply('2 — поверни'), edits)[0];
+  assert.deepEqual([restore.do, restore.why], ['ask', "item 2's block was changed again by item 9: ask which text to restore"]);
+  const rewrite = resolveReply(parseReply('2 — коротше'), edits)[0];
+  assert.deepEqual([rewrite.do, rewrite.later], ['rewrite', [9]]);
+  const c = card({ number: 577, status: 'finalReview' });
+  const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 87, headCommit: HEAD })], activity: { 'guide-docs#87': { comments: [{ id: 9301, author: 'owner-login', body: '9 — поверни\nЗагалом зроби весь текст коротшим', createdAt: ago(1), updatedAt: ago(1) }] } } });
+  ledger(w, c, { stages: BASE, prs: [{ repo: 'guide-docs', number: 87, targets: ['guide'], review: 'sme', stage: 'finalReview', edits }] });
+  const s = (await w.one('577')).steps[0];
+  const brief = briefFor({ ...s, role: 'writer', keys: ['577'] }, w.settings);
+  assert.ok(brief.includes('- 9, restore: docs/x/a.md, Крок 2: put back "Натисніть кнопку **Зберегти**." where it reads "Натисніть **Зберегти** унизу.".'));
+  assert.ok(brief.includes('Words of the reply outside its items (not tied to one item; an instruction for the PR, or a remark): "Загалом зроби весь текст коротшим".'));
+  assert.ok(brief.includes("Where the block doesn't read as the line says, change nothing for that item and ask back."));
+});
+
+test('two suggestion blocks in one comment are asked back; a block of several lines is matched by content', async () => {
+  assert.deepEqual(suggestionOf('```suggestion\nА\n```\nі\n```suggestion\nБ\n```').several, 2);
+  const c = card({ number: 578, status: 'finalReview' });
+  const line = (id, body) => ({ id, author: 'owner-login', body, path: 'docs/x/a.md', line: 12, reviewId: 9400, createdAt: ago(1), updatedAt: ago(1) });
+  const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 88, headCommit: HEAD })], activity: { 'guide-docs#88': { reviews: [{ id: 9400, author: 'owner-login', state: 'COMMENTED', body: '', submittedAt: ago(1) }], threads: [{ id: 'th2', path: 'docs/x/a.md', line: 12, comments: [line(9401, '```suggestion\nА\n```\n```suggestion\nБ\n```')] }] } } });
+  ledger(w, c, { stages: BASE, prs: [{ repo: 'guide-docs', number: 88, targets: ['guide'], review: 'sme', stage: 'finalReview' }] });
+  const s = (await w.one('578')).steps[0];
+  assert.deepEqual(s.suggestions, [{ id: 9401, path: 'docs/x/a.md', line: 12, several: 2 }]);
+  const brief = briefFor({ ...s, role: 'writer', keys: ['578'] }, w.settings);
+  assert.ok(brief.includes('- comment 9401, docs/x/a.md line 12: 2 suggestion blocks in one comment; ask back, change nothing.'));
+  assert.match(brief, /match the lines it replaces by their content, and if that isn't certain, change nothing and ask back/);
+});
+
+test('a PR with two cards: the reply is read against both cards\' lists, and an item they record differently is asked back', async () => {
+  const c = { a: card({ number: 579, status: 'finalReview' }), b: card({ number: 580, status: 'finalReview' }) };
+  const w = world({ cards: Object.values(c), prs: [pr({ repo: 'guide-docs', number: 89, headCommit: HEAD })], activity: { 'guide-docs#89': { comments: [{ id: 9501, author: 'owner-login', body: '5 — поверни; 10 — поверни', createdAt: ago(1), updatedAt: ago(1) }] } } });
+  const prOf = (edits) => [{ repo: 'guide-docs', number: 89, targets: ['guide'], review: 'sme', stage: 'finalReview', edits }];
+  ledger(w, c.a, { stages: BASE, group: '579-580', prs: prOf(EDITS) });
+  // The other card's record has item 10 the first lacks, and item 5 with another text.
+  ledger(w, c.b, { stages: BASE, group: '579-580', prs: prOf([...EDITS.filter((e) => e.n !== 5), item(5, '7001', 'Звіт за день', 'Звіт за тиждень'), item(10, '7501', 'Старе.', 'Нове.')]) });
+  const s = (await w.status()).tickets.find((t) => t.key === '579').steps[0];
+  assert.equal(s.nextEdit, 11, 'the numbers go on from both records');
+  assert.deepEqual(s.replies[0].items.map((x) => [x.n, x.do, x.why ?? null]), [[5, 'ask', 'item 5 reads differently in the records of the cards that share this PR'], [10, 'restore', null]]);
+});
+
+test('a move to In translation takes a ready PR along only for the owner\'s own commits with no session since ready, and the other card of the PR goes with it', async () => {
+  const old = 'a'.repeat(40);
+  const c = { mine: card({ number: 591, status: 'translation' }), session: card({ number: 592, status: 'translation' }), a: card({ number: 593, status: 'translation' }), b: card({ number: 594, status: 'finalReview' }) };
+  const vcs = { branchCommits: () => [], changedUnder: (t, from, to) => (from === old && to === HEAD ? ['docs/a.md'] : []), commitsBetween: (t, from, to) => (from === old && to === HEAD ? [HEAD] : null), pagesOf: () => [] };
+  const w = world({ cards: Object.values(c), prs: [91, 92, 93].map((number) => pr({ repo: 'guide-docs', number, headCommit: HEAD })), git: vcs });
+  const ready = (number, extra = {}) => ({ stages: BASE, left: 'finalReview', prs: [{ repo: 'guide-docs', number, targets: ['guide'], review: 'sme', stage: 'readyForMerge', pipelineCommits: ['e0e0e0e'], chain: chainDone(old), readyForMerge: [{ head: old, at: ago(5), seq: 5 }] }], ...extra });
+  ledger(w, c.mine, ready(91));
+  // An answer session ran on the PR after it was marked ready; its record failed, so its commit is in no list.
+  ledger(w, c.session, { ...ready(92), runs: [{ seq: 6, stage: 'answerComments', pr: 'guide-docs#92', role: 'writer', start: ago(2), outcome: 'failed' }] });
+  ledger(w, c.a, ready(93, { group: '593-594' }));
+  ledger(w, c.b, ready(93, { group: '593-594' }));
+  const st = await w.status();
+  const by = Object.fromEntries(st.tickets.map((t) => [t.key, t]));
+  assert.deepEqual(by['591'].steps[0].takeReady, [{ pr: 'guide-docs#91', head: HEAD }]);
+  assert.equal(by['592'].steps[0].takeReady, undefined, 'a session since ready: not known to be the owner\'s alone');
+  // The other card of PR 93 goes along with the same takeReady: one move, one re-sync, no extra move back.
+  const follow = { ...by['593'].steps[0], keys: ['593'] };
+  assert.deepEqual(follow.takeReady, [{ pr: 'guide-docs#93', head: HEAD }]);
+  assert.ok(scriptedCalls(follow, read(w, '593'), w.settings).includes(`tracker move ${c.b.shortLink} --to translation`), 'the other card is moved along');
+  moved(c.b, 'translation');
+  for (const key of ['593', '594']) await runRecord({ settings: w.settings, clients: w.clients(), key, stage: 'follow', status: 'done', to: 'translation', result: { takeReady: follow.takeReady }, now: NOW });
+  assert.deepEqual(['593', '594'].map((k) => read(w, k).prs[0].stage), ['translation', 'translation']);
+  assert.deepEqual(['593', '594'].map((k) => read(w, k).prs[0].approval?.head ?? null), [HEAD, HEAD]);
 });
