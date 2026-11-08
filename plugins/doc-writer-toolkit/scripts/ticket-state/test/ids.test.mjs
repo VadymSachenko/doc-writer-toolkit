@@ -71,6 +71,20 @@ test('code is not a link, and a relative path without an extension reaches no pa
   assert.equal(isIdOnlyChange(route, [route, page(before, after, 'docs/pay/steps.md')]), true, 'the same link as a site-root route');
 });
 
+// The other way round, the shared predicate reads a route the way Docusaurus does: number prefixes of a file name are
+// not in the route, `folder/folder.md` and `folder/index.md` are the folder's route. The linked page must still be in
+// the change, with that exact id.
+test('a route reaches a page whose file name has a number prefix or that is its folder\'s page', () => {
+  const after = '# Ліміти\n\n## Денний ліміт {/* #daily-limit */}\n\nТекст.\n';
+  const before = after.replace(' {/* #daily-limit */}', '');
+  const link = page('Див. [ліміт](/pay/limits#денний-ліміт).\n', 'Див. [ліміт](/pay/limits#daily-limit).\n', 'docs/pay/other.md');
+  for (const file of ['docs/pay/01-limits.md', 'docs/pay/limits/limits.md', 'docs/pay/limits/index.md']) {
+    assert.equal(isIdOnlyChange(link, [link, page(before, after, file)]), true, file);
+  }
+  assert.equal(isIdOnlyChange(link, [link, page(before, after, 'docs/pay/fees.md')]), false, 'another page');
+  assert.equal(isIdOnlyChange(link, [link, page(before, after.replace('#daily-limit', '#limit'), 'docs/pay/01-limits.md')]), false, 'another id');
+});
+
 test('the old fragment is the slug Docusaurus made: punctuation dropped, repeats numbered; headings in code fences are not headings', () => {
   const before = '## Довідка\n\n## Довідка\n\n[друга](#довідка-1)\n\n```md\n## Не заголовок\n```\n';
   const after = '## Довідка {/* #reference-a */}\n\n## Довідка {/* #reference-b */}\n\n[друга](#reference-b)\n\n```md\n## Не заголовок\n```\n';
