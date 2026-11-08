@@ -1,11 +1,11 @@
 {
   "id": "tc-40a-markers-answer-from-code",
-  "description": "A marker asks for a limit that only the app's code states. The host declares one code repo by URL and no other evidence exists: resolve-markers reads the repo at a fetched commit with no checkout, puts only the fact on the page, and cites the repo, the path, the lines and the commit in its report. The source repo's branch, HEAD and working tree stay as they were.",
+  "description": "A marker asks for a limit that only the app's code states. The host declares one code repo by a git remote URL and no other evidence exists: resolve-markers reads the repo from its own bare clone outside the host repo, at a fetched commit with no checkout, puts only the fact on the page, and cites the repo, the path, the lines and the commit in its report. Nothing but the page changes in the host, ignored files included, so a clone inside the host fails the case.",
   "fixture": {
     "shape": "single"
   },
   "setup": [
-    "mkdir ../code-src && git -C ../code-src init -q -b test && mkdir ../code-src/src && printf '// Rows allowed in one export file.\\nexport const EXPORT_MAX_ROWS = 5000;\\n' > ../code-src/src/export.ts && git -C ../code-src add -A && git -C ../code-src -c user.name=T -c user.email=t@example.com commit -q -m 'Export limit' && git -C ../code-src rev-parse HEAD > .git/harness-code-head",
+    "mkdir ../code-src && git -C ../code-src init -q -b test && mkdir ../code-src/src && printf '// Rows allowed in one export file.\\nexport const EXPORT_MAX_ROWS = 5000;\\n' > ../code-src/src/export.ts && git -C ../code-src add -A && git -C ../code-src -c user.name=T -c user.email=t@example.com commit -q -m 'Export limit'",
     "printf '%s\\n' \"- **Code repos:** \\`web-app file://$(cd ../code-src && pwd) test\\`\" >> CLAUDE.md",
     "mkdir -p portal/reports/export && printf -- '---\\ntitle: Експорт звіту\\nsidebar_label: Експорт звіту\\n---\\n\\n# Експорт звіту\\n\\nУ файл потрапляє не більше ніж N рядків. {/* NEEDS CONFIRMATION: максимальна кількість рядків в одному файлі експорту */}\\n' > portal/reports/export/export.md",
     "git add -A && git commit -q -m 'Case setup'"
@@ -50,20 +50,19 @@
       "name": "report cites the lines",
       "type": "match",
       "path": "output",
-      "pattern": "(L|lines? |:)2\\b"
-    },
-    {
-      "name": "source repo untouched",
-      "type": "command",
-      "run": "[ \"$(git -C ../code-src rev-parse HEAD)\" = \"$(cat .git/harness-code-head)\" ] && [ -z \"$(git -C ../code-src status --porcelain)\" ] && [ \"$(git -C ../code-src symbolic-ref --short HEAD)\" = test ]"
+      "pattern": "(L|lines? |:|[-–])2\\b"
     },
     {
       "name": "only the page changed",
-      "type": "unchanged",
-      "ignore": [
-        "portal/reports/export/export.md",
-        ".doc-toolkit/"
+      "type": "changed-only",
+      "paths": [
+        "portal/reports/export/export.md"
       ]
+    },
+    {
+      "name": "no code cloned into the host, ignored files included",
+      "type": "command",
+      "run": "s=\"$(git status --porcelain --ignored --untracked-files=all)\"; printf '%s\\n' \"$s\"; [ \"$s\" = \" M portal/reports/export/export.md\" ]"
     }
   ]
 }

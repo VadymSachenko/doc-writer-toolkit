@@ -159,21 +159,25 @@ Do not restate this procedure in the calling skill's own file — the calling sk
 
 ## Code repos
 
-These fields are read by the skills that use the app's code as evidence (`resolve-markers`). A project that lets no skill read its code declares none. In a ticket flow writer or reviewer session the brief names the code checkouts, and step 1 below is the whole procedure.
+These fields are read by the skills that use the app's code as evidence (`resolve-markers`, and `section-planner` before it lists an open question). A project that lets no skill read its code declares none. In a ticket flow writer or reviewer session the brief names the code checkouts, and step 1 below is the whole procedure.
 
 | Field | Required | Value | If absent |
 |---|---|---|---|
-| `Code repos:` | no | The app repos, one backtick span each: `<name> <https url> <branch the test environment runs>`, with a fourth word `clone=<path>` for the owner's own clone, from the repo root. A host that has `appRepos` in its ticket flow settings (`repo`, `url`, `base`, `path`) declares no `Code repos:`: the skills read that list instead (`ticket-state config` prints it), and if both exist `appRepos` wins; the two are never merged | no code is read; the run says so |
+| `Code repos:` | no | The app repos, one backtick span each: `<name> <remote> <branch the test environment runs>`. `<remote>` is a git remote URL, any URL `git clone` accepts (`https://…`, `git@host:org/repo.git`, `file:///…`), or `clone=<path>` when the host knows the repo only as a local clone, the path from the repo root. A host that has `appRepos` in its ticket flow settings (`repo`, `url`, `base`, `path`) declares no `Code repos:`: the skills read that list instead (`ticket-state config` prints it), and if both exist `appRepos` wins; the two are never merged. `appRepos` takes an `https://` URL only | no code is read; the run says so |
 
 ```md
-- **Code repos:** `web-app https://github.com/example-org/web-app.git test`, `api https://github.com/example-org/api.git main clone=../api`
+- **Code repos:** `web-app https://github.com/example-org/web-app.git test`, `api clone=../api main`
 ```
 
-**Where the code is read from,** by the first of these that applies to a repo. A question is looked up in every listed repo, not only in the first that matches.
+**Where the code is read from.** A question is looked up in every listed repo, not only in the first that matches.
 
-1. **A brief that names code checkouts** (a ticket flow writer or reviewer session): the path and the commit the brief gives, read with Read and Grep. No fetch, no clone and no `git grep` there (all denied). Inside any ticket flow session the brief is the only source: a repo it marks as unavailable, or does not name, is unavailable, with no fall-back to the steps below.
-2. **A repo with a `url`:** the pipeline's own bare clone, `<state>/code/<name>.git`, where `<state>` is the `state` that `ticket-state config` prints for a host with the ticket flow, else `<Toolkit state root>/code/<name>.git`. If it doesn't exist yet: `git clone -q --bare -- <url> <clone>`. Then `git -C <clone> fetch -q origin +refs/heads/<branch>:refs/remotes/origin/<branch>` and `git -C <clone> rev-parse refs/remotes/origin/<branch>`: that commit is fixed for the whole run. Read it with no checkout: `git -C <clone> grep -n -e <pattern> <commit> -- <path>` and `git -C <clone> show <commit>:<path>`. A fetch that fails reads the commit fetched last, and the run says so next to each fact read from it; with none fetched, the repo is unavailable. The owner's `clone=` of the same repo is never read or fetched.
-3. **A repo with only `clone=`:** the owner's clone. `git -C <clone> fetch -q origin <branch>`, then the same two reads on the commit of `origin/<branch>`. Never a checkout, a pull, a reset, a stash or a worktree, and never the files of its working tree (they may be weeks old): the owner's branch, HEAD and working tree stay as they were.
+1. **A brief that names code checkouts** (a ticket flow writer or reviewer session): the path and the commit the brief gives, read with Read and Grep. No fetch, no clone and no `git grep` there (all denied). Inside any ticket flow session the brief is the only source: a repo it marks as unavailable, or does not name, is unavailable, with no fall-back to step 2.
+2. **Any other run:** the pipeline's own bare clone of each repo, fetched from the repo's remote. No git command ever runs in a clone of the owner's but the one read below: no fetch, checkout, pull, reset, stash or worktree there, and none of its files is read (they may be weeks old). The owner's branch, HEAD, refs and working tree stay as they were.
+   - **The URL:** the `<remote>` as declared, or `url` in `appRepos`. For `clone=<path>`: `git -C <path> config --get remote.origin.url`, the only command run in that clone. With no URL there, the repo is unavailable.
+   - **The clone:** `<state>/code/<name>.git` when `ticket-state config` prints a `state` (the ticket flow's git-ignored folder, where its runner keeps the same clone); else `~/.cache/doc-writer-toolkit/code/<name>.git`. Never anywhere else in the host repo: `<Toolkit state root>` is committed, so an app's code there would show as untracked files, and a `git add -A` would commit it into the docs repo.
+   - **Clone and fetch:** if the clone doesn't exist yet, `git clone -q --bare -- <url> <clone>` (git makes the missing folders). If it exists and `git -C <clone> config --get remote.origin.url` is not `<url>` (a repo of the same name from another host, or one that moved): `git -C <clone> remote set-url origin <url>`. Then `git -C <clone> fetch -q origin +refs/heads/<branch>:refs/remotes/origin/<branch>` and `git -C <clone> rev-parse refs/remotes/origin/<branch>`: that commit is fixed for the whole run.
+   - **Read** it with no checkout: `git -C <clone> grep -n -e <pattern> <commit> -- <path>` and `git -C <clone> show <commit>:<path>`.
+   - **A fetch that fails** reads the commit fetched last, and the run says so next to each fact read from it. With none fetched, or with the URL changed by `set-url` in this run, the repo is unavailable.
 
 A repo that can't be reached is reported as unavailable. It never stops the run, and a fact only that code could answer stays a marker.
 

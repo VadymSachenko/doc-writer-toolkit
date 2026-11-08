@@ -1,0 +1,82 @@
+{
+  "id": "tc-40b-markers-code-from-owner-clone-remote",
+  "description": "The host knows the app repo only as the owner's local clone, which sits on another branch with a dirty working tree, and whose origin/test is older than the remote's. resolve-markers reads only the clone's remote URL, reads the code from its own bare clone fetched from that remote, and puts the remote branch's value on the page, not the stale or the dirty one. The owner's clone keeps its HEAD, branch, refs, status and diff.",
+  "fixture": {
+    "shape": "single"
+  },
+  "setup": [
+    "mkdir ../code-remote && git -C ../code-remote init -q -b test && mkdir ../code-remote/src && printf '// Rows allowed in one export file.\\nexport const EXPORT_MAX_ROWS = 2000;\\n' > ../code-remote/src/export.ts && git -C ../code-remote add -A && git -C ../code-remote -c user.name=T -c user.email=t@example.com commit -q -m 'Export limit'",
+    "git clone -q \"file://$(cd ../code-remote && pwd)\" ../owner-clone && git -C ../owner-clone checkout -q -b feature && printf '// Rows allowed in one export file.\\nexport const EXPORT_MAX_ROWS = 1000;\\n' > ../owner-clone/src/export.ts",
+    "printf '// Rows allowed in one export file.\\nexport const EXPORT_MAX_ROWS = 7500;\\n' > ../code-remote/src/export.ts && git -C ../code-remote -c user.name=T -c user.email=t@example.com commit -q -am 'Raise the export limit'",
+    "{ git -C ../owner-clone rev-parse HEAD; git -C ../owner-clone symbolic-ref --short HEAD; git -C ../owner-clone for-each-ref; git -C ../owner-clone status --porcelain; git -C ../owner-clone diff; } > .git/harness-owner-clone",
+    "printf '%s\\n' \"- **Code repos:** \\`web-app clone=../owner-clone test\\`\" >> CLAUDE.md",
+    "mkdir -p portal/reports/export && printf -- '---\\ntitle: Експорт звіту\\nsidebar_label: Експорт звіту\\n---\\n\\n# Експорт звіту\\n\\nУ файл потрапляє не більше ніж N рядків. {/* NEEDS CONFIRMATION: максимальна кількість рядків в одному файлі експорту */}\\n' > portal/reports/export/export.md",
+    "git add -A && git commit -q -m 'Case setup'"
+  ],
+  "prompt": "resolve-markers: portal/reports",
+  "options": {
+    "maxTurns": 60,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)",
+      "Bash(which:*)",
+      "Bash(ls:*)",
+      "Bash(node:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "marker resolved",
+      "type": "no-match",
+      "path": "portal/reports/export/export.md",
+      "pattern": "NEEDS CONFIRMATION"
+    },
+    {
+      "name": "the limit from the code is on the page",
+      "type": "match",
+      "path": "portal/reports/export/export.md",
+      "pattern": "7[ \\u00a0\\u202f]?500"
+    },
+    {
+      "name": "no commit, link or path on the page",
+      "type": "no-match",
+      "path": "portal/reports/export/export.md",
+      "pattern": "blob/|file://|[0-9a-f]{12,}|export\\.ts"
+    },
+    {
+      "name": "report cites the file and a commit",
+      "type": "match",
+      "path": "output",
+      "pattern": "(?=[\\s\\S]*src/export\\.ts)(?=[\\s\\S]*\\b[0-9a-f]{12,40}\\b)"
+    },
+    {
+      "name": "report cites the lines",
+      "type": "match",
+      "path": "output",
+      "pattern": "(L|lines? |:|[-–])2\\b"
+    },
+    {
+      "name": "not the clone's stale origin/test or its dirty working tree",
+      "type": "no-match",
+      "path": "portal/reports/export/export.md",
+      "pattern": "\\b[12][ \\u00a0\\u202f]?000\\b"
+    },
+    {
+      "name": "the owner's clone untouched: HEAD, branch, refs, status and diff",
+      "type": "command",
+      "run": "{ git -C ../owner-clone rev-parse HEAD; git -C ../owner-clone symbolic-ref --short HEAD; git -C ../owner-clone for-each-ref; git -C ../owner-clone status --porcelain; git -C ../owner-clone diff; } | cmp -s - .git/harness-owner-clone"
+    },
+    {
+      "name": "only the page changed",
+      "type": "changed-only",
+      "paths": [
+        "portal/reports/export/export.md"
+      ]
+    },
+    {
+      "name": "no code cloned into the host, ignored files included",
+      "type": "command",
+      "run": "s=\"$(git status --porcelain --ignored --untracked-files=all)\"; printf '%s\\n' \"$s\"; [ \"$s\" = \" M portal/reports/export/export.md\" ]"
+    }
+  ]
+}
