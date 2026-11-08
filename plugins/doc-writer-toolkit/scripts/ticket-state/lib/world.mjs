@@ -131,6 +131,13 @@ export function makeGit(settings) {
       const out = gitOut(cwd, ['rev-list', head, '--not', ref]);
       return out === null ? null : out.split('\n').filter(Boolean);
     },
+    // The commits after `from` up to `to`, newest first. Null when either commit isn't here.
+    commitsBetween(target, from, to) {
+      const cwd = repoPath(target);
+      if (!cwd || !hasCommit(cwd, from) || !hasCommit(cwd, to)) return null;
+      const out = gitOut(cwd, ['rev-list', to, '--not', from]);
+      return out === null ? null : out.split('\n').filter(Boolean);
+    },
     // The files under the roots that changed between two commits, leaving out an id-only change (D-073, lib/ids.mjs):
     // such a change keeps every stage recorded on the page. Null when either commit isn't here.
     changedUnder(target, from, to, roots) {
@@ -220,7 +227,8 @@ export async function readPrs({ settings, forge, ledgers }) {
 // summary) asks nothing of the pipeline and starts no session. A line comment of a review the pipeline posted (its id
 // in `posted`, as `review-on-lines` gives it) is the pipeline's too, whether or not its own id was recorded: the
 // pipeline posts from the owner's login, so it would read as the owner's. A submitted review takes no new comment: a
-// person's reply opens a review of their own.
+// person's reply opens a review of their own. Each carries its text (`body`): the rule reads the owner's reply by number
+// and suggestion blocks in it (lib/edits.mjs).
 export function unhandled(ledger, pr, activity, self) {
   const posted = new Set((ledger.posted?.pr ?? []).map(String));
   const ownReview = (c) => c.reviewId !== null && c.reviewId !== undefined && posted.has(String(c.reviewId));
@@ -230,13 +238,13 @@ export function unhandled(ledger, pr, activity, self) {
   const who = (author) => (self && author === self ? 'owner' : 'reviewer');
   const out = [];
   for (const t of activity.threads ?? []) {
-    for (const c of t.comments ?? []) if (fresh(c) && !ownReview(c)) out.push({ id: c.id, kind: 'review-comment', thread: t.id, author: c.author, by: who(c.author), path: c.path ?? t.path ?? null, line: c.line ?? t.line ?? null, updatedAt: c.updatedAt });
+    for (const c of t.comments ?? []) if (fresh(c) && !ownReview(c)) out.push({ id: c.id, kind: 'review-comment', thread: t.id, author: c.author, by: who(c.author), path: c.path ?? t.path ?? null, line: c.line ?? t.line ?? null, updatedAt: c.updatedAt, body: c.body ?? '' });
   }
-  for (const c of activity.comments ?? []) if (fresh(c)) out.push({ id: c.id, kind: 'comment', author: c.author, by: who(c.author), updatedAt: c.updatedAt });
+  for (const c of activity.comments ?? []) if (fresh(c)) out.push({ id: c.id, kind: 'comment', author: c.author, by: who(c.author), updatedAt: c.updatedAt, body: c.body ?? '' });
   for (const r of activity.reviews ?? []) {
     if (!String(r.body ?? '').trim()) continue; // a verdict with no text asks nothing
     const c = { id: r.id, author: r.author, authorBot: r.authorBot, updatedAt: r.submittedAt };
-    if (fresh(c)) out.push({ id: r.id, kind: 'review', state: r.state, author: r.author, by: who(r.author), updatedAt: r.submittedAt });
+    if (fresh(c)) out.push({ id: r.id, kind: 'review', state: r.state, author: r.author, by: who(r.author), updatedAt: r.submittedAt, body: r.body ?? '' });
   }
   return out;
 }

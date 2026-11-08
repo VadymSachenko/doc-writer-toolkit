@@ -288,20 +288,27 @@ test('two PRs: the card stands with the slower PR; an approved PR goes on to the
   assert.deepEqual(asked.steps, [], "the other PR waits in the owner's queue while the card is in Blocked");
 });
 
-test('row 8: a hand edit before ready for merge is noted and kept; after it, the final edit is re-synced', async () => {
+test('row 8: a hand edit before ready for merge is noted and kept; after it, a UA change goes back to the owner\'s queue', async () => {
   const head = 'c'.repeat(40);
-  const c = { before: card({ number: 801, status: 'translation' }), after: card({ number: 802, status: 'finalReview' }) };
-  const git = { branchCommits: () => ['c'.repeat(40), 'd'.repeat(40)], changedUnder: () => [], pagesOf: () => [] };
-  const w = world({ cards: Object.values(c), prs: [pr({ repo: 'guide-docs', number: 41, headCommit: head }), pr({ repo: 'guide-docs', number: 42, headCommit: head })], git });
+  const ready = 'd'.repeat(40);
+  const c = { before: card({ number: 801, status: 'translation' }), after: card({ number: 802, status: 'finalReview' }), en: card({ number: 803, status: 'finalReview' }) };
+  // UA changed after ready on #42; #43's hand commit left UA alone.
+  const git = { branchCommits: () => [head, ready], changedUnder: (t, from, to) => (from === ready && to === head && git.uaPrs.has(t.repo) ? ['docs/a.md'] : []), pagesOf: () => [], uaPrs: new Set(['guide-docs']) };
+  const w = world({ cards: Object.values(c), prs: [pr({ repo: 'guide-docs', number: 41, headCommit: head }), pr({ repo: 'guide-docs', number: 42, headCommit: head }), pr({ repo: 'api-docs', number: 43, headCommit: head })], git });
   const base = { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' };
-  const chain = Object.fromEntries(['translate', 'enReview', 'locales', 'align', 'labelSync', 'build', 'visualPack'].map((s) => [s, { status: 'done', head: 'd'.repeat(40) }]));
+  const chain = Object.fromEntries(['translate', 'enReview', 'locales', 'align', 'labelSync', 'build', 'visualPack'].map((s) => [s, { status: 'done', head: ready }]));
   ledger(w, c.before, { stages: base, prs: [{ repo: 'guide-docs', number: 41, targets: ['guide'], stage: 'translation', pipelineCommits: ['ddddddd'], chain: { translate: { status: 'done', head } } }] });
-  ledger(w, c.after, { stages: base, prs: [{ repo: 'guide-docs', number: 42, targets: ['guide'], stage: 'readyForMerge', pipelineCommits: ['ddddddd'], chain, readyForMerge: [{ head: 'd'.repeat(40), at: ago(3) }] }] });
+  ledger(w, c.after, { stages: base, prs: [{ repo: 'guide-docs', number: 42, targets: ['guide'], stage: 'readyForMerge', pipelineCommits: ['ddddddd'], chain, readyForMerge: [{ head: ready, at: ago(3) }] }] });
+  ledger(w, c.en, { stages: base, prs: [{ repo: 'api-docs', number: 43, targets: ['api'], stage: 'readyForMerge', pipelineCommits: ['ddddddd'], chain, readyForMerge: [{ head: ready, at: ago(3) }] }] });
   const st = await w.status();
   const before = st.tickets.find((t) => t.key === '801');
   assert.match(before.mismatch[0], /hand edit, kept/);
   assert.equal(next(before), 'enReview guide-docs#41', 'the next stage reads the branch');
-  assert.equal(next(st.tickets.find((t) => t.key === '802')), 'resync guide-docs#42');
+  const after = st.tickets.find((t) => t.key === '802');
+  assert.deepEqual(after.steps.map(fmt), ['move guide-docs#42 -> finalReview'], 'back to the owner, no re-sync yet');
+  assert.equal(after.steps[0].role, null, 'no model step');
+  assert.equal(after.steps[0].since, ready);
+  assert.deepEqual(st.tickets.find((t) => t.key === '803').steps.map(fmt), ['readyForMerge api-docs#43'], 'a hand commit that left UA alone: ready for its head, no re-sync');
 });
 
 test('the card follows the least advanced PR when the pipeline left it elsewhere', async () => {
@@ -412,4 +419,24 @@ test('a failed step: a move of the card there and back is a person acting, seen 
   const st = Object.fromEntries((await w.status()).tickets.map((t) => [t.key, t]));
   assert.deepEqual([next(st['961']), st['961'].failed.acted], ['answers', 'a person moved the card']);
   assert.deepEqual([st['962'].next, st['962'].held], [null, true]);
+});
+
+test('a re-sync left running runs again only at translation: not on a PR at ready for merge (the earlier rule) nor one the owner moved back', async () => {
+  const ready = 'd'.repeat(40);
+  const head = 'c'.repeat(40);
+  const c = { old: card({ number: 811, status: 'finalReview' }), back: card({ number: 812, status: 'finalReview' }), live: card({ number: 813, status: 'translation' }) };
+  const vcs = { branchCommits: () => [], changedUnder: (t, from, to) => (from === ready && to === head ? ['docs/a.md'] : []), pagesOf: () => [] };
+  const w = world({ cards: Object.values(c), prs: [41, 42, 43].map((number) => pr({ repo: 'guide-docs', number, headCommit: head })), git: vcs });
+  const base = { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' };
+  const chain = Object.fromEntries(['translate', 'enReview', 'locales', 'align', 'labelSync', 'build', 'visualPack'].map((s) => [s, { status: 'done', head: ready }]));
+  const entry = (number, stage) => [{ repo: 'guide-docs', number, targets: ['guide'], stage, pipelineCommits: [head], chain, steps: { resync: { status: 'running', head } }, readyForMerge: [{ head: ready, at: ago(3) }] }];
+  ledger(w, c.old, { stages: base, prs: entry(41, 'readyForMerge') });
+  ledger(w, c.back, { stages: base, prs: entry(42, 'finalReview') });
+  ledger(w, c.live, { stages: base, prs: entry(43, 'translation') });
+  const st = await w.status();
+  const by = Object.fromEntries(st.tickets.map((t) => [t.key, t]));
+  assert.deepEqual(by['811'].steps.map(fmt), ['move guide-docs#41 -> finalReview'], "the earlier rule's re-sync: back to the owner, not run again");
+  assert.deepEqual(by['812'].steps, [], 'moved back by the owner: it waits for the next move');
+  assert.deepEqual(by['813'].steps.map(fmt), ['resync guide-docs#43']);
+  assert.equal(by['813'].steps[0].interrupted, true);
 });

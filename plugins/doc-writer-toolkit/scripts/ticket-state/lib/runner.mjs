@@ -22,6 +22,7 @@ import { BUSY_NAME, LOCK_NAME, busyEnded, freeBrowserLock } from './browser-lock
 import { HOOK_VARIABLE, commandsOfRules, hookSettings } from './role-hook.mjs';
 import { parseClaudeConfig } from '../../ui-labels/lib/config.mjs';
 import { liveProgress } from './progress.mjs';
+import { replyLines, resyncItemLines, suggestionLines } from './edits.mjs';
 
 // The daily run (design §7): finish first, then triage the quiet intake cards (mornings, and the watcher's start pass
 // when a slot frees), then start ready groups while
@@ -356,7 +357,11 @@ export function briefFor(step, settings) {
     step.interrupted ? 'The last run of this stage was interrupted: read what it left and finish it.' : null,
     step.withoutVideo ? 'The owner moved the card back before every video part had its transcript: go on without the video, and say so in the plan comment.' : null,
     step.changed ? 'The section plan file changed after its gate: post the new plan and move the card back to Blocked (a new gate).' : null,
-    step.stage === 'resync' && step.since ? `UA changed since ready for merge at ${step.since}: re-sync the blocks changed in ${step.since}..${step.head ?? 'HEAD'}.` : null,
+    step.stage === 'resync' && step.since ? `UA changed since ready for merge at ${step.since}, and the owner moved the card to In translation: re-sync the blocks changed in ${step.since}..${step.head ?? 'HEAD'}, the whole range at once.` : null,
+    ...resyncItemLines(step.items),
+    step.nextEdit ? `A numbered list of edits you post on this PR starts at ${step.nextEdit}: the numbers already posted keep their items.` : null,
+    ...replyLines(step.replies),
+    ...suggestionLines(step.suggestions),
     step.stale ? `The UA pages changed after this stage last ran (${step.stale} file(s)): run it again on the current head.` : null,
     step.cards ? `Cards, highest priority first:\n${step.cards.map((c) => `- ${c.key}: ${c.url ?? c.shortLink} (${c.priority})`).join('\n')}` : null,
     step.worktrees?.length ? worktreeLines(step.worktrees) : null,
@@ -592,6 +597,7 @@ export function scriptedCalls(step, ledger, settings) {
     case 'follow':
       return [
         ...ledger.prs.filter((p) => p.number && followsMove(p.stage, ledger.left?.status, step.to)).flatMap((p) => label(p, PR_STAGE_OF_STATUS[step.to])),
+        ...ledger.prs.filter((p) => p.number && (step.takeReady ?? []).some((t) => t.pr === prId(p))).flatMap((p) => label(p, 'translation')),
         ...(step.to === 'smeReview' ? expertCalls(settings, ledger.prs.filter((p) => p.number && followsMove(p.stage, ledger.left?.status, step.to)), [card]) : []),
         ...cardsMovedWith(step, ledger, settings).map((o) => `tracker move ${o.card?.shortLink ?? o.card?.id} --to ${step.to}`),
       ];
@@ -615,7 +621,8 @@ function cardsMovedWith(step, ledger, settings) {
   const from = ledger.left?.status;
   if (step.to !== 'translation' && from !== 'translation') return [];
   const shared = new Set((ledger.prs ?? []).filter((p) => p.number).map(prId));
-  return readAllLedgers(settings.state).filter((o) => o.key !== ledger.key && !step.keys.includes(o.key) && o.group === ledger.group && o.mode === 'pipeline' && o.left?.status === from && o.stages?.close?.status !== 'done' && (o.prs ?? []).some((p) => p.number && shared.has(prId(p)) && followsMove(p.stage, from, step.to)));
+  const taken = new Set((step.takeReady ?? []).map((x) => x.pr));
+  return readAllLedgers(settings.state).filter((o) => o.key !== ledger.key && !step.keys.includes(o.key) && o.group === ledger.group && o.mode === 'pipeline' && o.left?.status === from && o.stages?.close?.status !== 'done' && (o.prs ?? []).some((p) => p.number && shared.has(prId(p)) && (followsMove(p.stage, from, step.to) || taken.has(prId(p)))));
 }
 
 async function runScripted(step, ctx) {
@@ -672,9 +679,12 @@ async function runScripted(step, ctx) {
       // The other card first: a stop here leaves this ticket's move still to follow, and the run starts it again.
       for (const o of cardsMovedWith(step, ledger, settings)) {
         await clients.tracker.move({ card: o.card.shortLink ?? o.card.id, to: step.to });
-        await runRecord({ settings, clients, key: o.key, stage: 'follow', status: 'done', to: step.to, now: (io.now ?? Date.now)() });
+        await runRecord({ settings, clients, key: o.key, stage: 'follow', status: 'done', to: step.to, now: (io.now ?? Date.now)(), ...(step.takeReady?.length ? { result: JSON.stringify({ takeReady: step.takeReady }) } : {}) });
       }
-      for (const k of step.keys) await rec(k, { to: step.to });
+      for (const k of step.keys) await rec(k, { to: step.to, ...(step.takeReady?.length ? { result: JSON.stringify({ takeReady: step.takeReady }) } : {}) });
+      // A ready PR the move took along (`takeReady`): labelled once its record took it, since the record may leave it
+      // (its head moved again). Its `readyForMerge` after the re-sync gives the final review label back.
+      if (step.takeReady?.length) for (const p of readLedger(settings.state, key).prs.filter((x) => x.number && x.stage === 'translation' && step.takeReady.some((t) => t.pr === prId(x)))) await setLabel(p, 'translation');
       return;
     }
     case 'close': {
