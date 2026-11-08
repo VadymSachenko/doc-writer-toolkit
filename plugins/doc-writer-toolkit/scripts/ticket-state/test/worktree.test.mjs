@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { LISTS, NOW, ago, card, gitRepo, pr, tmp } from './fakes.mjs';
+import { LISTS, NOW, ago, card, gitRepo, pr, rawSettings, tmp } from './fakes.mjs';
 import { ledger, read, world } from './helpers.mjs';
-import { runDaily } from '../lib/runner.mjs';
+import { runDaily, scriptedCalls } from '../lib/runner.mjs';
 import { runRecord } from '../lib/record.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
 import { codeClonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureWorktree, listWorktrees, canon, prsForStep, worktreePath } from '../lib/worktree.mjs';
@@ -630,6 +630,46 @@ test('after the chain: the card goes back to the owner\'s queue with one comment
   assert.deepEqual((await t.w.one('1501')).steps, []);
 });
 
+test('the end of the chain gives a PR its final review label back, at once, while the card waits for its other PR', async () => {
+  const withTranslation = { targets: rawSettings().targets.map((x) => (x.id === 'guide' ? { ...x, labels: { ...x.labels, translation: 'In translation' } } : x)) };
+  const t = finalReviewTicket({ done: CHAIN, extra: withTranslation });
+  t.forgePr.labels = ['In translation'];
+  // A second PR of the ticket, still in the chain: the card stays in In translation.
+  const second = pr({ repo: 'guide-docs', number: 72, head: 'ticket-72', labels: ['In translation'] });
+  t.w.forge.prs.push(second);
+  const l0 = read(t.w, '1501');
+  l0.prs.push({ ...l0.prs[0], number: 72, branch: 'ticket-72', pipelineCommits: [], chain: {} });
+  writeLedger(t.w.settings.state, l0);
+  assert.deepEqual(scriptedCalls({ stage: 'readyForMerge', pr: 'guide-docs#71', keys: ['1501'] }, l0, t.w.settings), ['forge set-stage-label --target guide --number 71 --stage finalReview']);
+  const io = {
+    readUsage: usage,
+    now: () => NOW,
+    ensureWorktree: (s, p) => (p.number === 72 ? { repo: p.repo, branch: p.branch, path: '/nowhere', push: '', linked: [], missing: [], notes: [], stuck: [] } : ensureWorktree(s, p)),
+    spawnClaude: async () => ({ code: 1, stdout: '', stderr: 'stop here' }),
+  };
+  const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io, options: { trigger: 'watcher', named: ['1501'] } });
+  assert.deepEqual(out.ran.map((r) => r.stage).slice(0, 1), ['readyForMerge']);
+  assert.ok(!out.ran.some((r) => r.stage === 'move'), 'the card stays with the PR still in the chain');
+  assert.equal(t.c.placeId, LISTS.translation.id);
+  assert.deepEqual([t.forgePr.labels, second.labels], [['In final review'], ['In translation']]);
+  const l = read(t.w, '1501');
+  assert.deepEqual(l.prs.map((p) => [p.stage, p.label ?? null]), [['readyForMerge', 'In final review'], ['translation', null]]);
+});
+
+test('a label the forge refuses at ready for merge is a warning: the step is done, its record stands', async () => {
+  const withTranslation = { targets: rawSettings().targets.map((x) => (x.id === 'guide' ? { ...x, labels: { ...x.labels, translation: 'In translation' } } : x)) };
+  const t = finalReviewTicket({ done: CHAIN, extra: withTranslation });
+  t.forgePr.labels = ['In translation'];
+  t.w.forge.changeLabels = async () => {
+    throw new Error('the label request failed');
+  };
+  const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude: async () => assert.fail('a session started') }, options: { trigger: 'watcher', named: ['1501'] } });
+  const ready = out.ran.find((r) => r.stage === 'readyForMerge');
+  assert.equal(ready.outcome, 'done');
+  assert.match(ready.warnings[0], /^guide-docs#71: the stage label for 'readyForMerge' was not set: .*the label request failed/);
+  assert.equal(read(t.w, '1501').prs[0].stage, 'readyForMerge');
+});
+
 test('two PRs: the card goes back only when both are ready', async () => {
   const c = card({ number: 1505, status: 'translation' });
   const w = world({ cards: [c], prs: [pr({ repo: 'portal-docs', number: 91, head: 'a' }), pr({ repo: 'portal-docs', number: 92, head: 'b' })] });
@@ -831,4 +871,39 @@ test('an answer pushed while the owner moved a ready card to In translation is n
   const again = await go();
   assert.deepEqual(again.ran.map((r) => r.stage), ['follow', 'resync', 'readyForMerge', 'move']);
   assert.equal(read(t.w, '1501').prs[0].approval.head, h2);
+});
+
+test('the translation label on a ready PR: taken along by the owner\'s move it is in translation for the re-sync and back in the final review at ready; sent back by row 8 it never leaves the final review', async () => {
+  const withTranslation = { targets: rawSettings().targets.map((x) => (x.id === 'guide' ? { ...x, labels: { ...x.labels, translation: 'In translation' } } : x)) };
+  for (const pipeline of [false, true]) {
+    const t = finalReviewTicket({ done: CHAIN, stage: 'readyForMerge', extra: withTranslation });
+    t.forgePr.labels = ['In final review'];
+    const h2 = t.handEdit({ 'docs/x/index.md': `# Сторінка\n\nВиправлено${pipeline ? ' відповіддю' : ''}.\n` });
+    t.forgePr.headCommit = h2;
+    if (pipeline) {
+      const l0 = read(t.w, '1501');
+      l0.prs[0].pipelineCommits.push(h2);
+      writeLedger(t.w.settings.state, l0);
+    }
+    t.c.placeId = LISTS.translation.id;
+    const seen = [];
+    const spawnClaude = async (cmd) => {
+      seen.push([stageOf(cmd), [...t.forgePr.labels]]);
+      await runRecord({ settings: t.w.settings, clients: t.w.clients(), key: '1501', stage: stageOf(cmd), pr: 'guide-docs#71', status: 'done', head: h2, result: {}, now: NOW });
+      return { code: 0, stdout: RESULT, stderr: '' };
+    };
+    const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1501'] } });
+    const changes = t.w.forge.log.filter((e) => e[0] === 'changeLabels').map((e) => [e[3], e[4]]);
+    if (!pipeline) {
+      assert.deepEqual(out.ran.map((r) => r.stage), ['follow', 'resync', 'readyForMerge', 'move']);
+      assert.deepEqual(seen, [['resync', ['In translation']]], 'taken along: in translation for the re-sync');
+      assert.deepEqual(changes, [[['In translation'], ['In final review']], [['In final review'], ['In translation']]]);
+    } else {
+      // An answer the owner hasn't read: not taken, back to the owner's queue (row 8), the label untouched.
+      assert.deepEqual(out.ran.map((r) => [r.stage, r.pr ?? null]), [['follow', null], ['move', 'guide-docs#71']]);
+      assert.deepEqual(seen, []);
+      assert.deepEqual(changes, [], 'never in translation');
+    }
+    assert.deepEqual([t.forgePr.labels, read(t.w, '1501').prs[0].label], [['In final review'], 'In final review']);
+  }
 });

@@ -19,7 +19,7 @@ The same ticket flow settings file as the `tracker` script, found the same way: 
   "forge": { "kind": "github", "owner": "acme-docs", "self": "pat", "assignee": "pat", "checkLabel": "Check me" },
   "targets": [
     { "id": "guide", "repo": "guide-docs", "review": "sme", "reviewers": ["rev-one"],
-      "labels": { "inProgress": "in progress", "review": "in SME review", "finalReview": "In final review" } },
+      "labels": { "inProgress": "in progress", "review": "in SME review", "finalReview": "In final review", "translation": "in translation" } },
     { "id": "api", "repo": "api-docs", "review": "places", "reviewers": ["rev-two"],
       "labels": { "inProgress": "In progress", "review": "In tech review", "finalReview": "In final review" } }
   ]
@@ -36,7 +36,7 @@ The same ticket flow settings file as the `tracker` script, found the same way: 
 | `forge.expertLabel` | no | The label on a PR whose writer recommends an expert review (the ticket flow's `pr` record adds it). The module may add it and never removes it. None: no such label. |
 | `targets[].id`, `targets[].repo` | required | A target's id (unique), and its repository (`name`, or `owner/name` with the forge's owner). |
 | `targets[].reviewers` | no | Logins the module may ask for a review. |
-| `targets[].labels` | no | `{ inProgress, review, finalReview }`: the target's stage labels. |
+| `targets[].labels` | no | `{ inProgress, review, finalReview, translation }`: the target's stage labels. `translation` is optional: the label of a PR in the translation chain. A target without it keeps its `finalReview` label through the chain (the ticket flow sets `finalReview` instead). |
 | `targets[].review` | no | `sme` or `places`; read by the callers, not by this module. |
 
 **What the settings let the module touch.** `settings` prints it.
@@ -64,7 +64,7 @@ All print JSON on stdout: `{ "ok": true, "command": …, … }`. Every command t
 | `suggest --repo <r> --number <n> --comment <id> --replacement <t> [--body <t>]` (`suggest`) | A reply whose text is the optional note and a `suggestion` block with the replacement (the fence is longer than any backticks inside it). Replaces the lines the thread's first comment is on. | as `reply`. |
 | `comment --repo <r> --number <n> --body <t> [--unless-header <h> [--since <time>]]` (`comment`) | A comment in the PR's conversation. `--unless-header` skips it when a comment (since the time) already starts with the header. | `commented`, `id`, `existing`, `posted`. |
 | `add-label --repo <r> --number <n> --label <name>`, `remove-label …` (`addLabel`, `removeLabel`) | One label, under the label rules above. One the PR has (or lacks) is a no-op. | `label`, `changed`, `reason`. |
-| `set-stage-label --target <id> --number <n> --stage inProgress\|review\|finalReview [--repo <r>]` (`setStageLabel`) | The PR's stage label follows the card. Adds the target's label for the stage and removes the target's other stage labels the PR has, **in one request**. It reads the PR's labels as they are, so it does not matter who moved the card, or who set the old label: a person's move is followed like the pipeline's own. Labels outside the target's three (the owner's, `checkLabel`, another target's) are not touched. The repository comes from the target; `--repo` must match it. | `target`, `stage`, `label`, `added[]`, `removed[]`, `changed`. |
+| `set-stage-label --target <id> --number <n> --stage inProgress\|review\|finalReview\|translation [--repo <r>]` (`setStageLabel`) | The PR's stage label follows the card. Adds the target's label for the stage and removes the target's other stage labels the PR has, **in one request**. It reads the PR's labels as they are, so it does not matter who moved the card, or who set the old label: a person's move is followed like the pipeline's own. A stage the target names no label for is refused (`notNamed`). Labels outside the target's stage labels (the owner's, `checkLabel`, another target's) are not touched. The repository comes from the target; `--repo` must match it. | `target`, `stage`, `label`, `added[]`, `removed[]`, `changed`. |
 
 ## Line comments (`review-on-lines`)
 

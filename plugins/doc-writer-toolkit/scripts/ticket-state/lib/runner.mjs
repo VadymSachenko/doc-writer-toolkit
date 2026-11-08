@@ -10,7 +10,7 @@ import { allLocks, takeLock, releaseLock, renewLock } from './locks.mjs';
 import { runRecord, cardStatusFor } from './record.mjs';
 import { runUnlock } from './handover.mjs';
 import { allowanceOf, parseUsage } from './allowance.mjs';
-import { LABEL_OF, PR_STAGE_OF_STATUS, PRIORITY_RANK, finishRank, followsMove } from './stages.mjs';
+import { PR_STAGE_OF_STATUS, PRIORITY_RANK, finishRank, followsMove, stageLabelOf } from './stages.mjs';
 import { callExperts, expertCalls } from './experts.mjs';
 import { appendRunLog, localDate, readRunLog, renderReport, writeReport } from './report.mjs';
 import { ROLES } from './settings.mjs';
@@ -579,7 +579,11 @@ export function collectSteps(st, { named = [], includeStart = false, retryWaitin
 export function scriptedCalls(step, ledger, settings) {
   const card = ledger?.card?.shortLink ?? ledger?.card?.id ?? step.card?.shortLink;
   const target = (pr) => settings.targets.find((t) => t.id === pr.targets?.[0]) ?? settings.targets.find((t) => t.repo === pr.repo);
-  const label = (pr, stage) => (LABEL_OF[stage] && target(pr) ? [`forge set-stage-label --target ${target(pr).id} --number ${pr.number} --stage ${LABEL_OF[stage]}`] : []);
+  const label = (pr, stage) => {
+    const t = target(pr);
+    const key = stageLabelOf(stage, t);
+    return key && t?.labels?.[key] ? [`forge set-stage-label --target ${t.id} --number ${pr.number} --stage ${key}`] : [];
+  };
   switch (step.stage) {
     case 'move': {
       if (step.pr) {
@@ -594,9 +598,16 @@ export function scriptedCalls(step, ledger, settings) {
     case 'follow':
       return [
         ...ledger.prs.filter((p) => p.number && followsMove(p.stage, ledger.left?.status, step.to)).flatMap((p) => label(p, PR_STAGE_OF_STATUS[step.to])),
+        ...ledger.prs.filter((p) => p.number && (step.takeReady ?? []).some((t) => t.pr === prId(p))).flatMap((p) => label(p, 'translation')),
         ...(step.to === 'smeReview' ? expertCalls(settings, ledger.prs.filter((p) => p.number && followsMove(p.stage, ledger.left?.status, step.to)), [card]) : []),
-        ...cardsMovedWith(step, ledger, settings).map((o) => `tracker move ${o.card?.shortLink ?? o.card?.id} --to ${step.to}`),
+        ...cardsMovedWith(step, ledger, settings).flatMap((o) => [
+          `tracker move ${o.card?.shortLink ?? o.card?.id} --to ${step.to}`,
+          // The other card's own PRs its record moves (a shared one is labelled once, above).
+          ...o.prs.filter((p) => p.number && !ledger.prs.some((x) => prId(x) === prId(p)) && followsMove(p.stage, o.left?.status, step.to)).flatMap((p) => label(p, PR_STAGE_OF_STATUS[step.to])),
+        ]),
       ];
+    case 'readyForMerge':
+      return label(findPr(ledger, step.pr), 'readyForMerge');
     case 'close':
       return step.card?.status === 'done' ? [] : [`tracker move ${card} --to done`];
     case 'videoBlock':
@@ -627,9 +638,19 @@ async function runScripted(step, ctx) {
   const target = (pr) => settings.targets.find((t) => t.id === pr.targets?.[0]) ?? settings.targets.find((t) => t.repo === pr.repo);
   const setLabel = async (pr, stage) => {
     const t = target(pr);
-    if (LABEL_OF[stage] && t?.labels?.[LABEL_OF[stage]]) await clients.forge.setStageLabel({ target: t.id, number: pr.number, stage: LABEL_OF[stage] });
+    const key = stageLabelOf(stage, t);
+    if (key && t?.labels?.[key]) await clients.forge.setStageLabel({ target: t.id, number: pr.number, stage: key });
   };
   const rec = (k, extra = {}) => runRecord({ settings, clients, key: k, stage: step.stage, status: 'done', pr: step.pr, now: (io.now ?? Date.now)(), ...extra });
+  // A label set after the step's record stood: a failure is a warning, not a failed step (the record would stand anyway).
+  const warnings = [];
+  const afterRecord = async (pr, stage) => {
+    try {
+      await setLabel(pr, stage);
+    } catch (err) {
+      warnings.push(`${prId(pr)}: the stage label for '${stage}' was not set: ${err.message}`);
+    }
+  };
   const cardsOf = (keys) => keys.map((k) => readLedger(settings.state, k).card).map((c) => c.shortLink ?? c.id);
   switch (step.stage) {
     case 'move': {
@@ -670,12 +691,23 @@ async function runScripted(step, ctx) {
       // A person's move to the review status calls each following PR's expert (lib/experts.mjs).
       if (step.to === 'smeReview') await callExperts({ settings, clients, prs: following, cards: cardsOf(step.keys) });
       // The other card first: a stop here leaves this ticket's move still to follow, and the run starts it again.
-      for (const o of cardsMovedWith(step, ledger, settings)) {
+      const others = cardsMovedWith(step, ledger, settings);
+      const before = new Map([...others, ...step.keys.map((k) => readLedger(settings.state, k))].map((l) => [l.key, new Map(l.prs.map((x) => [prId(x), x.stage]))]));
+      for (const o of others) {
         await clients.tracker.move({ card: o.card.shortLink ?? o.card.id, to: step.to });
         await runRecord({ settings, clients, key: o.key, stage: 'follow', status: 'done', to: step.to, now: (io.now ?? Date.now)(), ...(step.takeReady?.length ? { result: JSON.stringify({ takeReady: step.takeReady }) } : {}) });
       }
       for (const k of step.keys) await rec(k, { to: step.to, ...(step.takeReady?.length ? { result: JSON.stringify({ takeReady: step.takeReady }) } : {}) });
-      return;
+      // Every other PR the records moved: a ready PR taken along (`takeReady`, which the record may leave when its head
+      // moved again) and the other card's own PRs. Labelled after the records stood, so a failure is a warning.
+      const labelled = new Set(following.map(prId));
+      for (const k of before.keys()) {
+        for (const p of readLedger(settings.state, k).prs.filter((x) => x.number && !labelled.has(prId(x)) && x.stage !== before.get(k).get(prId(x)))) {
+          labelled.add(prId(p));
+          await afterRecord(p, p.stage);
+        }
+      }
+      return warnings;
     }
     case 'close': {
       // The PRs first: the cleanup removes nothing unless every one is merged.
@@ -694,7 +726,10 @@ async function runScripted(step, ctx) {
       // Its record checks the UA → EN image pairs in the PR's worktree: made or brought up to date first.
       for (const p of prsForStep({ ...step, stage: 'align' }, [ledger])) (io.ensureWorktree ?? ensureWorktree)(settings, p);
       for (const k of step.keys) await rec(k, { head: step.head });
-      return;
+      // The chain is done for this PR: its label goes back to the final review's now, not when the card's other PRs
+      // are ready too (a target with no translation label has it already).
+      await afterRecord(findPr(ledger, step.pr), 'readyForMerge');
+      return warnings;
     case 'planApproval':
       for (const k of step.keys) await rec(k);
       return;
@@ -1034,9 +1069,10 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
 
   async function runScriptedStep(step) {
     try {
-      await runScripted(step, { settings, clients, io });
-      say({ kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, outcome: 'done' });
-      return { ...pick(step), outcome: 'done' };
+      const warnings = (await runScripted(step, { settings, clients, io })) ?? [];
+      const note = warnings.length ? warnings.join('; ').slice(0, 300) : null;
+      say({ kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, outcome: 'done', ...(note ? { note } : {}) });
+      return { ...pick(step), outcome: 'done', ...(warnings.length ? { warnings } : {}) };
     } catch (e) {
       const note = `${e.message}`.slice(0, 300);
       for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'failed', pr: step.pr, note, now: clock() }).catch(() => {});
