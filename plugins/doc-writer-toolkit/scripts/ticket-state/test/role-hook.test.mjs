@@ -91,6 +91,8 @@ const REFUSED = ({ state, root }) => {
     `git log '--output=${root}/.claude/ticket-flow.local.json'`, `git log --out''put=${root}/.claude/settings.local.json`, `git log --out\\put=/x`, `git log "--output" /x`, `git show HEAD --output=/x`, `git diff --output /x`, `git -C ${WT} log '--output=/x'`, `git -C ${WT} diff --ou''tput=/x`, 'git log --output=/x', 'git log -1 --output /x',
     // Scripts' flags that run code.
     `node ${ui} check --sour''ce 'command id'`, `node ${ui} check '--source=command id'`, `node ${ui} "--source" x`, `node ${ui} check --sou\\rce=x`, `node ${vp} --range a..b '--playwright-from' /tmp/x`, `node ${vp} --range a..b --playwright''-from=/tmp/x`,
+    // The check label comes off only by the runner, on a person's forward move.
+    `node ${R}/scripts/forge/forge.mjs remove-label --repo guide-docs --number 3 --label x`, `node ${R}/scripts/forge/forge.mjs --repo guide-docs remove-label --number 3 --label x`, `node ${R}/scripts/forge/forge.mjs 'remove-label' --repo guide-docs --number 3 --label x`,
     // A browser lock by hand.
     `mkdir ${state}/.play''wright.lock`, `mkdir "${state}/.playwright.lock"`, `mkdir '${state}/.playwright.lock'`, 'mkdir .playwright.lock', `mkdir -p ${state}/tmp/.playwright.lock/x`, `mkdir ${state}/.PLAYWRIGHT.LOCK`, `mkdir ${state}/.playwright-busy`, `mkdir ${state}/.play*`,
     // Writes through read commands.

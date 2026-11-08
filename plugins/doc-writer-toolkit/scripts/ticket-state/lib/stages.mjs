@@ -74,6 +74,13 @@ export const PR_STAGE_OF_STATUS = { inProgress: 'reworkWait', smeReview: 'smeRev
 const below = (stage, of) => PR_ORDER.includes(stage) && PR_ORDER.indexOf(stage) < PR_ORDER.indexOf(of);
 export const followsMove = (stage, from, to) => Boolean(PR_STAGE_OF_STATUS[to]) && (to === 'translation' ? below(stage, 'readyForMerge') : CARD_STATUS_OF[stage] === from);
 
+// A person's forward move of the card (D-128): the owner's check is done, so the check label comes off the PRs the move
+// takes. Forward is on to a later status of the flow, or between the two reviews (the owner calling the expert from
+// the final review, or taking the card back from the expert's review into the final review). Back to In progress, to
+// Blocked, to the ready status, or from In translation back to a review is not forward.
+const FLOW_ORDER = { intake: 0, ready: 0, inProgress: 1, blocked: 1, smeReview: 2, finalReview: 2, translation: 3, done: 4 };
+export const forwardMove = (from, to) => from in FLOW_ORDER && to in FLOW_ORDER && (FLOW_ORDER[to] > FLOW_ORDER[from] || (FLOW_ORDER[to] === 2 && FLOW_ORDER[from] === 2 && to !== from));
+
 // Ticket states and what they count as (design §1, §7).
 export const IN_PROGRESS = ['planning', 'writing'];
 export const WAITING = ['questions', 'planGate', 'videoGate', 'ownerBlock', 'reworkWait'];

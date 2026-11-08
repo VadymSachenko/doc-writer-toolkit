@@ -26,8 +26,8 @@ export const labelKey = (name) => String(name ?? '').trim().toLowerCase();
 // the forge. The sets that follow from them are what the module is allowed to touch:
 //   repos          the repositories named by a target; a call on any other is refused;
 //   addable        the labels the module may add: every target's stage labels, `checkLabel` and `expertLabel`;
-//   removable      the labels it may remove: the stage labels only (`checkLabel` and `expertLabel` are the owner's to
-//                  remove);
+//   removable      the labels it may remove: the stage labels and `checkLabel` (a person's forward move of the card
+//                  means the owner's check is done); `expertLabel` is never removed;
 //   logins         the users it may assign or ask for a review: `self`, `assignee`, every target's reviewers.
 export function validateForge(forge, targets) {
   if (!isObject(forge)) fail("the file has no 'forge' object");
@@ -69,6 +69,7 @@ export function validateForge(forge, targets) {
     }
   }
   for (const extra of [checkLabel, expertLabel]) if (extra && !addable.has(labelKey(extra))) addable.set(labelKey(extra), extra);
+  if (checkLabel && !removable.has(labelKey(checkLabel))) removable.set(labelKey(checkLabel), checkLabel);
   const logins = new Set([self, assignee, ...list.flatMap((t) => t.reviewers)].filter(Boolean));
   return { kind, owner, self, assignee, checkLabel, expertLabel, targets: list, repos: [...new Set(list.map((t) => t.repo))], addable, removable, logins };
 }

@@ -30,6 +30,8 @@ const GIT_READS = new Set(['status', 'diff', 'log', 'show', 'ls-tree', 'ls-files
 const GIT_READ_FLAGS = ['--output', '--no-index', '--ext-diff', '--exec', '--open-files-in-pager', '--upload-pack', '--receive-pack'];
 const FIND_WRITES = new Set(['-fprint', '-fprint0', '-fprintf', '-fls', '-exec', '-execdir', '-ok', '-okdir', '-delete']);
 const SCRIPT_FLAGS = { 'ui-labels/ui-labels.mjs': ['--source'], 'visual-pack/visual-pack.mjs': ['--playwright-from'] };
+// Script commands that are the runner's alone: the check label comes off only on a person's forward move (D-128).
+const SCRIPT_COMMANDS = { 'forge/forge.mjs': ['remove-label'] };
 const PLAYWRIGHT_FLAGS = ['--config', '-c', '--output', '-o', '--ui', '--ui-host', '--ui-port'];
 const DOCUSAURUS_RUNS = new Set(['build', 'write-translations', 'write-heading-ids', 'clear']);
 const DOCUSAURUS_FLAGS = ['--config', '--out-dir', '-o', '--bundle-analyzer'];
@@ -115,6 +117,8 @@ function checkNode(words, cfg) {
       const [rel, ...subs] = entry.split(' ');
       if (script !== path.join(root, 'scripts', rel)) continue;
       if (subs.length && words[2]?.value !== subs[0]) continue;
+      const own = words.slice(2).find((w) => (SCRIPT_COMMANDS[rel] ?? []).includes(w.value));
+      if (own) return `${rel} ${own.value} (the runner's alone)`;
       const flags = SCRIPT_FLAGS[rel] ?? [];
       const bad = words.slice(2).find((w) => flags.some((f) => flagIs(w.value, f)));
       return bad ? `${rel} ${bad.value.split('=')[0]} (it runs code)` : null;

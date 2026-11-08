@@ -13,8 +13,9 @@ import { editsOf, mergedEdits, nextEditNumber, parseReply, resolveReply, suggest
 //    6 the card's list differs from left.list        a person moved it: follow the move
 //    7 a stage recorded running, no live lock         interrupted; run it again
 //    8-12 per PR: a hand edit, or a UA change after ready for merge (back to the owner's queue); finalReview with a new
-//         review requested; new comments; a hand edit of UA no style check read (styleCheck); translation: the first
-//         chain stage not done for the head, or after ready for merge the re-sync of the whole range since the ready head
+//         review requested; new comments; a hand edit of UA no style check read (styleCheck); smeReview with a reviewer's
+//         approval since it entered the review (to finalReview); translation: the first chain stage not done for the
+//         head, or after ready for merge the re-sync of the whole range since the ready head
 //   13 videoGate                                      the automatic try, the fallback, or the import
 //   14 ready and a free slot                          start (the `startable` groups, see limits.mjs)
 //   15 otherwise                                      the state's own next step
@@ -94,7 +95,7 @@ const GATES = {
   questions: { who: 'owner', why: 'answers on the card, then the card back to In progress' },
   planGate: { who: 'owner', why: 'the section plan: moving the card back approves it' },
   reworkWait: { who: 'owner', why: 'a person moved the card back to In progress' },
-  smeReview: { who: 'reviewer', why: 'the review, then a person moves the card' },
+  smeReview: { who: 'reviewer', why: "the review: the expert's Approve moves the card to the owner's queue, and so does a person" },
   finalReview: { who: 'owner', why: "the owner's read of the UA: comments first, then the card to In translation, or to the review status to call the expert" },
   readyForMerge: { who: 'owner', why: 'the final edit and the merge' },
   ownerBlock: { who: 'owner', why: "the owner's own block" },
@@ -269,7 +270,7 @@ function derive(l, w) {
     const merged = Boolean(pr.merged) || world?.state === 'merged';
     return { pr, world, merged, closed: world?.state === 'closed', stage: merged ? 'merged' : pr.stage };
   });
-  out.prs = prs.map((p) => ({ id: prId(p.pr), repo: p.pr.repo, number: p.pr.number, url: p.pr.url ?? p.world?.url ?? null, review: p.pr.review, stage: p.stage, state: p.merged ? 'merged' : p.world?.state ?? null, labels: p.world?.labels ?? null, head: p.world?.headCommit ?? null, expertReview: p.pr.expertReview ?? null, next: null }));
+  out.prs = prs.map((p) => ({ id: prId(p.pr), repo: p.pr.repo, number: p.pr.number, url: p.pr.url ?? p.world?.url ?? null, review: p.pr.review, stage: p.stage, state: p.merged ? 'merged' : p.world?.state ?? null, labels: p.world?.labels ?? null, head: p.world?.headCommit ?? null, expertReview: p.pr.expertReview ?? null, smeSince: p.pr.smeSince ?? (l.left?.status === 'smeReview' && p.stage === 'smeReview' ? l.left.at ?? null : null), reviewerAt: p.world?.reviewerAt ?? null, expertApproval: p.pr.expertApproval ?? null, next: null }));
   const view = (p) => out.prs.find((x) => x.id === prId(p.pr));
 
   if (l.stages?.close?.status === 'done') {
@@ -504,9 +505,14 @@ function prStep(l, p, w, out, prs) {
   // answered when a person moved the card back) doesn't move it again.
   if (p.stage === 'finalReview' && newReviewRequests(pr, world).length) return step('move', { pr: id, to: 'smeReview' });
   // Row 11.
+  const approved = p.stage === 'smeReview' ? expertApproved(l, p) : null;
   if (world.newComments?.length) {
     const owner = world.newComments.filter((c) => c.by === 'owner');
-    return step('answerComments', { pr: id, comments: world.newComments.length, owner: owner.length, reviewer: world.newComments.length - owner.length, ...ownerForms(pr, owner, w) });
+    const reviewer = world.newComments.length - owner.length;
+    // Answering the expert in their review, not yet approved: the summary ends with the way to approve (D-082).
+    const files = filesLink(pr, world);
+    const ask = p.stage === 'smeReview' && reviewer && !approved && files ? { askApprove: files } : {};
+    return step('answerComments', { pr: id, comments: world.newComments.length, owner: owner.length, reviewer, ...ownerForms(pr, owner, w), ...ask });
   }
   // Row 11b, the style check: hand commits that changed UA and no style check read are reviewed while the PR is in the
   // owner's queue (D-081, D-082), each once, whatever the head (the check records the shas it read). A ready PR went
@@ -525,11 +531,11 @@ function prStep(l, p, w, out, prs) {
       return step('styleCheck', { pr: id, head, commits, nextEdit: nextEditNumber({ edits }), ...(fixes.length ? { fixes } : {}) });
     }
   }
-  // Two PRs: an approved PR goes on to the owner's queue by itself while the card stands where the slower PR is. That
-  // starts nothing: both wait for the card.
-  if (p.stage === 'smeReview' && world.reviewDecision === 'APPROVED' && prs.some((o) => o !== p && rank(o.stage) < rank(p.stage))) {
-    return step('move', { pr: id, to: 'finalReview', approved: true });
-  }
+  // The expert's Approve (D-082): a PR in the expert's review that a reviewer approved since it entered the review goes
+  // on to the owner's queue by itself, after its new comments are answered (row 11), and the card goes where its least
+  // advanced PR is: with one PR, to the final review status; with two, it stays with the slower one. That starts
+  // nothing: the owner reads, then moves the card.
+  if (approved) return step('move', { pr: id, to: 'finalReview', approved: true, review: approved });
   // Row 12.
   if (p.stage === 'translation') return chainStep(l, p, w, out, target, head);
   return null;
@@ -585,6 +591,22 @@ function handToCheck(pr, hand, w, target, head, out, { grace = false } = {}) {
 
 // How long a hand commit waits before its style check (the owner's push, then the move).
 export const GRACE_MS = 10 * 60000;
+
+// The approving review of a PR in the expert's review, when a reviewer approved since it entered the review (an older
+// approval, of a review before a move back, moves nothing), and no review asks for changes. With the head it approved.
+function expertApproved(l, p) {
+  const a = p.world?.approved;
+  if (!a || p.world.reviewDecision === 'CHANGES_REQUESTED') return null;
+  const since = p.pr.smeSince ?? (l.left?.status === 'smeReview' ? l.left.at : null);
+  if (since && Date.parse(a.at) < Date.parse(since)) return null;
+  return { id: a.id, login: a.login, head: a.commit ?? p.world.headCommit ?? null, at: a.at };
+}
+
+// The PR's Files changed tab, where the expert reads and approves.
+export const filesLink = (pr, world) => {
+  const url = pr.url ?? world?.url ?? null;
+  return url ? `${url.replace(/\/+$/, '')}/files` : null;
+};
 
 const newReviewRequests = (pr, world) => (world.reviewRequests ?? []).map((r) => r.login ?? r.team ?? r).filter((r) => !(pr.reviewersRequested ?? []).map(String).includes(String(r)));
 

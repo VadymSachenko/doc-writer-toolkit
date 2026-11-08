@@ -53,3 +53,20 @@ export function expertCalls(settings, prs, cards, { request = true } = {}) {
   for (const card of cards) for (const m of members) out.push(`tracker add-member ${card} --member ${m}`);
   return out;
 }
+
+// The comment a PR gets each time it enters the expert's review (D-082): the settings' `reviewComment`, with the PR's
+// Files changed link. The same text is what the report gives the owner to send a quiet expert. Null with no PR link.
+export function reviewCommentFor(settings, url) {
+  if (!url) return null;
+  return settings.reviewComment.replaceAll('<files>', `${String(url).replace(/\/+$/, '')}/files`);
+}
+
+// Posts it once per entry: none when one with the same first line is already there since `since` (the run that posted it
+// stopped before its record). Gives the comment's id, posted or found, for the record's `posted`, so the pipeline never
+// reads it as the owner's: it posts from the owner's login.
+export async function postReviewComment({ settings, clients, pr, url, since }) {
+  const body = reviewCommentFor(settings, url);
+  if (!body || !pr.number) return null;
+  const c = await clients.forge.comment({ repo: pr.repo, number: pr.number, body, unlessHeader: body.split('\n')[0], ...(since ? { since } : {}) });
+  return c.id ?? c.existing ?? null;
+}

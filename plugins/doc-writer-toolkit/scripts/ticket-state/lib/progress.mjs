@@ -71,7 +71,7 @@ const GATE_WHY = {
   questions: 'answers on the card, then the card back to In progress',
   planGate: 'the section plan: moving the card back approves it',
   video: 'transcripts of the video parts',
-  smeReview: 'the expert review, then a person moves the card',
+  smeReview: "the expert review: the expert's Approve moves the card on, or a person does",
   reworkWait: 'a person moved the card back to In progress',
   finalReview: 'comments first, then the card to In translation, or to the review status to call the expert',
   readyForMerge: 'the final edit and the merge',

@@ -21,6 +21,9 @@ export const ROLES = ['triage', 'writer', 'reviewer', 'translator'];
 export const SIZES = ['edit', 'newPage', 'newSection'];
 export const START_ORDERS = ['priority', 'easiest'];
 
+// The comment on a PR entering the expert's review, by default: the changes to read, then GitHub's way to approve them.
+export const DEFAULT_REVIEW_COMMENT = 'The changes to review: <files>\nWhen nothing else is needed: «Review changes» → «Approve» → «Submit review».';
+
 export const LOCAL_DEFAULTS = {
   mode: 'observe',
   limits: {
@@ -48,8 +51,9 @@ export const LOCAL_DEFAULTS = {
   // `tokenFile`: a file (mode 600) with the long-lived sign-in token the watcher's runs use; none: the CLI's own sign-in.
   // `forgeSeconds`: how often the forge check looks for comments on the pipeline's PRs between full checks (none: only
   // the full check, every `watchMinutes`). `commentQuietMinutes`: how long single comments on a PR stay quiet before
-  // their session starts (a submitted review starts at once; lib/quiet.mjs).
-  schedule: { morning: '07:00', watchMinutes: 5, forgeSeconds: 60, commentQuietMinutes: 2, tokenFile: null },
+  // their session starts (a submitted review starts at once; lib/quiet.mjs). `expertQuietDays`: the working days (Monday
+  // to Friday) a PR in the expert's review may go with no activity from the expert before the report lists it.
+  schedule: { morning: '07:00', watchMinutes: 5, forgeSeconds: 60, commentQuietMinutes: 2, expertQuietDays: 2, tokenFile: null },
   roles: {
     triage: { model: 'claude-sonnet-5-5', effort: 'medium', maxTurns: 40 },
     writer: { model: 'claude-opus-5-5', effort: 'high', maxTurns: 200 },
@@ -157,6 +161,11 @@ export function validateSettings(merged, { root, stateRootDefault }) {
   };
   // The comment on the card when the chain is done and it goes back to the final review status.
   const readyComment = typeof rawTracker.readyComment === 'string' && rawTracker.readyComment.trim() ? rawTracker.readyComment : 'Ready for merge';
+  // The comment a PR gets each time it enters the expert's review (and the text the report gives to send a quiet
+  // expert): `<files>` is the PR's Files changed link.
+  const rawReview = merged.forge?.reviewComment;
+  if (rawReview !== undefined && rawReview !== null && (typeof rawReview !== 'string' || !rawReview.includes('<files>'))) fail('forge.reviewComment must be a text with <files> in it (the PR\'s Files changed link)');
+  const reviewComment = rawReview ?? DEFAULT_REVIEW_COMMENT;
 
   const mode = merged.mode ?? LOCAL_DEFAULTS.mode;
   if (!MODES.includes(mode)) fail(`mode must be one of ${MODES.join(', ')}`);
@@ -191,6 +200,7 @@ export function validateSettings(merged, { root, stateRootDefault }) {
   num(schedule.watchMinutes, 'schedule.watchMinutes', { min: 1 });
   if (schedule.forgeSeconds !== null) num(schedule.forgeSeconds, 'schedule.forgeSeconds', { min: 30 });
   num(schedule.commentQuietMinutes, 'schedule.commentQuietMinutes');
+  num(schedule.expertQuietDays, 'schedule.expertQuietDays', { min: 1 });
   if (schedule.tokenFile !== null && (typeof schedule.tokenFile !== 'string' || !schedule.tokenFile.trim())) fail('schedule.tokenFile must be a file path');
   const video = deepMerge(LOCAL_DEFAULTS.video, merged.video ?? {});
   num(video.partsPerDay, 'video.partsPerDay', { min: 1 });
@@ -227,6 +237,7 @@ export function validateSettings(merged, { root, stateRootDefault }) {
     noReviewLabel: merged.noReviewLabel ?? null,
     appRepos: validateAppRepos(merged.appRepos ?? []),
     readyComment,
+    reviewComment,
     hostRules: merged.hostRules ?? {},
     hostJobs: validateJobs(merged.hostJobs ?? [], root),
     styleCheck,

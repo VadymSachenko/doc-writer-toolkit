@@ -43,7 +43,7 @@ Read `<state>/reports/<date>.md`. If it is missing, list `<state>/reports/` and 
 First, in a few lines and only from the file:
 
 - the mode and the allowance line;
-- what waits for the person: "Waiting for you", "PRs with places", the PRs with the check label, "Videos waiting for transcripts", "Ready for merge";
+- what waits for the person: "Waiting for you", "Expert review gone quiet" (each line with the text to send the expert), "PRs with places", the PRs with the check label, "Videos waiting for transcripts", "Ready for merge";
 - "Failures and guard stops", and in "The watcher" any failing source, and a job failing or disarmed after an hour of failing.
 
 Then the report as written, unchanged. Don't reorder its sections, round its numbers or drop its links.

@@ -99,13 +99,14 @@ test('row 9: a reviewer requested from the owner\'s queue moves a places PR to r
   assert.deepEqual(t.steps, [], 'a person chose this; the old request stays quiet');
 });
 
-test('two PRs: the approved sme half lands in the queue while the card stands with the slower one; both wait for the card; the move takes both', async () => {
+test('two PRs: the approved sme half goes to the queue, and the card with it once both are there; a person\'s move to In translation first takes both', async () => {
   const c = card({ number: 505, status: 'smeReview' });
-  const prs = [pr({ repo: 'portal-docs', number: 21, head: 'a', headCommit: HEAD, labels: ['In final review'] }), pr({ repo: 'portal-docs', number: 22, head: 'b', headCommit: HEAD, labels: ['In expert review'], reviewDecision: 'APPROVED' })];
-  const w = world({ cards: [c], prs });
+  const prs = [pr({ repo: 'portal-docs', number: 21, head: 'a', headCommit: HEAD, labels: ['In final review'] }), pr({ repo: 'portal-docs', number: 22, head: 'b', headCommit: HEAD, labels: ['In expert review'] })];
+  const activity = { 'portal-docs#22': { reviews: [{ id: 9022, author: 'expert-one', state: 'APPROVED', body: '', submittedAt: ago(1), commit: HEAD }] } };
+  const w = world({ cards: [c], prs, activity });
   ledger(w, c, { stages: BASE, prs: [{ repo: 'portal-docs', number: 21, branch: 'a', targets: ['portal-api'], review: 'places', stage: 'finalReview' }, { repo: 'portal-docs', number: 22, branch: 'b', targets: ['portal-ui'], review: 'sme', stage: 'smeReview' }] });
   let t = await w.one('505');
-  assert.deepEqual(t.steps, [], 'neither goes on: the places half waits for the card too');
+  assert.deepEqual(steps(t), ['move portal-docs#22 -> finalReview'], 'the approval moves the sme half; the places half waits for the card');
 
   // The card goes straight from review to In translation: one card approves the whole ticket.
   moved(c, 'translation');
@@ -119,15 +120,17 @@ test('two PRs: the approved sme half lands in the queue while the card stands wi
 
 test('two PRs, an sme half approved while the other PR is slower: it lands in the queue and starts nothing', async () => {
   const c = card({ number: 506, status: 'inProgress' });
-  const prs = [pr({ repo: 'portal-docs', number: 23, head: 'a', headCommit: HEAD, labels: ['In progress'] }), pr({ repo: 'portal-docs', number: 24, head: 'b', headCommit: HEAD, labels: ['In final review'], reviewDecision: 'APPROVED' })];
-  const w = world({ cards: [c], prs });
+  const prs = [pr({ repo: 'portal-docs', number: 23, head: 'a', headCommit: HEAD, labels: ['In progress'] }), pr({ repo: 'portal-docs', number: 24, head: 'b', headCommit: HEAD, labels: ['In final review'] })];
+  const activity = { 'portal-docs#24': { reviews: [{ id: 9024, author: 'expert-one', state: 'APPROVED', body: '', submittedAt: ago(1), commit: HEAD }] } };
+  const w = world({ cards: [c], prs, activity });
   ledger(w, c, { stages: BASE, prs: [{ repo: 'portal-docs', number: 23, branch: 'a', targets: ['portal-api'], review: 'places', stage: 'reworkWait' }, { repo: 'portal-docs', number: 24, branch: 'b', targets: ['portal-ui'], review: 'sme', stage: 'smeReview' }] });
   const out = await run(w, noSession, { named: ['506'] });
   assert.deepEqual(out.ran.map((r) => [r.stage, r.pr, r.to]), [['move', 'portal-docs#24', 'finalReview']]);
   const l = read(w, '506');
   assert.deepEqual(l.prs.map((p) => p.stage), ['reworkWait', 'finalReview']);
   assert.equal(c.placeId, LISTS.inProgress.id, 'the card stands with the slower PR');
-  assert.equal(l.prs[1].approval ?? null, null);
+  assert.equal(l.prs[1].approval ?? null, null, "the expert's approval is not the owner's read");
+  assert.deepEqual(l.prs[1].expertApproval, { head: HEAD, at: ago(1), by: 'reviewer', login: 'expert-one', review: 9024 });
 });
 
 test('a PR with two cards: moving either is the approve, and the other card comes along; moving it back takes both back', async () => {
@@ -379,6 +382,10 @@ test('the owner\'s move to the review calls each PR\'s own expert (reviewer, rev
     'forge request-reviewers --repo api-docs --number 33 --reviewer expert-two',
     `tracker add-member ${c.shortLink} --member expert-one`,
     `tracker add-member ${c.shortLink} --member expert-two`,
+    'forge comment --repo guide-docs --number 32 --body-file <the review comment> --unless-header <its first line>',
+    'forge comment --repo api-docs --number 33 --body-file <the review comment> --unless-header <its first line>',
+    'forge remove-label --repo guide-docs --number 32 --label "Look at me"',
+    'forge remove-label --repo api-docs --number 33 --label "Look at me"',
   ]);
   assert.deepEqual(ran(await run(w, noSession, { named: ['531'] })), [['follow', 'smeReview', 'done']]);
   assert.deepEqual(asked(w), [[32, ['expert-one']], [33, ['expert-two']]], 'each PR its own target\'s reviewer');
@@ -491,7 +498,7 @@ test('a person\'s move to In translation gives the PR its translation label in p
   ledger(w, c, { stages: BASE, prs: [{ repo: 'guide-docs', number: 45, targets: ['guide'], review: 'sme', stage: 'finalReview', label: 'In final review' }] });
   moved(c, 'translation');
   assert.deepEqual(steps(await w.one('540')), ['follow -> translation']);
-  assert.deepEqual(scriptedCalls({ stage: 'follow', to: 'translation', keys: ['540'] }, read(w, '540'), w.settings), ['forge set-stage-label --target guide --number 45 --stage translation']);
+  assert.deepEqual(scriptedCalls({ stage: 'follow', to: 'translation', keys: ['540'] }, read(w, '540'), w.settings), ['forge set-stage-label --target guide --number 45 --stage translation', 'forge remove-label --repo guide-docs --number 45 --label "Look at me"']);
   // The chain's first session sees the PR already labelled; it stops there.
   let seen = null;
   await run(w, async () => {
@@ -524,7 +531,7 @@ test('a target with no translation label: the move to In translation changes no 
   const w = world({ cards: [c], prs: [forgePr] });
   ledger(w, c, { stages: BASE, prs: [{ repo: 'guide-docs', number: 46, targets: ['guide'], review: 'sme', stage: 'finalReview' }] });
   moved(c, 'translation');
-  assert.deepEqual(scriptedCalls({ stage: 'follow', to: 'translation', keys: ['541'] }, read(w, '541'), w.settings), ['forge set-stage-label --target guide --number 46 --stage finalReview']);
+  assert.deepEqual(scriptedCalls({ stage: 'follow', to: 'translation', keys: ['541'] }, read(w, '541'), w.settings), ['forge set-stage-label --target guide --number 46 --stage finalReview', 'forge remove-label --repo guide-docs --number 46 --label "Look at me"']);
   await run(w, stopHere, { named: ['541'] });
   assert.equal(read(w, '541').prs[0].stage, 'translation');
   assert.deepEqual(forgePr.labels, ['In final review']);
@@ -786,6 +793,8 @@ test('a PR with two cards: the other card\'s own PR, which its record takes into
     'forge set-stage-label --target guide --number 63 --stage translation',
     `tracker move ${b.shortLink} --to translation`,
     'forge set-stage-label --target api --number 64 --stage translation',
+    'forge remove-label --repo guide-docs --number 63 --label "Look at me"',
+    'forge remove-label --repo api-docs --number 64 --label "Look at me"',
   ]);
   await run(w, stopHere, { named: ['598'] });
   assert.deepEqual(read(w, '599').prs.map((p) => p.stage), ['translation', 'translation']);
@@ -805,7 +814,7 @@ test('the plan of a move to In translation labels a ready PR it takes along; its
   const by = Object.fromEntries((await w.status()).tickets.map((t) => [t.key, t]));
   const follow = { ...by['595'].steps[0], keys: ['595'] };
   assert.deepEqual(follow.takeReady, [{ pr: 'guide-docs#95', head: HEAD }]);
-  assert.deepEqual(scriptedCalls(follow, read(w, '595'), w.settings), ['forge set-stage-label --target guide --number 95 --stage translation']);
+  assert.deepEqual(scriptedCalls(follow, read(w, '595'), w.settings), ['forge set-stage-label --target guide --number 95 --stage translation', 'forge remove-label --repo guide-docs --number 95 --label "Look at me"']);
   await runRecord({ settings: w.settings, clients: w.clients(), key: '595', stage: 'follow', status: 'done', to: 'translation', result: { takeReady: follow.takeReady }, now: NOW });
   assert.deepEqual([read(w, '595').prs[0].stage, read(w, '595').prs[0].label], ['translation', 'In translation']);
   assert.deepEqual(scriptedCalls({ stage: 'readyForMerge', pr: 'guide-docs#95', keys: ['595'] }, read(w, '595'), w.settings), ['forge set-stage-label --target guide --number 95 --stage finalReview']);

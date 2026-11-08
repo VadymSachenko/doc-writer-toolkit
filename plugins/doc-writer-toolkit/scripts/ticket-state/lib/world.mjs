@@ -269,7 +269,11 @@ export async function readPrs({ settings, forge, ledgers }) {
       if (!pr.number || pr.merged) continue;
       const st = await forge.prState({ repo: pr.repo, number: pr.number });
       const entry = { state: st.state, url: st.url ?? null, headCommit: st.headCommit, reviewRequests: st.reviewRequests ?? [], reviewDecision: st.reviewDecision ?? null, labels: st.labels ?? [], mergeCommit: st.mergeCommit ?? null, mergedAt: st.mergedAt ?? null, newComments: [] };
-      if (st.state === 'open') entry.newComments = unhandled(l, pr, await forge.prActivity({ repo: pr.repo, number: pr.number }), settings.forge.self);
+      if (st.state === 'open') {
+        const activity = await forge.prActivity({ repo: pr.repo, number: pr.number });
+        entry.newComments = unhandled(l, pr, activity, settings.forge.self);
+        Object.assign(entry, reviewerSignals(activity, settings.forge.self));
+      }
       out.set(`${l.key}/${prId(pr)}`, entry);
     }
   }
@@ -301,6 +305,29 @@ export function unhandled(ledger, pr, activity, self) {
     if (fresh(c)) out.push({ id: r.id, kind: 'review', state: r.state, author: r.author, by: who(r.author), updatedAt: r.submittedAt, body: r.body ?? '' });
   }
   return out;
+}
+
+// What the reviewers (anyone but the pipeline's own login and a bot) did on a PR: `reviewerAt`, the time of their
+// latest review or comment, for the report's quiet expert; and `approved`, the latest approving review when each
+// reviewer's last verdict is an approval and none asks for changes, with the commit it approved. Read from the reviews
+// themselves: GitHub fills the PR's review decision only where a branch rule requires a review.
+export function reviewerSignals(activity, self) {
+  const theirs = (author, bot) => Boolean(author) && author !== self && bot !== true && !/\[bot\]$/.test(author);
+  const times = [];
+  for (const t of activity.threads ?? []) for (const c of t.comments ?? []) if (theirs(c.author, c.authorBot)) times.push(c.createdAt ?? c.updatedAt);
+  for (const c of activity.comments ?? []) if (theirs(c.author, c.authorBot)) times.push(c.createdAt ?? c.updatedAt);
+  const reviews = (activity.reviews ?? []).filter((r) => theirs(r.author, r.authorBot) && r.submittedAt);
+  for (const r of reviews) times.push(r.submittedAt);
+  const last = new Map();
+  for (const r of [...reviews].sort((a, b) => Date.parse(a.submittedAt) - Date.parse(b.submittedAt))) if (['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'].includes(r.state)) last.set(r.author, r);
+  const verdicts = [...last.values()];
+  const approvals = verdicts.filter((r) => r.state === 'APPROVED');
+  const approved = verdicts.some((r) => r.state === 'CHANGES_REQUESTED') ? null : approvals.at(-1) ?? null;
+  const valid = times.filter((x) => x && !Number.isNaN(Date.parse(x)));
+  return {
+    reviewerAt: valid.length ? new Date(Math.max(...valid.map((x) => Date.parse(x)))).toISOString() : null,
+    approved: approved ? { id: approved.id, login: approved.author, commit: approved.commit ?? null, at: approved.submittedAt } : null,
+  };
 }
 
 // The PRs a card's comments link to, in the repos the targets name (for a ticket whose ledger is missing).
