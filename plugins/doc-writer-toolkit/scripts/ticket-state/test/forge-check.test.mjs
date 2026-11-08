@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { NOW, card, noTree, pr, quietGit } from './fakes.mjs';
-import { runDaily } from '../lib/runner.mjs';
+import { runDaily, stillNext } from '../lib/runner.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
 import { ledger, read, world } from './helpers.mjs';
 import { runRecord } from '../lib/record.mjs';
@@ -466,6 +466,23 @@ test('a step that waited in the pool behind another chain is read again once its
   const log = fs.readFileSync(path.join(w.settings.state, 'runs', '2026-11-10.jsonl'), 'utf8');
   assert.match(log, /answerComments on guide-docs#82 is no longer the next step \(none\): another run took it while this one waited/);
   assert.equal(r.named.length, 2);
+});
+
+test('the step read again under its lock: the same stage and PR runs as the status gives it now, a follow\'s takeReady kept by value, not by identity', () => {
+  const planned = { stage: 'follow', role: null, to: 'translation', prStage: 'translation', takeReady: [{ pr: 'guide-docs#91', head: 'h1' }], group: '591', keys: ['591'] };
+  // A fresh object with the same content: the follow runs, with takeReady.
+  const same = { ...planned, takeReady: [{ pr: 'guide-docs#91', head: 'h1' }] };
+  assert.deepEqual(stillNext(planned, same), same);
+  // takeReady changed meanwhile (a new head) or no longer holds: the follow runs with today's, or with none.
+  const moved = { ...planned, takeReady: [{ pr: 'guide-docs#91', head: 'h2' }] };
+  assert.deepEqual(stillNext(planned, moved).takeReady, [{ pr: 'guide-docs#91', head: 'h2' }]);
+  const { takeReady, ...plain } = planned;
+  assert.equal('takeReady' in stillNext(planned, { ...plain }), false, 'not carried over from the plan');
+  // Another stage or PR, or none: skipped. Of a group, only the planned tickets that still have it.
+  assert.equal(stillNext(planned, { ...planned, stage: 'answerComments', pr: 'guide-docs#91' }), null);
+  assert.equal(stillNext({ stage: 'answerComments', pr: 'guide-docs#81', keys: ['481'] }, { stage: 'answerComments', pr: 'guide-docs#82', keys: ['481'] }), null);
+  assert.equal(stillNext(planned, null), null);
+  assert.deepEqual(stillNext({ ...planned, keys: ['593', '594'] }, { ...planned, keys: ['593', '599'] }).keys, ['593']);
 });
 
 test('limits.parallel: the forge check and the runner count the same runs: a lock by its group, a forge run by its ticket\'s group, once', async () => {

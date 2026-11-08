@@ -23,6 +23,7 @@ import { HOOK_VARIABLE, commandsOfRules, hookSettings } from './role-hook.mjs';
 import { parseClaudeConfig } from '../../ui-labels/lib/config.mjs';
 import { liveProgress } from './progress.mjs';
 import { runsGoingIn } from './forge-state.mjs';
+import { replyLines, resyncItemLines, suggestionLines } from './edits.mjs';
 
 // The daily run (design §7): finish first, then triage the quiet intake cards (mornings, and the watcher's start pass
 // when a slot frees), then start ready groups while
@@ -357,7 +358,11 @@ export function briefFor(step, settings) {
     step.interrupted ? 'The last run of this stage was interrupted: read what it left and finish it.' : null,
     step.withoutVideo ? 'The owner moved the card back before every video part had its transcript: go on without the video, and say so in the plan comment.' : null,
     step.changed ? 'The section plan file changed after its gate: post the new plan and move the card back to Blocked (a new gate).' : null,
-    step.stage === 'resync' && step.since ? `UA changed since ready for merge at ${step.since}: re-sync the blocks changed in ${step.since}..${step.head ?? 'HEAD'}.` : null,
+    step.stage === 'resync' && step.since ? `UA changed since ready for merge at ${step.since}, and the owner moved the card to In translation: re-sync the blocks changed in ${step.since}..${step.head ?? 'HEAD'}, the whole range at once.` : null,
+    ...resyncItemLines(step.items),
+    step.nextEdit ? `A numbered list of edits you post on this PR starts at ${step.nextEdit}: the numbers already posted keep their items.` : null,
+    ...replyLines(step.replies),
+    ...suggestionLines(step.suggestions),
     step.stale ? `The UA pages changed after this stage last ran (${step.stale} file(s)): run it again on the current head.` : null,
     step.cards ? `Cards, highest priority first:\n${step.cards.map((c) => `- ${c.key}: ${c.url ?? c.shortLink} (${c.priority})`).join('\n')}` : null,
     step.worktrees?.length ? worktreeLines(step.worktrees) : null,
@@ -610,7 +615,8 @@ function cardsMovedWith(step, ledger, settings) {
   const from = ledger.left?.status;
   if (step.to !== 'translation' && from !== 'translation') return [];
   const shared = new Set((ledger.prs ?? []).filter((p) => p.number).map(prId));
-  return readAllLedgers(settings.state).filter((o) => o.key !== ledger.key && !step.keys.includes(o.key) && o.group === ledger.group && o.mode === 'pipeline' && o.left?.status === from && o.stages?.close?.status !== 'done' && (o.prs ?? []).some((p) => p.number && shared.has(prId(p)) && followsMove(p.stage, from, step.to)));
+  const taken = new Set((step.takeReady ?? []).map((x) => x.pr));
+  return readAllLedgers(settings.state).filter((o) => o.key !== ledger.key && !step.keys.includes(o.key) && o.group === ledger.group && o.mode === 'pipeline' && o.left?.status === from && o.stages?.close?.status !== 'done' && (o.prs ?? []).some((p) => p.number && shared.has(prId(p)) && (followsMove(p.stage, from, step.to) || taken.has(prId(p)))));
 }
 
 async function runScripted(step, ctx) {
@@ -666,9 +672,9 @@ async function runScripted(step, ctx) {
       // The other card first: a stop here leaves this ticket's move still to follow, and the run starts it again.
       for (const o of cardsMovedWith(step, ledger, settings)) {
         await clients.tracker.move({ card: o.card.shortLink ?? o.card.id, to: step.to });
-        await runRecord({ settings, clients, key: o.key, stage: 'follow', status: 'done', to: step.to, now: (io.now ?? Date.now)() });
+        await runRecord({ settings, clients, key: o.key, stage: 'follow', status: 'done', to: step.to, now: (io.now ?? Date.now)(), ...(step.takeReady?.length ? { result: JSON.stringify({ takeReady: step.takeReady }) } : {}) });
       }
-      for (const k of step.keys) await rec(k, { to: step.to });
+      for (const k of step.keys) await rec(k, { to: step.to, ...(step.takeReady?.length ? { result: JSON.stringify({ takeReady: step.takeReady }) } : {}) });
       return;
     }
     case 'close': {
@@ -999,12 +1005,11 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
       if (recheck) {
         const fresh = await computeStatus({ settings, clients, usage, now: clock(), only: first.keys, ignoreLocks: own });
         const again = collectSteps(fresh, { named: first.keys, includeStart: manual && named.length > 0, retryWaiting })[0] ?? null;
-        const keys = again ? first.keys.filter((k) => again.keys.includes(k)) : [];
-        if (!again || again.stage !== first.stage || (again.pr ?? null) !== (first.pr ?? null) || !keys.length) {
+        step = stillNext(first, again);
+        if (!step) {
           say({ kind: 'lock', group, outcome: 'skipped', note: `${first.stage}${first.pr ? ` on ${first.pr}` : ''} is no longer the next step (${again ? `now ${again.stage}${again.pr ? ` on ${again.pr}` : ''}` : 'none'}): another run took it while this one waited` });
           return { group, skipped: 'stale' };
         }
-        step = { ...first, keys };
       }
       for (let i = 0; step && i < settings.limits.stepsPerTicket; i++) {
         if (step.role && !guard(step.stage, step.group)) break;
@@ -1233,6 +1238,16 @@ function summary(st) {
 
 export function readyGroupsOf(st) {
   return (st.groups ?? []).filter((g) => !g.failedStart).map((g) => g.group).sort();
+}
+
+// A planned finishing step against the ticket's next step read again under its lock (lib/runner.mjs `advance`): the
+// step to run, or null when another run took it meanwhile. The same stage and PR is the same step; it runs as the
+// status gives it now (both come from collectSteps), with today's fields: a follow's `takeReady` as it stands (left
+// out when it no longer holds), never compared by identity. Only the planned tickets that still have it run.
+export function stillNext(first, again) {
+  if (!again || again.stage !== first.stage || (again.pr ?? null) !== (first.pr ?? null)) return null;
+  const keys = first.keys.filter((k) => again.keys.includes(k));
+  return keys.length ? { ...again, keys } : null;
 }
 
 async function pool(items, size, fn) {
