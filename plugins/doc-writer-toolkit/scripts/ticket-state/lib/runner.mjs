@@ -1194,8 +1194,10 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
   }
 
   async function runModelStep(step, { lockGroups = [] } = {}) {
-    // The group's lock names the stage running now (the lock was taken with the chain's first stage).
-    if (step.group) renewLock(settings.state, step.group, { leaseMinutes: settings.limits.lockLeaseMinutes, stage: step.stage, now: clock() });
+    // The step's lock names the stage running now (it was taken with the chain's first stage): the group's, or the key's
+    // for a step with no group. Only a lock this run holds; another run's is never written.
+    const own = step.group ?? step.keys[0];
+    if (allLocks(settings.state, clock()).some((l) => l.group === own && l.pid === process.pid)) renewLock(settings.state, own, { leaseMinutes: settings.limits.lockLeaseMinutes, stage: step.stage, now: clock() });
     // Triage has no group yet: each card's key is its lock.
     const held = [];
     for (const g of lockGroups) {

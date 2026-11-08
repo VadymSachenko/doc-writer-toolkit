@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { canon, checkoutKind, clonePath, cloneOf, listWorktrees, readCheckoutsRoot, removeWorktree, targetOf, worktreePath } from './worktree.mjs';
+import { canon, checkoutKind, clonePath, cloneOf, isReadCheckout, listWorktrees, removeWorktree, targetOf, worktreePath } from './worktree.mjs';
 
 // Cleanup when a ticket's PRs are merged (D-074). The ticket's work files outside git (videos and their parts, audio,
 // transcripts, frames, downloaded attachments, run folders, clones) are recorded in the ledger as each stage makes
@@ -205,7 +205,7 @@ export function cleanupTicket({ settings, ledger, prState, forgeHeads = [], dryR
         const clone = c.kind === 'worktree' ? cloneOf(c.path) : null;
         // A read checkout is the runner's, kept across tickets (lib/worktree.mjs, `ensureReadCheckout`): never the
         // ticket's to remove, even inside a folder a session recorded.
-        if (inside(canon(c.path), canon(readCheckoutsRoot(settings)))) out.kept.push({ path: r, reason: 'the runner\'s read checkout, shared by every ticket: kept whole, never split' });
+        if (isReadCheckout(c.path)) out.kept.push({ path: r, reason: 'the runner\'s read checkout, shared by every ticket: kept whole, never split' });
         else if (clone) {
           const bytes = sizeOf(c.path);
           const res = removeWorktree(clone, c.path, { dryRun, pushed, keep: keeps });

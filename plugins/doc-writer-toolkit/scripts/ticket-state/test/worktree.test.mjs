@@ -1097,7 +1097,7 @@ const briefsOf = async (t) => {
   const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1601'] } });
   return { out, briefs, sessions };
 };
-const readCheckoutOf = (t) => path.join(path.resolve(t.w.settings.state), 'read', 'guide');
+const readCheckoutOf = (t) => path.join(path.dirname(t.clone.dir), '.worktrees', 'guide-docs', '.read', 'guide');
 
 test('a plan step with the target clone on another branch runs on a read checkout at origin/<base>: in its folders with the base\'s page, named in the brief, with no off-base note; the clone never moves', async () => {
   const t = planTicket({ onBase: false });
@@ -1251,14 +1251,14 @@ function mergeOnForge(bare, files) {
 }
 const pageIn = (dir, rel = 'docs/x/index.md') => fs.readFileSync(path.join(dir, rel), 'utf8');
 
-test('the read checkout is a detached worktree of the clone at origin/<base> under the state folder; the next run re-points the same folder, and the clone never moves', () => {
+test('the read checkout is a detached worktree of the clone at origin/<base> beside the ticket worktrees; the next run re-points the same folder, and the clone never moves', () => {
   const t = planTicket({ onBase: false });
   const target = t.w.settings.targets[0];
   const before = t.clone.g('rev-parse', 'HEAD');
   checkClone(t.w.settings, target);
   const r = ensureReadCheckout(t.w.settings, target);
   assert.equal(r.error, undefined, r.error);
-  assert.equal(r.path, path.join(path.resolve(t.w.settings.state), 'read', 'guide'));
+  assert.equal(r.path, path.join(path.dirname(t.clone.dir), '.worktrees', 'guide-docs', '.read', 'guide'), 'beside the ticket worktrees, outside every repo');
   assert.deepEqual([r.commit, r.ref], [t.clone.g('rev-parse', 'origin/main'), 'origin/main']);
   assert.equal(pageIn(r.path), '# Сторінка\n', 'the base\'s page, not the branch draft in the clone');
   assert.match(pageIn(t.clone.dir), /Новий абзац/, 'the clone keeps its draft');
@@ -1313,17 +1313,98 @@ test('no read checkout when its folder holds something else, the base was never 
   assert.equal(listWorktrees(t.clone.dir).length, 1, 'no worktree registered');
 });
 
-test('a read checkout left by a clone that moved (targets[].path changed) names the command that clears it', () => {
+test('no read checkout under a .sources/ folder (a write rule for the evidence would reach its pages); one made before it was sparse is made again', () => {
+  const t = planTicket({ onBase: false });
+  const target = t.w.settings.targets[0];
+  // A clone kept under a `.sources/` folder: its read checkout would be too.
+  const under = path.join(t.w.root, 'docs', '.sources', 'clones', 'guide-docs');
+  execFileSync('git', ['clone', '-q', t.bare, under]);
+  assert.match(ensureReadCheckout(t.w.settings, { ...target, path: 'docs/.sources/clones/guide-docs' }).error, /is under a \.sources\/ folder, where a write rule for the evidence would reach its pages/);
+  assert.equal(listWorktrees(under).length, 1);
+  // An older read checkout, full (no sparse patterns): made again, sparse.
+  const rc = readCheckoutPath(t.w.settings, target);
+  t.clone.g('worktree', 'add', '-q', '--detach', rc, 'origin/main');
+  fs.writeFileSync(path.join(rc, 'marker.local.md'), 'old\n');
+  assert.equal(ensureReadCheckout(t.w.settings, target, { othersRunning: true }).error, 'another session may be reading it, so it stays as it is (made before it was sparse)');
+  const r = ensureReadCheckout(t.w.settings, target);
+  assert.equal(r.error, undefined);
+  assert.ok(!fs.existsSync(path.join(rc, 'marker.local.md')), 'made again');
+  assert.equal(fs.readFileSync(path.join(execFileSync('git', ['-C', rc, 'rev-parse', '--absolute-git-dir'], { encoding: 'utf8' }).trim(), 'info', 'sparse-checkout'), 'utf8'), '/*\n!.sources/\n');
+});
+
+test('a clone that moved gets a read checkout of its own; one cloned again in the same place finds the old folder and is told how to clear it', () => {
   const t = planTicket({ onBase: false });
   const target = t.w.settings.targets[0];
   const rc = ensureReadCheckout(t.w.settings, target).path;
-  // The same repo, cloned again elsewhere, and the settings pointed at it.
+  // The same repo, cloned again elsewhere, and the settings pointed at it: its read checkout sits beside it.
   const moved = path.join(t.w.root, 'repos', 'guide-docs-2');
   execFileSync('git', ['clone', '-q', t.bare, moved]);
-  const err = ensureReadCheckout(t.w.settings, { ...target, path: 'repos/guide-docs-2' }).error;
-  assert.match(err, new RegExp(`it is a worktree of [^ ]*/repos/guide-docs \\(did targets\\[\\]\\.path change\\?\\); clear it with \`git -C [^ ]*/repos/guide-docs worktree remove --force ${rc}\``));
-  execFileSync('git', ['-C', t.clone.dir, 'worktree', 'remove', '--force', rc]);
-  assert.equal(ensureReadCheckout(t.w.settings, { ...target, path: 'repos/guide-docs-2' }).error, undefined, 'made again from the new clone');
+  const r2 = ensureReadCheckout(t.w.settings, { ...target, path: 'repos/guide-docs-2' });
+  assert.deepEqual([r2.error, r2.path], [undefined, path.join(t.w.root, 'repos', '.worktrees', 'guide-docs-2', '.read', 'guide')]);
+  // The clone thrown away and cloned again in its place: the old folder is a worktree of a repo that is gone.
+  fs.rmSync(t.clone.dir, { recursive: true, force: true });
+  execFileSync('git', ['clone', '-q', t.bare, t.clone.dir]);
+  assert.match(ensureReadCheckout(t.w.settings, target).error, /exists and is not a read checkout of guide-docs: a worktree of a clone that is gone; move the folder to the Trash, and the next step makes it again/);
+  // Registered to another clone of the repo (a path changed back and forth): the command that clears it.
+  fs.rmSync(rc, { recursive: true, force: true });
+  execFileSync('git', ['-C', moved, 'worktree', 'add', '-q', '--detach', rc]);
+  assert.match(ensureReadCheckout(t.w.settings, target).error, new RegExp(`it is a worktree of [^ ]*/repos/guide-docs-2 \\(did targets\\[\\]\\.path change\\?\\); clear it with \`git -C [^ ]*/repos/guide-docs-2 worktree remove --force ${rc}\``));
+  execFileSync('git', ['-C', moved, 'worktree', 'remove', '--force', rc]);
+  assert.equal(ensureReadCheckout(t.w.settings, target).error, undefined, 'made again');
+});
+
+test('a .sources/ folder git tracks is left out of the read checkout (sparse) and linked like the others: the tracked and the untracked files as the clone has them; the owner\'s clone keeps its own config and checkout', () => {
+  const t = planTicket({ onBase: true });
+  const target = t.w.settings.targets[0];
+  // A section whose `.sources/` git tracks (a README, an interview), on origin's base; the clone's `.gitignore` names
+  // `.sources/`, so it is added by force, as a host that tracks a few does.
+  fs.mkdirSync(path.join(t.clone.dir, 'docs/archive/.sources'), { recursive: true });
+  fs.writeFileSync(path.join(t.clone.dir, 'docs/archive/index.md'), '# Архів\n');
+  fs.writeFileSync(path.join(t.clone.dir, 'docs/archive/.sources/README.md'), 'tracked readme\n');
+  fs.writeFileSync(path.join(t.clone.dir, 'docs/archive/.sources/sme-interview.md'), 'tracked interview\n');
+  t.clone.g('add', '-f', 'docs/archive');
+  t.clone.g('commit', '-q', '-m', 'archive with tracked sources');
+  t.clone.g('push', '-q', 'origin', 'main');
+  // The owner's evidence beside them, untracked, and an edit of a tracked one not committed yet.
+  fs.writeFileSync(path.join(t.clone.dir, 'docs/archive/.sources/notes.md'), 'owner notes\n');
+  fs.writeFileSync(path.join(t.clone.dir, 'docs/archive/.sources/README.md'), 'tracked readme, owner edit\n');
+  const configBefore = fs.readFileSync(path.join(t.clone.dir, '.git', 'config'), 'utf8');
+  const statusBefore = t.clone.g('status', '--porcelain');
+  checkClone(t.w.settings, target);
+  const r = ensureReadCheckout(t.w.settings, target);
+  assert.equal(r.error, undefined, r.error);
+  const link = path.join(r.path, 'docs/archive/.sources');
+  assert.ok(fs.lstatSync(link).isSymbolicLink(), 'a link, not the tracked folder');
+  assert.deepEqual(fs.readdirSync(link).sort(), ['README.md', 'notes.md', 'sme-interview.md']);
+  assert.equal(pageIn(r.path, 'docs/archive/.sources/README.md'), 'tracked readme, owner edit\n', 'as the clone has it');
+  assert.equal(pageIn(r.path, 'docs/archive/index.md'), '# Архів\n', 'the page is there');
+  const rg = (...a) => execFileSync('git', ['-C', r.path, ...a], { encoding: 'utf8' }).trim();
+  assert.equal(rg('status', '--porcelain', '--untracked-files=no'), '', 'a plain git status there (as a session runs it) is clean');
+  assert.match(rg('ls-files', '-t', 'docs/archive/.sources'), /^S docs\/archive\/\.sources\/README\.md$/m, 'left out by its index bit');
+  assert.equal(rg('show', 'HEAD:docs/archive/.sources/README.md'), 'tracked readme', 'git show still reads the committed one');
+  // A write through the link lands in the clone; re-pointed at a newer base, the link and the owner's files stay.
+  fs.writeFileSync(path.join(link, 'section-readiness.json'), '{}\n');
+  const merged = mergeOnForge(t.bare, { 'docs/archive/index.md': '# Архів\n\nНове.\n', 'docs/archive/.sources/README.md': 'tracked readme v2\n' });
+  checkClone(t.w.settings, target);
+  const again = ensureReadCheckout(t.w.settings, target);
+  assert.deepEqual([again.error, again.commit], [undefined, merged]);
+  assert.equal(pageIn(again.path, 'docs/archive/index.md'), '# Архів\n\nНове.\n');
+  assert.ok(fs.lstatSync(link).isSymbolicLink());
+  assert.equal(pageIn(t.clone.dir, 'docs/archive/.sources/README.md'), 'tracked readme, owner edit\n', 'git never wrote through the link');
+  assert.equal(pageIn(t.clone.dir, 'docs/archive/.sources/section-readiness.json'), '{}\n');
+  assert.equal(rg('status', '--porcelain', '--untracked-files=no'), '');
+  // Made again (a change to a tracked page): still sparse, still linked, and the clone's files untouched.
+  fs.writeFileSync(path.join(again.path, 'docs/archive/index.md'), 'changed\n');
+  const third = ensureReadCheckout(t.w.settings, target);
+  assert.equal(third.error, undefined);
+  assert.ok(fs.lstatSync(link).isSymbolicLink());
+  assert.deepEqual(fs.readdirSync(path.join(t.clone.dir, 'docs/archive/.sources')).sort(), ['README.md', 'notes.md', 'section-readiness.json', 'sme-interview.md']);
+  // The owner's clone: no sparse settings, its config and its checkout as they were (plus the session's report).
+  assert.equal(fs.readFileSync(path.join(t.clone.dir, '.git', 'config'), 'utf8'), configBefore);
+  assert.ok(!fs.existsSync(path.join(t.clone.dir, '.git', 'info', 'sparse-checkout')));
+  assert.throws(() => t.clone.g('config', '--get', 'core.sparseCheckout'), 'no sparse setting in the clone');
+  assert.equal(t.clone.g('status', '--porcelain'), statusBefore);
+  assert.match(t.clone.g('ls-files', '-t', 'docs/archive/.sources'), /^H docs\/archive\/\.sources\/README\.md$/m);
 });
 
 test('a read checkout\'s .sources/ folders are the clone\'s: linked at the same path, written through, a new one moved into the clone, and never lost when it is made again', () => {
@@ -1398,7 +1479,7 @@ test('a read checkout runs none of the clone\'s hooks, never links a .sources/ f
   // The hub as a target: its own `.sources/` holds the state folder. Stand-in: a state folder inside the clone's.
   const inside = { ...t.w.settings, state: path.join(t.clone.dir, '.sources', 'flow') };
   fs.mkdirSync(path.join(inside.state, 'tickets'), { recursive: true });
-  const rc2 = path.join(inside.state, 'read', 'guide');
+  const rc2 = readCheckoutPath(inside, target);
   assert.equal(ensureReadCheckout(inside, target).error, undefined);
   assert.throws(() => fs.lstatSync(path.join(rc2, '.sources')), 'no link to the folder that holds the state');
   fs.mkdirSync(path.join(rc2, '.sources', 'flow', 'tickets'), { recursive: true });

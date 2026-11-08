@@ -216,7 +216,8 @@ test('a step with no worktree: its folders are the state tmp/, the work folder a
 test('a step with no worktree: a read checkout is read-only to mkdir and to the scripts\' paths, but for its .sources/ folders (the clone\'s)', () => {
   const w = world({ extra: { workFolder: 'work/tickets/<key>' } });
   const settings = { ...w.settings, targets: [...w.settings.targets, { ...w.settings.targets[0], id: 'the-hub', path: '.' }] };
-  const rc = path.join(path.resolve(settings.state), 'read', 'guide');
+  const clone0 = path.resolve(settings.root, settings.targets[0].path);
+  const rc = path.join(path.dirname(clone0), '.worktrees', path.basename(clone0), '.read', 'guide');
   const clone = path.resolve(settings.root, settings.targets[0].path);
   const clones = [{ repo: 'guide-docs', clone, base: 'main', notes: [], read: { path: rc, ref: 'origin/main', commit: 'a'.repeat(40) } }];
   const c = JSON.parse(commandFor(stepOf('writer', w, [], { stage: 'plan', clones }), settings, { agentsPath: '/x/agents.json', roots: ROOTS }).env[HOOK_VARIABLE]);

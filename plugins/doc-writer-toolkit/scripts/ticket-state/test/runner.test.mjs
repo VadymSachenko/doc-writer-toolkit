@@ -13,6 +13,7 @@ import { BRANCH_DENIED, PLUGIN_ROOT, PUSH_DENIED, PUSH_DENIED_PLAIN, ROLE_DIR, s
 import { localDate } from '../lib/report.mjs';
 import { jobCommand } from '../lib/jobs.mjs';
 import { notificationsOf } from '../lib/notify.mjs';
+import { readCheckoutPath } from '../lib/worktree.mjs';
 
 // The daily run: finishing first, the morning triage, starts within the limits; one `claude -p` session per model
 // step in its role; a dry run that plans and changes nothing; observe mode; the guard; the retry; the report.
@@ -683,12 +684,36 @@ test('a step with no worktree may create only its own specs: one rule per key pe
   assert.match(readRole('writer').prompt, /`_plan-<key>-<what>\.spec\.ts`/);
 });
 
+// Whether an `Edit(//<abs glob>)` rule of a list matches a file: `**/`, `/**`, `**`, `*` and `?` as the CLI reads them,
+// a `[...]` class as is.
+const globRe = (g) => new RegExp(`^${g.replace(/[.+^${}()|\\]/g, '\\$&').replace(/\*\*\/|\/\*\*|\*\*|\*|\?/g, (m) => ({ '**/': '(?:.*/)?', '/**': '(?:/.*)?', '**': '.*', '*': '[^/]*', '?': '[^/]' })[m])}$`);
+const editAllows = (rules, file) => rules.filter((r) => r.startsWith('Edit(//')).some((r) => globRe(r.slice('Edit(/'.length, -1)).test(file));
+
+test('the live layout (the hub its own target, its state under docs/.sources/): the hub\'s .sources/ rule reaches all of the state folder, so the read checkouts live outside every repo, where no rule reaches a page and the .sources/ links stay writable', () => {
+  const { w } = busyWorld();
+  const hub = { ...w.settings.targets[0], id: 'the-hub', path: '.' };
+  const settings = { ...w.settings, state: path.join(w.root, 'docs/.sources/ticket-pipeline'), targets: [...w.settings.targets, hub] };
+  const clone = path.resolve(settings.root, settings.targets[0].path);
+  const reads = [[settings.targets[0], clone], [hub, w.root]].map(([t, c]) => ({ repo: t.repo, clone: c, base: 'main', notes: [], read: { path: readCheckoutPath(settings, t), ref: 'origin/main', commit: 'b'.repeat(40) } }));
+  const cmd = commandFor({ stage: 'plan', role: 'writer', keys: ['502'], group: '502', worktrees: [], clones: reads }, settings, { agentsPath: '/x/agents.json', roots: ROOTS });
+  const allowed = cmd.args.slice(cmd.args.indexOf('--allowedTools') + 1, cmd.args.indexOf('--disallowedTools'));
+  // What the hub's own `.sources/` rule reaches: everything under the state folder, pages of a checkout kept there too.
+  assert.ok(allowed.includes(`Edit(/${w.root}/**/.sources/**)`));
+  assert.ok(editAllows(allowed, path.join(settings.state, 'tmp/x.md')));
+  assert.ok(editAllows(allowed, path.join(settings.state, 'read/guide/docs/x/index.md')), 'why a read checkout can\'t live under the state folder');
+  for (const r of reads) {
+    assert.ok(!r.read.path.split(path.sep).includes('.sources'), r.read.path);
+    assert.ok(!r.read.path.startsWith(`${settings.state}/`), 'outside the state folder');
+    for (const page of ['docs/x/index.md', 'docs/x/.assets/a.png', 'i18n/en/docusaurus-plugin-content-docs/current/x/index.md', 'docusaurus.config.ts']) assert.equal(editAllows(allowed, path.join(r.read.path, page)), false, `${r.repo}: ${page}`);
+    for (const ev of ['docs/x/.sources/section-readiness.json', 'docs/new/.sources/frames/a.png']) assert.ok(editAllows(allowed, path.join(r.read.path, ev)), `${r.repo}: ${ev}`);
+  }
+});
+
 test('a step with no worktree works in its read checkouts: in --add-dir and the git read rules, writable only in their .sources/ folders, named in the brief in place of the clone\'s note', () => {
   const { w } = busyWorld();
-  // The hub is a target too, so its `.sources/` rule reaches the state folder inside it.
   const settings = { ...w.settings, targets: [...w.settings.targets, { ...w.settings.targets[0], id: 'the-hub', path: '.' }] };
   const state = path.resolve(settings.state);
-  const rc = path.join(state, 'read', 'guide');
+  const rc = readCheckoutPath(settings, settings.targets[0]);
   const clone = path.resolve(settings.root, settings.targets[0].path);
   const off = { repo: 'guide-docs', clone, base: 'main', branch: 'ticket-71', off: true, notes: ['on the branch ticket-71, not on its base main: its files are that branch\'s, not the site\'s; read pages with `git -C x show origin/main:<path>`, never its working tree'] };
   const step = (clones) => ({ stage: 'plan', role: 'writer', keys: ['502'], group: '502', worktrees: [], clones });
@@ -703,8 +728,9 @@ test('a step with no worktree works in its read checkouts: in --add-dir and the 
   assert.ok(reads(clone).length > 0);
   assert.deepEqual(reads(rc), reads(clone), 'the git reads of a clone run in its read checkout too');
   // Its `.sources/` folders only (the clone's, through links): no rule opens its pages, and no deny closes the links.
-  assert.deepEqual(allowed.filter((r) => r.startsWith('Edit(') && r.includes(`${state}/read`)), [`Edit(/${rc}/**/.sources/**)`]);
-  assert.ok(!denied.some((r) => r.includes(`${state}/read`)), 'a deny there would beat the .sources/ rule');
+  assert.deepEqual(allowed.filter((r) => r.startsWith('Edit(') && r.includes('/.read/')), [`Edit(/${rc}/**/.sources/**)`]);
+  assert.ok(!denied.some((r) => r.includes('/.read/')), 'a deny there would beat the .sources/ rule');
+  assert.equal(editAllows(allowed, path.join(rc, 'docs/x/index.md')), false);
   assert.ok(denied.includes(`Edit(/${path.join(state, 'tickets')}/**)`), 'the state\'s own folders stay closed');
   const brief = briefFor(step(withRead), settings);
   assert.match(brief, new RegExp(`Read checkouts \\(the runner made them, detached at \`origin/<base>\`[^\\n]*give every skill the read checkout's path[^\\n]*never the clone's[^\\n]*pages, images and configuration are read-only\\. Its \`\\.sources/\` folders are the clone's \\(links\\)[^\\n]*moved into the clone when the session ends[^\\n]*\\n- guide-docs: ${rc}, origin/main at aaaaaaa; its clone: ${clone}\\.`));

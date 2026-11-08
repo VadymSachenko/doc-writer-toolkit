@@ -9,7 +9,7 @@ import { prId } from './ledger.mjs';
 // (`targets[].links`, default `node_modules`) and lists each link in the common git dir's `info/exclude`, since a
 // `node_modules/` line in `.gitignore` doesn't match a symlink. The close step removes the worktree with
 // `git worktree remove --force`, then prunes; nothing else ever moves a worktree's `.git` link. A step with no worktree
-// gets a read checkout instead (`ensureReadCheckout`): one per target, under the state folder, detached at
+// gets a read checkout instead (`ensureReadCheckout`): one per target, beside the ticket worktrees, detached at
 // `origin/<base>`, kept across tickets and never removed by the close step.
 
 // The stages that work on a PR branch, so their session gets the worktree.
@@ -299,29 +299,63 @@ export function checkClone(settings, target) {
 }
 
 // A step with no worktree reads a target's pages in a read checkout, not in the owner's clone: a worktree of the clone,
-// detached at `origin/<base>` as `checkClone` fetched it, under the state folder (`<state>/read/<target id>`). It is kept
-// across runs and re-pointed (`git checkout --detach`); one that won't move, or has changes to tracked files, is removed
-// and added again. The clone's hooks don't run for it (`core.hooksPath` is /dev/null for these commands). It is the
-// runner's, not a ticket's: no ledger records it, and the close step never removes it.
-// Its `.sources/` folders are the clone's (`linkSources`): the git-ignored work files a section's skills read and write
-// (notes, interviews, frames, the readiness report, the plan) are not in a checkout, so each `.sources/` folder of the
-// clone is linked into it at the same path, and a skill pointed at the read checkout's section reads and writes the
-// clone's. A `.sources/` folder a session makes there for the first time (a real folder) is moved into the clone after
-// the session and before any re-point (`adoptSources`), and a link put in its place. Everything else in it is
-// read-only to the session: no write rule names it but its `.sources/` folders (lib/runner.mjs), and the hook refuses
-// `mkdir` and a script's path there (lib/role-hook.mjs).
+// detached at `origin/<base>` as `checkClone` fetched it. It lives beside the ticket worktrees, outside every repo
+// (`<clone's parent>/.worktrees/<repo>/.read/<target id>`; no branch name starts with a dot), so no repo's write rule
+// reaches its pages: a hub that is its own target keeps its state under a `.sources/` folder, and
+// `Edit(<hub>/**/.sources/**)` would match every file of a read checkout under it. One whose path has a `.sources/`
+// folder in it is refused for the same reason. It is kept across runs and re-pointed (`git checkout --detach`); one
+// that won't move, or has changes to tracked files, is removed and added again. The clone's hooks don't run for it. It
+// is the runner's, not a ticket's: no ledger records it, and the close step never removes it.
+// It is sparse: every `.sources/` folder is left out (`!.sources/`), tracked or not, and the clone's own `.sources/`
+// folders are linked in at the same path instead (`linkSources`), so a skill pointed at the read checkout's section reads
+// and writes the clone's evidence: the owner's untracked notes and the tracked files as the clone has them. The sparse
+// settings are the runner's commands' alone (`-c core.sparseCheckout=true`, with the patterns in the read checkout's own
+// `info/sparse-checkout`): nothing is written to the clone's config, and a session's `git status` there still skips the
+// left-out files by their index bits. A `.sources/` folder a session makes there for the first time (a real folder) is
+// moved into the clone after the session and before any re-point (`adoptSources`), and a link put in its place.
+// Everything else in it is read-only to the session: no write rule names it but its `.sources/` folders
+// (lib/runner.mjs), and the hook refuses `mkdir` and a script's path there (lib/role-hook.mjs).
 // While another session that may read it runs (`othersRunning`), one at another commit, or with changes to tracked
 // files, is left as it is, so pages never change under a session still reading them; this session then reads the clone
 // with the note, as before. The clone itself is never checked out, pulled or reset: only its list of worktrees changes.
 // Returns { path, commit, ref, linked, adopted } or { error } (the brief then falls back to the clone and its note).
-export const readCheckoutsRoot = (settings) => path.join(path.resolve(settings.state), 'read');
-export const readCheckoutPath = (settings, target) => (/^[\w-][\w.-]*$/.test(String(target?.id ?? '')) ? path.join(readCheckoutsRoot(settings), target.id) : null);
+export const readCheckoutPath = (settings, target) => {
+  const clone = clonePath(settings, target);
+  return clone && /^[\w-][\w.-]*$/.test(String(target?.id ?? '')) ? path.join(path.dirname(clone), '.worktrees', path.basename(clone), '.read', target.id) : null;
+};
+// A path that is a read checkout, by its place: `…/.worktrees/<repo>/.read/<id>`.
+export const isReadCheckout = (p) => {
+  const parts = path.resolve(p).split(path.sep);
+  return parts.length > 4 && parts.at(-2) === '.read' && parts.at(-4) === '.worktrees';
+};
 const NO_HOOKS = ['-c', 'core.hooksPath=/dev/null'];
+const SPARSE = [...NO_HOOKS, '-c', 'core.sparseCheckout=true', '-c', 'core.sparseCheckoutCone=false', '-c', 'sparse.expectFilesOutsideOfPatterns=true'];
+const SPARSE_PATTERNS = '/*\n!.sources/\n';
+// The read checkout's own sparse patterns file (`<its git dir>/info/sparse-checkout`, which git keeps per worktree), or
+// null when git can't say where its git dir is.
+const sparseFile = (rc) => {
+  const dir = tryRun(rc, ['rev-parse', '--absolute-git-dir']);
+  return dir ? path.join(dir, 'info', 'sparse-checkout') : null;
+};
+const isSparse = (rc) => {
+  try {
+    return fs.readFileSync(sparseFile(rc), 'utf8') === SPARSE_PATTERNS;
+  } catch {
+    return false;
+  }
+};
+const writeSparse = (rc) => {
+  const file = sparseFile(rc);
+  if (!file) throw new Error(`${rc} has no git dir`);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, SPARSE_PATTERNS);
+};
 export function ensureReadCheckout(settings, target, { othersRunning = false } = {}) {
   const clone = clonePath(settings, target);
   const rc = readCheckoutPath(settings, target);
-  if (!rc) return { error: `the target id ${JSON.stringify(target?.id ?? null)} is not a plain name` };
-  if (!clone || !fs.existsSync(clone) || !checkoutKind(clone)) return { path: rc, error: `the clone of ${target.repo} is not on this machine` };
+  if (!rc) return { error: `the target id ${JSON.stringify(target?.id ?? null)} is not a plain name, or the target has no clone` };
+  if (!fs.existsSync(clone) || !checkoutKind(clone)) return { path: rc, error: `the clone of ${target.repo} is not on this machine` };
+  if (rc.split(path.sep).includes('.sources')) return { path: rc, error: `${rc} is under a .sources/ folder, where a write rule for the evidence would reach its pages: move the clone out of it` };
   const ref = `origin/${target.base ?? 'main'}`;
   const commit = tryRun(clone, ['rev-parse', '--verify', '-q', `refs/remotes/${ref}^{commit}`]);
   if (!commit) return { path: rc, error: `no ${ref} fetched in ${clone}` };
@@ -329,7 +363,14 @@ export function ensureReadCheckout(settings, target, { othersRunning = false } =
   const dirty = () => tryRun(rc, ['status', '--porcelain', '--untracked-files=no']);
   const add = () => {
     fs.mkdirSync(path.dirname(rc), { recursive: true });
-    run(clone, [...NO_HOOKS, 'worktree', 'add', '-q', '--detach', rc, commit]);
+    run(clone, [...NO_HOOKS, 'worktree', 'add', '-q', '--no-checkout', '--detach', rc, commit]);
+    writeSparse(rc);
+    run(rc, [...SPARSE, 'checkout', '-q', '--detach', commit]);
+  };
+  const again = () => {
+    run(clone, ['worktree', 'remove', '--force', rc]);
+    tryRun(clone, ['worktree', 'prune']);
+    add();
   };
   let adopted = { moved: [], kept: [] };
   try {
@@ -339,6 +380,10 @@ export function ensureReadCheckout(settings, target, { othersRunning = false } =
       tryRun(clone, ['worktree', 'prune']);
       if (fs.existsSync(rc) && (!fs.statSync(rc).isDirectory() || fs.readdirSync(rc).length)) return { path: rc, error: strayReadCheckout(rc, target) };
       add();
+    } else if (!isSparse(rc)) {
+      // Not made sparse (an older one): made again, with nothing of it moved into the clone.
+      if (othersRunning) return { path: rc, error: 'another session may be reading it, so it stays as it is (made before it was sparse)' };
+      again();
     } else {
       // What an earlier session left in a `.sources/` folder of its own goes into the clone before anything moves; never
       // while another session may still be writing there.
@@ -346,11 +391,8 @@ export function ensureReadCheckout(settings, target, { othersRunning = false } =
       if (at() !== commit || dirty()) {
         const head = at();
         if (othersRunning) return { path: rc, error: `another session may be reading it, so it stays ${head !== commit ? `at ${head ? head.slice(0, 7) : 'its commit'}` : 'as it is (changes to tracked files)'}` };
-        if (dirty() || tryRun(rc, [...NO_HOOKS, 'checkout', '-q', '--detach', commit]) === null) {
-          run(clone, ['worktree', 'remove', '--force', rc]);
-          tryRun(clone, ['worktree', 'prune']);
-          add();
-        }
+        writeSparse(rc);
+        if (dirty() || tryRun(rc, [...SPARSE, 'checkout', '-q', '--detach', commit]) === null) again();
       }
     }
   } catch (e) {
@@ -360,8 +402,8 @@ export function ensureReadCheckout(settings, target, { othersRunning = false } =
   return { path: rc, commit, ref, linked: linkSources(settings, clone, rc), adopted };
 }
 
-// Why a folder in a read checkout's place isn't one, and how to clear it. Most often the target's clone moved
-// (`targets[].path` changed): the folder is still the old clone's worktree.
+// Why a folder in a read checkout's place isn't one, and how to clear it: most often a worktree of another clone of the
+// same repo, one that was at this path before (`targets[].path` changed back and forth).
 function strayReadCheckout(rc, target) {
   const owner = checkoutKind(rc) === 'worktree' ? cloneOf(rc) : null;
   if (owner && fs.existsSync(owner)) return `${rc} exists and is not a read checkout of ${target.repo}: it is a worktree of ${owner} (did targets[].path change?); clear it with \`git -C ${owner} worktree remove --force ${rc}\`, and the next step makes it again`;
@@ -370,7 +412,8 @@ function strayReadCheckout(rc, target) {
 }
 
 // The `.sources/` folders under a folder, by their path from it, each with its kind (`dir` or `link`). Never through a
-// link, `.git`, `node_modules` or a build's output, and never inside `skip` (the state folder).
+// link, `.git`, `node_modules` or a build's output, into another checkout (a clone kept inside the hub), and never
+// inside `skip` (the state folder).
 const NOT_WALKED = new Set(['.git', 'node_modules', 'build', '.docusaurus', '.worktrees']);
 function sourcesFolders(root, skip = () => false) {
   const out = [];
@@ -388,7 +431,7 @@ function sourcesFolders(root, skip = () => false) {
         out.push({ rel: r, kind: e.isSymbolicLink() ? 'link' : 'dir' });
         continue;
       }
-      if (!e.isDirectory() || NOT_WALKED.has(e.name) || skip(abs)) continue;
+      if (!e.isDirectory() || NOT_WALKED.has(e.name) || skip(abs) || fs.existsSync(path.join(abs, '.git'))) continue;
       walk(abs, r);
     }
   };
@@ -399,11 +442,10 @@ const within = (p, dir) => {
   const rel = path.relative(dir, p);
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 };
-const tracked = (rc, rel) => (tryPaths(rc, ['ls-files', '-z', '--', rel]) ?? []).length > 0;
 
-// Each `.sources/` folder of the clone as a link in the read checkout, at the same path; a link whose folder is gone
-// goes. A folder that holds the state folder (a hub's own `.sources/`, when the hub is a target) is never linked, nor
-// one git tracks in the read checkout. Returns the linked paths.
+// Each `.sources/` folder of the clone, tracked or not, as a link in the read checkout, at the same path (the sparse
+// patterns leave the read checkout's own out); a link whose folder is gone goes. A folder that holds the state folder
+// (a hub's own, when the hub is a target) is never linked. Returns the linked paths.
 export function linkSources(settings, clone, rc) {
   const state = canon(settings.state);
   const skip = (abs) => within(canon(abs), state) || within(canon(abs), canon(rc));
@@ -425,7 +467,7 @@ export function linkSources(settings, clone, rc) {
           continue;
         }
         fs.unlinkSync(at);
-      } else if (st) continue; // a real folder: tracked here, or a session's, which `adoptSources` moves first
+      } else if (st) continue; // a real folder: a session's, which `adoptSources` moves first
       fs.mkdirSync(path.dirname(at), { recursive: true });
       fs.symlinkSync(src, at);
       linked.push(rel);
@@ -440,8 +482,8 @@ export function linkSources(settings, clone, rc) {
   return linked;
 }
 
-// A `.sources/` folder a session made in the read checkout (a real folder, which git doesn't track there) goes into the
-// clone at the same path, and a link takes its place. Into a folder the clone has by then, file by file: a file the
+// A `.sources/` folder a session made in the read checkout (a real folder: git writes none there, the sparse patterns
+// leave them out) goes into the clone at the same path, and a link takes its place. Into a folder the clone has by then, file by file: a file the
 // clone has too is kept, and the session's goes beside it as `<name>.from-read-checkout`. Never into the state folder,
 // and never out of the clone. A link inside it is left (it goes with the read checkout). Returns { moved, kept }.
 export function adoptSources(settings, clone, rc) {
@@ -452,10 +494,6 @@ export function adoptSources(settings, clone, rc) {
     if (kind !== 'dir') continue;
     const from = path.join(rc, rel);
     const to = path.join(clone, rel);
-    if (tracked(rc, rel)) {
-      out.kept.push({ path: rel, reason: 'git tracks it in the read checkout' });
-      continue;
-    }
     if (within(canon(to), state) || within(state, canon(to)) || !within(canon(to), canon(clone))) {
       out.kept.push({ path: rel, reason: 'it would land in the state folder or outside the clone' });
       continue;
