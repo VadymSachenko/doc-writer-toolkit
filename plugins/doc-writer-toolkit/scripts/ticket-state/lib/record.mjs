@@ -9,6 +9,7 @@ import { labelCheck } from './intake.mjs';
 import { KINDS, recordedSize } from './cleanup.mjs';
 import { imagePairsAt } from './pairs.mjs';
 import { writtenIn } from './worktree.mjs';
+import { addEdits, addEnSides } from './edits.mjs';
 
 // `record <key> --stage <s> --status running|done|failed`: one stage result, written only when the tracker, the forge
 // and the files support it (context/ticket-flow.md, "When a record is accepted"). On any problem nothing is written.
@@ -295,6 +296,8 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
           addAll(p.reviewersRequested, e.reviewersRequested);
           addAll(p.pipelineCommits, e.commits);
           p.expertReview = expertOf(e);
+          // The numbered change list of the description (the UA review's fixes), from 1.
+          warnings.push(...addEdits(p, e.edits, { list: 'description', stage, at, seq: l.seq + 1 }).map((x) => `${prId(p)}: ${x}`));
           const asked = (st.reviewRequests ?? []).map((r) => r.login ?? r.team ?? r).filter((r) => !p.reviewersRequested.map(String).includes(String(r)));
           if (asked.length) warnings.push(`${p.repo}#${p.number} has review requests (${asked.join(', ')}): every PR opens with no reviewer, and the expert is called by a person's move`);
         }
@@ -354,9 +357,13 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         const card = await needCard(to);
         const from = l.left?.status;
         for (const p of l.prs) {
-          if (p.number && followsMove(p.stage, from, to)) {
+          // A PR ready for merge whose head moved since (a change the rule had no time to send back to the owner's
+          // queue) goes along with a move to `translation` too: the move approves that change, and the rule re-syncs it.
+          const headNow = p.number && to === 'translation' && p.stage === 'readyForMerge' && !p.merged ? (await clients.forge.prState({ repo: p.repo, number: p.number })).headCommit : null;
+          const moved = Boolean(headNow && p.readyForMerge?.at(-1)?.head && headNow !== p.readyForMerge.at(-1).head);
+          if (p.number && (followsMove(p.stage, from, to) || moved)) {
             // The only UA approve: a person's move to `translation`. A later word change in UA is reported.
-            if (to === 'translation') p.approval = { head: (await clients.forge.prState({ repo: p.repo, number: p.number })).headCommit, at, from: p.stage, by: 'person' };
+            if (to === 'translation') p.approval = { head: headNow ?? (await clients.forge.prState({ repo: p.repo, number: p.number })).headCommit, at, from: p.stage, by: 'person' };
             // Who a move into or out of the review took along: a pending request then moves no card back (row 9).
             if (to === 'smeReview' || p.stage === 'smeReview') addAll(p.reviewersRequested, ((await clients.forge.prState({ repo: p.repo, number: p.number })).reviewRequests ?? []).map((r) => r.login ?? r.team ?? r));
             p.stage = PR_STAGE_OF_STATUS[to];
@@ -371,6 +378,9 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
       case 'answerComments': {
         for (const c of result.handled ?? []) l.reviewComments.push({ repo: pr.repo, pr: pr.number, at, ...c });
         if (result.summary) l.summaries.push({ repo: pr.repo, pr: pr.number, at, ...result.summary });
+        // The numbered list of the reply: the summary comment it was posted in, going on from the PR's last number.
+        if (result.edits !== undefined && !result.summary?.id) throw new CliError('answerComments: "edits" are the numbered list of the summary comment: give "summary": { "id" } too', { code: 2 });
+        warnings.push(...addEdits(pr, result.edits, { list: result.summary?.id, stage, at, seq: l.seq + 1 }));
         for (const u of result.places ?? []) {
           const place = l.places.find((p) => p.id === u.id && p.repo === pr.repo && Number(p.pr) === pr.number);
           if (place) Object.assign(place, u, { at });
@@ -405,6 +415,10 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         if (!st.headCommit.startsWith(given)) throw new Refused('stale', `the branch head is ${st.headCommit.slice(0, 12)}, not ${String(given).slice(0, 12)}`, { head: st.headCommit });
         record.head = st.headCommit;
         pr.lastSeenHead = st.headCommit;
+        // The EN review's posted rewrites go on the description's list; the re-sync gives the EN side of the items it
+        // re-synced, so a restore later puts EN back too.
+        if (stage === 'enReview') warnings.push(...addEdits(pr, result.edits, { list: 'description', stage, at, seq: l.seq + 1 }));
+        if (stage === 'resync') warnings.push(...addEnSides(pr, result.edits));
         if (stage === 'readyForMerge') {
           const missing = CHAIN.filter((s) => pr.chain[s]?.status !== 'done');
           if (missing.length) throw new Refused('chain', `the chain is not done: ${missing.join(', ')}`, { missing });
@@ -418,7 +432,7 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
           record.imagePairs = pairs.summary;
         }
         if (stage === 'readyForMerge') {
-          pr.readyForMerge.push({ head: st.headCommit, at });
+          pr.readyForMerge.push({ head: st.headCommit, at, seq: l.seq + 1 });
           pr.stage = 'readyForMerge';
         }
         // The re-sync no longer makes the PR ready by itself: the rule checks the images, then `readyForMerge` does. A

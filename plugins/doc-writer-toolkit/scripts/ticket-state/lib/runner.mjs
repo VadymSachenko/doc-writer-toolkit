@@ -22,6 +22,7 @@ import { BUSY_NAME, LOCK_NAME, busyEnded, freeBrowserLock } from './browser-lock
 import { HOOK_VARIABLE, commandsOfRules, hookSettings } from './role-hook.mjs';
 import { parseClaudeConfig } from '../../ui-labels/lib/config.mjs';
 import { liveProgress } from './progress.mjs';
+import { replyLines, resyncItemLines, suggestionLines } from './edits.mjs';
 
 // The daily run (design §7): finish first, then triage the quiet intake cards (mornings, and the watcher's start pass
 // when a slot frees), then start ready groups while
@@ -356,7 +357,11 @@ export function briefFor(step, settings) {
     step.interrupted ? 'The last run of this stage was interrupted: read what it left and finish it.' : null,
     step.withoutVideo ? 'The owner moved the card back before every video part had its transcript: go on without the video, and say so in the plan comment.' : null,
     step.changed ? 'The section plan file changed after its gate: post the new plan and move the card back to Blocked (a new gate).' : null,
-    step.stage === 'resync' && step.since ? `UA changed since ready for merge at ${step.since}: re-sync the blocks changed in ${step.since}..${step.head ?? 'HEAD'}.` : null,
+    step.stage === 'resync' && step.since ? `UA changed since ready for merge at ${step.since}, and the owner moved the card to In translation: re-sync the blocks changed in ${step.since}..${step.head ?? 'HEAD'}, the whole range at once.` : null,
+    ...resyncItemLines(step.items),
+    step.nextEdit ? `A numbered list of edits you post on this PR starts at ${step.nextEdit}: the numbers already posted keep their items.` : null,
+    ...replyLines(step.replies),
+    ...suggestionLines(step.suggestions),
     step.stale ? `The UA pages changed after this stage last ran (${step.stale} file(s)): run it again on the current head.` : null,
     step.cards ? `Cards, highest priority first:\n${step.cards.map((c) => `- ${c.key}: ${c.url ?? c.shortLink} (${c.priority})`).join('\n')}` : null,
     step.worktrees?.length ? worktreeLines(step.worktrees) : null,
