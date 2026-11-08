@@ -143,9 +143,13 @@ export function related(a, b, repos) {
 // The WIP counts and the groups a scheduled run may start now, with the reason each other group doesn't.
 // An open ticket: a scheduled run started it, and it is from planning to the final review, ready for merge included. Not
 // open: before the start, a pause (the card moved back to the ready status), outside the flow (a PR closed unmerged,
-// the card archived, gone or moved out of the flow), merged or closed. A locked ticket counts as what it is doing.
+// the card archived, gone or moved out of the flow), merged or closed. A locked ticket counts as what it is doing; one
+// locked at its start by a scheduled run is open, its card still in the ready status or not: its session may be moving
+// the card now, and a second scheduled run at the same time (a runner.mjs run by hand without --manual, a check lock
+// taken over) must not start a group past the limit meanwhile.
 const NOT_OPEN = new Set(['ready', 'needsInfo', 'new', 'paused', 'outside', 'merged', 'closed']);
-export const isOpen = (t) => t.ledger === 'present' && t.mode === 'pipeline' && t.startedBy === 'schedule' && !NOT_OPEN.has(t.state === 'locked' ? t.derivedState : t.state);
+const lockedAtStart = (t) => t.state === 'locked' && t.lock?.stage === 'start';
+export const isOpen = (t) => t.ledger === 'present' && t.mode === 'pipeline' && t.startedBy === 'schedule' && (lockedAtStart(t) || !NOT_OPEN.has(t.state === 'locked' ? t.derivedState : t.state));
 
 // `tried`: the tickets this run already started (or tried to): their groups hold no slot in its later calculations, so a
 // start that failed lets the run try the next group. `retryWaiting`: the run may give a waiting failed start its one more try

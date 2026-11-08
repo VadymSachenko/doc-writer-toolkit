@@ -454,3 +454,16 @@ test('together joins in either direction, as #N or N, and not across repos; a ca
   const groups = st.groups.map((g) => g.group).sort();
   assert.deepEqual(groups, ['701-702', '703', '704', '705', '706']);
 });
+
+test('open: a ticket locked at a scheduled start is open while its card is still in the ready status', async () => {
+  const w = world({ extra: { limits: { ...estimates.limits, open: 1, inProgress: 5 } } });
+  const c = ready(w, 801);
+  // The runner recorded the start and holds the lock; its session has not moved the card yet.
+  ledger(w, c, { stages: { triage: 'done', start: 'running' }, startedBy: 'schedule', triage: { verdict: 'docs', targets: ['guide'], size: 'edit' } });
+  takeLock(w.settings.state, { group: '801', kind: 'schedule', stage: 'start', leaseMinutes: 120, now: NOW });
+  ready(w, 501);
+  const st = await w.status({ usage: usage(5) });
+  assert.deepEqual([st.wip.open, st.wip.openKeys], [1, ['801']], 'a second scheduled run at the same time sees the slot taken');
+  assert.deepEqual(st.startable.map((g) => g.group), []);
+  assert.match(st.notStarted.find((g) => g.group === '501').reasons.join(), /1 open \(801\) \+ 1 > 1/);
+});

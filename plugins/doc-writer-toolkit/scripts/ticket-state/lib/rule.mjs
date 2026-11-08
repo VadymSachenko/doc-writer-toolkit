@@ -27,10 +27,18 @@ import { editsOf, mergedEdits, nextEditNumber, parseReply, resolveReply, suggest
 export const step = (stage, extra = {}) => ({ stage, role: ROLE_OF[stage] ?? null, ...extra });
 
 // The start of a ticket whose card is in work, with its origin (`startedBy`, which the brief passes on). The runner
-// records a start before its session, with its origin: such a start goes on as it was started (`again`), whoever moved
-// the card since (the session itself, or a person giving the failed start one more try). With no start recorded, a
-// person took the card into work by hand: a manual start, out of the limits for the ticket's whole life (`byHand`).
-const startStep = (l, extra = {}) => (l.stages?.start && l.startedBy ? step('start', { again: true, startedBy: l.startedBy, ...extra }) : step('start', { byHand: true, startedBy: 'manual', ...extra }));
+// records a start before its session, with its origin: such a start goes on as it was started (`again`). With no start
+// recorded, or after a start whose failed session left the card in the ready status, a person took the card into work
+// by hand: a manual start, out of the limits for the ticket's whole life (`byHand`).
+const startStep = (l, extra = {}) => (l.stages?.start && l.startedBy && !failedInReady(l) ? step('start', { again: true, startedBy: l.startedBy, ...extra }) : step('start', { byHand: true, startedBy: 'manual', ...extra }));
+
+// The ticket's last session was a start that failed with the card still where the ledger left it, in the ready status
+// (the failure's mark shows it): whoever took the card into work since was a person, not that start. A start recorded
+// after that failure (a retry, whose session may have moved the card and died before its run) is that retry's.
+function failedInReady(l) {
+  const last = (l.runs ?? []).at(-1);
+  return last?.stage === 'start' && last.outcome === 'failed' && Boolean(last.after?.list) && l.left?.status === 'ready' && last.after.list === l.left.list?.id && last.seq >= (l.stages?.start?.seq ?? 0);
+}
 
 // A start recorded but not done whose card is still in the ready status: the start didn't happen (its session failed
 // or died before the move), so the ticket is still ready.
@@ -390,7 +398,8 @@ function personMoved(l, w, out, prs) {
   }
   if ((from === 'ready' || from === 'intake') && to === 'inProgress') {
     // A person took the card into work by hand: a manual start, out of the limits for the ticket's whole life. A card
-    // the runner's own start session moved (or a person moved after that start failed) goes on as that start.
+    // the runner's own start session moved goes on as that start; one a person moved after that start failed with the
+    // card still in the ready status is a manual start too.
     out.state = 'planning';
     out.steps.push(startStep(l));
     return out;

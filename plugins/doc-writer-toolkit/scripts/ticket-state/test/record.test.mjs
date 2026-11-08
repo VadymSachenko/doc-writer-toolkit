@@ -263,3 +263,11 @@ test('handover: a ticket with no ledger is rebuilt from the card and its PR link
   assert.deepEqual(await runHandover({ settings: w.settings, clients: w.clients(), key: '1310', to: 'hand', now: NOW }), { key: '1310', mode: 'hand', changed: true });
   assert.equal(read(w, '1310').mode, 'hand');
 });
+
+test('start keeps the origin the runner recorded before the session, with no lock left', async () => {
+  const c = card({ number: 1212, status: 'inProgress' });
+  const w = world({ cards: [c] });
+  ledger(w, c, { stages: { triage: 'done', start: 'running' }, startedBy: 'schedule' });
+  await rec(w, { key: '1212', stage: 'start', status: 'done' });
+  assert.equal(read(w, '1212').startedBy, 'schedule', 'not turned manual because the lease ran out');
+});
