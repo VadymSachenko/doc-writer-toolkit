@@ -160,7 +160,9 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
       case 'start': {
         const card = await needCard('inProgress');
         if (!l.triage) l.triage = { verdict: result.verdict ?? 'owner-card', targets: result.targets ?? [], size: result.size ?? null, at };
-        if (!startedBy) {
+        // Who started it: the record's own --started-by, else the origin already recorded (the runner's record before
+        // the session), else the live lock's kind, else manual.
+        if (!startedBy && !l.startedBy) {
           const lock = lockOf(settings.state, result.group ? String(result.group) : l.group, now);
           l.startedBy = lock?.live ? lock.kind : 'manual';
         }
