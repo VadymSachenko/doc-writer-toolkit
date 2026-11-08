@@ -19,6 +19,7 @@ Load these files at the start of the task. Do not load others unless the user re
 - Follow `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` to resolve the page's **root pair** (its **UA content root** and **EN i18n root**) and the **UA URL prefix of every declared pair**, for Check 5. Do not assume any default.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` — the shared page-to-page link contract. Check 5 checks links against this file's algorithms, in the form the page's root pair declares (`Page link form:`); do not restate it here.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/heading-anchors.md` — the shared heading-id contract. Check 2 checks UA heading ids against it; do not restate it here.
+- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/code-blocks.md` — the shared rule for what a translation changes inside a code block. Checks 6 and 9 read code blocks by it; do not restate it here.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` — the shared slug/title/filename convention. Check 11 checks title form and slug/filename agreement against this file; do not restate it here.
 - The product kit's names table, for Check 12: the `## Назви` / `## Names` section of `<kit>/glossary-ua.md` and `<kit>/glossary-en.md` (`${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`, "Product kit"; the format is `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/glossary-format.md`, "Names"). Read only that section. With no kit declared, say so and run Check 12 without a table.
 - The UA page being checked (at the path resolved above).
@@ -46,7 +47,7 @@ Read both files. If either file does not exist, stop immediately and tell the us
 
 ## Step 1.5 — Run the structural script
 
-A Node script does the mechanical counting, so it is exact on long pages: dates, headings, heading ids, tables, code blocks, `<details>` blocks, markers, and image, link and admonition counts. Don't count these by hand when the script runs. Interpret its output.
+A Node script does the mechanical counting, so it is exact on long pages: dates, headings, heading ids, tables, code blocks and the Cyrillic left in the EN page's diagram labels and code comments, `<details>` blocks, markers, and image, link and admonition counts. Don't count these by hand when the script runs. Interpret its output.
 
 Run it with the main file first and the secondary file second:
 
@@ -65,7 +66,7 @@ It prints one JSON report: `bugs[]`, `warnings[]` and `passed[]`. Each finding h
 
 If the script can't run (no Node, or an exit other than `0`), count by hand as each Check below describes, and say in the report that the counts were done by hand.
 
-The semantic checks are always yours, whether the script ran or not: Check 4 (Type column language), Check 5 (link prefixes, per `internal-links.md`), Check 9 (Cyrillic text in the EN file), Check 10 (untranslated prose), Check 11 (naming) and the names the table lacks in Check 12.
+The semantic checks are always yours, whether the script ran or not: Check 4 (Type column language), Check 5 (link prefixes, per `internal-links.md`), Check 9 (Cyrillic text in the EN file's prose; the script covers its code blocks), Check 10 (untranslated prose), Check 11 (naming) and the names the table lacks in Check 12.
 
 ## Step 2 — Run all checks
 
@@ -118,13 +119,13 @@ Every page-to-page link in both files must have the form the page's root pair de
 
 **Flag:** `[LINK — INCORRECT PREFIX]` — show the full offending link and line number, and the pair's link form when it is `file-path`.
 
-### Check 6 — Code blocks are identical
+### Check 6 — Code blocks keep their code
 
-Extract every fenced code block (` ``` `) from both files in order. Their contents must be byte-for-byte identical (whitespace included). Code blocks are never translated.
+Extract every fenced code block (` ``` `) from both files in order. The counts must match, and each pair must have the same code part (`code-blocks.md`): a diagram the same ids, keywords, arrows and number of lines; any other block the same code, data, comment markers, whitespace and number of lines, byte for byte. Its reader text (diagram labels, comments, the descriptions of a folder tree) is translated, so a difference there is not a finding.
 
 **Flag:** `[CODE BLOCK MISMATCH]` — show the position (nth code block) and a side-by-side diff of the differing lines.
 
-Script flag: `CODE-BLOCK-MISMATCH`. Its `line` is the first line that differs; you still write the diff.
+Script flag: `CODE-BLOCK-MISMATCH`. Its `line` is the first line whose code part differs; you still write the diff.
 
 ### Check 7 — `<details>` block count matches
 
@@ -145,9 +146,11 @@ Script flags: `MARKER-MISSING-IN-SECONDARY`, `MARKER-MISSING-IN-MAIN`. It pairs 
 
 ### Check 9 — No Ukrainian prose in the EN file
 
-Scan the EN file for any Unicode characters in the Ukrainian/Cyrillic range (U+0400–U+04FF) that appear outside of fenced code blocks. Any such character is a bug.
+Scan the EN file for any Unicode characters in the Ukrainian/Cyrillic range (U+0400–U+04FF) outside fenced code blocks, and inside them in the reader text: a diagram label, a code comment or a tree description (`code-blocks.md`). Any such character is a bug. Cyrillic in a block's code part is data (a JSON value, a string) and stays.
 
 **Flag:** `[CYRILLIC TEXT IN EN FILE]` — show the line number and offending text.
+
+Script flag: `CYRILLIC-IN-EN-CODE-TEXT`, for the code blocks only, one per line with the text it found. The prose is yours.
 
 ### Check 10 — No untranslated prose in the UA file
 

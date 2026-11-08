@@ -9,15 +9,15 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/doc-align/doc-align.mjs <main-file> <secondar
 
 The second form proposes the missing UA heading ids instead of comparing: see [Proposing the missing ids](#proposing-the-missing-ids---propose-ids).
 
-Needs Node 18.3+. Tests: `npm test` in this folder (offline, fixtures inline). It takes the Docusaurus route of a page from `../locale-sync/lib/links.mjs`, so the two scripts must stay in the same plugin.
+Needs Node 18.3+. Tests: `npm test` in this folder (offline, fixtures inline). It takes the Docusaurus route of a page from `../locale-sync/lib/links.mjs`, and `locale-sync` reads code blocks with this script's `lib/fences.mjs`, so the two scripts must stay in the same plugin.
 
 ## What it does and doesn't do
 
 It reports differences in structure. It never judges meaning or language, and never decides whether a difference is intended: each finding is a candidate for the skill to interpret.
 
-Out of scope, by design (the skill does these): Type-column language, link targets and prefixes (`internal-links.md`), Cyrillic text in the EN page, untranslated prose in the UA page, title, slug and filename naming, and names of organizations that the names table lacks (the script knows only the table's rows). Whether an EN heading's wording may use an explicit id (`heading-anchors.md`, rule 6) is a judgment too: the script only checks that the ids agree.
+Out of scope, by design (the skill does these): Type-column language, link targets and prefixes (`internal-links.md`), Cyrillic text in the EN page's prose (the script checks only its code blocks), untranslated prose in the UA page, title, slug and filename naming, and names of organizations that the names table lacks (the script knows only the table's rows). Whether an EN heading's wording may use an explicit id (`heading-anchors.md`, rule 6) is a judgment too: the script only checks that the ids agree.
 
-The reader is line based and code aware: fenced code blocks and the frontmatter are skipped, and inline code is blanked before links, images, `<details>` and markers are counted. A heading inside a code block is not a heading.
+The reader is line based and code aware: fenced code blocks and the frontmatter are skipped, and inline code is blanked before links, images, `<details>` and markers are counted. A heading inside a code block is not a heading. Code blocks are read only by Checks 6 and 9, through [the code-block reader](#the-code-block-reader-libfencesmjs).
 
 ## Usage
 
@@ -65,7 +65,7 @@ Output is one JSON report on stdout. A failure prints `{"error": …}` on stdout
 | `main`, `secondary` | The two paths as passed. |
 | `ua` | `main` or `secondary`: the file the heading-id checks read as UA. `null` when they were skipped. |
 | `bugs[]`, `warnings[]` | One finding each: `check`, `flag`, `description`, `line`, `file`. |
-| `check` | The Check number in `skills/doc-alignment-checker/SKILL.md` (1, 2, 3, 6, 7, 8 or 12), or `null` for the image, link and admonition counts, which have no Check of their own. |
+| `check` | The Check number in `skills/doc-alignment-checker/SKILL.md` (1, 2, 3, 6, 7, 8, 9 or 12), or `null` for the image, link and admonition counts, which have no Check of their own. |
 | `flag` | One of the flags below. |
 | `description` | What differs, with the counts or the headings involved. |
 | `line`, `file` | Where to look: 1-based line in that file. For a count difference, the last item of the file that has more; line `1` when there is nothing to point at. |
@@ -74,7 +74,7 @@ Output is one JSON report on stdout. A failure prints `{"error": …}` on stdout
 
 ## Checks and flags
 
-Severity follows the skill: heading count and levels and code blocks are bugs, everything else is a warning.
+Severity follows the skill: heading count and levels, code blocks and Cyrillic left in the EN page are bugs, everything else is a warning.
 
 | Check | Sub-check (`passed` name) | Flag | Severity |
 |---|---|---|---|
@@ -85,7 +85,8 @@ Severity follows the skill: heading count and levels and code blocks are bugs, e
 | 2 | EN heading ids match the UA ids | `HEADING-ID-MISMATCH` | warning |
 | 2 | (the id checks could not run) | `HEADING-ID-SKIPPED` | warning |
 | 3 | Table count, columns and rows | `TABLE-MISMATCH` | warning |
-| 6 | Code blocks identical | `CODE-BLOCK-MISMATCH` | bug |
+| 6 | Code blocks keep their code | `CODE-BLOCK-MISMATCH` | bug |
+| 9 | No Cyrillic in EN diagram labels or code comments (not run when `ua` is `null`) | `CYRILLIC-IN-EN-CODE-TEXT` | bug |
 | 7 | `<details>` block count | `DETAILS-BLOCK-COUNT-MISMATCH` | warning |
 | 8 | ToDo markers paired, NEEDS CONFIRMATION markers paired | `MARKER-MISSING-IN-SECONDARY`, `MARKER-MISSING-IN-MAIN` | warning |
 | `null` | Image count | `IMAGE-COUNT-MISMATCH` | warning |
@@ -103,7 +104,12 @@ What each one compares:
 - **EN heading comments.** `EN-HEADING-COMMENT`: an EN heading, at any level, that carries a `{/* … */}` comment.
 - **EN heading ids.** `HEADING-ID-MISMATCH`: the EN heading's id differs from the well-formed UA id at the same position. The EN id is its explicit `\{#id}` (or `{#id}`: both are read), else the slug Docusaurus generates from its text (github-slugger: link and image text kept, tags dropped, lower case, every character that is not a letter, digit, space, hyphen or `_` removed, each space turned into a hyphen; a slug that already occurs on the page gets `-1`, `-2`, …). Runs only when the heading counts match, so the positions line up.
 - **Tables.** A run of lines starting with `|` whose second line is a separator row. The count must match, then, table by table, the columns of the header row (escaped `\|` is not a separator) and the body rows.
-- **Code blocks.** Fenced with ```` ``` ```` or `~~~` (closed by the same character, at least as long, with nothing after it). The count must match, then each block's contents byte for byte, whitespace included. The info string (```` ```json title="…" ````) is not compared. The finding's `line` is the first line that differs.
+- **Code blocks.** Fenced with ```` ``` ```` or `~~~` (closed by the same character, at least as long, with nothing after it). The count must match, then each block's code part (`context/doc-rules/project-rules/code-blocks.md`): its contents with the reader text taken out, compared byte for byte, whitespace and line count included. The reader text is translated, so it may differ. The info string (```` ```json title="…" ````) is not compared; its first word is the block's language. The finding's `line` is the first line whose code part differs. What counts as reader text, per kind of block (`lib/fences.mjs`):
+  - `mermaid`: node and edge labels (`[…]`, `(…)`, `{…}`, `>…]`, `|…|`, `-- … -->`), quoted text, subgraph titles, `participant … as` aliases, the text after the colon of a message, a note, a transition or a relation, the labels of `alt`, `else`, `loop` and the other sequence blocks, gantt and journey task names and sections, a `title`, frontmatter `title:` and `%%` comments. Ids, keywords, arrows, `%%{init}%%` directives and `classDef`, `class`, `style`, `linkStyle` and `click` lines are code. Diagram types without rules of their own (`mindmap`, `timeline`, …) compare by their type line, line count and indentation.
+  - A language with comments (the table in `code-blocks.md`): the comment bodies. Strings are skipped first, so `//` or `#` inside quotes is code; `#` opens a comment only at the start of a word, and a first-line `#!` is code. A block comment may span lines.
+  - `text`, `txt`, `plaintext`, `plain` or no language: the text after ` — ` on each line (a folder tree's descriptions).
+  - Any other language, `json` included: no reader text; the whole block is code.
+- **Cyrillic in the EN page's code blocks** (Check 9). The EN page is the one `ua` doesn't name. Each piece of reader text in its code blocks that holds a Cyrillic letter is a `CYRILLIC-IN-EN-CODE-TEXT` bug on its line. Cyrillic in the code part (a JSON value, a string) is data and is not reported. Cyrillic in the EN prose is the skill's to find.
 - **`<details>`.** Each `<details` tag outside code.
 - **Markers.** `{/* ToDo: … */}` and `{/* NEEDS CONFIRMATION: … */}`, also over several lines, by kind. When the heading counts match, they pair section by section (the section is the last heading above the marker), so a marker that moved to another section shows as one gap on each side. Otherwise only the totals compare. The surplus markers on the side that has more are reported, with their text. A marker in a heading is a marker, not a heading comment.
 - **Images.** `![alt](src)` and `<img src="…">`.
@@ -158,10 +164,14 @@ A link with a matching fragment that can't be resolved (a relative route, or a s
 
 Exit codes are as above: `0` it ran (proposals or not), `2` bad usage (`--root` or `--write` without `--propose-ids`, a `--root` that is not a folder, no way to tell the UA page).
 
+## The code-block reader (`lib/fences.mjs`)
+
+`fenceParts(info, lines)` splits one code block into its code part and its reader text, as `code-blocks.md` defines them and "Code blocks" above lists per language. It is the one implementation the scripts share: Checks 6 and 9 here, and in `locale-sync` the `code` check, the Ukrainian letters in code blocks, `terms --usage` and the choice of which code blocks a worker translates. `codeDiff(a, b)` gives the first line whose code part differs, `cyrillicText(info, lines)` the reader text that holds Cyrillic. It imports nothing.
+
 ## The id-only predicate (`lib/idonly.mjs`)
 
 `isIdOnlyChange(page, changeSet)` is the id-only change of `heading-anchors.md` ("Id-only changes"), the one implementation the scripts share (`section-state` uses it). `page` and every entry of `changeSet` are `{ path, before, after }`; a link to another page counts when its path (a relative `.md`/`.mdx` path, or a site-root route or file path matched against the end of a page path) reaches a page of `changeSet` whose heading got that id. It compares line by line; a difference in code or in the frontmatter is a real change. `--write` above produces exactly such a change.
 
 ## How the skill uses it
 
-`doc-translator` runs `--propose-ids --write` after it saves the EN page, so every UA heading gets its id from the EN anchor, with the links rewritten in the same change. `doc-alignment-checker` runs it as Step 1.5, after both files are loaded. It reads the JSON, treats each finding as a candidate (a difference may be intended), and supplies Checks 1, 2, 3, 6, 7 and 8 from it, and the table part of Check 12 when the host's product kit has a names table. It still runs its semantic checks itself. When the script can't run, the skill counts by hand as each Check describes and says so in its report.
+`doc-translator` runs `--propose-ids --write` after it saves the EN page, so every UA heading gets its id from the EN anchor, with the links rewritten in the same change. `doc-alignment-checker` runs it as Step 1.5, after both files are loaded. It reads the JSON, treats each finding as a candidate (a difference may be intended), and supplies Checks 1, 2, 3, 6, 7 and 8 from it, the code-block part of Check 9, and the table part of Check 12 when the host's product kit has a names table. It still runs its semantic checks itself. When the script can't run, the skill counts by hand as each Check describes and says so in its report.

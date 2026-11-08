@@ -349,6 +349,145 @@ test('blocks: import and plain code blocks are verbatim, mermaid is not', () => 
   assert.deepEqual([mer.kind, mer.verbatim], ['code', false]);
 });
 
+// A page with code blocks that hold reader text (code-blocks.md): Ukrainian comments, which a translation translates,
+// and Cyrillic data, which it keeps.
+const CODE_TAIL_UA = `
+\`\`\`bash
+# Скинути всі фільтри (їх може бути кілька)
+curl -X POST https://example.com/filters/reset   # повторіть за потреби
+\`\`\`
+
+\`\`\`json
+{ "owner": "Олена Коваль", "note": "Без змін, їх два" }
+\`\`\`
+
+\`\`\`sh
+# reset the cache
+rm -rf .cache
+\`\`\`
+`;
+const CODE_TAIL_TR = `
+\`\`\`bash
+# Tüm filtreleri sıfırla (birden fazla olabilir)
+curl -X POST https://example.com/filters/reset   # gerekirse tekrarlayın
+\`\`\`
+
+\`\`\`json
+{ "owner": "Олена Коваль", "note": "Без змін, їх два" }
+\`\`\`
+
+\`\`\`sh
+# reset the cache
+rm -rf .cache
+\`\`\`
+`;
+const UA_CODE = UA + CODE_TAIL_UA;
+const TR_CODE = TR + CODE_TAIL_TR;
+
+test('blocks: a code block with Ukrainian comments goes to the worker; data and code without them are copied (AC-3)', () => {
+  const change = (from, to) => plan(UA_CODE, edit(UA_CODE, from, to), TR_CODE).changes.map((c) => [c.kind, c.verbatim]);
+  assert.deepEqual(change('# Скинути всі фільтри', '# Скинути фільтри'), [['code', false]], 'a changed Ukrainian comment');
+  assert.deepEqual(change('https://example.com/filters/reset', 'https://example.com/filters/clear'), [['code', false]], 'changed code in a block with Ukrainian comments');
+  assert.deepEqual(change('"note": "Без змін, їх два"', '"note": "Без змін"'), [['code', true]], 'Cyrillic data is not reader text');
+  assert.deepEqual(change('rm -rf .cache', 'rm -rf .cache/*'), [['code', true]], 'comments with no Cyrillic stay as written');
+});
+
+test('check: a translated comment passes; the code part, the line count and leftover Ukrainian in a comment are checked; data keeps its letters (AC-3)', async () => {
+  const f = await fixtureRepo();
+  await writeState(f);
+  await f.write('docs/filters/filters.md', UA_CODE);
+  await f.commit();
+  assert.equal((await cli(f.dir, 'link-assets', 'filters', '--locales', 'tr,ru')).code, 0);
+  const check = async (text) => {
+    await f.write(`${TR_ROOT}/filters/filters.md`, text);
+    const r = await cli(f.dir, 'check', 'filters', '--locales', 'tr');
+    return { code: r.code, checks: r.out.results[0].checks, failures: r.out.results[0].failures, warnings: r.out.results[0].warnings };
+  };
+  let r = await check(TR_CODE);
+  assert.equal(r.code, 0, JSON.stringify(r.failures));
+  assert.deepEqual(r.warnings, [], 'the Cyrillic JSON value is data, not untranslated text');
+
+  for (const [name, from, to] of [
+    ['a code token', 'curl -X POST', 'curl -X PUT'],
+    ['the whitespace before a comment', 'reset   # gerekirse', 'reset # gerekirse'],
+    ['a line added', 'rm -rf .cache\n', 'rm -rf .cache\nls\n'],
+    ['a comment that moved into the code', '# Tüm filtreleri sıfırla (birden fazla olabilir)\n', 'echo Tüm filtreleri sıfırla\n'],
+    ['a JSON value', '"owner": "Олена Коваль"', '"owner": "Olena Koval"'],
+  ]) {
+    r = await check(edit(TR_CODE, from, to));
+    assert.deepEqual([r.code, r.checks], [1, ['code']], name);
+  }
+
+  r = await check(edit(TR_CODE, '# Tüm filtreleri sıfırla (birden fazla olabilir)', '# Скинути всі фільтри (їх може бути кілька)'));
+  assert.deepEqual([r.code, r.checks], [1, ['ukrainian-letters']]);
+  assert.deepEqual(r.failures[0].hits.map((h) => [h.line, h.letters]), [[TR_CODE.split('\n').indexOf('# Tüm filtreleri sıfırla (birden fazla olabilir)') + 1, 'ї']]);
+  // Cyrillic without a Ukrainian-only letter in a comment of a Latin-script translation is a warning, as in prose.
+  r = await check(edit(TR_CODE, '# gerekirse tekrarlayın', '# повторіть за потреби'));
+  assert.equal(r.code, 0);
+  assert.match(r.warnings.join('\n'), /Cyrillic text remains/);
+
+  // ru: its own letters may stay in a comment, and the JSON value's «ї» is data, not a leftover.
+  const RU_FILE = 'i18n/ru/docusaurus-plugin-content-docs/current/filters/filters.md';
+  await f.write(RU_FILE, RU + CODE_TAIL_UA.replace('# Скинути всі фільтри (їх може бути кілька)', '# Сбросить все фильтры (их может быть несколько)').replace('# повторіть за потреби', '# повторите при необходимости'));
+  r = await cli(f.dir, 'check', 'filters', '--locales', 'ru');
+  assert.equal(r.code, 0, JSON.stringify(r.out.results[0].failures));
+});
+
+test('locale-sync translates a Ukrainian comment through blocks and apply, keeps the code, and records the page (AC-3)', async () => {
+  const f = await fixtureRepo();
+  await f.write('docs/filters/filters.md', UA_CODE);
+  await f.commit();
+  await f.write(`${TR_ROOT}/filters/filters.md`, TR_CODE);
+  await writeState(f, { tr: trEntry(gitBlobHash(UA_CODE)) });
+  assert.equal((await cli(f.dir, 'link-assets', 'filters', '--locales', 'tr')).code, 0);
+  const ua2 = edit(edit(UA_CODE, '# повторіть за потреби', '# повторіть, якщо сервер не відповів'), 'rm -rf .cache', 'rm -rf .cache/tmp');
+  await f.write('docs/filters/filters.md', ua2);
+  await f.commit();
+
+  const b = (await cli(f.dir, 'blocks', 'filters', '--locales', 'tr')).out.results[0];
+  assert.equal(b.mode, 'incremental');
+  assert.deepEqual(b.changes.map((c) => [c.kind, c.verbatim]), [['code', false], ['code', true]]);
+  const [bash] = b.changes;
+  assert.ok(bash.target.text.includes('# gerekirse tekrarlayın'), 'the worker sees the current translation of the block');
+  await f.write('t.json', { [bash.id]: bash.target.text.replace('# gerekirse tekrarlayın', '# sunucu yanıt vermezse tekrarlayın') });
+  let r = await cli(f.dir, 'apply', 'filters', '--locales', 'tr', '--translations', 't.json', '--out', 'cand.md');
+  assert.equal(r.code, 0, JSON.stringify(r.out));
+  const want = edit(edit(TR_CODE, '# gerekirse tekrarlayın', '# sunucu yanıt vermezse tekrarlayın'), 'rm -rf .cache', 'rm -rf .cache/tmp');
+  assert.equal(await f.read('cand.md'), want, 'the comment is translated, the copied block is the UA code');
+  r = await cli(f.dir, 'record', 'filters', '--locales', 'tr', '--candidate', 'cand.md');
+  assert.equal(r.code, 0, JSON.stringify(r.out));
+
+  // A worker that changes the code while translating the comment is stopped by the checks.
+  await f.write('docs/filters/filters.md', edit(ua2, '# Скинути всі фільтри', '# Скинути фільтри'));
+  await f.commit();
+  const b2 = (await cli(f.dir, 'blocks', 'filters', '--locales', 'tr')).out.results[0];
+  await f.write('t.json', { [b2.changes[0].id]: b2.changes[0].target.text.replace('# Tüm filtreleri', '# Filtreleri').replace('-X POST', '-X PUT') });
+  assert.equal((await cli(f.dir, 'apply', 'filters', '--locales', 'tr', '--translations', 't.json', '--out', 'cand.md')).code, 0);
+  r = await cli(f.dir, 'record', 'filters', '--locales', 'tr', '--candidate', 'cand.md');
+  assert.notEqual(r.code, 0);
+  assert.ok(JSON.stringify(r.out).includes('"code"'), JSON.stringify(r.out));
+});
+
+test('blocks --redo and terms --usage: a translated comment is reader text, data is not (AC-3)', async () => {
+  const f = await fixtureRepo();
+  await f.write('docs/filters/filters.md', UA_CODE);
+  await f.commit();
+  await f.write(`${TR_ROOT}/filters/filters.md`, TR_CODE);
+  await writeState(f, { tr: trEntry(gitBlobHash(UA_CODE)) });
+  assert.equal((await cli(f.dir, 'link-assets', 'filters', '--locales', 'tr')).code, 0);
+  const at = (s) => TR_CODE.split('\n').findIndex((l) => l.includes(s)) + 1;
+
+  // The UA block decides: its comments are Ukrainian, so the translated block is picked; the JSON and the sh block are copied.
+  const r = (await cli(f.dir, 'blocks', 'filters', '--locales', 'tr', '--redo', `${at('curl -X POST')},${at('"owner"')},${at('rm -rf')}`)).out.results[0];
+  assert.deepEqual(r.changes.map((c) => [c.kind, c.ua.text.split('\n')[1]]), [['code', '# Скинути всі фільтри (їх може бути кілька)']]);
+  assert.deepEqual(r.skipped.map((x) => x.reason), ['code or import, copied verbatim', 'code or import, copied verbatim']);
+
+  // terms --usage finds a term in a comment, never in the code or the data.
+  const u = (await cli(f.dir, 'terms', '--usage', 'tekrarlayın', 'example', '--locales', 'tr')).out;
+  assert.deepEqual(u.pages[0].hits.map((h) => [h.line, h.match]), [[at('gerekirse tekrarlayın'), ['tekrarlayın']]]);
+  assert.equal(u.pages[0].redo, String(at('```bash')));
+});
+
 // ------------------------------------------------------------------ small helpers
 
 test('setLastUpdate changes only the target date, in the UA date format', () => {

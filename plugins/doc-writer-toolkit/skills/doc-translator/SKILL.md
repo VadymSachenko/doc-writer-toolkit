@@ -36,6 +36,7 @@ Load these files at the start of the task.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` — rank-0 project formatting conventions. Core section and English section apply. Outranks this skill's own body for any rule both cover.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` — the shared page-to-page link contract. Translation **preserves an already-correct route verbatim** (see "Never translate" and Step 4); do not re-derive or localize a path.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/heading-anchors.md` — the shared heading-id contract (see Heading IDs below).
+- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/code-blocks.md` — the shared rule for code blocks: which text inside a fence is translated (diagram labels, comments, tree descriptions) and which stays byte for byte (the code and the data). Follow it; do not restate it here.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` — the shared slug/title convention. The EN and UA pages share one path/filename; the EN `title:` is the semantic equivalent of the UA title. Never re-slug or move the page.
 - The Ukrainian source file, at the path resolved above.
 
@@ -54,11 +55,12 @@ Load these files at the start of the task.
 - Admonition body text
 - Table cell text that is prose
 - Link anchor text (but not the URL itself)
+- Inside code blocks, only the reader text `code-blocks.md` lists: diagram labels, code comments and the descriptions of a folder tree
 
 **Never translate:**
-- Code blocks (` ``` `) — preserve byte-for-byte, including comments inside
+- The code part of a code block (` ``` `): the code, ids, keywords, arrows, comment markers, whitespace and line count stay byte-for-byte (`code-blocks.md`)
 - Inline code (`` `backtick` ``) — preserve exactly
-- JSON keys and values inside code blocks
+- JSON keys and values, and every other data value inside code blocks, Ukrainian letters included
 - HTTP methods and paths (`POST /transaction/create`)
 - Reader-replaced placeholders: `*`\``UPPER_CASE`\``*`
 - MDX component names and attribute names (`<details>`, `<summary>`, `:::note`, `<Icon>`, etc.)
@@ -276,7 +278,7 @@ Before translating, produce an internal checklist (do not show to the user unles
 
 Produce the full English page. Apply every rule in the **What to translate** and **Translation rules** sections above.
 
-Do not alter page structure, section order, heading levels, admonition types, code samples, or link paths.
+Do not alter page structure, section order, heading levels, admonition types, code samples (beyond the reader text `code-blocks.md` lists), or link paths.
 
 ### Step 4 — Self-review
 
@@ -284,7 +286,7 @@ Before saving, check:
 
 - Every canonical UA term in prose has been replaced with its EN glossary counterpart
 - No Ukrainian prose sentences remain (code blocks and inline code excepted)
-- No Cyrillic characters appear outside code blocks
+- No Cyrillic characters appear outside code blocks, and no Ukrainian letter is left in a diagram label, a code comment or a tree description (`code-blocks.md`); Cyrillic in a block's data stays
 - No passive constructions where an active alternative is natural
 - No future tense (`will`, `would`) in descriptions of current behavior
 - No marketing adjectives
@@ -293,7 +295,8 @@ Before saving, check:
 - In a project with more than one root pair, the output path is under the source page's pair EN i18n root
 - The EN `title:` is the semantic equivalent of the UA title, and an EN `sidebar_label:` of the UA one (`naming-conventions.md`); the output path, filename, and any `slug:` field are unchanged from the source's shared path — the page was not re-slugged or moved
 - Every page-to-page link path is byte-identical to the UA source (`internal-links.md`); no route was localized or "corrected"
-- All code blocks are byte-for-byte identical to the source
+- Each diagram keeps its structure: the same ids, keywords, arrows, directives, styling lines and number of lines as the source; only its labels changed (`code-blocks.md`)
+- Every other code block keeps its code part byte-for-byte: the code, the data, the comment markers, the whitespace and the number of lines; only its comments and tree descriptions changed
 - No `{/* #anchor */}` comments appear in EN headings
 - Every EN heading's id, generated from its text or explicit `\{#id}` (an existing `{#id}` counts too), equals its UA heading's comment id (`heading-anchors.md`)
 - No explicit `\{#id}` contains a `{…}` placeholder (`heading-anchors.md` rule 9); a placeholder in the UA comment is reported, not carried into EN
@@ -301,7 +304,7 @@ Before saving, check:
 - The product's own name follows `glossary-en.md`'s rule for translated pages
 - `## Передумови` translated as `## Prerequisites` with the correct EN sentence (Variant A if a single reference section; Variant B if multiple)
 - After colons in prose: first word is capitalized if it is a regular word (not a UI element name, proper name, or code value)
-- No spaces around em dashes: `word—word`, not `word — word`
+- No spaces around em dashes in prose: `word—word`, not `word — word` (inside a code block the ` — ` of a folder tree stays, `code-blocks.md`)
 - `ви можете виконувати такі операції` → `you can do the following` (never "perform the following operations")
 - No "side menu" (use "sidebar"); no "allows you to" (use "lets you"); no "via" (use "through" or "by using"); no "type" for text input (use "enter")
 - No "in order to" (use "to"); no "may" for possibility (use "might" or "can"); no "once" when meaning "after"

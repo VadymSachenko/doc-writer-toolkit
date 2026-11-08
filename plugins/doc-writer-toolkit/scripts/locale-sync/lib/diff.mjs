@@ -1,4 +1,4 @@
-import { anchorPath, boldSpans, isLeaf, nodeText, PROSE_FM_KEYS, sectionPath, sections, splitCode, wordCount } from './parse.mjs';
+import { anchorPath, boldSpans, isLeaf, isVerbatimNode, nodeText, PROSE_FM_KEYS, sectionPath, sections, splitCode, wordCount } from './parse.mjs';
 import { createSlugger, EXPLICIT_ID, slugify, slugSource } from '../../doc-align/lib/headings.mjs';
 
 // ---------------------------------------------------------------- A -> B (what changed in the UA source)
@@ -226,8 +226,6 @@ function kindOf(g) {
   const t = nodes[0].type;
   return t === 'row' ? 'table-row' : t;
 }
-
-const isVerbatimNode = (page, n) => n.type === 'import' || (n.type === 'code' && !/mermaid/i.test(page.lines[n.start]));
 
 // ---------------------------------------------------------------- splices (heading-anchors.md, "Id-only changes")
 
