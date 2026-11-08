@@ -53,6 +53,9 @@ test('AC-3: a hand commit that changed UA gets one style check, listed with its 
   await assert.rejects(rec({ reviewed: [{ sha: HAND }], edits: [one], commits: [FIX] }), (e) => e.exitCode === 2 && /give "summary"/.test(e.message));
   await assert.rejects(rec({ reviewed: [{ sha: HAND }], summary: { id: 7801 }, edits: [one], posted: [7801] }), (e) => e.exitCode === 2 && /give the "commits" that pushed them/.test(e.message));
   await assert.rejects(rec({ reviewed: [{ sha: HAND }], summary: { id: 7801 }, edits: [one], commits: [FIX] }), (e) => e.exitCode === 2 && /the summary comment goes in "posted"/.test(e.message));
+  // A commit pushed is a fix on the summary's list: no commits without their edits and the summary.
+  await assert.rejects(rec({ reviewed: [{ sha: HAND }], commits: [FIX] }), (e) => e.exitCode === 2 && /"commits" pushed fixes: give their "edits" and the "summary"/.test(e.message));
+  await assert.rejects(rec({ reviewed: [{ sha: HAND }], summary: { id: 7801 }, edits: [], commits: [FIX], posted: [7801] }), (e) => e.exitCode === 2 && /give their "edits"/.test(e.message));
   assert.equal(read(w, '801').prs[0].styleChecked?.length ?? 0, 0, 'nothing written by a refused record');
 
   // The check fixed a rule the hand edit broke: its fix is a pipeline commit, the head moves to it.
@@ -164,11 +167,12 @@ test('a check that was running when the owner moved the card keeps its fixes: th
   const w = world({ cards: [c], prs: [forgePr], git: vcs(state) });
   ledger(w, c, { stages: BASE, prs: [{ repo: 'guide-docs', number: 89, targets: ['guide'], review: 'sme', stage: 'translation', pipelineCommits: [OLD], chain, readyForMerge: [{ head: OLD, at: ago(5), seq: 5 }], approval: { head: FIX, at: ago(1) }, edits: DESC }] });
   const fix = { n: 3, page: PAGE, block: 'Крок 1', before: 'Натисніть на кнопку **Зберегти**', after: 'Натисніть **Зберегти**', rule: 'gdsg: ui-elements §2' };
-  const out = await runRecord({ settings: w.settings, clients: w.clients(), key: '809', stage: 'styleCheck', status: 'done', pr: 'guide-docs#89', result: { reviewed: [{ sha: HAND }], summary: { id: 7891 }, edits: [fix], commits: [FIX], posted: [7891] }, now: Date.now() });
+  const out = await runRecord({ settings: w.settings, clients: w.clients(), key: '809', stage: 'styleCheck', status: 'done', pr: 'guide-docs#89', result: { reviewed: [{ sha: HAND }], summary: { id: 7891 }, edits: [fix], commits: [FIX], posted: [7891] }, note: 'one fix', now: Date.now() });
   assert.equal(out.warnings.length, 1);
   assert.match(out.warnings[0], /^style fixes landed after the card was moved on \(.+\): they are on the summary's numbered list \(comment 7891\) and can be undone by number$/);
   const l = read(w, '809');
-  assert.deepEqual([l.log.at(-1).note, l.prs[0].steps.styleCheck.note], [out.warnings[0], out.warnings[0]]);
+  const both = `one fix; ${out.warnings[0]}`;
+  assert.deepEqual([l.log.at(-1).note, l.prs[0].steps.styleCheck.note], [both, both], 'appended to the session\'s own note');
   assert.equal(fmt((await w.one('809')).steps[0]), 'resync guide-docs#89', 'the chain goes on with the fixes: no move back');
 });
 

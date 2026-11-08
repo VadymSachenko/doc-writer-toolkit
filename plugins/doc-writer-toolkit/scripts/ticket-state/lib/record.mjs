@@ -401,6 +401,8 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         if ((result.edits?.length || result.notes?.length) && !result.summary?.id) throw new CliError('styleCheck: "edits" and "notes" are in the summary comment: give "summary": { "id" } too', { code: 2 });
         // A fix is a commit pushed, and its list a comment posted: neither is recorded without the other.
         if (result.edits?.length && !result.commits?.length) throw new CliError('styleCheck: "edits" are fixes: give the "commits" that pushed them', { code: 2 });
+        // And the other way: a commit pushed is a fix the owner reads on the summary's list, posted.
+        if (result.commits?.length && (!result.edits?.length || !result.summary?.id)) throw new CliError('styleCheck: "commits" pushed fixes: give their "edits" and the "summary" that listed them', { code: 2 });
         const postedIds = (Array.isArray(result.posted) ? result.posted : []).map((p) => String(typeof p === 'object' ? p?.id : p));
         if (result.summary?.id && !postedIds.includes(String(result.summary.id))) throw new CliError('styleCheck: the summary comment goes in "posted" too, so the pipeline never answers it', { code: 2 });
         if (result.summary) l.summaries.push({ repo: pr.repo, pr: pr.number, at, ...result.summary, ...(result.notes?.length ? { notes: result.notes } : {}) });
@@ -416,8 +418,9 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         if (result.commits?.length) {
           const card = await cardNow(ref);
           if (card.status !== 'finalReview') {
-            record.note = `style fixes landed after the card was moved on (${card.list?.name ?? card.status}): they are on the summary's numbered list (comment ${result.summary?.id}) and can be undone by number`;
-            warnings.push(record.note);
+            const moved = `style fixes landed after the card was moved on (${card.list?.name ?? card.status}): they are on the summary's numbered list (comment ${result.summary?.id}) and can be undone by number`;
+            record.note = record.note ? `${record.note}; ${moved}` : moved;
+            warnings.push(moved);
           }
         }
         return;
