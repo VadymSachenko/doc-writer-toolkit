@@ -57,8 +57,12 @@ export const CARD_STATUS_OF = {
   readyForMerge: 'finalReview',
   merged: 'done',
 };
-// The stage label a PR carries at each stage (a target's `labels` key), or null to leave it.
+// The stage label a PR carries at each stage (a target's `labels` key), or null to leave it. `translation` here is the
+// fallback for a target with no translation label; `stageLabelOf` is what the runner and the records use.
 export const LABEL_OF = { writing: 'inProgress', reworkWait: 'inProgress', smeReview: 'review', finalReview: 'finalReview', translation: 'finalReview', readyForMerge: 'finalReview' };
+// The `labels` key a PR at this stage carries on a target: `translation` when the target names a label for it (the PR
+// is in the chain), else the final review's, as before the translation label existed. Null: leave the label.
+export const stageLabelOf = (stage, target) => (stage === 'translation' && target?.labels?.translation ? 'translation' : LABEL_OF[stage] ?? null);
 
 // Where a person's move of the card puts the PRs at the card's stage.
 export const PR_STAGE_OF_STATUS = { inProgress: 'reworkWait', smeReview: 'smeReview', finalReview: 'finalReview', translation: 'translation' };

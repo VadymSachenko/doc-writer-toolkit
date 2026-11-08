@@ -6,7 +6,8 @@ import { CliError } from './errors.mjs';
 // It takes the `forge` object and the `targets` list (repo, review kind, reviewers, stage labels).
 export { deepMerge, localSettingsPath, settingsFile };
 
-export const STAGES = ['inProgress', 'review', 'finalReview'];
+// `translation` is optional: a target with no label for it keeps the final review label through the chain.
+export const STAGES = ['inProgress', 'review', 'finalReview', 'translation'];
 
 const isObject = (v) => v && typeof v === 'object' && !Array.isArray(v);
 const fail = (msg) => {
@@ -46,7 +47,7 @@ export function validateForge(forge, targets) {
     if (repoOwner !== owner || !repo) fail(`targets[${i}].repo '${repoRaw}' is not in forge.owner '${owner}'`);
     const labels = {};
     if (t.labels !== undefined) {
-      if (!isObject(t.labels)) fail(`targets[${i}].labels must be { inProgress, review, finalReview }`);
+      if (!isObject(t.labels)) fail(`targets[${i}].labels must be { inProgress, review, finalReview, translation? }`);
       for (const [k, v] of Object.entries(t.labels)) {
         if (!STAGES.includes(k)) fail(`targets[${i}].labels.${k} is not a stage (${STAGES.join(', ')})`);
         labels[k] = str(v, `targets[${i}].labels.${k}`);

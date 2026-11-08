@@ -31,7 +31,7 @@ Commands
   suggest --repo <r> --number <n> --comment <id> --replacement <t> [--body <t>]   A reply with a suggestion block.
   comment --repo <r> --number <n> --body <t> [--unless-header <h> [--since <time>]]   A comment in the conversation.
   add-label --repo <r> --number <n> --label <name>, remove-label --repo <r> --number <n> --label <name>
-  set-stage-label --target <id> --number <n> --stage inProgress|review|finalReview [--repo <r>]
+  set-stage-label --target <id> --number <n> --stage inProgress|review|finalReview|translation [--repo <r>]
 
 Options
   --root <dir>            the host repo (default: cwd); the settings file is read from it
