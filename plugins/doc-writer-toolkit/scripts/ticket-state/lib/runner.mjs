@@ -18,7 +18,7 @@ import { ROLES } from './settings.mjs';
 import { cleanupTicket } from './cleanup.mjs';
 import { removeClosedMarkdown } from './import.mjs';
 import { DOWNLOAD_DIRS_VARIABLE, ROLE_SESSION_VARIABLE, childEnv, sessionChildEnv } from './env.mjs';
-import { checkClone, clonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureReadCheckout, ensureWorktree, prsForStep, worktreePath } from './worktree.mjs';
+import { TREE_STAGES, checkClone, clonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureReadCheckout, ensureWorktree, prsForStep, worktreePath } from './worktree.mjs';
 import { BUSY_NAME, LOCK_NAME, busyEnded, freeBrowserLock } from './browser-lock.mjs';
 import { HOOK_VARIABLE, commandsOfRules, hookSettings } from './role-hook.mjs';
 import { parseClaudeConfig } from '../../ui-labels/lib/config.mjs';
@@ -1211,15 +1211,19 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         // The code as fetched now. One that can't be fetched or checked out is said in the brief, and stops no session.
         // With no other session running (no live lock but this step's), the checkouts of other commits go.
         const mine = new Set([step.group ?? step.keys[0], ...held]);
-        const othersRunning = allLocks(settings.state, clock()).some((l) => l.live && !mine.has(l.group));
+        const others = allLocks(settings.state, clock()).filter((l) => l.live && !mine.has(l.group));
+        const othersRunning = others.length > 0;
         // A step with no worktree reads the pages of the ticket's targets at `origin/<base>`, in a read checkout of each
         // clone, never in the owner's working tree (lib/worktree.mjs, `ensureReadCheckout`). One that can't be made is
         // said in the run log, and the session reads that clone as it stands: one off its base or behind its origin is
-        // said in the brief, with how to read the base instead (`checkClone`). Neither stops the session.
+        // said in the brief, with how to read the base instead (`checkClone`). Neither stops the session. Only another
+        // session that may read a read checkout keeps it where it is: a lock of a stage with no worktree, or one that
+        // names no stage (a hand run's).
+        const othersReading = others.some((l) => !l.stage || (!TREE_STAGES.includes(l.stage) && l.stage !== 'triage'));
         const clones = (!trees.length && step.role !== 'triage' ? targetsOf(settings, step.keys.map((k) => readLedger(settings.state, k))) : []).map((t) => {
           const c = (io.checkClone ?? checkClone)(settings, t);
           if (!c) return null;
-          const r = (io.ensureReadCheckout ?? ensureReadCheckout)(settings, t, { othersRunning });
+          const r = (io.ensureReadCheckout ?? ensureReadCheckout)(settings, t, { othersRunning: othersReading });
           if (!r.error) return { ...c, read: r };
           say({ kind: 'readCheckout', group: step.group, keys: step.keys, stage: step.stage, repo: c.repo, outcome: 'failed', note: `no read checkout of ${c.repo}, so the session reads its clone: ${r.error}`.slice(0, 400) });
           return { ...c, readError: r.error };

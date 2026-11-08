@@ -302,7 +302,7 @@ export function checkClone(settings, target) {
 // detached at `origin/<base>` as `checkClone` fetched it, under the state folder (`<state>/read/<target id>`). It is kept
 // across runs and re-pointed (`git checkout --detach`); one that won't move, or has changes to tracked files, is removed
 // and added again. It is the runner's, not a ticket's: no ledger records it, the close step never removes it, and the
-// session can't write in it (`writeDeniedFor`). While another session runs (`othersRunning`), one at another commit is
+// session can't write in it (`writeDeniedFor`). While another session that may read it runs (`othersRunning`), one at another commit is
 // left where it is, so pages never change under a session still reading them; this session then reads the clone with
 // the note, as before. The clone itself is never checked out, pulled or reset: only its list of worktrees changes.
 // Returns { path, commit, ref } or { error } (the brief then falls back to the clone and its note).

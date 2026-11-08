@@ -13,6 +13,7 @@ import { makeGit } from '../lib/world.mjs';
 import { commandFor } from '../lib/runner.mjs';
 import { spentOf } from '../lib/limits.mjs';
 import { writeLedger } from '../lib/ledger.mjs';
+import { releaseLock, takeLock } from '../lib/locks.mjs';
 import { localDate, renderReport } from '../lib/report.mjs';
 
 // The ticket worktree (lib/worktree.mjs): the runner makes it, with the clone's node_modules linked and excluded, so
@@ -1114,7 +1115,7 @@ test('a plan step with the target clone on another branch runs on a read checkou
   assert.match(c.notes.join(' '), /at a detached HEAD \(\w+\), not on its base main/);
 });
 
-test('a second run re-points the read checkout at the base merged since; one the runner can\'t make leaves the session on the clone with its off-base note, said in the run log', async () => {
+test('a second run re-points the read checkout at the base merged since, unless another plan session may be reading it; one the runner can\'t make leaves the session on the clone with its off-base note, said in the run log', async () => {
   const t = planTicket({ onBase: false });
   const before = t.clone.g('rev-parse', 'HEAD');
   const first = await briefsOf(t);
@@ -1125,13 +1126,25 @@ test('a second run re-points the read checkout at the base merged since; one the
   // The plan step is due again (the stand-in session recorded nothing): a fresh ledger at the same stage.
   const again = () => ledger(t.w, t.c, { stages: { start: 'done' }, left: 'same', triage: { verdict: 'docs-required', targets: ['guide'], size: 'edit' } });
   again();
+  // Another group's session on a worktree stage reads no read checkout: it doesn't keep this one from moving.
+  takeLock(t.w.settings.state, { group: 'other-write', kind: 'schedule', stage: 'write', leaseMinutes: 120, now: NOW });
   const second = await briefsOf(t);
+  releaseLock(t.w.settings.state, 'other-write');
   assert.ok(second.sessions.length >= 1);
   assert.equal(second.sessions[0].pages[rc], '# Сторінка\n\nЗлито.\n', 'the page merged since');
   assert.match(second.briefs[0], new RegExp(`- guide-docs: ${rc}, origin/main at ${merged.slice(0, 7)};`));
   assert.ok(fs.existsSync(path.join(rc, 'marker.local.md')), 'the same folder, re-pointed, not made again');
   assert.equal(listWorktrees(t.clone.dir).filter((x) => canon(x.path) === canon(rc)).length, 1);
   assert.deepEqual([t.clone.g('symbolic-ref', '--short', 'HEAD'), t.clone.g('rev-parse', 'HEAD')], ['ticket-71', before], 'the clone never moves');
+  // Another group's plan session may be reading it: a newer base leaves it where it is, and this session reads the clone.
+  mergeOnForge(t.bare, { 'docs/y.md': '# Нова\n' });
+  takeLock(t.w.settings.state, { group: 'other-plan', kind: 'schedule', stage: 'plan', leaseMinutes: 120, now: NOW });
+  again();
+  const busy = await briefsOf(t);
+  releaseLock(t.w.settings.state, 'other-plan');
+  assert.ok(busy.sessions.length >= 1);
+  assert.equal(t.clone.g('-C', rc, 'rev-parse', 'HEAD'), merged, 'not moved under the other session');
+  assert.match(busy.briefs[0], /- guide-docs: .*guide-docs; no read checkout \(another session may be reading it, so it stays at \w{7}\); on the branch ticket-71/);
   // Its folder taken by something else (a person's files, say): no read checkout, and the step still runs, on the
   // clone with today's note; the run log says why.
   t.clone.g('worktree', 'remove', '--force', rc);
@@ -1276,6 +1289,11 @@ test('the read checkout of a clone behind origin has the page merged since; one 
   assert.match(held.error, /another session may be reading it, so it stays at \w{7}/);
   assert.ok(!fs.existsSync(path.join(r.path, 'docs/y.md')));
   assert.equal(ensureReadCheckout(t.w.settings, target).commit, merged, 'alone again, it moves');
+  // Its folder gone (removed by hand): the stale registration is pruned and the read checkout made again.
+  fs.rmSync(r.path, { recursive: true, force: true });
+  const back = ensureReadCheckout(t.w.settings, target);
+  assert.deepEqual([back.error, back.commit, pageIn(back.path, 'docs/y.md')], [undefined, merged, '# Нова\n']);
+  assert.equal(listWorktrees(t.clone.dir).filter((x) => canon(x.path) === canon(r.path)).length, 1);
 });
 
 test('no read checkout when its folder holds something else, the base was never fetched or the target id is no plain name: an error, and nothing touched', () => {

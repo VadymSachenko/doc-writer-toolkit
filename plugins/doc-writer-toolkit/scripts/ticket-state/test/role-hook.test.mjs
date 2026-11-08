@@ -224,6 +224,9 @@ test('a step with no worktree: a read checkout is read-only to mkdir, even where
   assert.ok(c.sources.includes(path.resolve(settings.root)), 'the hub is a target');
   assert.match(refusalOf(`mkdir -p ${rc}/docs/a/.sources/frames`, c, { cwd: settings.root }), /mkdir in a read checkout, which is read-only/);
   assert.equal(refusalOf(`mkdir -p ${clone}/docs/a/.sources/frames`, c, { cwd: settings.root }), null, 'the clone\'s .sources/ stays open');
+  // The reads the brief names run there.
+  for (const line of [`git -C ${rc} show HEAD:docs/x/index.md`, `git -C ${rc} log -1`, `cd ${rc}`, `ls ${rc}/docs`]) assert.equal(refusalOf(line, c, { cwd: settings.root }), null, line);
+  assert.ok(refusalOf(`git -C ${rc} commit -m x`, c, { cwd: settings.root }), 'never a commit there');
   // A step with a worktree has no read checkout.
   assert.deepEqual(JSON.parse(commandFor(stepOf('writer', w, [TREE], { clones }), settings, { agentsPath: '/x/agents.json', roots: ROOTS }).env[HOOK_VARIABLE]).read, []);
 });
