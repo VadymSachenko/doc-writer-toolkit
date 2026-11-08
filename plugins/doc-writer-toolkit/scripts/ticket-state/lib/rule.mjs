@@ -412,16 +412,20 @@ function personMoved(l, w, out, prs) {
   // ready (a hand edit the rule had no time to send back): the owner read what they wrote. A commit of the pipeline's
   // in that range (an answer to a comment, pushed while the owner moved the card) is not read yet: that PR stays, and
   // row 8 sends it back to the owner's queue.
-  const takeReady = to === 'translation' ? prs.map((p) => ownEditsSinceReady(p, w)).filter(Boolean) : [];
+  const takeReady = to === 'translation' ? prs.map((p) => ownEditsSinceReady(l, p, w)).filter(Boolean) : [];
   out.steps.push(step('follow', { to, ...(PR_STAGE_OF_STATUS[to] ? { prStage: PR_STAGE_OF_STATUS[to] } : {}), ...(takeReady.length ? { takeReady } : {}) }));
   return out;
 }
 
-function ownEditsSinceReady(p, w) {
+// A model session on the PR since it was marked ready, done or failed, may have pushed what no record names (an answer
+// whose record failed): then the change isn't known to be the owner's alone, and the PR is not taken.
+function ownEditsSinceReady(l, p, w) {
   const { pr, world } = p;
   const ready = pr.readyForMerge?.at(-1);
   const head = world?.headCommit;
   if (!pr.number || p.merged || p.stage !== 'readyForMerge' || !ready?.head || !head || head === ready.head) return null;
+  const after = (r) => (ready.seq !== undefined && r.seq !== undefined ? r.seq > ready.seq : String(r.start ?? r.at ?? '') > String(ready.at ?? ''));
+  if ((l.runs ?? []).some((r) => r.role && r.pr === prId(pr) && after(r))) return null;
   const target = w.settings.targets.find((t) => t.id === pr.targets?.[0]) ?? w.settings.targets.find((t) => t.repo === pr.repo);
   const commits = w.git?.commitsBetween?.(target, ready.head, head) ?? null;
   const mine = (sha) => (pr.pipelineCommits ?? []).some((c) => c && sha.startsWith(String(c)));

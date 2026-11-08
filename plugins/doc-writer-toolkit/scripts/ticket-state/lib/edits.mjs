@@ -113,7 +113,9 @@ const LEAD = /^\s*(?:[-*•]\s*)?(?:(?:пункт|пункти|п\.|item|items|�
 const ITEM = new RegExp(`${LEAD.source}(\\d{1,4})(?:\\s*(?:[—–:)]|\\.(?!\\d))\\s*|\\s+-\\s+|\\s*$)([\\s\\S]*)$`, 'i');
 const GROUP = new RegExp(`${LEAD.source}(\\d{1,4}(?:\\s*(?:,|і|й|и|та|and|&|-|–)\\s*\\d{1,4})+)\\s*(?:[—–:)]|\\.(?!\\d)|\\s-\\s)([\\s\\S]*)$`, 'i');
 const RESTORE = /^(?:(?:(?:поверн|верн|відкот|відкоч|відкат|скасу)\S*|undo|revert|restore)(?:\s+(?:як\s+було|назад|було|«було»|старий\s+текст))?|як\s+було|назад)(?:,?\s*(?:будь\s+ласка|please))?$/i;
-const KEEP = /^(?:ок|окей|ok|okay|так|добре|гаразд|норм|нормально|залиш\S*|лиши|хай\s+буде|не\s+треба|не\s+потрібно|не\s+змінюй|keep|fine)(?:,?\s*(?:дякую|thanks))?$/i;
+// «не треба» may say "leave it" or "undo it": asked back.
+const EITHER = /^(?:не\s+треба|не\s+потрібно|не\s+варто|не\s+так)$/i;
+const KEEP = /^(?:ок|окей|ok|okay|так|добре|гаразд|норм|нормально|залиш\S*|лиши|хай\s+буде|не\s+змінюй|keep|fine)(?:,?\s*(?:дякую|thanks))?$/i;
 
 // One item's words: one quoted text and nothing else is the owner's own text, verbatim; a restore word puts «було»
 // back; a word of assent keeps the item; anything else is a description to apply; nothing at all is unclear.
@@ -123,6 +125,7 @@ function kindOf(rest) {
   if (closeOf(bare, 0) === bare.length - 1) return { kind: 'verbatim', text: bare.slice(1, -1) };
   if (RESTORE.test(bare)) return { kind: 'restore', text: bare };
   if (KEEP.test(bare)) return { kind: 'keep', text: bare };
+  if (EITHER.test(bare)) return { kind: 'either', text: bare };
   return { kind: 'describe', text: rest.trim() };
 }
 
@@ -198,6 +201,7 @@ export function resolveReply(parsed, edits) {
     if (lists.length > 1) return ask(`item ${it.n} is in ${lists.length} lists (${lists.map(listName).join(', ')})`);
     if (hits.some((e) => e.differs)) return ask(`item ${it.n} reads differently in the records of the cards that share this PR`);
     if (it.kind === 'unclear') return ask(`the reply names item ${it.n} with nothing to do`);
+    if (it.kind === 'either') return ask(`${JSON.stringify(it.text)} on item ${it.n} may mean keep it or undo it`);
     const e = hits.at(-1);
     if (it.kind === 'keep') return { n: it.n, do: 'keep' };
     // A later item changed the same block: its «стало» is not what the page reads now.

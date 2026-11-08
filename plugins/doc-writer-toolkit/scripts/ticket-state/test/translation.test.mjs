@@ -639,7 +639,7 @@ test('the reply\'s traps: no bare-space separator, a general line after a restor
   assert.match(own[0].why, /reads as a numbered list of its own/);
   assert.deepEqual(resolveReply(parseReply('1. коротше\n2. прибери «також»'), EDITS).map((x) => x.do), ['rewrite', 'rewrite'], 'a quote in an item marks a reply to the list');
   assert.deepEqual(resolveReply(parseReply('1. коротше\n2 — поверни'), EDITS).map((x) => x.do), ['rewrite', 'restore']);
-  assert.deepEqual(resolveReply(parseReply('3 — ок; 4 — залиш; 6 — не треба'), EDITS).map((x) => x.do), ['keep', 'keep', 'keep'], 'an assent changes nothing');
+  assert.deepEqual(resolveReply(parseReply('3 — ок; 4 — залиш; 6 — не треба; 8 — не потрібно'), EDITS).map((x) => x.do), ['keep', 'keep', 'ask', 'ask'], 'an assent changes nothing; «не треба» may mean undo, so it is asked back');
 });
 
 test('a restore of an item whose block a later item changed is asked back; a rewrite names the later items; the words outside the items reach the brief', async () => {
@@ -683,4 +683,29 @@ test('a PR with two cards: the reply is read against both cards\' lists, and an 
   const s = (await w.status()).tickets.find((t) => t.key === '579').steps[0];
   assert.equal(s.nextEdit, 11, 'the numbers go on from both records');
   assert.deepEqual(s.replies[0].items.map((x) => [x.n, x.do, x.why ?? null]), [[5, 'ask', 'item 5 reads differently in the records of the cards that share this PR'], [10, 'restore', null]]);
+});
+
+test('a move to In translation takes a ready PR along only for the owner\'s own commits with no session since ready, and the other card of the PR goes with it', async () => {
+  const old = 'a'.repeat(40);
+  const c = { mine: card({ number: 591, status: 'translation' }), session: card({ number: 592, status: 'translation' }), a: card({ number: 593, status: 'translation' }), b: card({ number: 594, status: 'finalReview' }) };
+  const vcs = { branchCommits: () => [], changedUnder: (t, from, to) => (from === old && to === HEAD ? ['docs/a.md'] : []), commitsBetween: (t, from, to) => (from === old && to === HEAD ? [HEAD] : null), pagesOf: () => [] };
+  const w = world({ cards: Object.values(c), prs: [91, 92, 93].map((number) => pr({ repo: 'guide-docs', number, headCommit: HEAD })), git: vcs });
+  const ready = (number, extra = {}) => ({ stages: BASE, left: 'finalReview', prs: [{ repo: 'guide-docs', number, targets: ['guide'], review: 'sme', stage: 'readyForMerge', pipelineCommits: ['e0e0e0e'], chain: chainDone(old), readyForMerge: [{ head: old, at: ago(5), seq: 5 }] }], ...extra });
+  ledger(w, c.mine, ready(91));
+  // An answer session ran on the PR after it was marked ready; its record failed, so its commit is in no list.
+  ledger(w, c.session, { ...ready(92), runs: [{ seq: 6, stage: 'answerComments', pr: 'guide-docs#92', role: 'writer', start: ago(2), outcome: 'failed' }] });
+  ledger(w, c.a, ready(93, { group: '593-594' }));
+  ledger(w, c.b, ready(93, { group: '593-594' }));
+  const st = await w.status();
+  const by = Object.fromEntries(st.tickets.map((t) => [t.key, t]));
+  assert.deepEqual(by['591'].steps[0].takeReady, [{ pr: 'guide-docs#91', head: HEAD }]);
+  assert.equal(by['592'].steps[0].takeReady, undefined, 'a session since ready: not known to be the owner\'s alone');
+  // The other card of PR 93 goes along with the same takeReady: one move, one re-sync, no extra move back.
+  const follow = { ...by['593'].steps[0], keys: ['593'] };
+  assert.deepEqual(follow.takeReady, [{ pr: 'guide-docs#93', head: HEAD }]);
+  assert.ok(scriptedCalls(follow, read(w, '593'), w.settings).includes(`tracker move ${c.b.shortLink} --to translation`), 'the other card is moved along');
+  moved(c.b, 'translation');
+  for (const key of ['593', '594']) await runRecord({ settings: w.settings, clients: w.clients(), key, stage: 'follow', status: 'done', to: 'translation', result: { takeReady: follow.takeReady }, now: NOW });
+  assert.deepEqual(['593', '594'].map((k) => read(w, k).prs[0].stage), ['translation', 'translation']);
+  assert.deepEqual(['593', '594'].map((k) => read(w, k).prs[0].approval?.head ?? null), [HEAD, HEAD]);
 });

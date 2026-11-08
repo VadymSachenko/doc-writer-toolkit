@@ -614,7 +614,8 @@ function cardsMovedWith(step, ledger, settings) {
   const from = ledger.left?.status;
   if (step.to !== 'translation' && from !== 'translation') return [];
   const shared = new Set((ledger.prs ?? []).filter((p) => p.number).map(prId));
-  return readAllLedgers(settings.state).filter((o) => o.key !== ledger.key && !step.keys.includes(o.key) && o.group === ledger.group && o.mode === 'pipeline' && o.left?.status === from && o.stages?.close?.status !== 'done' && (o.prs ?? []).some((p) => p.number && shared.has(prId(p)) && followsMove(p.stage, from, step.to)));
+  const taken = new Set((step.takeReady ?? []).map((x) => x.pr));
+  return readAllLedgers(settings.state).filter((o) => o.key !== ledger.key && !step.keys.includes(o.key) && o.group === ledger.group && o.mode === 'pipeline' && o.left?.status === from && o.stages?.close?.status !== 'done' && (o.prs ?? []).some((p) => p.number && shared.has(prId(p)) && (followsMove(p.stage, from, step.to) || taken.has(prId(p)))));
 }
 
 async function runScripted(step, ctx) {
@@ -670,7 +671,7 @@ async function runScripted(step, ctx) {
       // The other card first: a stop here leaves this ticket's move still to follow, and the run starts it again.
       for (const o of cardsMovedWith(step, ledger, settings)) {
         await clients.tracker.move({ card: o.card.shortLink ?? o.card.id, to: step.to });
-        await runRecord({ settings, clients, key: o.key, stage: 'follow', status: 'done', to: step.to, now: (io.now ?? Date.now)() });
+        await runRecord({ settings, clients, key: o.key, stage: 'follow', status: 'done', to: step.to, now: (io.now ?? Date.now)(), ...(step.takeReady?.length ? { result: JSON.stringify({ takeReady: step.takeReady }) } : {}) });
       }
       for (const k of step.keys) await rec(k, { to: step.to, ...(step.takeReady?.length ? { result: JSON.stringify({ takeReady: step.takeReady }) } : {}) });
       return;
