@@ -420,3 +420,23 @@ test('a failed step: a move of the card there and back is a person acting, seen 
   assert.deepEqual([next(st['961']), st['961'].failed.acted], ['answers', 'a person moved the card']);
   assert.deepEqual([st['962'].next, st['962'].held], [null, true]);
 });
+
+test('a re-sync left running runs again only at translation: not on a PR at ready for merge (the earlier rule) nor one the owner moved back', async () => {
+  const ready = 'd'.repeat(40);
+  const head = 'c'.repeat(40);
+  const c = { old: card({ number: 811, status: 'finalReview' }), back: card({ number: 812, status: 'finalReview' }), live: card({ number: 813, status: 'translation' }) };
+  const vcs = { branchCommits: () => [], changedUnder: (t, from, to) => (from === ready && to === head ? ['docs/a.md'] : []), pagesOf: () => [] };
+  const w = world({ cards: Object.values(c), prs: [41, 42, 43].map((number) => pr({ repo: 'guide-docs', number, headCommit: head })), git: vcs });
+  const base = { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' };
+  const chain = Object.fromEntries(['translate', 'enReview', 'locales', 'align', 'labelSync', 'build', 'visualPack'].map((s) => [s, { status: 'done', head: ready }]));
+  const entry = (number, stage) => [{ repo: 'guide-docs', number, targets: ['guide'], stage, pipelineCommits: [head], chain, steps: { resync: { status: 'running', head } }, readyForMerge: [{ head: ready, at: ago(3) }] }];
+  ledger(w, c.old, { stages: base, prs: entry(41, 'readyForMerge') });
+  ledger(w, c.back, { stages: base, prs: entry(42, 'finalReview') });
+  ledger(w, c.live, { stages: base, prs: entry(43, 'translation') });
+  const st = await w.status();
+  const by = Object.fromEntries(st.tickets.map((t) => [t.key, t]));
+  assert.deepEqual(by['811'].steps.map(fmt), ['move guide-docs#41 -> finalReview'], "the earlier rule's re-sync: back to the owner, not run again");
+  assert.deepEqual(by['812'].steps, [], 'moved back by the owner: it waits for the next move');
+  assert.deepEqual(by['813'].steps.map(fmt), ['resync guide-docs#43']);
+  assert.equal(by['813'].steps[0].interrupted, true);
+});

@@ -672,7 +672,7 @@ async function runScripted(step, ctx) {
         await clients.tracker.move({ card: o.card.shortLink ?? o.card.id, to: step.to });
         await runRecord({ settings, clients, key: o.key, stage: 'follow', status: 'done', to: step.to, now: (io.now ?? Date.now)() });
       }
-      for (const k of step.keys) await rec(k, { to: step.to });
+      for (const k of step.keys) await rec(k, { to: step.to, ...(step.takeReady?.length ? { result: JSON.stringify({ takeReady: step.takeReady }) } : {}) });
       return;
     }
     case 'close': {

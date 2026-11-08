@@ -801,3 +801,34 @@ test('a writer\'s session gets the checkout and the commit; every role is denied
   assert.ok(!translator.args.includes(tree));
   assert.ok(translator.args.includes(`Read(//${clone.replace(/^\/+/, '')}/**)`));
 });
+
+test('an answer pushed while the owner moved a ready card to In translation is not taken along: the owner reads it first, nothing is translated', async () => {
+  const t = finalReviewTicket({ done: CHAIN, stage: 'readyForMerge' });
+  // The answer session's commit (the pipeline's own: in pipelineCommits), pushed while the owner moved the card.
+  const h2 = t.handEdit({ 'docs/x/index.md': '# Сторінка\n\nКоротше, як просив власник.\n' });
+  t.forgePr.headCommit = h2;
+  const l0 = read(t.w, '1501');
+  l0.prs[0].pipelineCommits.push(h2);
+  writeLedger(t.w.settings.state, l0);
+  t.c.placeId = LISTS.translation.id;
+  const stages = [];
+  const spawnClaude = async (cmd) => {
+    stages.push(stageOf(cmd));
+    await runRecord({ settings: t.w.settings, clients: t.w.clients(), key: '1501', stage: stageOf(cmd), pr: 'guide-docs#71', status: 'done', head: h2, result: {}, now: NOW });
+    return { code: 0, stdout: RESULT, stderr: '' };
+  };
+  const go = () => runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1501'] } });
+  const out = await go();
+  assert.deepEqual(out.ran.map((r) => [r.stage, r.pr ?? null, r.outcome]), [['follow', null, 'done'], ['move', 'guide-docs#71', 'done']]);
+  assert.deepEqual(stages, [], 'no re-sync of a rewrite the owner never read');
+  assert.ok(!t.w.tracker.log.some((e) => e[0] === 'comment'), 'not said ready: it goes back to the owner');
+  const l = read(t.w, '1501');
+  assert.equal(l.prs[0].stage, 'finalReview');
+  assert.equal(l.prs[0].approval ?? null, null, 'the move approved nothing it did not see');
+  assert.equal(t.c.placeId, LISTS.finalReview.id, "the card back in the owner's queue");
+  // The owner reads it and moves the card again: now the re-sync runs.
+  t.c.placeId = LISTS.translation.id;
+  const again = await go();
+  assert.deepEqual(again.ran.map((r) => r.stage), ['follow', 'resync', 'readyForMerge', 'move']);
+  assert.equal(read(t.w, '1501').prs[0].approval.head, h2);
+});

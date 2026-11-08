@@ -1,6 +1,6 @@
 import { CARD_STATUS_OF, CHAIN, IN_PROGRESS, PR_ORDER, PR_STAGE_OF_STATUS, ROLE_OF, WAITING } from './stages.mjs';
 import { prId } from './ledger.mjs';
-import { editsOf, nextEditNumber, parseReply, resolveReply, suggestionOf } from './edits.mjs';
+import { editsOf, mergedEdits, nextEditNumber, parseReply, resolveReply, suggestionOf } from './edits.mjs';
 
 // The next-step rule of the ticket flow (context/ticket-flow.md, "The rule"). A pure function of a ledger and what the
 // tracker, the forge, git and the files show now: the world wins over the ledger. First match wins:
@@ -43,13 +43,14 @@ const dayOf = (ms, timeZone) => new Intl.DateTimeFormat('en-CA', { timeZone, yea
 // when its record was made later (`seq`).
 const doneAfter = (l, stage, after) => l.stages?.[stage]?.status === 'done' && (!after || (l.stages?.[after]?.status === 'done' && l.stages[stage].seq > l.stages[after].seq));
 
-// A chain stage left running on a PR that isn't at `translation` now (an old ledger, a person's move back) waits for a
-// person's move like the rest of the chain: no session starts for it.
+// A chain stage or a re-sync left running on a PR that isn't at `translation` now (an old ledger, a person's move back,
+// a re-sync the earlier rule started at ready for merge) waits for a person's move like the rest of the chain: no
+// session starts for it.
 function runningStage(l) {
   for (const [stage, rec] of Object.entries(l.stages ?? {})) if (rec?.status === 'running') return { stage };
   for (const pr of l.prs ?? []) {
     for (const [stage, rec] of Object.entries({ ...(pr.chain ?? {}), ...(pr.steps ?? {}) })) {
-      if (rec?.status === 'running' && (!CHAIN.includes(stage) || pr.stage === 'translation')) return { stage, pr: prId(pr) };
+      if (rec?.status === 'running' && ((!CHAIN.includes(stage) && stage !== 'resync') || pr.stage === 'translation')) return { stage, pr: prId(pr) };
     }
   }
   return null;
@@ -305,7 +306,9 @@ function derive(l, w) {
     // translation with every PR ready for merge: the chain is done, and the card says so.
     const expected = CARD_STATUS_OF[PR_ORDER[least]];
     // Never into In translation by itself: only a person's move (or the other card of the same PR, lib/runner.mjs) goes there.
-    if (expected && expected !== status && expected !== 'translation' && card.list?.id === l.left?.list?.id && !out.steps.some((s) => s.stage === 'move' && !s.pr)) {
+    // A PR's own move takes the card where it belongs, so the card isn't moved first (nor said ready when a PR goes back
+    // to the owner's queue).
+    if (expected && expected !== status && expected !== 'translation' && card.list?.id === l.left?.list?.id && !out.steps.some((s) => s.stage === 'move')) {
       out.steps.unshift(step('move', { to: expected, card: true, ...(status === 'translation' && PR_ORDER[least] === 'readyForMerge' ? { ready: true } : {}) }));
     }
     // A place from the code with no reference at a commit: its comment is posted, so the record stood; it is reported.
@@ -405,8 +408,24 @@ function personMoved(l, w, out, prs) {
     return out;
   }
   out.state = ['finalReview', 'translation', 'smeReview'].includes(to) ? to : to === 'inProgress' ? 'reworkWait' : stateOf(l, prs, to, phase);
-  out.steps.push(step('follow', { to, ...(PR_STAGE_OF_STATUS[to] ? { prStage: PR_STAGE_OF_STATUS[to] } : {}) }));
+  // A move to In translation also takes a ready PR whose head moved only by the owner's own commits since it was marked
+  // ready (a hand edit the rule had no time to send back): the owner read what they wrote. A commit of the pipeline's
+  // in that range (an answer to a comment, pushed while the owner moved the card) is not read yet: that PR stays, and
+  // row 8 sends it back to the owner's queue.
+  const takeReady = to === 'translation' ? prs.map((p) => ownEditsSinceReady(p, w)).filter(Boolean) : [];
+  out.steps.push(step('follow', { to, ...(PR_STAGE_OF_STATUS[to] ? { prStage: PR_STAGE_OF_STATUS[to] } : {}), ...(takeReady.length ? { takeReady } : {}) }));
   return out;
+}
+
+function ownEditsSinceReady(p, w) {
+  const { pr, world } = p;
+  const ready = pr.readyForMerge?.at(-1);
+  const head = world?.headCommit;
+  if (!pr.number || p.merged || p.stage !== 'readyForMerge' || !ready?.head || !head || head === ready.head) return null;
+  const target = w.settings.targets.find((t) => t.id === pr.targets?.[0]) ?? w.settings.targets.find((t) => t.repo === pr.repo);
+  const commits = w.git?.commitsBetween?.(target, ready.head, head) ?? null;
+  const mine = (sha) => (pr.pipelineCommits ?? []).some((c) => c && sha.startsWith(String(c)));
+  return commits?.length && !commits.some(mine) ? { pr: prId(pr), head } : null;
 }
 
 // Rows 8 to 12 for one PR. First match wins.
@@ -458,7 +477,7 @@ function prStep(l, p, w, out, prs) {
   // Row 11.
   if (world.newComments?.length) {
     const owner = world.newComments.filter((c) => c.by === 'owner');
-    return step('answerComments', { pr: id, comments: world.newComments.length, owner: owner.length, reviewer: world.newComments.length - owner.length, nextEdit: nextEditNumber(pr), ...ownerForms(pr, owner) });
+    return step('answerComments', { pr: id, comments: world.newComments.length, owner: owner.length, reviewer: world.newComments.length - owner.length, ...ownerForms(pr, owner, w) });
   }
   // Two PRs: an approved PR goes on to the owner's queue by itself while the card stands where the slower PR is. That
   // starts nothing: both wait for the card.
@@ -475,13 +494,13 @@ const newReviewRequests = (pr, world) => (world.reviewRequests ?? []).map((r) =>
 // The owner's comments in the two forms the writer takes as they are: a reply by number to the PR's lists of edits
 // (only once the PR has a list: before that a numbered comment is an ordinary instruction), resolved item by item
 // against the lists; and a review comment with a `suggestion` block, its block to be put in verbatim.
-function ownerForms(pr, owner) {
-  const edits = editsOf(pr);
+function ownerForms(pr, owner, w) {
+  const edits = mergedEdits(w.editsByPr?.get(prId(pr)) ?? [editsOf(pr)]);
   const replies = edits.length
-    ? owner.filter((c) => c.kind !== 'review-comment').map((c) => ({ id: c.id, parsed: parseReply(c.body) })).filter((x) => x.parsed).map((x) => ({ id: x.id, items: resolveReply(x.parsed, edits) }))
+    ? owner.filter((c) => c.kind !== 'review-comment').map((c) => ({ id: c.id, parsed: parseReply(c.body) })).filter((x) => x.parsed).map((x) => ({ id: x.id, items: resolveReply(x.parsed, edits), ...(x.parsed.rest ? { rest: x.parsed.rest } : {}) }))
     : [];
-  const suggestions = owner.filter((c) => c.kind === 'review-comment').map((c) => ({ c, s: suggestionOf(c.body) })).filter((x) => x.s).map(({ c, s }) => ({ id: c.id, path: c.path ?? null, line: c.line ?? null, text: s.text, note: s.note }));
-  return { ...(replies.length ? { replies } : {}), ...(suggestions.length ? { suggestions } : {}) };
+  const suggestions = owner.filter((c) => c.kind === 'review-comment').map((c) => ({ c, s: suggestionOf(c.body) })).filter((x) => x.s).map(({ c, s }) => ({ id: c.id, path: c.path ?? null, line: c.line ?? null, ...(s.several ? { several: s.several } : { text: s.text, note: s.note }) }));
+  return { nextEdit: nextEditNumber({ edits }), ...(replies.length ? { replies } : {}), ...(suggestions.length ? { suggestions } : {}) };
 }
 
 // After ready for merge, once the owner moved the card to In translation: the blocks changed since the ready head

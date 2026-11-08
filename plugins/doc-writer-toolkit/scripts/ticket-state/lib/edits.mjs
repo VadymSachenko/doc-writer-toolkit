@@ -66,12 +66,25 @@ export const listName = (list) => (list === 'description' ? 'the PR description'
 
 // ------------------------------------------------------------------ the reply
 
-const QUOTES = { '«': ['»'], '“': ['”'], '„': ['“', '”'], '"': ['"'] };
+// Quotes and what closes them. Guillemets and curly quotes nest («А «Б» В»), so the close is found by depth; a straight
+// quote can't nest, and „…“ closes at the first “ or ”.
+const PAIRS = { '«': '»', '“': '”' };
 const closeOf = (s, i) => {
-  const ends = QUOTES[s[i]];
-  if (!ends) return -1;
-  const at = ends.map((c) => s.indexOf(c, i + 1)).filter((x) => x > i);
-  return at.length ? Math.min(...at) : -1;
+  const open = s[i];
+  if (PAIRS[open]) {
+    let depth = 0;
+    for (let j = i; j < s.length; j++) {
+      if (s[j] === open) depth += 1;
+      else if (s[j] === PAIRS[open] && --depth === 0) return j;
+    }
+    return -1;
+  }
+  if (open === '„') {
+    const at = ['“', '”'].map((c) => s.indexOf(c, i + 1)).filter((x) => x > i);
+    return at.length ? Math.min(...at) : -1;
+  }
+  if (open === '"') return s.indexOf('"', i + 1);
+  return -1;
 };
 
 // The reply cut at `;` and line ends, never inside a quote: a quoted text may hold either.
@@ -93,37 +106,81 @@ function segments(s) {
   return out;
 }
 
-const ITEM = /^\s*(?:[-*•]\s*)?(?:(?:пункт|п\.|item|№|#)\s*)?(\d{1,4})(?:\s*[—–:.)]\s*|\s*-\s+|\s+|$)([\s\S]*)$/i;
+// The number first, then a separator: a dash, a colon, a dot (not a decimal point) or a bracket; a bare space is not
+// one, so «5 хвилин тому…» is no item. Several numbers before one separator («2 і 3 — поверни», «2, 3: …», «2-3 —
+// …») name items together.
+const LEAD = /^\s*(?:[-*•]\s*)?(?:(?:пункт|пункти|п\.|item|items|№|#)\s*)?/i;
+const ITEM = new RegExp(`${LEAD.source}(\\d{1,4})(?:\\s*(?:[—–:)]|\\.(?!\\d))\\s*|\\s+-\\s+|\\s*$)([\\s\\S]*)$`, 'i');
+const GROUP = new RegExp(`${LEAD.source}(\\d{1,4}(?:\\s*(?:,|і|й|и|та|and|&|-|–)\\s*\\d{1,4})+)\\s*(?:[—–:)]|\\.(?!\\d)|\\s-\\s)([\\s\\S]*)$`, 'i');
 const RESTORE = /^(?:(?:(?:поверн|верн|відкот|відкоч|відкат|скасу)\S*|undo|revert|restore)(?:\s+(?:як\s+було|назад|було|«було»|старий\s+текст))?|як\s+було|назад)(?:,?\s*(?:будь\s+ласка|please))?$/i;
+const KEEP = /^(?:ок|окей|ok|okay|так|добре|гаразд|норм|нормально|залиш\S*|лиши|хай\s+буде|не\s+треба|не\s+потрібно|не\s+змінюй|keep|fine)(?:,?\s*(?:дякую|thanks))?$/i;
 
 // One item's words: one quoted text and nothing else is the owner's own text, verbatim; a restore word puts «було»
-// back; anything else is a description to apply; nothing at all is unclear.
+// back; a word of assent keeps the item; anything else is a description to apply; nothing at all is unclear.
 function kindOf(rest) {
   const bare = rest.trim().replace(/[.;,!\s]+$/u, '');
   if (!bare) return { kind: 'unclear', text: '' };
   if (closeOf(bare, 0) === bare.length - 1) return { kind: 'verbatim', text: bare.slice(1, -1) };
   if (RESTORE.test(bare)) return { kind: 'restore', text: bare };
+  if (KEEP.test(bare)) return { kind: 'keep', text: bare };
   return { kind: 'describe', text: rest.trim() };
 }
 
-// The owner's reply by number, or null when the comment names no item (an ordinary instruction). Words before the
-// first number are left out; a line with no number goes on the item before it; a quoted line (`> `, GitHub's quote
-// reply) is not the owner's words and is left out.
+// The owner's reply by number, or null when the comment names no item (an ordinary instruction). A quoted line (`> `,
+// GitHub's quote reply) is not the owner's words and is left out. A line with no number goes on the item before it
+// only when that item is a description (or names nothing yet); after a restore, a quoted text or an assent it is a
+// word of the whole reply (`rest`), never narrowed to one item. A comment that reads as the owner's own numbered list
+// (1., 2., … in order, descriptions only, no quote in any of them) is asked back as a whole: it may answer the list,
+// or be new instructions.
 export function parseReply(body) {
   const s = String(body ?? '').replace(/\r\n?/g, '\n').split('\n').filter((line) => !/^\s*>/.test(line)).join('\n');
   const items = [];
-  const preamble = [];
+  const rest = [];
   for (const seg of segments(s)) {
     if (!seg.trim()) continue;
+    const g = GROUP.exec(seg);
+    if (g) {
+      const ns = g[1].match(/\d{1,4}/g).map(Number);
+      for (const n of ns) items.push({ n, raw: g[2], together: ns, dot: false });
+      continue;
+    }
     const m = ITEM.exec(seg);
-    if (m) items.push({ n: Number(m[1]), raw: m[2] });
-    else if (items.length) items.at(-1).raw += `\n${seg}`;
-    else preamble.push(seg.trim());
+    if (m) {
+      items.push({ n: Number(m[1]), raw: m[2], dot: /^\s*\d+\s*\./.test(seg.replace(LEAD, '')) });
+      continue;
+    }
+    const prev = items.at(-1);
+    if (prev && !prev.together && ['describe', 'unclear'].includes(kindOf(prev.raw).kind)) prev.raw += `\n${seg}`;
+    else rest.push(seg.trim());
   }
   if (!items.length) return null;
+  const kinds = items.map((it) => kindOf(it.raw));
+  const ownList = items.length >= 2 && items.every((it, i) => it.dot && it.n === i + 1) && kinds.every((k) => k.kind === 'describe' && !/[«“„"]/.test(k.text));
   const count = new Map();
   for (const it of items) count.set(it.n, (count.get(it.n) ?? 0) + 1);
-  return { items: items.map((it) => ({ n: it.n, ...kindOf(it.raw), ...(count.get(it.n) > 1 ? { twice: true } : {}) })), preamble: preamble.join('\n') };
+  return {
+    items: items.map((it, i) => ({
+      n: it.n,
+      ...kinds[i],
+      ...(count.get(it.n) > 1 ? { twice: true } : {}),
+      ...(it.together ? { together: it.together } : {}),
+      ...(ownList ? { ownList: true } : {}),
+    })),
+    rest: rest.join('\n'),
+  };
+}
+
+// The edits of a PR as the lists show them, from every ledger that shares the PR (a PR with two cards has two): one
+// item per number and list, `differs` when the ledgers disagree about its text.
+export function mergedEdits(lists) {
+  const out = new Map();
+  for (const e of lists.flat()) {
+    const k = `${e.n}|${e.list}`;
+    const seen = out.get(k);
+    if (!seen) out.set(k, { ...e });
+    else if (['page', 'block', 'before', 'after'].some((f) => (seen[f] ?? null) !== (e[f] ?? null)) || JSON.stringify(seen.en ?? null) !== JSON.stringify(e.en ?? null)) seen.differs = true;
+  }
+  return [...out.values()];
 }
 
 // Each named item against the PR's lists: what to do, with the exact texts, or a question back. Items not named are
@@ -134,23 +191,34 @@ export function resolveReply(parsed, edits) {
     const hits = edits.filter((e) => e.n === it.n);
     const lists = [...new Set(hits.map((e) => e.list))];
     const ask = (why) => ({ n: it.n, do: 'ask', why, words: it.text });
+    if (it.ownList) return ask('the comment reads as a numbered list of its own (1., 2., … with descriptions only): ask whether it answers the list of edits by number or gives new instructions');
+    if (it.together) return ask(`the reply names items ${it.together.join(', ')} together: ask for each on its own`);
     if (it.twice) return ask(`item ${it.n} is named twice in the reply`);
     if (!hits.length) return ask(last ? `there is no item ${it.n} on this PR (its items are 1–${last})` : `there is no numbered list of edits on this PR yet`);
     if (lists.length > 1) return ask(`item ${it.n} is in ${lists.length} lists (${lists.map(listName).join(', ')})`);
+    if (hits.some((e) => e.differs)) return ask(`item ${it.n} reads differently in the records of the cards that share this PR`);
     if (it.kind === 'unclear') return ask(`the reply names item ${it.n} with nothing to do`);
     const e = hits.at(-1);
-    const where = { page: e.page, block: e.block, now: e.after };
+    if (it.kind === 'keep') return { n: it.n, do: 'keep' };
+    // A later item changed the same block: its «стало» is not what the page reads now.
+    const later = edits.filter((x) => x !== e && x.page === e.page && (x.block ?? null) === (e.block ?? null) && x.n > e.n).map((x) => x.n);
+    if (it.kind === 'restore' && later.length) return ask(`item ${it.n}'s block was changed again by item ${later.join(', ')}: ask which text to restore`);
+    const where = { page: e.page, block: e.block, now: e.after, ...(later.length ? { later } : {}) };
     if (it.kind === 'restore') return { n: it.n, do: 'restore', ...where, put: e.before, ...(e.en ? { en: { page: e.en.page, now: e.en.after, put: e.en.before } } : {}) };
     if (it.kind === 'verbatim') return { n: it.n, do: 'verbatim', ...where, put: it.text };
     return { n: it.n, do: 'rewrite', ...where, how: it.text };
   });
 }
 
-// A review comment of the owner's with a `suggestion` block: the block exactly, and the words outside it.
+// A review comment of the owner's with a `suggestion` block: the block exactly, and the words outside it. Two blocks
+// in one comment can't both replace the comment's lines: `several`, asked back.
 export function suggestionOf(body) {
   const s = String(body ?? '').replace(/\r\n?/g, '\n');
-  const m = /(^|\n)(`{3,}|~{3,})suggestion[^\n]*\n([\s\S]*?)(?:\n)?\2[ \t]*(?=\n|$)/.exec(s);
-  if (!m) return null;
+  const re = /(^|\n)(`{3,}|~{3,})suggestion[^\n]*\n([\s\S]*?)(?:\n)?\2[ \t]*(?=\n|$)/g;
+  const found = [...s.matchAll(re)];
+  if (!found.length) return null;
+  if (found.length > 1) return { several: found.length, text: null, note: s.trim() };
+  const m = found[0];
   const note = (s.slice(0, m.index) + s.slice(m.index + m[0].length)).trim();
   return { text: m[3], note };
 }
@@ -163,13 +231,15 @@ const at = (x) => `${x.page}${x.block ? `, ${x.block}` : ''}`;
 export function replyLines(replies) {
   const out = [];
   for (const r of replies ?? []) {
-    out.push(`The owner's reply by number (comment ${r.id}): do exactly this, item by item; the items it doesn't name stay as they are. Texts are JSON strings: put them in exactly as given. If an item's words point at another place than that item's block (the owner numbered their own instructions, not the list), change nothing for it and ask back.`);
+    out.push(`The owner's reply by number (comment ${r.id}): do exactly this, item by item; the items it doesn't name stay as they are. Texts are JSON strings: put them in exactly as given. Where the block doesn't read as the line says, change nothing for that item and ask back. If an item's words point at another place than that item's block (the owner numbered their own instructions, not the list), change nothing for it and ask back.`);
     for (const x of r.items) {
       if (x.do === 'restore') out.push(`- ${x.n}, restore: ${at(x)}: put back ${q(x.put)} where it reads ${q(x.now)}.${x.en ? ` EN ${x.en.page}: put back ${q(x.en.put)} where it reads ${q(x.en.now)}.` : ''}`);
-      else if (x.do === 'verbatim') out.push(`- ${x.n}, the owner's text: ${at(x)}: replace ${q(x.now)} with exactly ${q(x.put)}.`);
-      else if (x.do === 'rewrite') out.push(`- ${x.n}, rewrite as the owner describes (${q(x.how)}): ${at(x)}, which reads ${q(x.now)}.`);
+      else if (x.do === 'verbatim') out.push(`- ${x.n}, the owner's text: ${at(x)}: replace ${q(x.now)}${x.later ? ` (or what items ${x.later.join(', ')} made of it)` : ''} with exactly ${q(x.put)}.`);
+      else if (x.do === 'rewrite') out.push(`- ${x.n}, rewrite as the owner describes (${q(x.how)}): ${at(x)}, which reads ${q(x.now)}${x.later ? ` (or what items ${x.later.join(', ')} made of it)` : ''}.`);
+      else if (x.do === 'keep') out.push(`- ${x.n}, keep: the owner agrees, change nothing.`);
       else out.push(`- ${x.n}, ask back, change nothing: ${x.why}.`);
     }
+    if (r.rest) out.push(`  Words of the reply outside its items (not tied to one item; an instruction for the PR, or a remark): ${q(r.rest)}.`);
   }
   return out;
 }
@@ -177,8 +247,8 @@ export function replyLines(replies) {
 export function suggestionLines(suggestions) {
   if (!suggestions?.length) return [];
   return [
-    "The owner's suggestions (review comments with a `suggestion` block): unless the lines already read so (the owner committed it, a hand edit: change nothing), replace the lines the comment is on with the block exactly, no rewording; only the words outside the block are an instruction.",
-    ...suggestions.map((x) => `- comment ${x.id}, ${x.path ?? '?'} line ${x.line ?? '?'}: ${q(x.text)}${x.note ? `; the words outside it: ${q(x.note)}` : ''}`),
+    "The owner's suggestions (review comments with a `suggestion` block): unless the lines already read so (the owner committed it, a hand edit: change nothing), replace the lines the comment is on with the block exactly, no rewording; only the words outside the block are an instruction. The line given is the last line the comment covers: a block of several lines may start above it, so match the lines it replaces by their content, and if that isn't certain, change nothing and ask back.",
+    ...suggestions.map((x) => (x.several ? `- comment ${x.id}, ${x.path ?? '?'} line ${x.line ?? '?'}: ${x.several} suggestion blocks in one comment; ask back, change nothing.` : `- comment ${x.id}, ${x.path ?? '?'} line ${x.line ?? '?'}: ${q(x.text)}${x.note ? `; the words outside it: ${q(x.note)}` : ''}`)),
   ];
 }
 

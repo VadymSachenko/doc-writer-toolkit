@@ -357,10 +357,12 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         const card = await needCard(to);
         const from = l.left?.status;
         for (const p of l.prs) {
-          // A PR ready for merge whose head moved since (a change the rule had no time to send back to the owner's
-          // queue) goes along with a move to `translation` too: the move approves that change, and the rule re-syncs it.
-          const headNow = p.number && to === 'translation' && p.stage === 'readyForMerge' && !p.merged ? (await clients.forge.prState({ repo: p.repo, number: p.number })).headCommit : null;
-          const moved = Boolean(headNow && p.readyForMerge?.at(-1)?.head && headNow !== p.readyForMerge.at(-1).head);
+          // A PR ready for merge whose head moved since by the owner's own commits only (the rule names it in
+          // `takeReady`, with the head it saw) goes along with a move to `translation` too: the move approves that
+          // change, and the rule re-syncs it. A head that moved again since the rule looked stays, like a pipeline commit.
+          const take = to === 'translation' && p.stage === 'readyForMerge' && !p.merged ? (result.takeReady ?? []).find((x) => x?.pr === prId(p)) : null;
+          const headNow = p.number && take ? (await clients.forge.prState({ repo: p.repo, number: p.number })).headCommit : null;
+          const moved = Boolean(headNow && headNow === take.head && p.readyForMerge?.at(-1)?.head && headNow !== p.readyForMerge.at(-1).head);
           if (p.number && (followsMove(p.stage, from, to) || moved)) {
             // The only UA approve: a person's move to `translation`. A later word change in UA is reported.
             if (to === 'translation') p.approval = { head: headNow ?? (await clients.forge.prState({ repo: p.repo, number: p.number })).headCommit, at, from: p.stage, by: 'person' };

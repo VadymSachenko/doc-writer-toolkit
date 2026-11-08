@@ -131,6 +131,13 @@ export function makeGit(settings) {
       const out = gitOut(cwd, ['rev-list', head, '--not', ref]);
       return out === null ? null : out.split('\n').filter(Boolean);
     },
+    // The commits after `from` up to `to`, newest first. Null when either commit isn't here.
+    commitsBetween(target, from, to) {
+      const cwd = repoPath(target);
+      if (!cwd || !hasCommit(cwd, from) || !hasCommit(cwd, to)) return null;
+      const out = gitOut(cwd, ['rev-list', to, '--not', from]);
+      return out === null ? null : out.split('\n').filter(Boolean);
+    },
     // The files under the roots that changed between two commits, leaving out an id-only change (D-073, lib/ids.mjs):
     // such a change keeps every stage recorded on the page. Null when either commit isn't here.
     changedUnder(target, from, to, roots) {

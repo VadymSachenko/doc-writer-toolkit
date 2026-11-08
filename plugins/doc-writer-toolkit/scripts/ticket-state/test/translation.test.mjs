@@ -548,8 +548,8 @@ test('AC-4: a number that does not exist, or one in two lists, is asked back, ne
 });
 
 test('the reply\'s free form: dictated separators, a quote holding a semicolon, a line going on the item before, and words before the first number', () => {
-  const parsed = parseReply('Добре, кілька правок:\n1. як було\n3: «нова назва; друга частина»\n4) прибери «також»\nі не повторюй слово\n#6 revert\nпункт 8 - верни назад.\n2 — 5 полів');
-  assert.equal(parsed.preamble, 'Добре, кілька правок:');
+  const parsed = parseReply('Добре, кілька правок:\n1. як було\n3: «нова назва; друга частина»\n4) прибери «також»\nі не повторюй слово\n#6 — revert\nпункт 8 - верни назад.\n2 — 5 полів');
+  assert.equal(parsed.rest, 'Добре, кілька правок:');
   assert.deepEqual(parsed.items.map((x) => [x.n, x.kind, x.text]), [
     [1, 'restore', 'як було'],
     [3, 'verbatim', 'нова назва; друга частина'],
@@ -622,4 +622,65 @@ test('AC-3: the re-sync after a restore of both languages is told the item\'s EN
   assert.ok(brief.includes('- 9: docs/x/a.md, Крок 2 (EN set)'));
   assert.ok(brief.includes('- 10: docs/x/a.md, Крок 10'));
   assert.match(brief, /An item marked "EN set" was changed in EN with UA \(a restore of both\): its EN block already matches, leave it\./);
+});
+
+test('the reply\'s traps: no bare-space separator, a general line after a restore stays general, items named together, nested quotes, the owner\'s own numbered list, an assent', () => {
+  const kinds = (t) => parseReply(t)?.items.map((x) => [x.n, x.kind, x.text]) ?? null;
+  assert.equal(parseReply('5 хвилин тому я просив інше'), null, 'a number and a space are no item');
+  assert.equal(parseReply('2.5 мм — замало'), null, 'a decimal point is no separator');
+  const general = parseReply('2 — поверни\nЗагалом зроби весь текст коротшим');
+  assert.deepEqual([kinds('2 — поверни\nЗагалом зроби весь текст коротшим'), general.rest], [[[2, 'restore', 'поверни']], 'Загалом зроби весь текст коротшим'], 'the restore kept, the general line not narrowed to item 2');
+  assert.deepEqual(kinds('7 — коротше\nі без «також»'), [[7, 'describe', 'коротше\nі без «також»']], 'a description still goes on');
+  assert.deepEqual(resolveReply(parseReply('2 і 3 — поверни'), EDITS).map((x) => [x.n, x.do, x.why]), [[2, 'ask', 'the reply names items 2, 3 together: ask for each on its own'], [3, 'ask', 'the reply names items 2, 3 together: ask for each on its own']]);
+  assert.deepEqual(kinds('5 — «Натисніть «Зберегти»»'), [[5, 'verbatim', 'Натисніть «Зберегти»']]);
+  assert.deepEqual(kinds('5 — «А «Б»; В»'), [[5, 'verbatim', 'А «Б»; В']], 'no cut inside a nested quote');
+  const own = resolveReply(parseReply('1. Додай розділ про ліміти\n2. Прибери скриншот з кроку 3'), EDITS);
+  assert.deepEqual(own.map((x) => x.do), ['ask', 'ask'], "the owner's own numbered list is asked back, not applied to items 1 and 2");
+  assert.match(own[0].why, /reads as a numbered list of its own/);
+  assert.deepEqual(resolveReply(parseReply('1. коротше\n2. прибери «також»'), EDITS).map((x) => x.do), ['rewrite', 'rewrite'], 'a quote in an item marks a reply to the list');
+  assert.deepEqual(resolveReply(parseReply('1. коротше\n2 — поверни'), EDITS).map((x) => x.do), ['rewrite', 'restore']);
+  assert.deepEqual(resolveReply(parseReply('3 — ок; 4 — залиш; 6 — не треба'), EDITS).map((x) => x.do), ['keep', 'keep', 'keep'], 'an assent changes nothing');
+});
+
+test('a restore of an item whose block a later item changed is asked back; a rewrite names the later items; the words outside the items reach the brief', async () => {
+  const edits = [...EDITS, item(9, '7301', 'Натисніть кнопку **Зберегти**.', 'Натисніть **Зберегти** унизу.', { block: 'Крок 2' })];
+  const out = resolveReply(parseReply('2 — поверни; 2 — коротше'), edits);
+  assert.equal(out[0].do, 'ask');
+  const restore = resolveReply(parseReply('2 — поверни'), edits)[0];
+  assert.deepEqual([restore.do, restore.why], ['ask', "item 2's block was changed again by item 9: ask which text to restore"]);
+  const rewrite = resolveReply(parseReply('2 — коротше'), edits)[0];
+  assert.deepEqual([rewrite.do, rewrite.later], ['rewrite', [9]]);
+  const c = card({ number: 577, status: 'finalReview' });
+  const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 87, headCommit: HEAD })], activity: { 'guide-docs#87': { comments: [{ id: 9301, author: 'owner-login', body: '9 — поверни\nЗагалом зроби весь текст коротшим', createdAt: ago(1), updatedAt: ago(1) }] } } });
+  ledger(w, c, { stages: BASE, prs: [{ repo: 'guide-docs', number: 87, targets: ['guide'], review: 'sme', stage: 'finalReview', edits }] });
+  const s = (await w.one('577')).steps[0];
+  const brief = briefFor({ ...s, role: 'writer', keys: ['577'] }, w.settings);
+  assert.ok(brief.includes('- 9, restore: docs/x/a.md, Крок 2: put back "Натисніть кнопку **Зберегти**." where it reads "Натисніть **Зберегти** унизу.".'));
+  assert.ok(brief.includes('Words of the reply outside its items (not tied to one item; an instruction for the PR, or a remark): "Загалом зроби весь текст коротшим".'));
+  assert.ok(brief.includes("Where the block doesn't read as the line says, change nothing for that item and ask back."));
+});
+
+test('two suggestion blocks in one comment are asked back; a block of several lines is matched by content', async () => {
+  assert.deepEqual(suggestionOf('```suggestion\nА\n```\nі\n```suggestion\nБ\n```').several, 2);
+  const c = card({ number: 578, status: 'finalReview' });
+  const line = (id, body) => ({ id, author: 'owner-login', body, path: 'docs/x/a.md', line: 12, reviewId: 9400, createdAt: ago(1), updatedAt: ago(1) });
+  const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 88, headCommit: HEAD })], activity: { 'guide-docs#88': { reviews: [{ id: 9400, author: 'owner-login', state: 'COMMENTED', body: '', submittedAt: ago(1) }], threads: [{ id: 'th2', path: 'docs/x/a.md', line: 12, comments: [line(9401, '```suggestion\nА\n```\n```suggestion\nБ\n```')] }] } } });
+  ledger(w, c, { stages: BASE, prs: [{ repo: 'guide-docs', number: 88, targets: ['guide'], review: 'sme', stage: 'finalReview' }] });
+  const s = (await w.one('578')).steps[0];
+  assert.deepEqual(s.suggestions, [{ id: 9401, path: 'docs/x/a.md', line: 12, several: 2 }]);
+  const brief = briefFor({ ...s, role: 'writer', keys: ['578'] }, w.settings);
+  assert.ok(brief.includes('- comment 9401, docs/x/a.md line 12: 2 suggestion blocks in one comment; ask back, change nothing.'));
+  assert.match(brief, /match the lines it replaces by their content, and if that isn't certain, change nothing and ask back/);
+});
+
+test('a PR with two cards: the reply is read against both cards\' lists, and an item they record differently is asked back', async () => {
+  const c = { a: card({ number: 579, status: 'finalReview' }), b: card({ number: 580, status: 'finalReview' }) };
+  const w = world({ cards: Object.values(c), prs: [pr({ repo: 'guide-docs', number: 89, headCommit: HEAD })], activity: { 'guide-docs#89': { comments: [{ id: 9501, author: 'owner-login', body: '5 — поверни; 10 — поверни', createdAt: ago(1), updatedAt: ago(1) }] } } });
+  const prOf = (edits) => [{ repo: 'guide-docs', number: 89, targets: ['guide'], review: 'sme', stage: 'finalReview', edits }];
+  ledger(w, c.a, { stages: BASE, group: '579-580', prs: prOf(EDITS) });
+  // The other card's record has item 10 the first lacks, and item 5 with another text.
+  ledger(w, c.b, { stages: BASE, group: '579-580', prs: prOf([...EDITS.filter((e) => e.n !== 5), item(5, '7001', 'Звіт за день', 'Звіт за тиждень'), item(10, '7501', 'Старе.', 'Нове.')]) });
+  const s = (await w.status()).tickets.find((t) => t.key === '579').steps[0];
+  assert.equal(s.nextEdit, 11, 'the numbers go on from both records');
+  assert.deepEqual(s.replies[0].items.map((x) => [x.n, x.do, x.why ?? null]), [[5, 'ask', 'item 5 reads differently in the records of the cards that share this PR'], [10, 'restore', null]]);
 });
