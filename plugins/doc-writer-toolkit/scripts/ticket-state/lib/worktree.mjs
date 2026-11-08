@@ -260,21 +260,23 @@ export function writtenIn(settings, pr) {
   return { head, ahead };
 }
 
-// A target clone as a step with no worktree reads it (the plan, the answers: their session reads the clone's files as
-// they stand). Off its base (a checked-out branch that isn't the base, or a detached HEAD: the owner's branch work), or
-// behind `origin/<base>` (the owner merges on the forge, so a clone is behind after each merge), its files aren't the
-// site's: a note for the brief says so and how to read the base instead. No session is held for it. The base is fetched
-// into its remote-tracking ref first, as for a worktree; the runner never checks out, pulls or resets the clone. Null
-// for a clone that isn't on this machine. Returns { repo, clone, base, branch, off, notes }.
+// A target clone as a step with no worktree finds it (the plan, the answers). The base is fetched into its
+// remote-tracking ref first, as for a worktree, for the read checkout the session reads pages in (`ensureReadCheckout`).
+// When that can't be made, the session reads the clone's files as they stand: off its base (a checked-out branch that
+// isn't the base, or a detached HEAD: the owner's branch work), or behind `origin/<base>` (the owner merges on the
+// forge, so a clone is behind after each merge), its files aren't the site's, and a note for the brief says so and how
+// to read the base instead. No session is held for it. The runner never checks out, pulls or resets the clone. Null for
+// a clone that isn't on this machine. Returns { repo, clone, base, branch, off, unfetched, notes }.
 export function checkClone(settings, target) {
   const clone = clonePath(settings, target);
   if (!clone || !fs.existsSync(clone) || !checkoutKind(clone)) return null;
   const base = target.base ?? 'main';
-  const out = { repo: target.repo, clone, base, branch: null, off: false, notes: [] };
+  const out = { repo: target.repo, clone, base, branch: null, off: false, unfetched: false, notes: [] };
   out.branch = tryRun(clone, ['symbolic-ref', '-q', '--short', 'HEAD']);
   try {
     execFileSync('git', ['-C', clone, 'fetch', '-q', '--no-tags', '--no-write-fetch-head', 'origin', `+refs/heads/${base}:refs/remotes/origin/${base}`], { stdio: ['ignore', 'ignore', 'ignore'], timeout: 30000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
   } catch {
+    out.unfetched = true;
     out.notes.push(`could not fetch ${base} from origin`);
   }
   const fetched = hasRef(clone, `refs/remotes/origin/${base}`);
@@ -292,6 +294,53 @@ export function checkClone(settings, target) {
   if (behind) out.notes.push(`${behind} commit(s) behind origin/${base}: a page merged since is not in its files; ${readBase}`);
   if (ahead) out.notes.push(`${ahead} commit(s) on ${base} that origin doesn't have: its files hold them`);
   return out;
+}
+
+// A step with no worktree reads a target's pages in a read checkout, not in the owner's clone: a worktree of the clone,
+// detached at `origin/<base>` as `checkClone` fetched it, under the state folder (`<state>/read/<target id>`). It is kept
+// across runs and re-pointed (`git checkout --detach`); one that won't move, or has changes to tracked files, is removed
+// and added again. It is the runner's, not a ticket's: no ledger records it, the close step never removes it, and the
+// session can't write in it (`writeDeniedFor`). While another session runs (`othersRunning`), one at another commit is
+// left where it is, so pages never change under a session still reading them; this session then reads the clone with
+// the note, as before. The clone itself is never checked out, pulled or reset: only its list of worktrees changes.
+// Returns { path, commit, ref } or { error } (the brief then falls back to the clone and its note).
+export const readCheckoutsRoot = (settings) => path.join(path.resolve(settings.state), 'read');
+export const readCheckoutPath = (settings, target) => (/^[\w-][\w.-]*$/.test(String(target?.id ?? '')) ? path.join(readCheckoutsRoot(settings), target.id) : null);
+export function ensureReadCheckout(settings, target, { othersRunning = false } = {}) {
+  const clone = clonePath(settings, target);
+  const rc = readCheckoutPath(settings, target);
+  if (!rc) return { error: `the target id ${JSON.stringify(target?.id ?? null)} is not a plain name` };
+  if (!clone || !fs.existsSync(clone) || !checkoutKind(clone)) return { path: rc, error: `the clone of ${target.repo} is not on this machine` };
+  const ref = `origin/${target.base ?? 'main'}`;
+  const commit = tryRun(clone, ['rev-parse', '--verify', '-q', `refs/remotes/${ref}^{commit}`]);
+  if (!commit) return { path: rc, error: `no ${ref} fetched in ${clone}` };
+  const at = () => tryRun(rc, ['rev-parse', 'HEAD']);
+  const dirty = () => tryRun(rc, ['status', '--porcelain', '--untracked-files=no']);
+  const add = () => {
+    fs.mkdirSync(path.dirname(rc), { recursive: true });
+    run(clone, ['worktree', 'add', '-q', '--detach', rc, commit]);
+  };
+  try {
+    const registered = listWorktrees(clone).find((x) => canon(x.path) === canon(rc));
+    if (!registered || registered.prunable || !fs.existsSync(rc)) {
+      // A registration whose folder is gone is pruned first; a folder that isn't this clone's worktree is never touched.
+      tryRun(clone, ['worktree', 'prune']);
+      if (fs.existsSync(rc) && (!fs.statSync(rc).isDirectory() || fs.readdirSync(rc).length)) return { path: rc, error: `${rc} exists and is not a read checkout of ${target.repo}` };
+      add();
+    } else if (at() !== commit || dirty()) {
+      const head = at();
+      if (othersRunning && head !== commit) return { path: rc, error: `another session may be reading it, so it stays at ${head ? head.slice(0, 7) : 'its commit'}` };
+      if (dirty() || tryRun(rc, ['checkout', '-q', '--detach', commit]) === null) {
+        run(clone, ['worktree', 'remove', '--force', rc]);
+        tryRun(clone, ['worktree', 'prune']);
+        add();
+      }
+    }
+  } catch (e) {
+    return { path: rc, error: `the read checkout at ${rc}: ${gitError(e)}` };
+  }
+  if (at() !== commit) return { path: rc, error: `${rc} is not at ${ref}` };
+  return { path: rc, commit, ref };
 }
 
 // The PRs a step's session works on: the step's PR, or every open PR of its tickets with a branch.

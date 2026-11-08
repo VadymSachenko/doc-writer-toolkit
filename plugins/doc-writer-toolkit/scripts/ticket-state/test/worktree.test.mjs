@@ -8,7 +8,7 @@ import { ledger, read, world } from './helpers.mjs';
 import { runDaily, scriptedCalls } from '../lib/runner.mjs';
 import { runRecord } from '../lib/record.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
-import { checkClone, codeClonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureWorktree, listWorktrees, canon, prsForStep, unsavedWork, worktreePath } from '../lib/worktree.mjs';
+import { checkClone, codeClonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureReadCheckout, ensureWorktree, listWorktrees, canon, readCheckoutPath, prsForStep, unsavedWork, worktreePath } from '../lib/worktree.mjs';
 import { makeGit } from '../lib/world.mjs';
 import { commandFor } from '../lib/runner.mjs';
 import { spentOf } from '../lib/limits.mjs';
@@ -1134,4 +1134,79 @@ test('the translation label on a ready PR: taken along by the owner\'s move it i
     }
     assert.deepEqual([t.forgePr.labels, read(t.w, '1501').prs[0].label], [['In final review'], 'In final review']);
   }
+});
+
+// The read checkout (lib/worktree.mjs, `ensureReadCheckout`): a step with no worktree reads pages at `origin/<base>`,
+// in a detached worktree of the clone under the state folder, never in the owner's working tree.
+// A merge on the forge: a commit on origin's base the clone hasn't fetched.
+function mergeOnForge(bare, files) {
+  const d = path.join(tmp('forge-'), 'merge');
+  execFileSync('git', ['clone', '-q', bare, d]);
+  for (const [rel, text] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(d, rel)), { recursive: true });
+    fs.writeFileSync(path.join(d, rel), text);
+  }
+  const g = (...a) => execFileSync('git', ['-C', d, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  g('add', '-A');
+  g('-c', 'user.email=f@example.com', '-c', 'user.name=Forge', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'Merged on the forge');
+  g('push', '-q', 'origin', 'HEAD:main');
+  return g('rev-parse', 'HEAD');
+}
+const pageIn = (dir, rel = 'docs/x/index.md') => fs.readFileSync(path.join(dir, rel), 'utf8');
+
+test('the read checkout is a detached worktree of the clone at origin/<base> under the state folder; the next run re-points the same folder, and the clone never moves', () => {
+  const t = planTicket({ onBase: false });
+  const target = t.w.settings.targets[0];
+  const before = t.clone.g('rev-parse', 'HEAD');
+  checkClone(t.w.settings, target);
+  const r = ensureReadCheckout(t.w.settings, target);
+  assert.equal(r.error, undefined, r.error);
+  assert.equal(r.path, path.join(path.resolve(t.w.settings.state), 'read', 'guide'));
+  assert.deepEqual([r.commit, r.ref], [t.clone.g('rev-parse', 'origin/main'), 'origin/main']);
+  assert.equal(pageIn(r.path), '# Сторінка\n', 'the base\'s page, not the branch draft in the clone');
+  assert.match(pageIn(t.clone.dir), /Новий абзац/, 'the clone keeps its draft');
+  // A merge on the forge: the next run's fetch brings it, and the same folder moves to it.
+  const merged = mergeOnForge(t.bare, { 'docs/x/index.md': '# Сторінка\n\nЗлито.\n' });
+  fs.writeFileSync(path.join(r.path, 'marker.local.md'), 'left by the first run\n');
+  checkClone(t.w.settings, target);
+  const again = ensureReadCheckout(t.w.settings, target);
+  assert.deepEqual([again.path, again.commit, again.error], [r.path, merged, undefined]);
+  assert.equal(pageIn(again.path), '# Сторінка\n\nЗлито.\n');
+  assert.ok(fs.existsSync(path.join(r.path, 'marker.local.md')), 're-pointed, not made again');
+  assert.equal(listWorktrees(t.clone.dir).filter((x) => canon(x.path) === canon(r.path)).length, 1);
+  assert.deepEqual([t.clone.g('symbolic-ref', '--short', 'HEAD'), t.clone.g('rev-parse', 'HEAD')], ['ticket-71', before], 'the clone never moves');
+  assert.equal(t.clone.g('status', '--porcelain', '--untracked-files=no'), '');
+});
+
+test('the read checkout of a clone behind origin has the page merged since; one with changes to tracked files is made again; while another session runs, one at another commit stays', () => {
+  const t = planTicket({ behind: 2 });
+  const target = t.w.settings.targets[0];
+  checkClone(t.w.settings, target);
+  const r = ensureReadCheckout(t.w.settings, target);
+  assert.equal(pageIn(r.path, 'docs/merged-1.md'), '# Злито\n');
+  assert.ok(!fs.existsSync(path.join(t.clone.dir, 'docs/merged-1.md')), 'the clone stays behind');
+  // A change to a tracked file (a session can't write here, a person might): gone at the next run.
+  fs.writeFileSync(path.join(r.path, 'docs/x/index.md'), 'changed\n');
+  const clean = ensureReadCheckout(t.w.settings, target);
+  assert.deepEqual([clean.error, pageIn(clean.path)], [undefined, '# Сторінка\n']);
+  // Another session may be reading it: a newer base doesn't move it under that session.
+  const merged = mergeOnForge(t.bare, { 'docs/y.md': '# Нова\n' });
+  checkClone(t.w.settings, target);
+  const held = ensureReadCheckout(t.w.settings, target, { othersRunning: true });
+  assert.match(held.error, /another session may be reading it, so it stays at \w{7}/);
+  assert.ok(!fs.existsSync(path.join(r.path, 'docs/y.md')));
+  assert.equal(ensureReadCheckout(t.w.settings, target).commit, merged, 'alone again, it moves');
+});
+
+test('no read checkout when its folder holds something else, the base was never fetched or the target id is no plain name: an error, and nothing touched', () => {
+  const t = planTicket({ onBase: false });
+  const target = t.w.settings.targets[0];
+  const rc = readCheckoutPath(t.w.settings, target);
+  fs.mkdirSync(rc, { recursive: true });
+  fs.writeFileSync(path.join(rc, 'notes.md'), 'not a checkout\n');
+  assert.match(ensureReadCheckout(t.w.settings, target).error, /exists and is not a read checkout of guide-docs/);
+  assert.equal(fs.readFileSync(path.join(rc, 'notes.md'), 'utf8'), 'not a checkout\n');
+  assert.match(ensureReadCheckout(t.w.settings, { ...target, id: 'other', base: 'release' }).error, /no origin\/release fetched/);
+  assert.match(ensureReadCheckout(t.w.settings, { ...target, id: '../x' }).error, /not a plain name/);
+  assert.equal(listWorktrees(t.clone.dir).length, 1, 'no worktree registered');
 });
