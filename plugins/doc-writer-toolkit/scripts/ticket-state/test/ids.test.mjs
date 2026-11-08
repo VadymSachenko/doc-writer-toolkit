@@ -4,7 +4,7 @@ import path from 'node:path';
 import { ago, card, gitRepo, pr } from './fakes.mjs';
 import { ledger, world } from './helpers.mjs';
 import { makeGit } from '../lib/world.mjs';
-import { isIdOnlyChange, slugOf } from '../lib/ids.mjs';
+import { isIdOnlyChange } from '../../doc-align/lib/idonly.mjs';
 
 // D-073. A UA change is id-only when its only differences from the approved version are (1) `{/* #id */}` comments
 // added to headings that had none, and (2) link fragments rewritten from such a heading's old fragment to its new id.
@@ -42,8 +42,8 @@ test('links to another page of the same change, by file path or by route, and wi
   const limitsAfter = '# Ліміти\n\n## Денний ліміт {/* #daily-limit */}\n\nТекст.\n';
   const limits = page(limitsBefore, limitsAfter, 'docs/pay/limits.md');
   const encoded = encodeURIComponent('денний-ліміт');
-  const before = `Див. [ліміт](./limits.md#денний-ліміт), [ліміт](/pay/limits#${encoded}) і <a href="limits#денний-ліміт">ліміт</a>.\n`;
-  const after = 'Див. [ліміт](./limits.md#daily-limit), [ліміт](/pay/limits#daily-limit) і <a href="limits#daily-limit">ліміт</a>.\n';
+  const before = `Див. [ліміт](./limits.md#денний-ліміт), [ліміт](/pay/limits#${encoded}) і <a href="/pay/limits#денний-ліміт">ліміт</a>.\n`;
+  const after = 'Див. [ліміт](./limits.md#daily-limit), [ліміт](/pay/limits#daily-limit) і <a href="/pay/limits#daily-limit">ліміт</a>.\n';
   const refunds = page(before, after);
   assert.equal(isIdOnlyChange(refunds, [refunds, limits]), true);
   assert.equal(isIdOnlyChange(refunds, [refunds]), false, 'the target page is not in the change: a real change');
@@ -52,8 +52,26 @@ test('links to another page of the same change, by file path or by route, and wi
   assert.equal(isIdOnlyChange(page(before, after.replace('./limits.md#daily-limit', './other.md#daily-limit')), [limits]), false, 'the link path changed');
 });
 
+// The predicate is doc-align's, the one the scripts share. Where it is stricter than the ticket-state copy it replaced,
+// the stricter answer holds: a link in code is code, and a link path that is neither a file path nor a site-root route
+// can't be tied to a page, so a rewritten fragment there is a real change (the page goes stale instead of keeping
+// an approval it may not have).
+test('code is not a link, and a relative path without an extension reaches no page: both are real changes', () => {
+  const before = '# Т\n\n## Крок\n\nТекст.\n';
+  const after = '# Т\n\n## Крок {/* #step */}\n\nТекст.\n';
+  const same = page(`${before}\nДив. [крок](#крок).\n`, `${after}\nДив. [крок](#step).\n`, 'docs/pay/steps.md');
+  assert.equal(isIdOnlyChange(same), true, 'the control: a link in prose');
+  const inline = page(`${before}\nПишіть \`[крок](#крок)\`.\n`, `${after}\nПишіть \`[крок](#step)\`.\n`, 'docs/pay/steps.md');
+  assert.equal(isIdOnlyChange(inline), false, 'inline code');
+  const fenced = page(`${before}\n\`\`\`md\n[крок](#крок)\n\`\`\`\n`, `${after}\n\`\`\`md\n[крок](#step)\n\`\`\`\n`, 'docs/pay/steps.md');
+  assert.equal(isIdOnlyChange(fenced), false, 'a code fence');
+  const other = page('# О\n\nДив. [крок](steps#крок).\n', '# О\n\nДив. [крок](steps#step).\n', 'docs/pay/other.md');
+  assert.equal(isIdOnlyChange(other, [other, page(before, after, 'docs/pay/steps.md')]), false, 'a relative path without an extension');
+  const route = page('# О\n\nДив. [крок](/pay/steps#крок).\n', '# О\n\nДив. [крок](/pay/steps#step).\n', 'docs/pay/other.md');
+  assert.equal(isIdOnlyChange(route, [route, page(before, after, 'docs/pay/steps.md')]), true, 'the same link as a site-root route');
+});
+
 test('the old fragment is the slug Docusaurus made: punctuation dropped, repeats numbered; headings in code fences are not headings', () => {
-  assert.equal(slugOf('Крок 2: `POST` /payments, **коротко**'), 'крок-2-post-payments-коротко');
   const before = '## Довідка\n\n## Довідка\n\n[друга](#довідка-1)\n\n```md\n## Не заголовок\n```\n';
   const after = '## Довідка {/* #reference-a */}\n\n## Довідка {/* #reference-b */}\n\n[друга](#reference-b)\n\n```md\n## Не заголовок\n```\n';
   assert.equal(isIdOnlyChange(page(before, after)), true);

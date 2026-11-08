@@ -177,7 +177,7 @@ The approval of a PR (a person's move of the card to In translation) and every c
 
 A UA change is id-only when its only differences from the approved version are (1) `{/* #id */}` comments added to headings that had none, and (2) link fragments rewritten from such a heading's old fragment to its new id. Anything else makes it a real change: a changed or removed id, a changed heading text, or any other edit.
 
-`isIdOnlyChange` in `lib/ids.mjs` is that predicate. A heading's old fragment is the slug Docusaurus made of its text. A link to another page counts when its path resolves to a page of the same change whose heading got that id; one that doesn't resolve is a real change.
+`isIdOnlyChange` in `../doc-align/lib/idonly.mjs` is that predicate, the one implementation the scripts share (`section-state` uses it too), so the two scripts must stay in the same plugin. A heading's old fragment is the slug Docusaurus made of its text. A link to another page counts when its path (a relative `.md`/`.mdx` path, or a site-root route or file path) resolves to a page of the same change whose heading got that id; one that doesn't resolve is a real change. Code, fenced or inline, is never a link: a difference there is a real change.
 
 ## Cleanup after the merge
 
@@ -453,7 +453,7 @@ What it never prints: a tool's result (apart from the first line of a refusal), 
 | `lib/status.mjs`, `lib/world.mjs` | The snapshot: ledgers, the tracker, the forge, git (read only). |
 | `lib/record.mjs`, `lib/handover.mjs`, `lib/import.mjs` | The only writers of a ledger (`import`: the Markdown ledgers, and their removal). |
 | `lib/limits.mjs`, `lib/allowance.mjs`, `lib/intake.mjs` | The limits and estimates, the day's allowance, the intake. |
-| `lib/ids.mjs`, `lib/cleanup.mjs` | The id-only predicate; the cleanup after the merge. |
+| `lib/cleanup.mjs` | The cleanup after the merge. |
 | `lib/worktree.mjs`, `lib/pairs.mjs` | The ticket worktrees (made, linked, removed); the UA → EN image check of `record align`. |
 | `lib/runner.mjs`, `lib/report.mjs`, `lib/locks.mjs` | The daily run, the report, the locks. |
 | `lib/trace.mjs` | `trace`: the transcripts' actions per run (read only). |

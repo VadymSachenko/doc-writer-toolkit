@@ -9,7 +9,7 @@ import { createAdapter as createForgeAdapter } from '../../forge/adapters/index.
 import { spawnGh } from '../../forge/adapters/github/gh.mjs';
 import { FLOW_STATUSES } from './settings.mjs';
 import { prId } from './ledger.mjs';
-import { isIdOnlyChange } from './ids.mjs';
+import { isIdOnlyChange } from '../../doc-align/lib/idonly.mjs';
 
 // What the ticket flow reads: the tracker and the forge through their modules (this script composes no tracker or
 // forge request itself), and git, read only, in the target repos the settings name. Every request the modules send is
