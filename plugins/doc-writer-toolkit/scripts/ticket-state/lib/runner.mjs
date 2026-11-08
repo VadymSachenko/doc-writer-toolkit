@@ -21,6 +21,7 @@ import { clonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureWorktree,
 import { BUSY_NAME, LOCK_NAME, busyEnded, freeBrowserLock } from './browser-lock.mjs';
 import { HOOK_VARIABLE, commandsOfRules, hookSettings } from './role-hook.mjs';
 import { parseClaudeConfig } from '../../ui-labels/lib/config.mjs';
+import { liveProgress } from './progress.mjs';
 
 // The daily run (design §7): finish first, then triage the quiet intake cards (mornings, and the watcher's start pass
 // when a slot frees), then start ready groups while
@@ -725,7 +726,17 @@ export function proposeRoles(ledgers, settings, now = Date.now()) {
 
 // ------------------------------------------------------------------ the run
 
-export async function runDaily({ settings, clients, io = {}, options = {} }) {
+// The progress file is closed in a `finally`, so a run that throws never leaves it saying "in progress".
+export async function runDaily(args) {
+  const holder = {};
+  try {
+    return await runDailyRun(args, holder);
+  } finally {
+    holder.live?.finish();
+  }
+}
+
+async function runDailyRun({ settings, clients, io = {}, options = {} }, holder) {
   // `progress.begun` turns true once the run starts its first step: a caller can tell a run that failed before doing
   // anything (safe to start again) from one that failed part way.
   // `startPass`: the watcher's start pass when a slot frees between morning runs (lib/watch.mjs): a scheduled run with
@@ -750,6 +761,9 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
   const out = { mode: settings.mode, dryRun, observe, trigger, morning, ...(startPass ? { startPass } : {}), named, planned: [], ran: [], triage: null, starts: [], guard: [], notes: [...(settings.settingsNotes ?? [])] };
   const log = [];
   const say = (e) => log.push({ at: new Date(clock()).toISOString(), ...e });
+  // The live progress file (lib/progress.mjs): written at each step boundary, never fails a run, nothing in a dry run or observe.
+  let st = null;
+  const live = (holder.live = liveProgress({ settings, clock, off: dryRun || observe || settings.mode === 'off', getRun: () => ({ out, st, log, trigger }) }));
   if (settings.mode === 'off') {
     out.stopped = 'mode off: nothing runs';
     return out;
@@ -787,8 +801,9 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
   // calculations, so the run tries the next group; the failed one waits as any failed step does.
   const tried = new Set();
   const status = () => computeStatus({ settings, clients, usage, now: clock(), ignoreLocks: own, tried, retryWaiting });
-  let st = await status();
+  st = await status();
   out.before = summary(st);
+  live.write();
 
   // Plan a dry run: describe, start nothing.
   const describe = (step) => {
@@ -827,7 +842,7 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
       if (planOnly) out.triage = describe(step);
       else if (guard('triage')) {
         progress.begun = true;
-        out.triage = await runModelStep(step, { lockGroups: step.keys });
+        out.triage = await live.tracked(step, () => runModelStep(step, { lockGroups: step.keys }));
         st = await status();
       }
     } else out.triage = { note: 'no intake card is due' };
@@ -940,7 +955,7 @@ export async function runDaily({ settings, clients, io = {}, options = {} }) {
       let step = first;
       for (let i = 0; step && i < settings.limits.stepsPerTicket; i++) {
         if (step.role && !guard(step.stage, step.group)) break;
-        const r = step.role ? await runModelStep(step) : await runScriptedStep(step);
+        const r = await live.tracked(step, () => (step.role ? runModelStep(step) : runScriptedStep(step)));
         done.push(r);
         ran(r);
         if (r.outcome !== 'done') break;

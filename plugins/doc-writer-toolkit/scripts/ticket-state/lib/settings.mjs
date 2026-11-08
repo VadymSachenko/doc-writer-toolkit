@@ -14,7 +14,7 @@ import { validateJobs } from './jobs.mjs';
 //
 // The shared file holds `state`, `workFolder`, `tracker`, `forge`, `targets`, `noReviewLabel`, `appRepos`, `hostRules`, `hostJobs`,
 // and each role's tool rules (`roles.<role>.allowedTools`, `disallowedTools`).
-// The local file holds `mode`, `limits`, `schedule`, `roles` (no tool rules), `modelLadder`, `video` and `cleanup`. Defaults below.
+// The local file holds `mode`, `limits`, `schedule`, `roles` (no tool rules), `modelLadder`, `video`, `cleanup` and `progress`. Defaults below.
 
 export const MODES = ['off', 'observe', 'on'];
 export const ROLES = ['triage', 'writer', 'reviewer', 'translator'];
@@ -59,6 +59,8 @@ export const LOCAL_DEFAULTS = {
   video: { transcriber: null, fallback: 'person', partMinutes: 30, partsPerDay: 3, browserProfile: null, transcriptHours: 2 },
   // What the close step does with a merged ticket's recorded work files (D-074).
   cleanup: { mode: 'trash', keep: DEFAULT_KEEP, trashDir: null },
+  // `stepsFile`: a file of the owner's own planned steps, shown as is at the end of the progress file (none: no block).
+  progress: { stepsFile: null },
 };
 
 // The statuses the ticket flow reads by name. Each must be a status of tracker.statuses.
@@ -186,6 +188,9 @@ export function validateSettings(merged, { root, stateRootDefault }) {
   if (!Array.isArray(cleanup.keep) || cleanup.keep.some((g) => typeof g !== 'string' || !g.trim())) fail('cleanup.keep must be a list of globs');
   if (cleanup.trashDir !== null && (typeof cleanup.trashDir !== 'string' || !cleanup.trashDir.trim())) fail('cleanup.trashDir must be a folder');
 
+  const progress = { ...LOCAL_DEFAULTS.progress, ...(merged.progress ?? {}) };
+  if (progress.stepsFile !== null && (typeof progress.stepsFile !== 'string' || !progress.stepsFile.trim())) fail('progress.stepsFile must be a file path');
+
   // A ticket's work folder, from the host root: a role session may write there (lib/runner.mjs, `writableFor`).
   const workFolder = merged.workFolder ?? null;
   if (workFolder !== null && (typeof workFolder !== 'string' || !workFolder.includes('<key>') || path.isAbsolute(workFolder) || workFolder.split(/[\\/]/).includes('..'))) fail('workFolder must be a path from the host root with <key> in it, such as "work/tickets/<key>"');
@@ -211,6 +216,7 @@ export function validateSettings(merged, { root, stateRootDefault }) {
     roles,
     modelLadder,
     video,
+    progress: { stepsFile: progress.stepsFile ? path.resolve(root, progress.stepsFile.replace(/^~(?=\/|$)/, process.env.HOME ?? '~')) : null },
     cleanup: { ...cleanup, trashDir: cleanup.trashDir ? path.resolve(root, cleanup.trashDir.replace(/^~(?=\/|$)/, process.env.HOME ?? '~')) : null },
   };
 }
@@ -232,7 +238,7 @@ export function sharedAtHead(root, file) {
 // What the local file may set: only its own keys, and of a role only what shapes the session's cost. A local file is
 // git-ignored, so a session that got to write one would otherwise widen the next session's rules (`roles.*.allowedTools`,
 // `workFolder`, `targets`, `state`, `hostJobs`).
-export const LOCAL_KEYS = ['mode', 'limits', 'schedule', 'roles', 'modelLadder', 'video', 'cleanup'];
+export const LOCAL_KEYS = ['mode', 'limits', 'schedule', 'roles', 'modelLadder', 'video', 'cleanup', 'progress'];
 const ROLE_RULE_KEYS = ['allowedTools', 'disallowedTools'];
 export function localOnly(local) {
   const ignored = Object.keys(local ?? {}).filter((k) => k !== 'schemaVersion' && !LOCAL_KEYS.includes(k));

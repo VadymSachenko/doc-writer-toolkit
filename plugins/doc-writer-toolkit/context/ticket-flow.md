@@ -124,3 +124,7 @@ The close step of a ticket whose PRs are all merged first removes its worktrees 
 ## The report
 
 `<state>/reports/<date>.md`, written by the runner (or `ticket-state report`) with no model call and sent nowhere: what waits for the owner, PRs with places, PRs with the check label, videos waiting for transcripts, ready for merge, cards left in the host jobs' watched lists, what finished and started and why the rest didn't, mismatches and tickets in the owner's hands, the work files removed, the watcher (its last check, failing sources, host jobs waiting), failures and guard stops, the day's cost, and once a week the proposed changes to the roles. `/ticket-report [date]` reads it on demand.
+
+## The progress file
+
+`<state>/watch/progress.md`, rewritten with no model after each step and at the end of each watcher check: a checklist of the runs and of each ticket's phases (done, running, not yet, failed, stale, and the gates with who they wait for), with the owner's own steps file at the end if the local settings name one (`progress.stepsFile`). The ledgers are its source; a failed write never fails a run. The watcher also sends one "your turn" notification for each gate that waits for the owner. The owner reads the file in an editor's Markdown preview (`scripts/ticket-state/README.md`, "The live progress file").

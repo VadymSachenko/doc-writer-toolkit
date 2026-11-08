@@ -56,6 +56,7 @@ The shared file (committed in the host) holds `state`, `workFolder`, `tracker`, 
 | `cleanup.mode` | `trash` | `trash` moves a merged ticket's work files into the Trash; `delete` removes them. |
 | `cleanup.keep` | `["**/sme-interview.md", "**/app-notes.md"]` | Globs (from the host root) the cleanup never removes. |
 | `cleanup.trashDir` | `~/.Trash` | Where `trash` moves them. |
+| `progress.stepsFile` | none | A file of the owner's own planned steps, shown as it is at the end of the live progress file ("The live progress file"). A path from the host root, absolute, or with `~`. |
 
 Role defaults: triage `claude-sonnet-5-5` medium, writer `claude-opus-5-5` high, reviewer and translator `claude-sonnet-5-5` high.
 
@@ -374,6 +375,40 @@ Every `claude` the runner and the watcher start gets an environment without `ANT
 
 The plist holds absolute paths (node, the watcher in the plugin's folder as installed, the host) and a PATH with `claude`, `git`, `gh`, and `ffmpeg` and `ffprobe` when found (the video gate's cut, `scripts/video-parts/`): install again after the plugin or one of them moves, or after installing `ffmpeg`.
 
+## The live progress file
+
+`<state>/watch/progress.md` is a checklist of the work as it happens, for reading in an editor. A script writes it with no model and no network (`lib/progress.mjs`): at the start and the end of each step of a run, and at the end of each watcher check, so it also shows the pipeline while it only waits. The `watch/` folder is under the state folder, which a host keeps out of git.
+
+**To follow it:** open `progress.md` in VS Code and press `Cmd+K V` (Markdown: open preview to the side). The file is replaced as a whole (a temp file, then a rename), so a preview never shows half of it. Whether the preview refreshes by itself while the runner writes has to be seen on a live pass; if it does not, reopen the preview (the file is a plain Markdown file, so any viewer that reloads on change works).
+
+What it shows, top to bottom:
+
+- The update time and `mode`.
+- **Waiting for you:** each gate where the pipeline waits for the owner (questions, the section plan, a PR's final review, ready for merge), from the ledgers alone.
+- **The current run** (**The last run** once it ended, also when the run stopped on an error): what kind of run it was (the morning run, a start pass, the watcher's, a scheduled one, one started by hand), the steps running now with their elapsed time, the triage and its count (a triage session shared by several cards shows its duration here once, and each card its share of the cost), the tickets picked, why a ready group did not start (the limits, the day's allowance, a locked group), a guard stop, the free slots. Under it, one line from the watcher's last start pass (`feed.json`, `starts`) when it did not run or started nothing: `not run: no ready ticket` or no room, `started nothing`, deferred (a change that waits for the start hours, `limits.startHours`, or for a board that reads), `retry at HH:MM` after a failed try, or `failed`.
+- **Tickets in work:** each ticket that has a `start` record (or a step running on it), phase by phase; a triaged ticket not started yet is one line, "Triaged, not started: …". ✅ done, with the cost and duration of its session from `runs` (a session shared by several cards shows the card's share of the cost and no duration); ⏳ running, with the start time and the time since; ⬜ not yet; ❌ failed, with the reason; 👉 a gate that waits for you, ⏸ one that waits for someone else (the reviewer, the team). The row "Your read of the UA" names an expert review the writer recommended (`expertReview`). The row "Expert review" comes after it and shows only when the PR is at the review, was asked for (`reviewersRequested`) or is recommended: ⏸ while the PR is at the review status, ✅ once a person's move took it there and back, ⬜ with the reason otherwise (a review request that came with the `pr` record alone is not a review; the tick rests on a review request in the PR that the `pr` record's own result does not carry; the ledger keeps no other trace of the stage, so a target with no reviewers on the forge leaves none and shows no tick). A chain stage that a change in UA made stale, and every stage after it, goes back to ⬜ with "stale". A closed ticket is not shown; a ticket in the owner's hands (`mode hand`) is listed by key.
+- **Claude's planned steps:** if `progress.stepsFile` names a file, its text, as it is, at the end. The runner never writes that file.
+
+The ledgers win: every row except the stale ones is read from them. The stale marks come from the status the runner has when it writes. They are kept in `watch/progress.json`, so a watcher check that ran no step shows them too, and they drop when the stage runs again for the new head. A check that reads no status leaves the marks as they were.
+
+Limits: the gates are read from the ledgers, which do not show a card a person moved out of the flow without a close record; such a ticket keeps its rows until its ledger is closed. Two processes writing `progress.json` at the same moment (a run started by hand and the watcher) can lose an entry of `notified`, which costs one repeated notification at most.
+
+**A step in flight** shows ⏳ at once, before its session records anything: the runner writes the file when a step starts and when it ends, whatever its outcome. A dry run and `observe` mode write nothing from the runner (the watcher's check writes the file in `observe` too: it only reads the ledgers).
+
+**A run that throws** closes the file in a `finally`: the header says "The last run", never "in progress". The rows still show what the ledgers say (a stage left `running` shows ⏳ until the next run records it).
+
+**A failed write never fails a run.** `writeProgress` returns `{ written: false, error }` and the step goes on.
+
+### "Your turn" notification
+
+At the end of each watcher check, one macOS notification (not urgent) for each gate that waits for the owner and has not been told yet: questions on the card, the section plan, the video transcripts, a PR's final review, ready for merge. Not for a reviewer's wait, a card the owner moved back, a ticket in the owner's hands, or a failed or held step (that one has its urgent notification already).
+
+The memory is `watch/progress.json` (`notified`). A gate is `<key>|<kind>|<PR>|<mark of its arrival>`, where the mark is what the pipeline recorded when it opened the wait: the newest question's time, the plan gate's record, the pipeline's latest commit on the PR, the head marked ready. A check that finds the gate standing tells nothing. A gate that ended is forgotten, and a later one tells again (a second round of questions, a new head after a rework). The first write of the file only records the gates already standing, so nothing is told for them. Only the watcher sends; after a run started by hand, the gate is in the file at once and the next check tells it.
+
+### Claude's planned steps
+
+`progress.stepsFile` in the local settings file (`<name>.local.json`, next to the shared file; none by default) names a file with the owner's own checklist: a path from the host root, absolute, or with `~`. A missing or empty file shows no block. Set it by hand, or with `ticket-state.mjs set progress.stepsFile <file>`.
+
 ## The browser lock
 
 `browser-lock.mjs take|free|status --ticket <key> [--wait <minutes>]` serialises Playwright runs on the host's folder `<state>/.playwright.lock`, the one a hand run takes with `mkdir` and moves away when done. Every role is denied `mv`, `rmdir`, `rm` and a `mkdir` of the lock folder, even where a host layer allows them, and the Edit and Write tools on the lock folder and on `<state>/.playwright-busy`, so a session takes and frees the lock only through this script, which every role may run by its path (`NODE_SCRIPTS`): it can't make a lock with no holder or forge one.
@@ -422,6 +457,7 @@ What it never prints: a tool's result (apart from the first line of a refusal), 
 | `lib/worktree.mjs`, `lib/pairs.mjs` | The ticket worktrees (made, linked, removed); the UA → EN image check of `record align`. |
 | `lib/runner.mjs`, `lib/report.mjs`, `lib/locks.mjs` | The daily run, the report, the locks. |
 | `lib/trace.mjs` | `trace`: the transcripts' actions per run (read only). |
+| `lib/progress.mjs` | The live progress file `watch/progress.md` and the "your turn" notification ("The live progress file"). |
 | `lib/watch.mjs`, `lib/feed.mjs`, `lib/jobs.mjs`, `lib/rearm.mjs`, `lib/notify.mjs` | The watcher's check, its sources and cursor, the host jobs and their re-arm, the notifications. |
 | `lib/launchd.mjs`, `lib/env.mjs`, `lib/setlocal.mjs` | The LaunchAgent; the environment of every `claude` (no API key, the sign-in token); `set`. |
 | `lib/ledger.mjs`, `lib/stages.mjs`, `lib/settings.mjs`, `lib/errors.mjs` | The ledger file, the stage vocabulary, the settings, the errors. |
