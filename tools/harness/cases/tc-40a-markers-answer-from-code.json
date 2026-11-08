@@ -6,7 +6,7 @@
   },
   "setup": [
     "mkdir ../code-src && git -C ../code-src init -q -b test && mkdir ../code-src/src && printf '// Rows allowed in one export file.\\nexport const EXPORT_MAX_ROWS = 5000;\\n' > ../code-src/src/export.ts && git -C ../code-src add -A && git -C ../code-src -c user.name=T -c user.email=t@example.com commit -q -m 'Export limit'",
-    "printf '%s\\n' \"- **Code repos:** \\`web-app file://$(cd ../code-src && pwd) test\\`\" >> CLAUDE.md",
+    "printf '%s\\n' \"- **Code repos:** \\`harness-fixture-app file://$(cd ../code-src && pwd) test\\`\" >> CLAUDE.md",
     "mkdir -p portal/reports/export && printf -- '---\\ntitle: Експорт звіту\\nsidebar_label: Експорт звіту\\n---\\n\\n# Експорт звіту\\n\\nУ файл потрапляє не більше ніж N рядків. {/* NEEDS CONFIRMATION: максимальна кількість рядків в одному файлі експорту */}\\n' > portal/reports/export/export.md",
     "git add -A && git commit -q -m 'Case setup'"
   ],
