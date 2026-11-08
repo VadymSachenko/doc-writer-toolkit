@@ -93,8 +93,8 @@ function segments(s) {
   return out;
 }
 
-const ITEM = /^\s*(?:(?:пункт|п\.|item|№|#)\s*)?(\d{1,4})(?:\s*[—–:.)]\s*|\s*-\s+|\s+|$)([\s\S]*)$/i;
-const RESTORE = /^(?:(?:поверн|верн|відкот|відкоч|відкат|скасу)\S*|undo|revert|restore)(?:\s+(?:як\s+було|назад|було|«було»|старий\s+текст))?$|^як\s+було$|^назад$/i;
+const ITEM = /^\s*(?:[-*•]\s*)?(?:(?:пункт|п\.|item|№|#)\s*)?(\d{1,4})(?:\s*[—–:.)]\s*|\s*-\s+|\s+|$)([\s\S]*)$/i;
+const RESTORE = /^(?:(?:(?:поверн|верн|відкот|відкоч|відкат|скасу)\S*|undo|revert|restore)(?:\s+(?:як\s+було|назад|було|«було»|старий\s+текст))?|як\s+було|назад)(?:,?\s*(?:будь\s+ласка|please))?$/i;
 
 // One item's words: one quoted text and nothing else is the owner's own text, verbatim; a restore word puts «було»
 // back; anything else is a description to apply; nothing at all is unclear.
@@ -107,9 +107,10 @@ function kindOf(rest) {
 }
 
 // The owner's reply by number, or null when the comment names no item (an ordinary instruction). Words before the
-// first number are left out; a line with no number goes on the item before it.
+// first number are left out; a line with no number goes on the item before it; a quoted line (`> `, GitHub's quote
+// reply) is not the owner's words and is left out.
 export function parseReply(body) {
-  const s = String(body ?? '').replace(/\r\n?/g, '\n');
+  const s = String(body ?? '').replace(/\r\n?/g, '\n').split('\n').filter((line) => !/^\s*>/.test(line)).join('\n');
   const items = [];
   const preamble = [];
   for (const seg of segments(s)) {
@@ -162,7 +163,7 @@ const at = (x) => `${x.page}${x.block ? `, ${x.block}` : ''}`;
 export function replyLines(replies) {
   const out = [];
   for (const r of replies ?? []) {
-    out.push(`The owner's reply by number (comment ${r.id}): do exactly this, item by item; the items it doesn't name stay as they are. Texts are JSON strings: put them in exactly as given.`);
+    out.push(`The owner's reply by number (comment ${r.id}): do exactly this, item by item; the items it doesn't name stay as they are. Texts are JSON strings: put them in exactly as given. If an item's words point at another place than that item's block (the owner numbered their own instructions, not the list), change nothing for it and ask back.`);
     for (const x of r.items) {
       if (x.do === 'restore') out.push(`- ${x.n}, restore: ${at(x)}: put back ${q(x.put)} where it reads ${q(x.now)}.${x.en ? ` EN ${x.en.page}: put back ${q(x.en.put)} where it reads ${q(x.en.now)}.` : ''}`);
       else if (x.do === 'verbatim') out.push(`- ${x.n}, the owner's text: ${at(x)}: replace ${q(x.now)} with exactly ${q(x.put)}.`);

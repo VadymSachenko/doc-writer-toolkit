@@ -542,6 +542,7 @@ test('AC-4: a number that does not exist, or one in two lists, is asked back, ne
   const brief = briefFor({ ...asked, role: 'writer', keys: ['572'] }, w.settings);
   assert.ok(brief.includes('- 12, ask back, change nothing: there is no item 12 on this PR (its items are 1–8).'));
   assert.ok(brief.includes('- 3, ask back, change nothing: item 3 is in 2 lists (the PR description, comment 6999).'));
+  assert.ok(brief.includes("If an item's words point at another place than that item's block (the owner numbered their own instructions, not the list), change nothing for it and ask back."), 'numbered instructions are never guessed onto items');
   const plain = st.tickets.find((t) => t.key === '573').steps[0];
   assert.deepEqual([plain.stage, plain.replies, plain.nextEdit], ['answerComments', undefined, 1], 'no list yet: the owner\'s instructions, applied as before');
 });
@@ -558,6 +559,8 @@ test('the reply\'s free form: dictated separators, a quote holding a semicolon, 
     [2, 'describe', '5 полів'],
   ]);
   assert.equal(parseReply('Гарно, але кнопка називається інакше.'), null, 'no number first: not a reply by number');
+  assert.deepEqual(parseReply('- 2 — поверни, будь ласка\n* 5 — коротше\n• 6 — "Так."').items.map((x) => [x.n, x.kind]), [[2, 'restore'], [5, 'describe'], [6, 'verbatim']], 'a bulleted reply');
+  assert.deepEqual(parseReply('> 3. «а» → «б»\n> ще рядок цитати\n2 — поверни\n> 4. «в» → «г»').items.map((x) => [x.n, x.kind, x.text]), [[2, 'restore', 'поверни']], "a quote reply's quoted lines are not the owner's words");
   assert.equal(parseReply('5 — «a» і «b»').items[0].kind, 'describe', 'two quotes and words between them are a description');
   assert.deepEqual(resolveReply(parseReply('5 — поверни; 5 — коротше'), EDITS).map((x) => x.why), ['item 5 is named twice in the reply', 'item 5 is named twice in the reply']);
 });
