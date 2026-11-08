@@ -1,0 +1,9 @@
+{
+  "name": "forge",
+  "private": true,
+  "type": "module",
+  "description": "A forge module for a docs pipeline: open and edit a PR, read its state, reviews and review comments, follow the event feed, comment on lines, reply, suggest a change, set labels. A GitHub adapter over the gh CLI sits behind the interface. No dependencies.",
+  "bin": { "forge": "./forge.mjs" },
+  "engines": { "node": ">=18.3" },
+  "scripts": { "test": "node --test test/forge.test.mjs" }
+}

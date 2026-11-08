@@ -1,0 +1,7 @@
+{
+  "message": "Unprocessable Entity",
+  "errors": [
+    "Pull request review thread line must be part of the diff"
+  ],
+  "status": "422"
+}

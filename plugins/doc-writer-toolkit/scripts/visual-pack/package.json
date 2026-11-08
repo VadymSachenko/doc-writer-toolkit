@@ -1,0 +1,12 @@
+{
+  "name": "visual-pack",
+  "private": true,
+  "type": "module",
+  "description": "Build one visual review sheet: every changed docs page in every locale, captured with the host's own Playwright, with automatic findings on top. No model call, no runtime dependency of its own.",
+  "bin": { "visual-pack": "./visual-pack.mjs" },
+  "engines": { "node": ">=18.3" },
+  "scripts": {
+    "test": "node test/run.mjs",
+    "test:offline": "node --test test/offline.test.mjs"
+  }
+}

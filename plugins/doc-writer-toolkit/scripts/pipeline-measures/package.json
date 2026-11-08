@@ -1,0 +1,9 @@
+{
+  "name": "pipeline-measures",
+  "private": true,
+  "type": "module",
+  "description": "Measure a docs pipeline from a repo's git history, its pull requests and its tracker: markers in drafts, questions at review, edits after the pipeline's own commits. Read only. No dependencies.",
+  "bin": { "pipeline-measures": "./pipeline-measures.mjs" },
+  "engines": { "node": ">=18.3" },
+  "scripts": { "test": "node --test test/pipeline-measures.test.mjs" }
+}

@@ -1,0 +1,37 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "id": "PR_kwDOAAAAAc7"
+      },
+      "labels": {
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": null
+        },
+        "nodes": [
+          {
+            "id": "LA_1",
+            "name": "in progress"
+          },
+          {
+            "id": "LA_2",
+            "name": "in SME review"
+          },
+          {
+            "id": "LA_3",
+            "name": "In final review"
+          },
+          {
+            "id": "LA_4",
+            "name": "Check me"
+          },
+          {
+            "id": "LA_5",
+            "name": "ship it"
+          }
+        ]
+      }
+    }
+  }
+}

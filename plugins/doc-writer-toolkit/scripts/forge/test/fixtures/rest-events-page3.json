@@ -1,0 +1,16 @@
+[
+  {
+    "id": 999,
+    "event": "closed",
+    "created_at": "2026-11-01T08:00:00Z",
+    "actor": {
+      "login": "pat"
+    },
+    "issue": {
+      "number": 7,
+      "pull_request": {
+        "url": "https://api.github.com/repos/acme-docs/guide-docs/pulls/7"
+      }
+    }
+  }
+]

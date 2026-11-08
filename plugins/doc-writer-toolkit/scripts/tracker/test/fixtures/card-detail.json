@@ -1,0 +1,30 @@
+{
+  "id": "5f00000000000000000c0003",
+  "name": "#2002 - Add a currency",
+  "desc": "Add the currency. See https://trello.com/c/Link0001/other and the video.",
+  "idShort": 43,
+  "shortLink": "Doin0003",
+  "shortUrl": "https://trello.com/c/Doin0003",
+  "labels": [{ "id": "5f00000000000000000b0002", "idBoard": "5f00000000000000000d0001", "name": "needs answer", "color": "red" }],
+  "idList": "5f00000000000000000a0004",
+  "idBoard": "5f00000000000000000d0001",
+  "closed": false,
+  "dateLastActivity": "2026-11-02T10:51:38.771Z",
+  "attachments": [
+    { "id": "5f00000000000000000e0001", "name": "clip.mp4", "url": "https://trello.com/1/cards/5f00000000000000000c0003/attachments/5f00000000000000000e0001/download/clip.mp4", "mimeType": "video/mp4", "bytes": 11, "isUpload": true, "date": "2026-11-01T09:00:00.000Z" },
+    { "id": "5f00000000000000000e0002", "name": "spec", "url": "https://example.com/spec", "mimeType": "", "bytes": null, "isUpload": false, "date": "2026-11-01T09:05:00.000Z" },
+    { "id": "5f00000000000000000e0003", "name": "notes.txt", "url": "https://trello.com/1/cards/5f00000000000000000c0003/attachments/5f00000000000000000e0003/download/notes.txt", "mimeType": "text/plain", "bytes": 5, "isUpload": true, "date": "2026-11-01T09:06:00.000Z" },
+    { "id": "5f00000000000000000e0004", "name": "notes.txt", "url": "https://trello.com/1/cards/5f00000000000000000c0003/attachments/5f00000000000000000e0004/download/notes.txt", "mimeType": "text/plain", "bytes": 6, "isUpload": true, "date": "2026-11-01T09:07:00.000Z" }
+  ],
+  "checklists": [
+    {
+      "id": "5f00000000000000000f0001",
+      "name": "Checks",
+      "idCard": "5f00000000000000000c0003",
+      "checkItems": [
+        { "id": "5f00000000000000000f0012", "name": "second, see https://trello.com/c/Link0002", "state": "incomplete", "pos": 2 },
+        { "id": "5f00000000000000000f0011", "name": "first", "state": "complete", "pos": 1 }
+      ]
+    }
+  ]
+}

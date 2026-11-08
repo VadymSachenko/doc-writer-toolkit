@@ -8,15 +8,20 @@ const CONFIG_HEADING = /^(#{1,6})\s+Documentation toolkit configuration\b/i;
 // Reads the "Documentation toolkit configuration" bullets of <root>/CLAUDE.md as { 'field name (lowercase)': value }.
 // The names as written are kept in the non-enumerable `names` ({ 'field name (lowercase)': 'Field name' }).
 export async function loadClaudeConfig(root) {
-  const fields = {};
-  const names = {};
-  Object.defineProperty(fields, 'names', { value: names });
   let text;
   try {
     text = await fs.readFile(path.join(root, 'CLAUDE.md'), 'utf8');
   } catch {
-    return fields;
+    return parseClaudeConfig('');
   }
+  return parseClaudeConfig(text);
+}
+
+// The same, from the text of a CLAUDE.md (the ticket flow's runner reads it without waiting).
+export function parseClaudeConfig(text) {
+  const fields = {};
+  const names = {};
+  Object.defineProperty(fields, 'names', { value: names });
   let level = 0;
   for (const line of text.split('\n')) {
     const heading = line.match(/^(#{1,6})\s/);
@@ -87,6 +92,8 @@ export function ticketsFromBranch(branch) {
 }
 
 export async function loadSettings(values) {
+  // A role session of the ticket flow (the runner sets the marker): `--source command …` would run a shell of its choosing.
+  if (process.env.DOC_TOOLKIT_ROLE_SESSION && values.source !== undefined) throw new CliError('--source is refused in a role session: the UI label source comes from the project\'s CLAUDE.md', { code: 2 });
   const root = path.resolve(values.root ?? process.cwd());
   const claude = await loadClaudeConfig(root);
   const pick = (flag, field) => values[flag] ?? claude[field];
@@ -120,7 +127,11 @@ export function requireSource(settings) {
       { code: 2, data: { missing: ['UI label source'] } },
     );
   }
-  return parseSource(settings.sourceSpec);
+  const source = parseSource(settings.sourceSpec);
+  // A `command` source is a shell line from the CLAUDE.md of whichever folder `--root` names, and a role session picks that
+  // folder: such a session runs no `command` source at all.
+  if (source.type === 'command' && process.env.DOC_TOOLKIT_ROLE_SESSION) throw new CliError('a `command` UI label source is refused in a role session: run it by hand, or declare a `github` source', { code: 2 });
+  return source;
 }
 
 // UA/EN root pairs. The unprefixed fields (`UA content root:`, `EN i18n root:`, `UA URL prefix:`, `Translation scope:`,
