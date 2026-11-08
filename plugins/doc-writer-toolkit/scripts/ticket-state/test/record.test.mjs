@@ -128,6 +128,41 @@ test('pr checks each PR is on the forge for its branch and keeps the expert revi
   assert.deepEqual(l.prs[0].pipelineCommits, ['1111111']);
 });
 
+test('after a pr record with places, the places\' line comments (posted from the owner\'s login) are not new: by the review\'s id, or by their own', async () => {
+  const fmt = (s) => (s ? `${s.stage}${s.pr ? ` ${s.pr}` : ''}` : null);
+  const placeComment = (id, line, reviewId, author = 'owner-login') => ({ id, author, body: `Place ${line}: check the value`, path: 'docs/a.md', line, reviewId, createdAt: ago(1), updatedAt: ago(1) });
+  const places = (commentIds = []) => [3, 4].map((line, i) => ({ id: `p${i + 1}`, repo: 'api-docs', pr: 93, page: 'docs/a.md', line, claim: 'c', why: 'codeOnly', ...(commentIds[i] ? { commentId: commentIds[i] } : {}) }));
+  const setupPr = (activity) => {
+    const c = card({ number: 1245, status: 'finalReview' });
+    const w = world({ cards: [c], prs: [pr({ repo: 'api-docs', number: 93, head: 'ticket-1245' })], activity: { 'api-docs#93': activity } });
+    ledger(w, c, { stages: { start: 'done', plan: 'done', write: 'done', uaReview: 'done' }, prs: [{ repo: 'api-docs', branch: 'ticket-1245', targets: ['api'], review: 'places' }] });
+    return w;
+  };
+  const expert = { recommended: false, why: 'every fact is from the code and the UI' };
+  const review = { id: 77, author: 'owner-login', state: 'COMMENTED', body: 'Two places to check.', submittedAt: ago(1) };
+  const threads = [{ id: 'T1', path: 'docs/a.md', line: 3, comments: [placeComment(780, 3, 77)] }, { id: 'T2', path: 'docs/a.md', line: 4, comments: [placeComment(781, 4, 77)] }];
+
+  // The session forwarded only the review's id from `review-on-lines` (`posted`) and no comment ids with the places.
+  const w = setupPr({ threads, reviews: [review] });
+  await rec(w, { key: '1245', stage: 'pr', status: 'done', result: { prs: [{ branch: 'ticket-1245', number: 93, expertReview: expert }], places: places(), posted: [{ kind: 'review', id: 77 }] } });
+  let t = await w.one('1245');
+  assert.equal(fmt(t.next), null, 'no own comment is new: nothing to answer');
+
+  // The places carry their comments' ids and nothing else was forwarded: they land in `posted`.
+  const w2 = setupPr({ threads, reviews: [] });
+  await rec(w2, { key: '1245', stage: 'pr', status: 'done', result: { prs: [{ branch: 'ticket-1245', number: 93, expertReview: expert }], places: places([780, 781]) } });
+  assert.deepEqual(read(w2, '1245').posted.pr, [780, 781]);
+  t = await w2.one('1245');
+  assert.equal(fmt(t.next), null);
+
+  // A person's reply in a place's thread is their own review: it is new, and the owner's own are instructions.
+  w.forge.activity['api-docs#93'].threads[0].comments.push(placeComment(782, 3, 90, 'expert-two'));
+  w.forge.activity['api-docs#93'].threads[1].comments.push(placeComment(783, 4, 91));
+  t = await w.one('1245');
+  assert.equal(fmt(t.next), 'answerComments api-docs#93');
+  assert.deepEqual([t.next.comments, t.next.owner], [2, 1]);
+});
+
 test('move --pr checks the card status and the stage label; only a person\'s move approves, and no record takes a PR into the chain', async () => {
   const head = 'e'.repeat(40);
   const forgePr = pr({ repo: 'api-docs', number: 95, labels: ['In progress'], headCommit: head });

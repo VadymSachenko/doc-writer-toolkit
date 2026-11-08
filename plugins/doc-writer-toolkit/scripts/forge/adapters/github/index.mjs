@@ -52,7 +52,7 @@ const Q = {
           id isResolved isOutdated path line
           comments(first: 100) {
             pageInfo { hasNextPage }
-            nodes { id databaseId author { __typename login } body createdAt updatedAt path line replyTo { databaseId } pullRequestReview { databaseId } }
+            nodes { id databaseId author { __typename login } body createdAt updatedAt path line replyTo { databaseId } pullRequestReview { databaseId state } }
           }
         }
       }
@@ -231,23 +231,30 @@ export function createGithubAdapter(gh, { owner, pageSize = PAGE }) {
         .map((r) => ({ id: r.databaseId, nodeId: r.id, author: login(r.author), ...authorBot(r.author), state: r.state, body: r.body ?? '', submittedAt: r.submittedAt ?? null, commit: r.commit?.oid ?? null }));
     },
 
+    // GitHub gives the author of a review not yet submitted (`PENDING`) its line comments too. The forge acts from the
+    // owner's own login, so those would read as the owner's: they are left out, as `reviews` leaves out the review, and
+    // a thread with nothing else (one the draft opened) with them. Once the review is submitted they are read.
     async threads({ repo, number }) {
       const nodes = await pages('PrThreads', Q.threads, vars(repo, { number }), (d) => must(d.repository?.pullRequest, `PR #${number}`).reviewThreads);
-      return nodes.map((t) => ({
-        id: t.id,
-        resolved: t.isResolved,
-        outdated: t.isOutdated,
-        path: t.path,
-        line: t.line ?? null,
-        truncated: Boolean(t.comments.pageInfo.hasNextPage),
-        comments: t.comments.nodes.map((c) => ({
-          ...commentOf(c),
-          path: c.path,
-          line: c.line ?? null,
-          inReplyTo: c.replyTo?.databaseId ?? null,
-          reviewId: c.pullRequestReview?.databaseId ?? null,
-        })),
-      }));
+      return nodes
+        .map((t) => ({
+          id: t.id,
+          resolved: t.isResolved,
+          outdated: t.isOutdated,
+          path: t.path,
+          line: t.line ?? null,
+          truncated: Boolean(t.comments.pageInfo.hasNextPage),
+          comments: t.comments.nodes
+            .filter((c) => c.pullRequestReview?.state !== 'PENDING')
+            .map((c) => ({
+              ...commentOf(c),
+              path: c.path,
+              line: c.line ?? null,
+              inReplyTo: c.replyTo?.databaseId ?? null,
+              reviewId: c.pullRequestReview?.databaseId ?? null,
+            })),
+        }))
+        .filter((t) => t.comments.length);
     },
 
     async issueComments({ repo, number }) {

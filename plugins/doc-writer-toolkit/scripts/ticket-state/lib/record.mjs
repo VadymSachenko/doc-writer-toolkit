@@ -304,6 +304,8 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
           const noRef = place.source === 'code' && !(Array.isArray(place.refs) && place.refs.length && place.refs.every((r) => r?.repo && r?.path && r?.lines && r?.commit));
           if (noRef) warnings.push(`place ${place.id ?? '?'} is from the code and has no reference with repo, path, lines and commit`);
           l.places.push({ state: 'open', at, ...place, pr: Number(place.pr), ...(noRef ? { noRef: true } : {}) });
+          // Its line comment was posted from the owner's login: in `posted`, so it never reads as the owner's.
+          addAll(l.posted.pr, [place.commentId]);
         }
         // Every PR to the owner's queue, whatever its review kind: the owner reads first and calls the expert if needed. A
         // recommended expert review puts `forge.expertLabel` on the PR, never taken off; a failure is a warning.

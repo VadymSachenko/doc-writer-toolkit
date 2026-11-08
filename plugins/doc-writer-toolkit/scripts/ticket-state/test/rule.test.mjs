@@ -5,6 +5,8 @@ import path from 'node:path';
 import { LISTS, NOW, ago, card, pr } from './fakes.mjs';
 import { ledger, world } from './helpers.mjs';
 import { takeLock } from '../lib/locks.mjs';
+import { makeClients } from '../lib/world.mjs';
+import { fixture, replayer } from '../../forge/test/fake-gh.mjs';
 
 // AC-1: `status` derives the state and the next step for every state of the design (§1) and every row of the rule (§7).
 
@@ -194,6 +196,31 @@ test('rows 9 and 11: a places PR waits in the owner\'s queue, open places or non
   assert.equal(next(t), 'answerComments guide-docs#14');
   assert.equal(t.next.comments, 2, 'the edited reviewer comment and the owner instruction; not the pipeline own comment, not an empty verdict');
   assert.equal(t.next.owner, 1);
+});
+
+test('row 11: the comments of the owner\'s review not yet submitted are no instruction; once it is submitted they are answered (through the GitHub adapter)', async () => {
+  // The forge reads from the owner's login, and GitHub gives a draft review's line comments to its author.
+  const c = card({ number: 505, status: 'smeReview' });
+  const w = world({ cards: [c] });
+  ledger(w, c, { stages: { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' }, prs: [{ repo: 'guide-docs', number: 7, branch: 'docs/export-screen', targets: ['guide'], review: 'sme', stage: 'smeReview' }] });
+  const routes = (state) => {
+    const threads = fixture('gql-threads');
+    threads.data.repository.pullRequest.reviewThreads.nodes = [3, 9].map((line) => ({
+      id: `PRRT_${line}`, isResolved: false, isOutdated: false, path: 'docs/a.md', line,
+      comments: { pageInfo: { hasNextPage: false }, nodes: [{ id: `PRRC_${600 + line}`, databaseId: 600 + line, author: { __typename: 'User', login: 'owner-login' }, body: `Say it as the app does (${line}).`, createdAt: ago(1), updatedAt: ago(1), path: 'docs/a.md', line, replyTo: null, pullRequestReview: { databaseId: 530, state } }] },
+    }));
+    const reviews = fixture('gql-reviews');
+    reviews.data.repository.pullRequest.reviews.nodes = [];
+    const comments = fixture('gql-comments');
+    comments.data.repository.pullRequest.comments.nodes = [];
+    return { 'graphql PrByNumber': fixture('gql-pr-7'), 'graphql PrReviews': reviews, 'graphql PrThreads': threads, 'graphql PrComments': comments };
+  };
+  const view = async (state) => (await w.status({ clients: makeClients({ settings: w.settings, io: { trackerAdapter: w.tracker, ghRunner: replayer(routes(state)) } }) })).tickets.find((t) => t.key === '505');
+  const pending = await view('PENDING');
+  assert.equal(next(pending), null, 'half a review asks nothing yet');
+  const sent = await view('COMMENTED');
+  assert.equal(next(sent), 'answerComments guide-docs#7');
+  assert.deepEqual([sent.next.comments, sent.next.owner], [2, 2]);
 });
 
 test('row 12: the first chain stage not done for the head; then ready for merge; row 4: every PR merged closes', async () => {

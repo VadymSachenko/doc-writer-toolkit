@@ -507,11 +507,31 @@ export function parseResult(stdout) {
   }
 }
 
-export function readUsageFromClaude(claude = 'claude', env = process.env) {
-  const run = spawnSync(claude, ['-p', '/usage'], { cwd: os.tmpdir(), env: childEnv(env), encoding: 'utf8', timeout: 60 * 1000 });
-  const usage = parseUsage(`${run.stdout ?? ''}${run.stderr ?? ''}`);
-  return usage.week || usage.session ? usage : null;
+// `claude -p /usage` gives no reading now and then while the sign-in is fine (a reading a few minutes later works), so
+// one reading is up to USAGE_TRIES runs, USAGE_DELAY_MS apart, before a guard stops a step for want of it.
+export const USAGE_TRIES = 3;
+export const USAGE_DELAY_MS = 10 * 1000;
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// `{ usage, tries }`: the reading and the runs it took; `usage` is null when every run gave none. `sleep` is the wait
+// between runs (a test passes its own).
+export async function readUsageTried(claude = 'claude', env = process.env, { tries = USAGE_TRIES, delayMs = USAGE_DELAY_MS, sleep = pause } = {}) {
+  for (let n = 1; ; n++) {
+    const run = spawnSync(claude, ['-p', '/usage'], { cwd: os.tmpdir(), env: childEnv(env), encoding: 'utf8', timeout: 60 * 1000 });
+    const usage = parseUsage(`${run.stdout ?? ''}${run.stderr ?? ''}`);
+    if (usage.week || usage.session) return { usage, tries: n };
+    if (n >= tries) return { usage: null, tries: n };
+    await sleep(delayMs);
+  }
 }
+
+export async function readUsageFromClaude(claude = 'claude', env = process.env, options = {}) {
+  return (await readUsageTried(claude, env, options)).usage;
+}
+
+// The guard's reason when there is no reading; `tries`, when the runs that failed are known. `notify.mjs` tells this
+// reason from a spent allowance by its start.
+export const noUsageReading = (tries) => `no usage reading${tries ? ` after ${tries} tries` : ''}: no scheduled start`;
 
 // ------------------------------------------------------------------ the order of the run
 
@@ -769,14 +789,22 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
     return out;
   }
 
-  const readUsage = io.readUsage ?? (() => readUsageFromClaude(claude, io.claudeEnv));
+  // The runs the last reading took when it gave none (the runner's own reading only; a reading `io` gives is one).
+  let usageTries = null;
+  const readUsage =
+    io.readUsage ??
+    (async () => {
+      const r = await readUsageTried(claude, io.claudeEnv, io.sleep ? { sleep: io.sleep } : {});
+      usageTries = r.usage ? null : r.tries;
+      return r.usage;
+    });
   let usage = await readUsage();
   out.usage = usage;
   // Why a scheduled model step may not start now, or null.
   const guardReason = () => {
     if (manual) return null;
     const a = allowanceOf(usage, settings.limits, new Date(clock()));
-    if (!a) return 'no usage reading: no scheduled start';
+    if (!a) return noUsageReading(usage ? null : usageTries);
     if (a.remaining <= 0) return `the week is at ${a.used}%, the allowance by now is ${a.cap}%`;
     return null;
   };
