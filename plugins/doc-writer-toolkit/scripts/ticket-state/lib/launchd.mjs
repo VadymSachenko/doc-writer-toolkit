@@ -9,10 +9,11 @@ import { watchDir } from './feed.mjs';
 import { tickSecondsOf } from './settings.mjs';
 
 // The LaunchAgent that starts the watcher (macOS, launchd): one per host, in ~/Library/LaunchAgents, running
-// `watcher.mjs --quiet` at each tick: every `schedule.forgeSeconds` (the forge check, D-126), the full check every
-// `schedule.watchMinutes` of them (lib/watch.mjs `checkKindOf`); without a forge check, every `watchMinutes`. One agent,
-// not two: one process decides each tick, so the full check never loses its turn to a forge check on the shared lock,
-// and launchd runs a missed interval once after the Mac wakes, and never two copies of one job at once. The plist holds paths only: no token, no key (it is a plain file); the watcher reads
+// `watcher.mjs --quiet` at each tick: every `schedule.forgeSeconds` the forge check, and every `schedule.watchMinutes`
+// the full check started as a process of its own (lib/forge-watch.mjs, D-126); without a forge check, the full check
+// every `watchMinutes`, in the tick. One agent: install, uninstall and the one-agent-per-host cleanup stay as they were.
+// `AbandonProcessGroup`: a detached full check or run outlives its tick. launchd runs a missed interval once after the
+// Mac wakes, and never two copies of the tick at once. The plist holds paths only: no token, no key (it is a plain file); the watcher reads
 // the token from `schedule.tokenFile` itself. The morning run needs no agent of its own: the watcher starts it at the
 // first check after `schedule.morning`.
 
@@ -47,6 +48,8 @@ export function plistText({ label, programArguments, workingDirectory, intervalS
     `  <key>WorkingDirectory</key>\n  <string>${esc(workingDirectory)}</string>`,
     `  <key>StartInterval</key>\n  <integer>${intervalSeconds}</integer>`,
     '  <key>RunAtLoad</key>\n  <true/>',
+    // The full check and the forge check's runs go on in processes of their own after the tick ends (lib/forge-watch.mjs).
+    '  <key>AbandonProcessGroup</key>\n  <true/>',
     '  <key>ProcessType</key>\n  <string>Background</string>',
     '  <key>EnvironmentVariables</key>',
     '  <dict>',

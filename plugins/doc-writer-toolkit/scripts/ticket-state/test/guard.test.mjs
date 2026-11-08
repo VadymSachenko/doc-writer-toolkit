@@ -184,7 +184,8 @@ test('the sign-in token reaches only the claude a check starts: never a host scr
   fs.writeFileSync(fake, `#!/bin/sh\n[ "$CLAUDE_CODE_OAUTH_TOKEN" = "${TOKEN}" ] && echo "$2" | head -c 6 >> "${seen}" && echo >> "${seen}"\nif [ "$2" = "/usage" ]; then echo "Current week (all models): 1% used · resets Nov 14 at 6am (UTC)"; else echo '${RESULT}'; fi\n`, { mode: 0o755 });
   const env = { PATH: process.env.PATH, HOME: process.env.HOME, ANTHROPIC_API_KEY: 'sk-test-should-not-pass' };
   let printed = '';
-  await watcherMain(['--root', root, '--claude', fake], { env, stdout: { write: (x) => (printed += x) }, trackerAdapter: trackerAdapter(), forgeAdapter: forgeAdapter(), now: () => NOW });
+  // The full check, as a tick starts it (a tick with no flag starts it as a process of its own).
+  await watcherMain(['--full', '--root', root, '--claude', fake], { env, stdout: { write: (x) => (printed += x) }, trackerAdapter: trackerAdapter(), forgeAdapter: forgeAdapter(), now: () => NOW });
   const out = JSON.parse(printed);
   assert.deepEqual(out.jobs.map((j) => [j.name, j.outcome]), [['printenv', 'done'], ['notes', 'done']]);
   const logs = fs.readdirSync(path.join(root, '.flow', 'watch', 'jobs')).map((f) => fs.readFileSync(path.join(root, '.flow', 'watch', 'jobs', f), 'utf8'));
