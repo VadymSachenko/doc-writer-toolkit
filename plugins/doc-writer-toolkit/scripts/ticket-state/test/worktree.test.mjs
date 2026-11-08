@@ -8,7 +8,8 @@ import { ledger, read, world } from './helpers.mjs';
 import { runDaily, scriptedCalls } from '../lib/runner.mjs';
 import { runRecord } from '../lib/record.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
-import { codeClonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureWorktree, listWorktrees, canon, prsForStep, worktreePath } from '../lib/worktree.mjs';
+import { checkClone, codeClonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureWorktree, listWorktrees, canon, prsForStep, unsavedWork, worktreePath } from '../lib/worktree.mjs';
+import { makeGit } from '../lib/world.mjs';
 import { commandFor } from '../lib/runner.mjs';
 import { spentOf } from '../lib/limits.mjs';
 import { writeLedger } from '../lib/ledger.mjs';
@@ -73,8 +74,8 @@ function withClone(w, { declare = true } = {}) {
     og('add', '-A');
     og('commit', '-q', '-m', 'Fix: by hand');
     og('push', '-q', 'origin', 'ticket-71');
-    // The target clone sees it, as when the owner pushes from it (status reads git there and fetches nothing).
-    clone.g('fetch', '-q', 'origin');
+    // The target clone isn't fetched: the commit reaches it as one made on the forge would, by status's own fetch
+    // (lib/world.mjs, `fetchHeads`) or the worktree's.
     return og('rev-parse', 'HEAD');
   };
   // The owner rewrites the branch (a rebase onto the base, then a force push), as after a squash of the drafts.
@@ -296,7 +297,7 @@ test('AC-5: the close step removes the ticket\'s worktrees with git, prunes, and
 });
 
 // A merged ticket whose worktree holds work no remote has: `make` leaves it so before the close.
-async function closeWith(make, { files = [] } = {}) {
+async function closeWith(make, { files = [], reported = () => [] } = {}) {
   const c = card({ number: 1504, status: 'finalReview' });
   const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 71, head: 'ticket-71', state: 'merged' })] });
   gitRepo(w.root).commit({ '.gitignore': '.flow/\nrepos/\n', 'docs/index.md': '# Host\n' });
@@ -305,7 +306,7 @@ async function closeWith(make, { files = [] } = {}) {
   ensureWorktree(w.settings, p);
   const wt = worktreePath(w.settings, p);
   make(wt, fx, w);
-  ledger(w, c, { stages: { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' }, prs: [{ ...p, number: 71, review: 'sme', stage: 'readyForMerge', pipelineCommits: [fx.h1], readyForMerge: [{ head: fx.h1, at: ago(2) }] }], files: files.map((f) => ({ path: path.relative(w.root, path.join(wt, f)), kind: 'other', bytes: 0, stage: 'write', at: ago(30) })) });
+  ledger(w, c, { stages: { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' }, prs: [{ ...p, number: 71, review: 'sme', stage: 'readyForMerge', pipelineCommits: [fx.h1, ...reported()], readyForMerge: [{ head: fx.h1, at: ago(2) }] }], files: files.map((f) => ({ path: path.relative(w.root, path.join(wt, f)), kind: 'other', bytes: 0, stage: 'write', at: ago(30) })) });
   const trash = path.join(tmp('fake-trash-'), '.Trash');
   const out = await runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: usage, trashDir: trash, now: () => NOW, spawnClaude: () => assert.fail('no model step') }, options: {} });
   assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['close', 'done']]);
@@ -324,6 +325,30 @@ test('AC-5: the close step keeps a worktree with a commit no remote has, and the
   assert.match(tree.kept, /1 commit\(s\) on no remote branch/);
   assert.match(tree.todo, /push origin HEAD:refs\/heads\/ticket-71.*worktree remove --force/);
   assert.match(report, /worktree\(s\) kept: .*1 commit\(s\) on no remote branch.*worktree remove --force/);
+});
+
+test('AC-4: a commit a session reported (pipelineCommits) whose push never reached the forge keeps the worktree', async () => {
+  let mine;
+  const { wt, tree, l } = await closeWith((wt) => { mine = commitIn(wt, 'docs/x/index.md', 'push rejected\n'); }, { reported: () => [mine] });
+  assert.ok(l.prs[0].pipelineCommits.includes(mine), 'the session listed it');
+  assert.equal(fs.existsSync(wt), true);
+  assert.equal(execFileSync('git', ['-C', wt, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), mine, 'the commit is still there');
+  assert.equal(tree.removed, false);
+  assert.match(tree.kept, /1 commit\(s\) on no remote branch/);
+});
+
+test('unsavedWork: a head behind one the forge had was on the forge, with no remote-tracking ref left; one off it was not', () => {
+  const repo = gitRepo(path.join(tmp('unsaved-'), 'repo'));
+  const c1 = repo.commit({ 'a.md': 'a\n' }, 'one');
+  const c2 = repo.commit({ 'a.md': 'b\n' }, 'two');
+  const wt = path.join(path.dirname(repo.dir), 'wt');
+  repo.g('worktree', 'add', '-q', '--detach', wt, c1);
+  assert.deepEqual(unsavedWork(wt, [c2]), [], 'c1 is behind c2, a head the forge had');
+  assert.deepEqual(unsavedWork(wt, [c1]), [], 'the head itself');
+  assert.deepEqual(unsavedWork(wt, []), ['1 commit(s) on no remote branch']);
+  // A session's commit on c1, beside c2: no head the forge had holds it.
+  commitIn(wt, 'a.md', 'session\n');
+  assert.deepEqual(unsavedWork(wt, [c1, c2]), ['2 commit(s) on no remote branch']);
 });
 
 test('AC-5: the close step keeps a worktree with a tracked change, and the report says what to do', async () => {
@@ -384,7 +409,11 @@ test('AC-5: a file on the cleanup.keep list keeps the worktree too; the build ou
   const gone = await closeWith((wt) => put(wt, { 'build/index.html': '<html>', 'build/assets/a.js': 'x', '.docusaurus/client.js': 'x' }), { files: ['build'] });
   assert.deepEqual([gone.tree.removed, gone.tree.kept], [true, undefined]);
   assert.equal(fs.existsSync(gone.wt), false);
-  assert.match(gone.l.stages.close.result.cleanup.kept.find((k) => k.path.endsWith('build')).reason, /^inside the worktree .*, removed with it/);
+  // The recorded build folder went with the worktree: deleted by git, not in the Trash, and said so plainly.
+  const cleanup = gone.l.stages.close.result.cleanup;
+  assert.equal(cleanup.kept.find((k) => k.path.endsWith('build')), undefined, 'not reported as kept');
+  assert.deepEqual(cleanup.deletedWithWorktree.map((d) => [d.path.endsWith('build'), canon(d.worktree)]), [[true, canon(gone.wt)]]);
+  assert.match(gone.report, /deleted with the worktree, not in the Trash: `[^`]*build`/);
 });
 
 // Git quotes a non-ASCII path in line output (`".sources/\320\262…"`), so these are read with `-z`.
@@ -414,6 +443,16 @@ test('listWorktrees reads a worktree path with Cyrillic letters and a double quo
   clone.g('worktree', 'lock', wt);
   const list = listWorktrees(clone.dir);
   assert.deepEqual(list.map((x) => [canon(x.path), x.locked]), [[canon(clone.dir), false], [canon(wt), true]]);
+});
+
+// Git prints a worktree path with a newline raw in line output, so only `-z` keeps it whole.
+test('listWorktrees reads a worktree path with a newline in it as one path', () => {
+  const root = tmp('wt-newline-');
+  const clone = gitRepo(path.join(root, 'repo'));
+  clone.commit({ 'a.md': 'a\n' }, 'base');
+  const wt = path.join(root, '.worktrees', 'two\nlines');
+  clone.g('worktree', 'add', '-q', '--detach', wt, 'HEAD');
+  assert.deepEqual(listWorktrees(clone.dir).map((x) => canon(x.path)), [canon(clone.dir), canon(wt)]);
 });
 
 test('AC-4: a hand commit that changes an image with a Cyrillic name after ready for merge runs the pack again', async () => {
@@ -516,6 +555,121 @@ test('AC-4: a hand commit that changes only text after ready for merge: the re-s
   assert.ok(briefs.resync.includes(`UA changed since ready for merge at ${t.h1}, and the owner moved the card to In translation: re-sync the blocks changed in ${t.h1}..${h2}, the whole range at once.`), "the session's brief names the range");
   assert.notEqual(l.prs[0].chain.visualPack.head, h2);
   assert.equal(l.prs[0].readyForMerge.at(-1).head, h2);
+});
+
+// What the owner's checkout shows: its branch, the local branches, HEAD, the working tree, a page and the tags, to
+// prove the fetch of status changes none of it.
+const checkoutOf = (clone) => ({
+  branch: clone.g('symbolic-ref', '--short', 'HEAD'),
+  local: clone.g('rev-parse', 'refs/heads/ticket-71'),
+  main: clone.g('rev-parse', 'refs/heads/main'),
+  head: clone.g('rev-parse', 'HEAD'),
+  status: clone.g('status', '--porcelain'),
+  page: fs.readFileSync(path.join(clone.dir, 'docs/x/index.md'), 'utf8'),
+  tags: clone.g('tag', '-l'),
+});
+
+test('AC-1: a commit made on the forge after ready for merge is fetched by status and takes the hand-commit path; the owner\'s checkout is untouched', async () => {
+  const t = finalReviewTicket({ done: CHAIN, stage: 'readyForMerge' });
+  // Pushed from elsewhere (as an edit in the browser would be), and a tag on it, which status never brings in.
+  const h2 = t.handEdit({ 'docs/x/index.md': '# Сторінка\n\nПравка в браузері.\n' });
+  execFileSync('git', ['-C', t.bare, 'tag', 'v-forge', h2]);
+  t.forgePr.headCommit = h2;
+  const before = checkoutOf(t.clone);
+  assert.throws(() => t.clone.g('cat-file', '-e', `${h2}^{commit}`), 'not in the clone yet');
+  // With no fetch, the head is noted as not fetched, and nothing is checked.
+  const noFetch = { ...makeGit(t.w.settings), fetchHeads: () => [] };
+  const blind = await t.w.one('1501', { git: noFetch });
+  assert.equal(blind.next, null);
+  assert.ok(blind.notes.some((n) => /is not fetched here/.test(n)), JSON.stringify(blind.notes));
+  // A check that names other tickets fetches nothing for this one.
+  await t.w.status({ git: makeGit(t.w.settings), only: ['1999'] });
+  assert.throws(() => t.clone.g('cat-file', '-e', `${h2}^{commit}`), 'still not fetched');
+  // Status's own fetch brings the head in: a UA change after ready, back to the owner's queue (D-112).
+  const tk = await t.w.one('1501', { git: makeGit(t.w.settings) });
+  assert.deepEqual([tk.next?.stage, tk.next?.to, tk.next?.uaChanged], ['move', 'finalReview', 1]);
+  assert.equal(t.clone.g('rev-parse', 'refs/remotes/origin/ticket-71'), h2, 'into the remote-tracking ref');
+  assert.deepEqual(checkoutOf(t.clone), before, 'no local branch, HEAD, file or tag changed');
+});
+
+// An image under the UA root is a UA change (back to the owner's queue, then the re-sync and the pack: the `afterReady`
+// cases above, whose hand commits now reach the clone only by status's fetch). One outside it leaves UA alone.
+test('AC-1: a commit made on the forge that changes an image outside the UA root: status fetches it, and the run takes the pack, then ready again, with no re-sync', async () => {
+  const t = finalReviewTicket({ done: CHAIN, stage: 'readyForMerge' });
+  const h2 = t.handEdit({ 'static/img/logo.png': 'logo v2' });
+  t.forgePr.headCommit = h2;
+  const stages = [];
+  const spawnClaude = async (cmd) => {
+    stages.push(stageOf(cmd));
+    await runRecord({ settings: t.w.settings, clients: t.w.clients(), key: '1501', stage: stageOf(cmd), pr: 'guide-docs#71', status: 'done', head: h2, result: {}, now: NOW });
+    return { code: 0, stdout: RESULT, stderr: '' };
+  };
+  const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1501'] } });
+  assert.deepEqual(out.ran.filter((r) => !(r.stage === 'move' && !r.pr)).map((r) => [r.stage, r.outcome]), [['visualPack', 'done'], ['readyForMerge', 'done']]);
+  assert.deepEqual(stages, ['visualPack']);
+  assert.equal(read(t.w, '1501').prs[0].readyForMerge.at(-1).head, h2);
+});
+
+test('fetchHeads: one fetch per clone and branch for a check; an origin that can\'t be reached leaves the head noted, and nothing throws', async () => {
+  const t = finalReviewTicket({ done: CHAIN, stage: 'readyForMerge' });
+  const h2 = t.handEdit({ 'docs/x/index.md': '# Сторінка\n\nЩе правка.\n' });
+  t.forgePr.headCommit = h2;
+  const git = makeGit(t.w.settings);
+  const target = t.w.settings.targets[0];
+  const wanted = [{ target, branch: 'ticket-71', base: 'main', head: h2 }];
+  assert.deepEqual(git.fetchHeads(wanted).map((f) => [f.fetched, f.refs]), [[true, ['+refs/heads/main:refs/remotes/origin/main', '+refs/heads/ticket-71:refs/remotes/origin/ticket-71']]]);
+  assert.deepEqual(git.fetchHeads(wanted), [], 'not again in the same check');
+  assert.deepEqual(makeGit(t.w.settings).fetchHeads(wanted), [], 'a head the clone has is never fetched');
+  // Offline: the next commit can't be fetched; the rule notes it as before.
+  const h3 = t.handEdit({ 'docs/x/index.md': '# Сторінка\n\nОфлайн.\n' });
+  t.forgePr.headCommit = h3;
+  t.clone.g('remote', 'set-url', 'origin', path.join(tmp('gone-'), 'nowhere.git'));
+  const runTried = new Set();
+  assert.deepEqual(makeGit(t.w.settings, { asked: runTried }).fetchHeads([{ ...wanted[0], head: h3 }]).map((f) => f.fetched), [false]);
+  assert.deepEqual(makeGit(t.w.settings, { asked: runTried }).fetchHeads([{ ...wanted[0], head: h3 }]), [], 'a run shares one set: not tried again in it');
+  const tk = await t.w.one('1501', { git: makeGit(t.w.settings) });
+  assert.ok(tk.notes.some((n) => /is not fetched here/.test(n)), JSON.stringify(tk.notes));
+});
+
+// The forge's "Update branch" after ready for merge: the base, with another PR's UA page, merged into the PR's branch.
+function updateBranch(t, { ownEdit = false } = {}) {
+  t.clone.g('checkout', '-q', 'main');
+  t.clone.commit({ 'docs/y/other.md': '# Інша сторінка\n' }, 'Another PR, merged');
+  t.clone.g('push', '-q', 'origin', 'main');
+  t.clone.g('checkout', '-q', 'ticket-71');
+  t.clone.g('merge', '-q', '--no-edit', 'main');
+  if (ownEdit) t.clone.commit({ 'docs/x/index.md': '# Сторінка\n\nПравка власника.\n' }, 'Fix: by hand');
+  t.clone.g('push', '-q', 'origin', 'ticket-71');
+  return t.clone.g('rev-parse', 'HEAD');
+}
+
+test('a merge of the base into a ready PR (the forge\'s "Update branch") that brings another PR\'s UA page keeps it ready: no bounce to the owner\'s queue', async () => {
+  const t = finalReviewTicket({ done: CHAIN, stage: 'readyForMerge' });
+  t.forgePr.headCommit = updateBranch(t);
+  const tk = await t.w.one('1501', { git: makeGit(t.w.settings) });
+  assert.deepEqual([tk.next?.stage, tk.next?.head], ['readyForMerge', t.forgePr.headCommit]);
+  // The plain count would have taken the other PR's page as this one's.
+  assert.deepEqual(makeGit(t.w.settings).changedUnder(t.w.settings.targets[0], t.h1, t.forgePr.headCommit, ['docs/']), ['docs/y/other.md']);
+  assert.deepEqual(makeGit(t.w.settings).changedUnder(t.w.settings.targets[0], t.h1, t.forgePr.headCommit, ['docs/'], 'main'), []);
+});
+
+test('a merge of the base plus the owner\'s edit of a PR page after ready: back to the owner\'s queue, counting only the PR\'s page', async () => {
+  const t = finalReviewTicket({ done: CHAIN, stage: 'readyForMerge' });
+  t.forgePr.headCommit = updateBranch(t, { ownEdit: true });
+  const tk = await t.w.one('1501', { git: makeGit(t.w.settings) });
+  assert.deepEqual([tk.next?.stage, tk.next?.to, tk.next?.uaChanged], ['move', 'finalReview', 1]);
+});
+
+test('changedUnder and pagesOf read a UA page with a Cyrillic name (which git quotes in line output)', () => {
+  const t = finalReviewTicket({ done: CHAIN, stage: 'readyForMerge' });
+  const page = 'docs/x/оплата "нова".md';
+  const h2 = t.clone.commit({ [page]: '# Оплата\n' }, 'a Cyrillic page');
+  t.clone.g('push', '-q', 'origin', 'HEAD:main');
+  t.clone.g('fetch', '-q', 'origin');
+  const git = makeGit(t.w.settings);
+  const target = t.w.settings.targets[0];
+  assert.deepEqual(git.changedUnder(target, t.h1, h2, ['docs/']), [page]);
+  assert.ok(git.pagesOf(target).includes('x/оплата "нова"'), JSON.stringify(git.pagesOf(target)));
 });
 
 test('AC-3: record align is refused while a UA image changed without its EN counterpart, naming it; both changed passes', async () => {
@@ -871,6 +1025,75 @@ test('an answer pushed while the owner moved a ready card to In translation is n
   const again = await go();
   assert.deepEqual(again.ran.map((r) => r.stage), ['follow', 'resync', 'readyForMerge', 'move']);
   assert.equal(read(t.w, '1501').prs[0].approval.head, h2);
+});
+
+// A step with no worktree (the plan, the answers, a start) reads the target clones as they stand: one off its base or
+// behind its origin is said in the brief, with how to read the base; nothing is held for it.
+function planTicket({ onBase = true, behind = 0, status = 'inProgress', stages = { start: 'done' }, left = 'same', targets = ['guide'] } = {}) {
+  const c = card({ number: 1601, status });
+  const w = world({ cards: [c] });
+  const fx = withClone(w);
+  if (onBase) fx.clone.g('checkout', '-q', 'main');
+  // Merged on the forge: on origin, not in the clone's own main.
+  if (behind) {
+    for (let i = 0; i < behind; i++) fx.clone.commit({ [`docs/merged-${i}.md`]: '# Злито\n' }, `merged ${i}`);
+    fx.clone.g('push', '-q', 'origin', 'main');
+    fx.clone.g('reset', '-q', '--hard', `HEAD~${behind}`);
+  }
+  ledger(w, c, { stages, left, triage: { verdict: 'docs-required', targets, size: 'edit' } });
+  return { w, c, ...fx };
+}
+
+const briefsOf = async (t) => {
+  const briefs = [];
+  const spawnClaude = async (cmd) => (briefs.push(briefOf(cmd)), { code: 0, stdout: RESULT, stderr: '' });
+  const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1601'] } });
+  return { out, briefs };
+};
+
+test('a plan step with the target clone on another branch runs: the brief names the branch and says to read the base, never the working tree', async () => {
+  const t = planTicket({ onBase: false });
+  const before = t.clone.g('rev-parse', 'HEAD');
+  const { briefs } = await briefsOf(t);
+  assert.ok(briefs.length >= 1, 'the session started: an off-base clone holds nothing');
+  assert.match(briefs[0], /Target clones, read as they stand \(the runner never moves them\):\n- guide-docs: .*guide-docs; on the branch ticket-71, not on its base main: its files are that branch's, not the site's; read pages with `git -C .*guide-docs show origin\/main:<path>`, never its working tree\./);
+  assert.deepEqual([t.clone.g('symbolic-ref', '--short', 'HEAD'), t.clone.g('rev-parse', 'HEAD')], ['ticket-71', before], 'the runner never moves the clone');
+  // A detached HEAD is off its base too.
+  t.clone.g('checkout', '-q', '--detach', 'main');
+  const c = checkClone(t.w.settings, t.w.settings.targets[0]);
+  assert.equal(c.off, true);
+  assert.match(c.notes.join(' '), /at a detached HEAD \(\w+\), not on its base main/);
+});
+
+test('a start of an owner\'s card in the ready status names the clone of the target its label names, and a ticket that names no target gets no clone note', async () => {
+  const c = card({ number: 1602, status: 'ready', labels: ['Guide'] });
+  const w = world({ cards: [c] });
+  withClone(w);
+  const briefs = [];
+  await runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude: async (cmd) => (briefs.push(briefOf(cmd)), { code: 0, stdout: RESULT, stderr: '' }) }, options: {} });
+  assert.deepEqual(read(w, '1602').triage.targets, ['guide'], 'the start recorded the target before the check');
+  assert.match(briefs[0], /Stage `start`[\s\S]*- guide-docs: .*on the branch ticket-71, not on its base main/);
+  const none = planTicket({ onBase: false, targets: [] });
+  const { briefs: b2 } = await briefsOf(none);
+  assert.doesNotMatch(b2[0], /Target clones/, 'no target named: no clone checked');
+});
+
+test('a plan step with the target clone on its base but behind origin runs, and the brief says how far behind and how to read a merged page', async () => {
+  const t = planTicket({ behind: 2 });
+  const briefs = [];
+  const spawnClaude = async (cmd) => {
+    briefs.push(briefOf(cmd));
+    return { code: 0, stdout: RESULT, stderr: '' };
+  };
+  await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1601'] } });
+  assert.ok(briefs.length >= 1, 'the session started');
+  assert.match(briefs[0], /Target clones, read as they stand \(the runner never moves them\):\n- guide-docs: .*guide-docs; 2 commit\(s\) behind origin\/main: a page merged since is not in its files; read pages with `git -C .*guide-docs show origin\/main:<path>`, never its working tree\./);
+  assert.equal(t.clone.g('rev-list', '--count', 'HEAD..origin/main'), '2', 'still behind: never pulled');
+  // At origin's base, the brief says nothing of the clone.
+  const u = planTicket();
+  const seen = [];
+  await runDaily({ settings: u.w.settings, clients: u.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude: async (cmd) => (seen.push(briefOf(cmd)), { code: 0, stdout: RESULT, stderr: '' }) }, options: { trigger: 'watcher', named: ['1601'] } });
+  assert.doesNotMatch(seen[0], /Target clones/);
 });
 
 test('the translation label on a ready PR: taken along by the owner\'s move it is in translation for the re-sync and back in the final review at ready; sent back by row 8 it never leaves the final review', async () => {

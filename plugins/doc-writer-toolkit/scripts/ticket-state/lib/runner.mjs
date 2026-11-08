@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { computeStatus } from './status.mjs';
+import { makeGit } from './world.mjs';
 import { readAllLedgers, readLedger, findPr, prId } from './ledger.mjs';
 import { allLocks, takeLock, releaseLock, renewLock } from './locks.mjs';
 import { runRecord, cardStatusFor } from './record.mjs';
@@ -17,7 +18,7 @@ import { ROLES } from './settings.mjs';
 import { cleanupTicket } from './cleanup.mjs';
 import { removeClosedMarkdown } from './import.mjs';
 import { DOWNLOAD_DIRS_VARIABLE, ROLE_SESSION_VARIABLE, childEnv, sessionChildEnv } from './env.mjs';
-import { clonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureWorktree, prsForStep, worktreePath } from './worktree.mjs';
+import { checkClone, clonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureWorktree, prsForStep, worktreePath } from './worktree.mjs';
 import { BUSY_NAME, LOCK_NAME, busyEnded, freeBrowserLock } from './browser-lock.mjs';
 import { HOOK_VARIABLE, commandsOfRules, hookSettings } from './role-hook.mjs';
 import { parseClaudeConfig } from '../../ui-labels/lib/config.mjs';
@@ -367,6 +368,7 @@ export function briefFor(step, settings) {
     step.cards ? `Cards, highest priority first:\n${step.cards.map((c) => `- ${c.key}: ${c.url ?? c.shortLink} (${c.priority})`).join('\n')}` : null,
     step.worktrees?.length ? worktreeLines(step.worktrees) : null,
     step.codeTrees?.length ? codeLines(step.codeTrees) : null,
+    step.clones?.length ? cloneLines(step.clones) : null,
     '',
     `Host repo: ${root}`,
     `The toolkit's scripts folder: ${path.join(PLUGIN_ROOT, 'scripts')}`,
@@ -390,6 +392,24 @@ function worktreeLines(trees) {
     'Worktrees (the runner made them; work only there, and never create, move or remove a worktree, or link a file into one). Run git there as `git -C <the path exactly as below, unquoted> <command>`. A read (status, diff, log, show) may also run as plain `git <command>` after a `cd` to it as a separate call; an add, a commit, a push and a fetch run only as `git -C` (this session starts in the hub, whose checkout a plain one would change). Other spellings are denied, a quoted path and `cd <path> && git …` among them.',
     ...trees.map((t) => `- ${t.repo} ${t.branch}: ${t.path}${t.linked?.length ? ` (linked from the clone: ${t.linked.join(', ')})` : ''}. It is detached at origin/${t.branch} as the runner fetched it; push with \`${t.push}\`, fetch with \`git -C ${t.path} fetch origin\`.${t.notes?.length ? ` Note: ${t.notes.join('; ')}.` : ''}`),
   ].join('\n');
+}
+
+// The targets a step's tickets name (their triage's, their PRs'), one per clone; none while they name none.
+function targetsOf(settings, ledgers) {
+  const ids = new Set(ledgers.filter(Boolean).flatMap((l) => [...(l.triage?.targets ?? []), ...(l.prs ?? []).flatMap((p) => p.targets ?? [])]));
+  const seen = new Set();
+  return settings.targets.filter((t) => ids.has(t.id)).filter((t) => {
+    const c = clonePath(settings, t);
+    if (!c || seen.has(c)) return false;
+    seen.add(c);
+    return true;
+  });
+}
+
+// What the brief says about a target clone a step with no worktree reads, when it isn't at its origin's base.
+function cloneLines(clones) {
+  const noted = clones.filter((c) => c.notes?.length);
+  return noted.length ? ['Target clones, read as they stand (the runner never moves them):', ...noted.map((c) => `- ${c.repo}: ${c.clone}; ${c.notes.join('; ')}.`)].join('\n') : null;
 }
 
 // What the brief says about the code the session may read: the checkout at the commit the runner just fetched.
@@ -712,12 +732,17 @@ async function runScripted(step, ctx) {
     case 'close': {
       // The PRs first: the cleanup removes nothing unless every one is merged.
       const states = new Map();
-      for (const p of ledger.prs.filter((x) => x.number)) states.set(prId(p), (await clients.forge.prState({ repo: p.repo, number: p.number })).state);
+      const heads = [];
+      for (const p of ledger.prs.filter((x) => x.number)) {
+        const st = await clients.forge.prState({ repo: p.repo, number: p.number });
+        states.set(prId(p), st.state);
+        heads.push(st.headCommit);
+      }
       const now = await clients.tracker.findCards({ link: card });
       if (now.cards[0]?.status !== 'done') await clients.tracker.move({ card, to: 'done' });
       for (const k of step.keys) {
         const l = readLedger(settings.state, k);
-        const cleanup = cleanupTicket({ settings, ledger: l, prState: (p) => states.get(prId(p)) ?? null, trashDir: trashOf(settings, io) });
+        const cleanup = cleanupTicket({ settings, ledger: l, prState: (p) => states.get(prId(p)) ?? null, forgeHeads: heads, trashDir: trashOf(settings, io) });
         await rec(k, { result: JSON.stringify({ cleanup }) });
       }
       return;
@@ -799,6 +824,9 @@ export async function runDaily(args) {
 }
 
 async function runDailyRun({ settings, clients, io = {}, options = {} }, holder) {
+  // One set of tried fetches for the whole run (lib/world.mjs, `fetchHeads`): a branch is fetched at most once a run.
+  const fetchesTried = new Set();
+  const runGit = () => makeGit(settings, { asked: fetchesTried });
   // `progress.begun` turns true once the run starts its first step: a caller can tell a run that failed before doing
   // anything (safe to start again) from one that failed part way.
   // `startPass`: the watcher's start pass when a slot frees between morning runs (lib/watch.mjs): a scheduled run with
@@ -870,7 +898,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
   // The tickets this run already started or tried to: a start that failed holds no slot in the run's later
   // calculations, so the run tries the next group; the failed one waits as any failed step does.
   const tried = new Set();
-  const status = () => computeStatus({ settings, clients, usage, now: clock(), ignoreLocks: own, tried, retryWaiting });
+  const status = () => computeStatus({ settings, clients, usage, git: runGit(), now: clock(), ignoreLocks: own, tried, retryWaiting });
   st = await status();
   out.before = summary(st);
   live.write();
@@ -883,8 +911,8 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
       if (step.stage === 'close' && l) {
         // What the close step would remove after the merge: listed, nothing removed.
         const views = st.tickets.find((t) => t.key === l.key)?.prs ?? [];
-        const c = cleanupTicket({ settings, ledger: l, prState: (p) => views.find((v) => v.id === prId(p))?.state ?? (p.merged ? 'merged' : null), dryRun: true, trashDir: trashOf(settings, io) });
-        d.cleanup = { mode: c.mode, wouldRemove: c.removed, keeps: c.kept, freesBytes: c.freedBytes, blocked: c.blocked, worktrees: c.worktrees.map((t) => t.path) };
+        const c = cleanupTicket({ settings, ledger: l, prState: (p) => views.find((v) => v.id === prId(p))?.state ?? (p.merged ? 'merged' : null), forgeHeads: views.map((v) => v.head), dryRun: true, trashDir: trashOf(settings, io) });
+        d.cleanup = { mode: c.mode, wouldRemove: c.removed, keeps: c.kept, ...(c.deletedWithWorktree.length ? { wouldDeleteWithWorktree: c.deletedWithWorktree } : {}), freesBytes: c.freedBytes, blocked: c.blocked, worktrees: c.worktrees.map((t) => t.path) };
       }
       return d;
     }
@@ -989,7 +1017,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
 
   // After a live run, the state as the next run finds it: a start that failed in this run waits (for a person or the
   // next morning run), and the report says so.
-  st = planOnly ? st : await computeStatus({ settings, clients, usage, now: clock(), ignoreLocks: own });
+  st = planOnly ? st : await computeStatus({ settings, clients, usage, git: runGit(), now: clock(), ignoreLocks: own });
   out.after = summary(st);
   out.notStarted = st.notStarted;
   out.guard = log.filter((e) => e.kind === 'guard');
@@ -1038,7 +1066,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
     try {
       let step = first;
       if (recheck) {
-        const fresh = await computeStatus({ settings, clients, usage, now: clock(), only: first.keys, ignoreLocks: own });
+        const fresh = await computeStatus({ settings, clients, usage, git: runGit(), now: clock(), only: first.keys, ignoreLocks: own });
         const again = collectSteps(fresh, { named: first.keys, includeStart: manual && named.length > 0, retryWaiting })[0] ?? null;
         step = stillNext(first, again);
         if (!step) {
@@ -1052,7 +1080,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         done.push(r);
         ran(r);
         if (r.outcome !== 'done') break;
-        const now = await computeStatus({ settings, clients, usage, now: clock(), only: step.keys, ignoreLocks: own });
+        const now = await computeStatus({ settings, clients, usage, git: runGit(), now: clock(), only: step.keys, ignoreLocks: own });
         const next = collectSteps(now, { named: step.keys, includeStart: false, retryWaiting })[0] ?? null;
         step = next ? { ...next, keys: next.keys.filter((k) => step.keys.includes(k)) } : null;
       }
@@ -1112,8 +1140,11 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         // With no other session running (no live lock but this step's), the checkouts of other commits go.
         const mine = new Set([step.group ?? step.keys[0], ...held]);
         const othersRunning = allLocks(settings.state, clock()).some((l) => l.live && !mine.has(l.group));
+        // A step with no worktree reads the ticket's target clones as they stand: one off its base or behind its origin
+        // is said in the brief, with how to read the base instead (lib/worktree.mjs, `checkClone`).
+        const clones = !trees.length && step.role !== 'triage' ? targetsOf(settings, step.keys.map((k) => readLedger(settings.state, k))).map((t) => (io.checkClone ?? checkClone)(settings, t)).filter(Boolean) : [];
         const codeTrees = CODE_ROLES.has(step.role) ? (settings.appRepos ?? []).map((a) => (io.ensureCodeTree ?? ensureCodeTree)(settings, a, { othersRunning })) : [];
-        step = { ...step, worktrees: trees, codeTrees };
+        step = { ...step, worktrees: trees, codeTrees, clones };
       } catch (e) {
         const note = `the worktree: ${String(e.message).slice(0, 400)}`;
         for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'failed', pr: step.pr, note, now: clock() }).catch(() => {});
@@ -1209,7 +1240,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
   // read now, a bare mark: then only `ticket-state set retry` or the morning run gives the step another try.
   async function marksOf(step) {
     try {
-      const now = await computeStatus({ settings, clients, usage, now: clock(), only: step.keys, ignoreLocks: own, marks: step.keys });
+      const now = await computeStatus({ settings, clients, usage, git: runGit(), now: clock(), only: step.keys, ignoreLocks: own, marks: step.keys });
       return Object.fromEntries(now.tickets.filter((t) => t.mark).map((t) => [t.key, t.mark]));
     } catch {
       return Object.fromEntries(step.keys.map((k) => [k, { at: new Date(clock()).toISOString(), list: null, comments: null, prs: {} }]));

@@ -14,7 +14,7 @@ import { prId } from './ledger.mjs';
 export const TREE_STAGES = ['write', 'uaReview', 'pr', 'answerComments', 'translate', 'enReview', 'locales', 'align', 'labelSync', 'build', 'visualPack', 'resync'];
 export const DEFAULT_LINKS = ['node_modules'];
 
-const run = (cwd, args) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+const run = (cwd, args) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 }).trim();
 const tryRun = (cwd, args) => {
   try {
     return run(cwd, args);
@@ -260,6 +260,40 @@ export function writtenIn(settings, pr) {
   return { head, ahead };
 }
 
+// A target clone as a step with no worktree reads it (the plan, the answers: their session reads the clone's files as
+// they stand). Off its base (a checked-out branch that isn't the base, or a detached HEAD: the owner's branch work), or
+// behind `origin/<base>` (the owner merges on the forge, so a clone is behind after each merge), its files aren't the
+// site's: a note for the brief says so and how to read the base instead. No session is held for it. The base is fetched
+// into its remote-tracking ref first, as for a worktree; the runner never checks out, pulls or resets the clone. Null
+// for a clone that isn't on this machine. Returns { repo, clone, base, branch, off, notes }.
+export function checkClone(settings, target) {
+  const clone = clonePath(settings, target);
+  if (!clone || !fs.existsSync(clone) || !checkoutKind(clone)) return null;
+  const base = target.base ?? 'main';
+  const out = { repo: target.repo, clone, base, branch: null, off: false, notes: [] };
+  out.branch = tryRun(clone, ['symbolic-ref', '-q', '--short', 'HEAD']);
+  try {
+    execFileSync('git', ['-C', clone, 'fetch', '-q', '--no-tags', '--no-write-fetch-head', 'origin', `+refs/heads/${base}:refs/remotes/origin/${base}`], { stdio: ['ignore', 'ignore', 'ignore'], timeout: 30000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
+  } catch {
+    out.notes.push(`could not fetch ${base} from origin`);
+  }
+  const fetched = hasRef(clone, `refs/remotes/origin/${base}`);
+  const readBase = fetched ? `read pages with \`git -C ${clone} show origin/${base}:<path>\`, never its working tree` : `read pages with \`git -C ${clone} show ${base}:<path>\`, never its working tree`;
+  if (out.branch !== base) {
+    const at = (tryRun(clone, ['rev-parse', '--short', 'HEAD']) ?? '').slice(0, 7);
+    out.off = true;
+    out.notes.push(`${out.branch ? `on the branch ${out.branch}` : `at a detached HEAD${at ? ` (${at})` : ''}`}, not on its base ${base}: its files are that branch's, not the site's; ${readBase}`);
+    return out;
+  }
+  if (!fetched) return out;
+  const count = (range) => Number(tryRun(clone, ['rev-list', '--count', range]) ?? 0);
+  const behind = count(`HEAD..origin/${base}`);
+  const ahead = count(`origin/${base}..HEAD`);
+  if (behind) out.notes.push(`${behind} commit(s) behind origin/${base}: a page merged since is not in its files; ${readBase}`);
+  if (ahead) out.notes.push(`${ahead} commit(s) on ${base} that origin doesn't have: its files hold them`);
+  return out;
+}
+
 // The PRs a step's session works on: the step's PR, or every open PR of its tickets with a branch.
 export function prsForStep(step, ledgers) {
   if (!TREE_STAGES.includes(step.stage)) return [];
@@ -299,7 +333,7 @@ export function cloneOf(worktree) {
 }
 
 // Work in a worktree that no remote has: commits on no remote-tracking ref (unless the head is one the forge had, in
-// `pushed`), changes to tracked files, untracked files git doesn't ignore (a page a session wrote and never added), and
+// `pushed`, or behind one), changes to tracked files, untracked files git doesn't ignore (a page a session wrote and never added), and
 // ignored work files: anything under a `.sources/` folder (notes, interviews, frames) or matching `keep` (the
 // `cleanup.keep` globs, over the path from the worktree's top). Other ignored files (the linked `node_modules` and
 // `.env`, `build/`, `.docusaurus/`, a pack's output) go with the worktree.
@@ -319,7 +353,10 @@ export function unsavedWork(wt, pushed = [], { keep = [] } = {}) {
   if (work.length) reasons.push(`${work.length} ignored work file(s) (${work.slice(0, 3).join(', ')}${work.length > 3 ? ', …' : ''})`);
   const head = tryRun(wt, ['rev-parse', 'HEAD']);
   const unpushed = (tryRun(wt, ['rev-list', 'HEAD', '--not', '--remotes']) ?? '').split('\n').filter(Boolean);
-  if (unpushed.length && !pushed.filter(Boolean).some((h) => head?.startsWith(String(h)))) reasons.push(`${unpushed.length} commit(s) on no remote branch`);
+  // A head the forge had, or one behind it (a later push built on it), was on the forge, whatever the remote-tracking
+  // refs say now (the branch deleted after the merge, then pruned).
+  const onForge = (h) => head?.startsWith(String(h)) || (head && tryRun(wt, ['merge-base', '--is-ancestor', head, String(h)]) !== null);
+  if (unpushed.length && !pushed.filter(Boolean).some(onForge)) reasons.push(`${unpushed.length} commit(s) on no remote branch`);
   return reasons;
 }
 

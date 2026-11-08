@@ -407,6 +407,24 @@ test('a failed step waits until a person acts after it: a move, a comment, a PR 
   assert.deepEqual([next(parked['951']), parked['951'].next.waits !== undefined], ['answers', true]);
 });
 
+test('the hold text counts a failure with no session apart: a stuck step, then a failed session, is twice, once before any session started', async () => {
+  const at = new Date(NOW - 30 * 60000).toISOString();
+  const x = card({ number: 961, status: 'inProgress' });
+  const y = card({ number: 962, status: 'inProgress' });
+  const w = world({ cards: [x, y], comments: { [x.id]: [], [y.id]: [] } });
+  const after = (c) => ({ at, list: c.placeId, comments: [], prs: {} });
+  const answers = { stages: { start: 'done', plan: 'done', questions: 'done' }, left: 'blocked' };
+  const stuck = (c) => ({ seq: 8, stage: 'answers', outcome: 'failed', session: null, note: 'the clone: off its base', failures: 1, after: after(c) });
+  const session = (c, n, seq = 9) => ({ seq, stage: 'answers', outcome: 'failed', failures: n, start: at, after: after(c) });
+  ledger(w, x, { ...answers, runs: [stuck(x), session(x, 2)] });
+  ledger(w, y, { ...answers, runs: [stuck(y), session(y, 2), session(y, 3, 10)] });
+  const by = Object.fromEntries((await w.status()).tickets.map((t) => [t.key, t]));
+  assert.equal(by['961'].held, true);
+  assert.match(by['961'].gate.why, /^answers failed twice with no one acting in between, once before any session started: a comment/);
+  assert.doesNotMatch(by['961'].gate.why, /in 2 sessions/);
+  assert.match(by['962'].gate.why, /^answers failed 3 times with no one acting in between, once before any session started: /);
+});
+
 test('a failed step: a move of the card there and back is a person acting, seen in the card own moves', async () => {
   const at = new Date(NOW - 30 * 60000).toISOString();
   const c = { back: card({ number: 961, status: 'inProgress' }), still: card({ number: 962, status: 'inProgress' }) };

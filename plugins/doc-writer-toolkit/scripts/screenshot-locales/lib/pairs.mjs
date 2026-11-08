@@ -27,6 +27,28 @@ function linksTo(root, head, enPath, uaPath) {
   return path.posix.normalize(path.posix.join(path.posix.dirname(enPath), target)) === uaPath;
 }
 
+// `git diff -z --name-status` as a map of path to its status letter. A record is `<status>\0<path>\0`, but a rename or
+// a copy (`R100`, `C75`) carries two paths, `<status>\0<old>\0<new>\0`: read as two fields, every later record would
+// shift by one. `--no-renames` keeps renames out; should one come anyway (a caller without it), the old path counts as
+// removed and the new one as added, which is what a rename is to the pair check.
+export function nameStatus(out) {
+  const f = String(out ?? '').split('\0');
+  const changed = new Map();
+  for (let i = 0; i < f.length && f[i]; ) {
+    const s = f[i][0];
+    if (s === 'R' || s === 'C') {
+      if (s === 'R') changed.set(f[i + 1], 'D');
+      changed.set(f[i + 2], 'A');
+      i += 3;
+    } else {
+      changed.set(f[i + 1], s);
+      i += 2;
+    }
+  }
+  changed.delete(undefined);
+  return changed;
+}
+
 export function checkPairs(cfg, { base, head = 'HEAD' } = {}) {
   if (!base) throw new CliError('pairs needs --base <ref>: the branch the PR goes into (origin/main, say).', { code: 2 });
   if (!cfg.multilocale || !cfg.locales.includes('en')) {
@@ -34,9 +56,7 @@ export function checkPairs(cfg, { base, head = 'HEAD' } = {}) {
   }
   if (cfg.problems.length) throw new CliError(`The screenshot locales can't be resolved: ${cfg.problems.map((p) => p.message).join(' ')}`, { code: 2, data: { problems: cfg.problems } });
   // `-z`: status and path each end in NUL, so a non-ASCII name is never quoted (and so never missed).
-  const out = git(cfg.root, ['diff', '-z', '--name-status', '--no-renames', `${base}...${head}`]).split('\0');
-  const changed = new Map();
-  for (let i = 0; i + 1 < out.length; i += 2) if (out[i]) changed.set(out[i + 1], out[i][0]);
+  const changed = nameStatus(git(cfg.root, ['diff', '-z', '--name-status', '--no-renames', `${base}...${head}`]));
   // Each pair's default-locale root and EN root, the longest UA root first, so a nested root wins.
   const pairs = cfg.pairs
     .map((p) => ({ id: p.id, ua: cfg.roots[p.id]?.[cfg.defaultLocale], en: cfg.roots[p.id]?.en }))
