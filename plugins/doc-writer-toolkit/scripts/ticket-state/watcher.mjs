@@ -6,7 +6,7 @@ import { CliError } from './lib/errors.mjs';
 import { loadSettings } from './lib/settings.mjs';
 import { makeClients } from './lib/world.mjs';
 import { prepareEnv } from './lib/env.mjs';
-import { runCheck } from './lib/watch.mjs';
+import { runHandOn, runTick } from './lib/forge-watch.mjs';
 import { notify, startedOf } from './lib/notify.mjs';
 
 const USAGE = `watcher [options]
@@ -19,7 +19,17 @@ instead. Inside limits.startHours (10-22 by default), when a slot frees or anoth
 it has the runner triage and start as a scheduled run would, once per change. It also starts the host jobs that are
 due. A check that finds nothing starts nothing.
 
+The LaunchAgent ticks every schedule.forgeSeconds (60 by default). Each tick runs the forge check: the PRs that
+changed only, no tracker read, no morning run, no start pass, no job. It hands a ticket with the owner's or a
+reviewer's comments to answer on, at once for a submitted review, once single comments have been quiet for
+schedule.commentQuietMinutes (2 by default), to a run in a process of its own, and doesn't wait for it. Every
+schedule.watchMinutes the tick also starts the full check as a process of its own, unless one still runs.
+
 Options
+  --full                    run the full check now, here, whatever the tick would run
+  --forge                   run the forge check now, here, whatever the tick would run
+  --hand-on <id>            the forge check's run for the tickets named with --ticket (it starts this itself)
+  --ticket <key>            with --hand-on: a ticket to finish (repeatable)
   --dry-run                 read and plan only: no runner step, no job, no cursor, no notification is written
   --quiet                   print nothing for a quiet check, one line otherwise (for launchd's log)
   --noop                    do nothing at all and exit 0 (for an install test of the LaunchAgent)
@@ -32,6 +42,10 @@ Options
 
 const OPTIONS = {
   'dry-run': { type: 'boolean' },
+  full: { type: 'boolean' },
+  forge: { type: 'boolean' },
+  'hand-on': { type: 'string' },
+  ticket: { type: 'string', multiple: true },
   quiet: { type: 'boolean' },
   noop: { type: 'boolean' },
   claude: { type: 'string' },
@@ -57,14 +71,29 @@ export function startPassLine(p) {
 // One line for launchd's log: what the check found and did.
 export function oneLine(out) {
   if (out.stopped || out.skipped) return `${out.at ?? ''} ${out.stopped ?? out.skipped}`.trim();
+  if (out.kind === 'forge') return forgeLine(out);
   const bits = [`${out.at} mode ${out.mode}`, `${out.events} new event(s)`];
   const failed = out.sources.filter((s) => s.outcome === 'failed' || s.outcome === 'gap');
   if (failed.length) bits.push(`${failed.length} source(s) failing`);
   if (out.morning) bits.push('morning run');
   if (out.errors?.length) bits.push(`${out.errors.length} part(s) failed: ${out.errors.map((e) => e.part).join(', ')}`);
   if (out.run) bits.push(`finished ${out.run.named.join(', ')}`);
+  for (const w of (out.waiting ?? []).filter((x) => x.new)) bits.push(`${w.key} waits for quiet until ${w.until}`);
   if (out.startPass) bits.push(startPassLine(out.startPass));
   for (const j of out.jobs.filter((x) => x.due)) bits.push(`job ${j.name}: ${j.outcome ?? (j.held ? 'held' : 'planned')}`);
+  if (out.notified.length) bits.push(`${out.notified.length} notification(s)`);
+  return bits.join('; ');
+}
+
+// The forge check's line: what it handed on, what waits for quiet, what failed.
+export function forgeLine(out) {
+  const bits = [`${out.at} forge check`, `${out.events} changed PR(s)`];
+  if (out.full?.started) bits.push(`full check started (pid ${out.full.pid})`);
+  if (out.full?.error) bits.push(`the full check could not start: ${out.full.error}`);
+  for (const f of out.finished ?? []) bits.push(`run ${f.id} of ${f.keys.join(', ')} ended`);
+  if (out.handed.length) bits.push(`comments: ${out.handOn?.pid ? `run ${out.handOn.id} (pid ${out.handOn.pid}) started for` : 'would start a run for'} ${out.handed.join(', ')}`);
+  for (const w of out.waiting.filter((x) => x.new)) bits.push(`${w.key} waits for quiet until ${w.until}`);
+  if (out.errors.length) bits.push(`${out.errors.length} part(s) failed: ${out.errors.map((e) => e.part).join(', ')}`);
   if (out.notified.length) bits.push(`${out.notified.length} notification(s)`);
   return bits.join('; ');
 }
@@ -77,6 +106,10 @@ export async function main(argv, io = {}) {
     return 0;
   }
   if (positionals.length) throw new CliError(`unexpected argument '${positionals[0]}'.\n\n${USAGE}`, { code: 2 });
+  if ([values.full, values.forge, values['hand-on'] !== undefined].filter(Boolean).length > 1) throw new CliError('--full, --forge and --hand-on exclude each other', { code: 2 });
+  if (values['hand-on'] !== undefined && !/^[A-Za-z0-9-]+$/.test(values['hand-on'])) throw new CliError(`'${values['hand-on']}' is not a hand-on id`, { code: 2 });
+  if (values['hand-on'] !== undefined && !values.ticket?.length) throw new CliError('--hand-on needs the tickets it finishes (--ticket)', { code: 2 });
+  if (values.ticket?.length && values['hand-on'] === undefined) throw new CliError('--ticket goes with --hand-on', { code: 2 });
   if (values.noop) {
     if (!values.quiet) stdout.write(JSON.stringify({ ok: true, command: 'watch', noop: true }) + '\n');
     return 0;
@@ -86,7 +119,14 @@ export async function main(argv, io = {}) {
   const { notes, claudeEnv } = prepareEnv(settings, env);
   const dryRun = Boolean(values['dry-run']);
   const clients = makeClients({ settings, env, dryRun, io: { ...io, ...(values.origin ? { trackerOrigin: values.origin } : {}) } });
-  const out = await runCheck({ settings, clients, io: { notify, ...io, claudeEnv }, options: { dryRun, claude: values.claude ?? 'claude', notes } });
+  if (values['hand-on'] !== undefined) {
+    const r = await runHandOn({ settings, clients, io: { ...io, claudeEnv }, options: { id: values['hand-on'], keys: values.ticket, dryRun, claude: values.claude ?? 'claude' } });
+    if (values.quiet) stdout.write(`${r.ended} hand-on ${r.id} of ${r.keys.join(', ')}: ${r.error ? `failed: ${r.error}` : 'ended'}\n`);
+    else stdout.write(JSON.stringify({ ok: true, command: 'hand-on', ...r, requests: clients.requests(), caught: clients.caught() }, null, 2) + '\n');
+    return 0;
+  }
+  const kind = values.full ? 'full' : values.forge ? 'forge' : null;
+  const out = await runTick({ settings, clients, io: { notify, ...io, claudeEnv }, options: { dryRun, claude: values.claude ?? 'claude', notes, ...(kind ? { kind } : {}) } });
   if (values.quiet) {
     if (!out.quiet) stdout.write(oneLine(out) + '\n');
   } else stdout.write(JSON.stringify({ ok: true, command: 'watch', ...out, requests: clients.requests(), caught: clients.caught() }, null, 2) + '\n');

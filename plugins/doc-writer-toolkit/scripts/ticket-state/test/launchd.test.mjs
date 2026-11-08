@@ -9,6 +9,21 @@ import { agentFor, install, labelOf, uninstall } from '../lib/launchd.mjs';
 import { main as launchdMain } from '../launchd.mjs';
 import { main as watcherMain } from '../watcher.mjs';
 import { main as stateMain } from '../ticket-state.mjs';
+import { emptyForge, writeForge } from '../lib/forge-state.mjs';
+
+test('uninstall names the detached processes it leaves running: the full check a tick started and the forge check\'s runs', async () => {
+  const settings = await settingsOf();
+  const agentsDir = tmp('agents-');
+  const env = io(agentsDir, []);
+  install(settings, { io: env });
+  const at = new Date().toISOString();
+  writeForge(settings.state, { ...emptyForge(), handOns: [{ id: 'h1', pid: 4101, keys: ['481'], at }, { id: 'h2', pid: 4102, keys: ['482'], at }] });
+  let out = '';
+  await launchdMain(['uninstall', '--root', settings.root], { ...env, isAlive: (p) => p === 4101, stdout: { write: (s) => (out += s) } });
+  const r = JSON.parse(out);
+  assert.equal(r.left, false);
+  assert.deepEqual(r.stillRunning.map((x) => [x.kind, x.pid, x.tickets]), [['run', 4101, ['481']]]);
+});
 
 // AC-3: install and uninstall leave no stray job (with a stand-in for launchctl here; the evidence of a real install and
 // uninstall on a Mac is in the task's evidence). And `set`: the plain-words settings command edits the local file only.
@@ -52,7 +67,9 @@ test('AC-3: install writes one plist and loads it; uninstall unloads it and remo
   assert.deepEqual(calls.map((c) => c[0]), ['bootout', 'bootstrap', 'print']);
   assert.equal(calls[1][1], 'gui/501');
   const text = fs.readFileSync(path.join(agentsDir, `${r.label}.plist`), 'utf8');
-  assert.match(text, /<key>StartInterval<\/key>\n {2}<integer>300<\/integer>/);
+  // The tick: the forge check every schedule.forgeSeconds (60 by default); the watcher runs the full one every 5 minutes.
+  assert.match(text, /<key>StartInterval<\/key>\n {2}<integer>60<\/integer>/);
+  assert.deepEqual([r.everySeconds, r.fullEveryMinutes], [60, 5]);
   assert.match(text, /<string>--quiet<\/string>/);
   assert.match(text, new RegExp(`<string>${settings.root}</string>`));
   // Paths only: the token file's path and any key stay out of the plist; PATH holds node, claude, git, gh, and ffmpeg
@@ -109,6 +126,38 @@ test('the launchd CLI: print shows the plist and installs nothing; status reads 
   out = '';
   await launchdMain(['status', '--root', settings.root], { ...io(agentsDir, []), stdout: { write: (s) => (out += s) } });
   assert.deepEqual([JSON.parse(out).loaded, JSON.parse(out).fileExists], [false, false]);
+  assert.equal(JSON.parse(out).wantSeconds, 60);
+});
+
+test('the forge check is in the LaunchAgent: one agent at schedule.forgeSeconds; none set, every watchMinutes; status says when to install again', async () => {
+  // An agent installed before the forge check: every 5 minutes. Its status asks for an install again.
+  const before = await settingsOf({ schedule: { watchMinutes: 5, forgeSeconds: null } });
+  const agentsDir = tmp('agents-');
+  const env = io(agentsDir, []);
+  const r = install(before, { io: env });
+  assert.equal(r.everySeconds, 300);
+  const status = async (root) => {
+    let out = '';
+    await launchdMain(['status', '--root', root], { ...env, stdout: { write: (s) => (out += s) } });
+    return JSON.parse(out);
+  };
+  let s = await status(before.root);
+  assert.deepEqual([s.everySeconds, s.wantSeconds, s.installAgain], [300, 300, false]);
+  assert.equal(s.checks, 'the full check every 5 min');
+  // The owner's local file drops the null: the default 60 s applies, and the installed agent is behind.
+  const local = path.join(before.root, '.claude', 'ticket-flow.local.json');
+  fs.writeFileSync(local, JSON.stringify({ schedule: { watchMinutes: 5 } }));
+  s = await status(before.root);
+  assert.deepEqual([s.everySeconds, s.wantSeconds, s.installAgain], [300, 60, true]);
+  assert.equal(s.checks, 'the forge check every 60 s, the full check every 5 min');
+  const after = install(await loadSettings({ root: before.root }), { io: env });
+  assert.equal(after.everySeconds, 60);
+  assert.equal(fs.readdirSync(agentsDir).length, 1, 'one host, one agent');
+  s = await status(before.root);
+  assert.deepEqual([s.everySeconds, s.installAgain], [60, false]);
+  // A forge interval not shorter than the full one is no forge check: every tick is a full check.
+  const slow = await settingsOf({ schedule: { watchMinutes: 1, forgeSeconds: 90 } });
+  assert.match(agentFor(slow, { io: env }).text, /<key>StartInterval<\/key>\n {2}<integer>60<\/integer>/);
 });
 
 test('set: one key of the local file, checked before it is written; the shared file is never touched', async () => {
