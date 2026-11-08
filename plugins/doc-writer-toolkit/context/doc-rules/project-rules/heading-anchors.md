@@ -39,14 +39,18 @@ verbatim, lands on the right heading in every locale.
    → `## Transaction statuses`), so Docusaurus generates the same id, even when a closer translation of
    the UA text exists: `## Перегляд транзакцій {/* #transaction-list */}` → `## Transaction list`. Give
    the EN heading the id explicitly only when the id's words can't head the section: the id names a
-   parent (`## Reference information {#reference-information-create-payment}`), or its words say
-   something the UA heading no longer says.
+   parent (`## Reference information \{#reference-information-create-payment}`), or its words say
+   something the UA heading no longer says. **Write an explicit id with the backslash, `\{#id}`.**
+   A bare `{#id}` is read by MDX as an expression and fails the build in some hosts ("Could not parse
+   expression with acorn"); `\{#id}` builds everywhere, and Docusaurus reads it as the heading's id. Readers
+   (the scripts, the checks) accept both forms, because existing pages may have either; no tool rewrites
+   one into the other.
 7. **Further locales.** The comment stays verbatim; only the heading text is translated.
 8. **Adding an id to an existing heading** changes that heading's fragment. Whoever adds it also
    rewrites, in the same change, every link that used the old fragment (search the content roots for
    `#<old fragment>`).
 9. **No placeholder left in an id.** A template's `{slug}` (or any `{…}`) left inside an explicit
-   `{#…}` id breaks the MDX build: MDX evaluates the inner braces as an expression
+   `\{#…}` id breaks the MDX build: MDX evaluates the inner braces as an expression
    (`ReferenceError: slug is not defined`). Inside a `{/* #… */}` comment it builds, but the id comes out
    wrong (`reference-information-{slug}`). Every id is filled in before the page is saved.
 10. **A missing id is added at EN translation.** See "Who adds a missing id".
@@ -55,7 +59,7 @@ verbatim, lands on the right heading in every locale.
 
 The **translator** (`doc-translator`), while it translates the page to EN, whole or in sync mode. Every
 UA heading of the page from `##` down without a comment gets the **anchor of its EN heading**: the EN
-heading's explicit `{#id}`, else the id Docusaurus generates from its text. So an existing EN anchor,
+heading's explicit `\{#id}` (or `{#id}`), else the id Docusaurus generates from its text. So an existing EN anchor,
 which links may already use, never changes; a heading new to EN gets its id from the EN text the
 translator writes (rule 2). In the same change it rewrites every link to the heading's old fragment
 (rule 8). `scripts/doc-align` (`--propose-ids --write`) computes both, so the result is an id-only
@@ -103,7 +107,7 @@ EN:
 ## Prerequisites
 ## Transaction statuses
 ## Archive page
-## Reference information {#reference-information-create-payment}
+## Reference information \{#reference-information-create-payment}
 
 Select the [filters](#reference-information-create-payment) you need.
 For more information, see [statuses](/archive/archive#transaction-statuses).

@@ -1,10 +1,11 @@
 // Heading ids, per context/doc-rules/project-rules/heading-anchors.md: the `{/* #id */}` comment that ends a UA
-// heading, the id Docusaurus gives the EN heading (its explicit `{#id}` or the slug of its text), and which of
+// heading, the id Docusaurus gives the EN heading (its explicit `\{#id}` or `{#id}`, or the slug of its text), and which of
 // the two pages is the UA one.
 
 const COMMENT = /\{\/\*([\s\S]*?)\*\/\}/g;
 const MARKER = /^\s*(ToDo|NEEDS CONFIRMATION)\s*:/i;
-export const EXPLICIT_ID = /\s*\{#([^}\s]+)\}\s*$/;
+// An explicit id is written `\{#id}` (a bare `{#id}` fails the MDX build in some hosts); both forms are read.
+export const EXPLICIT_ID = /\s*\\?\{#([^}\s]+)\}\s*$/;
 export const ID_FORM = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const CYRILLIC = /[Ѐ-ӿ]/g;
 
@@ -13,7 +14,7 @@ export function headingComments(raw) {
   return [...raw.matchAll(COMMENT)].filter((m) => !MARKER.test(m[1])).map((m) => ({ body: m[1], start: m.index, end: m.index + m[0].length }));
 }
 
-// The heading text with every comment and an explicit `{#id}` removed, for descriptions and slugs.
+// The heading text with every comment and an explicit `\{#id}` removed, for descriptions and slugs.
 export function headingText(raw) {
   return raw.replace(COMMENT, '').replace(EXPLICIT_ID, '').replace(/\s+/g, ' ').trim();
 }
@@ -48,7 +49,7 @@ export function slugify(text) {
   return text.toLowerCase().replace(/[^\p{L}\p{M}\p{N}\p{Pc} -]/gu, '').replace(/ /g, '-');
 }
 
-// The text Docusaurus slugs for a heading without an id: comments and an explicit `{#id}` removed, link and
+// The text Docusaurus slugs for a heading without an id: comments and an explicit `\{#id}` removed, link and
 // image text kept, tags dropped.
 export const slugSource = (raw) => plainText(headingText(raw));
 

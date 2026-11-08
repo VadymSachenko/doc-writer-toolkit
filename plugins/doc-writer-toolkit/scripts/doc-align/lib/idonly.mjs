@@ -27,7 +27,7 @@ const decode = (s) => {
 };
 
 // The headings of a page outside code, by line index: level, text without the id comment, the id (comment or explicit
-// `{#id}`), and for a heading without an id its slug, numbered the way Docusaurus numbers repeats.
+// `\{#id}` or `{#id}`), and for a heading without an id its slug, numbered the way Docusaurus numbers repeats.
 function headingsOf(text) {
   const slug = createSlugger();
   const out = new Map();

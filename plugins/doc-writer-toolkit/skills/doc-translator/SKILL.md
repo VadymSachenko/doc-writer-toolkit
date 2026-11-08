@@ -78,7 +78,7 @@ UA headings from `##` down carry an id comment, per `heading-anchors.md`: `## П
 When translating to English:
 - The text inside `{/* #... */}` is the canonical EN anchor slug. Derive the EN heading from it (convert kebab-case to title/sentence words).
 - **Remove** the `{/* #... */}` comment from the EN output — EN headings do not carry anchor comments; Docusaurus generates their anchors automatically from the heading text.
-- Use the id's words even when a closer translation of the UA text exists (`## Перегляд транзакцій {/* #transaction-list */}` → `## Transaction list`). Only when the id's words can't head the section (the id names a parent, such as `reference-information-<slug>`, or its words say something the UA heading no longer says), write the EN heading naturally and give it the id explicitly, never as a comment: `## Reference information {#reference-information-create-payment}`. The EN heading's id always equals the UA comment's id.
+- Use the id's words even when a closer translation of the UA text exists (`## Перегляд транзакцій {/* #transaction-list */}` → `## Transaction list`). Only when the id's words can't head the section (the id names a parent, such as `reference-information-<slug>`, or its words say something the UA heading no longer says), write the EN heading naturally and give it the id explicitly, never as a comment: `## Reference information \{#reference-information-create-payment}`, with the backslash (a bare `{#…}` breaks the MDX build in some hosts; `heading-anchors.md` rule 6). The EN heading's id always equals the UA comment's id.
 
 ```md
 UA:  ## Передумови {/* #prerequisites */}
@@ -298,9 +298,9 @@ Before saving, check:
 - Each diagram keeps its structure: the same ids, keywords, arrows, directives, styling lines and number of lines as the source; only its labels changed (`code-blocks.md`)
 - Every other code block keeps its code part byte-for-byte: the code, the data, the comment markers, the whitespace and the number of lines; only its comments and tree descriptions changed
 - No `{/* #anchor */}` comments appear in EN headings
-- Every EN heading's id, generated from its text or explicit `{#id}`, equals its UA heading's comment id (`heading-anchors.md`)
-- No explicit `{#id}` contains a `{…}` placeholder (`heading-anchors.md` rule 9); a placeholder in the UA comment is reported, not carried into EN
-- Every EN heading whose UA heading has no id slugs to lowercase ASCII kebab-case, or has an explicit `{#id}` that is, so Step 5b can give the UA heading its id
+- Every EN heading's id, generated from its text or explicit `\{#id}` (an existing `{#id}` counts too), equals its UA heading's comment id (`heading-anchors.md`)
+- No explicit `\{#id}` contains a `{…}` placeholder (`heading-anchors.md` rule 9); a placeholder in the UA comment is reported, not carried into EN
+- Every EN heading whose UA heading has no id slugs to lowercase ASCII kebab-case, or has an explicit `\{#id}` that is, so Step 5b can give the UA heading its id
 - The product's own name follows `glossary-en.md`'s rule for translated pages
 - `## Передумови` translated as `## Prerequisites` with the correct EN sentence (Variant A if a single reference section; Variant B if multiple)
 - After colons in prose: first word is capitalized if it is a regular word (not a UI element name, proper name, or code value)
@@ -339,8 +339,8 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/doc-align/doc-align.mjs <UA page> <EN page> -
 Give one `--root` pair (UA content root and EN i18n root, each with the pair's UA URL prefix) for every root pair the project declares (`project-paths.md`), so links from every pair are found. The fields are in `${CLAUDE_PLUGIN_ROOT}/scripts/doc-align/README.md`, "Proposing the missing ids"; read it only when the output is unclear.
 
 - **`proposals` without a `problem`** are written: the comment onto the UA heading line, and each link in `links` gets the new fragment, on the UA page, on the EN page and on the other pages that link to the heading. Nothing else changes in any file.
-- **A proposal with a `problem`** is not written. Not kebab-case (`Fees & limits` slugs to `fees--limits`): reword the EN heading so it slugs to a valid id, or give it an explicit `{#id}` (rule 6); an id another UA heading has: give the EN heading an explicit `{#…-<what it belongs to>}` (rule 3). Save EN and run the command again. Change only those EN headings.
-- **`skipped`, or a `reason`** (the heading counts differ): the EN page doesn't mirror UA. Fix the translation (Step 4) and run again. A UA heading with an explicit `{#id}` is replaced by hand only if the user asks; report it.
+- **A proposal with a `problem`** is not written. Not kebab-case (`Fees & limits` slugs to `fees--limits`): reword the EN heading so it slugs to a valid id, or give it an explicit `\{#id}` (rule 6); an id another UA heading has: give the EN heading an explicit `\{#…-<what it belongs to>}` (rule 3). Save EN and run the command again. Change only those EN headings.
+- **`skipped`, or a `reason`** (the heading counts differ): the EN page doesn't mirror UA. Fix the translation (Step 4) and run again. A UA heading with an explicit `\{#id}` (or `{#id}`) is replaced by hand only if the user asks; report it.
 - **`unresolved`** links: list them in the report; don't edit them.
 - With no heading missing an id, the script writes nothing.
 
