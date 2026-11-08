@@ -656,6 +656,20 @@ test('the end of the chain gives a PR its final review label back, at once, whil
   assert.deepEqual(l.prs.map((p) => [p.stage, p.label ?? null]), [['readyForMerge', 'In final review'], ['translation', null]]);
 });
 
+test('a label the forge refuses at ready for merge is a warning: the step is done, its record stands', async () => {
+  const withTranslation = { targets: rawSettings().targets.map((x) => (x.id === 'guide' ? { ...x, labels: { ...x.labels, translation: 'In translation' } } : x)) };
+  const t = finalReviewTicket({ done: CHAIN, extra: withTranslation });
+  t.forgePr.labels = ['In translation'];
+  t.w.forge.changeLabels = async () => {
+    throw new Error('the label request failed');
+  };
+  const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude: async () => assert.fail('a session started') }, options: { trigger: 'watcher', named: ['1501'] } });
+  const ready = out.ran.find((r) => r.stage === 'readyForMerge');
+  assert.equal(ready.outcome, 'done');
+  assert.match(ready.warnings[0], /^guide-docs#71: the stage label for 'readyForMerge' was not set: .*the label request failed/);
+  assert.equal(read(t.w, '1501').prs[0].stage, 'readyForMerge');
+});
+
 test('two PRs: the card goes back only when both are ready', async () => {
   const c = card({ number: 1505, status: 'translation' });
   const w = world({ cards: [c], prs: [pr({ repo: 'portal-docs', number: 91, head: 'a' }), pr({ repo: 'portal-docs', number: 92, head: 'b' })] });

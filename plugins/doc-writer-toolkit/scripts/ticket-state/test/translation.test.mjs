@@ -771,6 +771,28 @@ test('a move to In translation takes a ready PR along only for the owner\'s own 
   assert.deepEqual(['593', '594'].map((k) => read(w, k).prs[0].approval?.head ?? null), [HEAD, HEAD]);
 });
 
+test('a PR with two cards: the other card\'s own PR, which its record takes into translation, gets the translation label too', async () => {
+  const all = { targets: rawSettings().targets.map((t) => ({ ...t, labels: { ...t.labels, translation: 'In translation' } })) };
+  const a = card({ number: 598, status: 'finalReview' });
+  const b = card({ number: 599, status: 'finalReview' });
+  const shared = pr({ repo: 'guide-docs', number: 63, headCommit: HEAD, labels: ['In final review'] });
+  const own = pr({ repo: 'api-docs', number: 64, headCommit: HEAD, labels: ['In final review'] });
+  const w = world({ cards: [a, b], prs: [shared, own], extra: all });
+  const sharedPr = { repo: 'guide-docs', number: 63, targets: ['guide'], review: 'sme', stage: 'finalReview' };
+  ledger(w, a, { stages: BASE, group: '598-599', prs: [sharedPr] });
+  ledger(w, b, { stages: BASE, group: '598-599', prs: [sharedPr, { repo: 'api-docs', number: 64, targets: ['api'], review: 'places', stage: 'finalReview' }] });
+  moved(a, 'translation');
+  assert.deepEqual(scriptedCalls({ stage: 'follow', to: 'translation', keys: ['598'] }, read(w, '598'), w.settings), [
+    'forge set-stage-label --target guide --number 63 --stage translation',
+    `tracker move ${b.shortLink} --to translation`,
+    'forge set-stage-label --target api --number 64 --stage translation',
+  ]);
+  await run(w, stopHere, { named: ['598'] });
+  assert.deepEqual(read(w, '599').prs.map((p) => p.stage), ['translation', 'translation']);
+  assert.deepEqual([shared.labels, own.labels], [['In translation'], ['In translation']]);
+  assert.equal(labelChanges(w).filter((e) => e[0] === 63).length, 1, 'the shared PR labelled once');
+});
+
 test('the plan of a move to In translation labels a ready PR it takes along; its record keeps the label; row 8 sends a ready PR back with the final review label', async () => {
   const old = 'a'.repeat(40);
   const c = { taken: card({ number: 595, status: 'translation' }), back: card({ number: 597, status: 'finalReview' }) };
