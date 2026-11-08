@@ -87,8 +87,8 @@ export function watchLockHolder(state, { now = Date.now(), isAlive = alive, name
   try {
     owner = JSON.parse(fs.readFileSync(path.join(dir, 'owner.json'), 'utf8'));
   } catch {
-    /* being written: held */
-    return { pid: null, startedAt: null };
+    // Being written: held for a minute from the folder's time, as takeWatchLock counts it; after that, stale.
+    return now - fs.statSync(dir).mtimeMs <= 60000 ? { pid: null, startedAt: null } : null;
   }
   const age = now - Date.parse(owner.startedAt ?? '');
   return isAlive(owner.pid) && !(age > STALE_MS) ? owner : null;

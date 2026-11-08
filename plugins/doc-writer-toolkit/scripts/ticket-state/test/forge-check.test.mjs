@@ -412,6 +412,25 @@ test('the tick: the full check every watchMinutes since the last one began (half
   assert.equal(checkKindOf({ ...s, schedule: { ...s.schedule, forgeSeconds: null } }, at(60 * SEC), NOW), 'full');
 });
 
+test('a full check\'s lock with no owner file: held for a minute (being written), then stale, and a due tick starts the full check', async () => {
+  const { w } = commented();
+  seed(w, NOW - 10 * MIN);
+  const dir = path.join(w.settings.state, 'watch', 'active');
+  fs.mkdirSync(dir);
+  const t = ticker(w);
+  const real = Date.now();
+  assert.equal(watchLockHolder(w.settings.state, { now: real + 10 * SEC }) !== null, true, 'fresh: held');
+  fs.utimesSync(dir, new Date(real - 2 * MIN), new Date(real - 2 * MIN));
+  assert.equal(watchLockHolder(w.settings.state, { now: real }), null, 'two minutes old: stale');
+  // The tick's clock is the test's: the folder's age is read against it.
+  fs.utimesSync(dir, new Date(NOW - 2 * MIN), new Date(NOW - 2 * MIN));
+  let out = await t.tick(NOW);
+  assert.equal(out.full.started, true);
+  fs.utimesSync(dir, new Date(NOW - 10 * SEC), new Date(NOW - 10 * SEC));
+  out = await t.tick(NOW + SEC);
+  assert.equal(out.full.running, true);
+});
+
 test('mode off: a tick starts no full check and the forge check reads nothing', async () => {
   const { w, say } = commented({ extra: { mode: 'off' } });
   seed(w, NOW - 10 * MIN);
