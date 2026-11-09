@@ -265,3 +265,18 @@ test('AC-1, AC-2: the video gate comment the runner posts gets the header once, 
   assert.deepEqual(w.tracker.log.filter((x) => x[0] === 'comment').map((x) => x[2]), [`${HEADER}\n\nBlocked: a video is needed\nParts: v-part1`]);
   assert.equal(c.placeId, LISTS.blocked.id);
 });
+
+test('AC-5: a PR with two cards: each ledger is compared with itself, so a step with no new record changes no label, and one record on both gives one call', async () => {
+  const c = { a: card({ number: 959, status: 'finalReview' }), b: card({ number: 960, status: 'finalReview' }) };
+  const w = world({ cards: Object.values(c), prs: [pr({ repo: 'guide-docs', number: 59, headCommit: HEAD })] });
+  const shared = (seq) => ({ repo: 'guide-docs', number: 59, targets: ['guide'], review: 'sme', stage: 'finalReview', openQuestions: { items: [{ text: 'Which?' }], stage: 'answerComments', at: ago(2), seq } });
+  // Each ledger numbers its records on its own: the same PR's last answer is record 5 in one and 9 in the other.
+  ledger(w, c.a, { stages: BASE, group: 'g', prs: [shared(5)] });
+  ledger(w, c.b, { stages: BASE, group: 'g', prs: [shared(9)] });
+  const keys = ['959', '960'];
+  let before = labelSnapshot(w.settings.state, keys);
+  assert.deepEqual(labelChanges(before, w.settings.state, keys, w.settings.forge), [], 'nothing recorded: the owner\'s removal stands');
+  before = labelSnapshot(w.settings.state, keys);
+  for (const key of keys) await runRecord({ settings: w.settings, clients: w.clients(), key, stage: 'answerComments', pr: 'guide-docs#59', status: 'done', result: { handled: [], summary: { id: 7059 }, questions: [{ text: 'Which?' }], posted: [7059] }, now: NOW });
+  assert.deepEqual(labelChanges(before, w.settings.state, keys, w.settings.forge), [{ repo: 'guide-docs', number: 59, label: CHECK, add: true }]);
+});

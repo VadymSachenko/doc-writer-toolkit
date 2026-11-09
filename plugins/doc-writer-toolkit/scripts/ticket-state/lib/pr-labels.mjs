@@ -11,29 +11,29 @@ import { prId, readLedger } from './ledger.mjs';
 //     Between two such records it stays as a person left it. A person's forward move takes it off (`follow`, D-128).
 // A label the forge refuses after the record stood is a warning: the step stays done.
 
-// Each PR of the tickets as it stands in the ledgers: its stage, how often it was marked ready, and which record last
-// set its open questions.
+// Each PR of the tickets as it stands in each ledger (a PR with two cards is in two, each with its own record
+// numbers): its stage, how often it was marked ready, and which record last set its open questions.
+const slot = (key, p) => `${key}|${prId(p)}`;
 export function labelSnapshot(state, keys) {
   const out = new Map();
   for (const key of keys) {
-    const l = readLedger(state, key);
-    for (const p of l?.prs ?? []) if (p.number) out.set(prId(p), { stage: p.stage, ready: p.readyForMerge?.length ?? 0, asked: p.openQuestions?.seq ?? null });
+    for (const p of readLedger(state, key)?.prs ?? []) if (p.number) out.set(slot(key, p), { stage: p.stage, ready: p.readyForMerge?.length ?? 0, asked: p.openQuestions?.seq ?? null });
   }
   return out;
 }
 
-// The label changes the ledgers ask for since `before`: `[{ repo, number, label, add }]`, one per PR and label (a PR
-// with two cards is in two ledgers).
+// The label changes the ledgers ask for since `before`, each ledger against its own snapshot: `[{ repo, number,
+// label, add }]`, one per PR and label. Two ledgers of one PR that disagree: on wins (a question open in either).
 export function labelChanges(before, state, keys, forge) {
-  const out = [];
-  const seen = new Set();
+  const out = new Map();
   for (const key of keys) {
     for (const p of readLedger(state, key)?.prs ?? []) {
-      const id = prId(p);
-      if (!p.number || p.merged || p.stage === 'merged' || seen.has(id)) continue;
-      seen.add(id);
-      const was = before.get(id) ?? { stage: null, ready: 0, asked: null };
-      const change = (label, add) => out.push({ repo: p.repo, number: p.number, label, add });
+      if (!p.number || p.merged || p.stage === 'merged') continue;
+      const was = before.get(slot(key, p)) ?? { stage: null, ready: 0, asked: null };
+      const change = (label, add) => {
+        const k = `${prId(p)}|${label}`;
+        out.set(k, { repo: p.repo, number: p.number, label, add: add || Boolean(out.get(k)?.add) });
+      };
       if (forge.readyLabel) {
         if (p.stage === 'readyForMerge' && (was.stage !== 'readyForMerge' || (p.readyForMerge?.length ?? 0) > was.ready)) change(forge.readyLabel, true);
         else if (was.stage === 'readyForMerge' && p.stage !== 'readyForMerge') change(forge.readyLabel, false);
@@ -41,7 +41,7 @@ export function labelChanges(before, state, keys, forge) {
       if (forge.checkLabel && p.openQuestions && p.openQuestions.seq !== was.asked && ['answerComments', 'styleCheck'].includes(p.openQuestions.stage)) change(forge.checkLabel, p.openQuestions.items.length > 0);
     }
   }
-  return out;
+  return [...out.values()];
 }
 
 // Sets them on the forge. Returns the warnings.
