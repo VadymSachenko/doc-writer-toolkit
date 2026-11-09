@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { CliError, Refusal, TrackerError } from './errors.mjs';
 import { assertAdapter } from './adapter-contract.mjs';
+import { withHeader, withoutHeader } from './comment-header.mjs';
 
 // The tracker module, in statuses and transitions. It owns every decision and calls an adapter (see
 // `adapter-contract.mjs`) for the tracker's own API. Nothing here knows Trello.
@@ -13,6 +14,8 @@ import { assertAdapter } from './adapter-contract.mjs';
 //   - `move` runs only a (from, to) pair the settings list in `transitions`;
 //   - `createCard` creates only in the `intake` status;
 //   - an empty comment or description is refused;
+//   - every comment starts with the settings' `commentHeader`, when they set one, and a comment is looked up by its
+//     first words without it (lib/comment-header.mjs);
 //   - only the people the settings name (`tracker.owner`, the targets' `cardMembers`) are added to a card, and each
 //     must be a member of the board, resolved with the statuses: a name that matches no member stops the run;
 //   - no operation archives, deletes or renames a card, or removes anyone from it.
@@ -95,6 +98,7 @@ export function createTracker({ adapter, tracker, dryRun = false, now = () => Da
   const memberSpec = tracker.members ?? [];
   const owner = tracker.owner ?? null;
   const priorityNames = tracker.priority ?? { high: 'high', low: 'low' };
+  const header = tracker.commentHeader ?? null;
   const boards = [board, ...tracker.watchBoards];
 
   const knownStatus = (status) => {
@@ -319,17 +323,19 @@ export function createTracker({ adapter, tracker, dryRun = false, now = () => Da
       return { card: card.id, attachment: pickAttachment(att), path: dest, bytes, ...(att.bytes && att.bytes !== bytes ? { warning: `the card says ${att.bytes} bytes, the file has ${bytes}` } : {}) };
     },
 
-    // `unlessHeader`: skip the comment when the card already has one (since `since`) that starts with this header.
+    // `unlessHeader`: skip the comment when the card already has one (since `since`) that starts with this header. Both
+    // are read without the comment header, so a comment from before the header existed counts too.
     async comment({ card: input, text, unlessHeader, since }) {
-      if (!bare(text)) throw new Refusal('empty', 'an empty comment is refused');
+      if (!bare(withoutHeader(text, header))) throw new Refusal('empty', 'an empty comment is refused');
       const { ref, card } = await need(input);
       if (unlessHeader) {
         const from = sinceOf(since);
-        const header = bare(unlessHeader);
-        const existing = (await adapter.comments(ref)).find((c) => (!from || c.time >= from) && bare(c.text).startsWith(header));
+        const first = bare(withoutHeader(unlessHeader, header));
+        if (!first) throw new Refusal('empty', "the header to look for is the comment header alone: give the message's first line");
+        const existing = (await adapter.comments(ref)).find((c) => (!from || c.time >= from) && bare(withoutHeader(c.text, header)).startsWith(first));
         if (existing) return { card: card.id, commented: false, reason: 'a comment with this header is already there', existing: existing.id };
       }
-      const made = await adapter.comment(ref, text);
+      const made = await adapter.comment(ref, withHeader(text, header));
       return { card: card.id, commented: true, id: made.id, time: made.time };
     },
 

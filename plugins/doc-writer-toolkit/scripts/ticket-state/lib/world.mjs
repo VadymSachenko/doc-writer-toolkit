@@ -7,6 +7,7 @@ import { createAdapter as createTrackerAdapter } from '../../tracker/adapters/in
 import { createForge } from '../../forge/lib/forge.mjs';
 import { createAdapter as createForgeAdapter } from '../../forge/adapters/index.mjs';
 import { spawnGh } from '../../forge/adapters/github/gh.mjs';
+import { withoutHeader } from '../../tracker/lib/comment-header.mjs';
 import { FLOW_STATUSES } from './settings.mjs';
 import { expertsOf } from './experts.mjs';
 import { prId } from './ledger.mjs';
@@ -272,7 +273,7 @@ export async function readPrs({ settings, forge, ledgers }) {
       const entry = { state: st.state, url: st.url ?? null, headCommit: st.headCommit, reviewRequests: st.reviewRequests ?? [], reviewDecision: st.reviewDecision ?? null, labels: st.labels ?? [], mergeCommit: st.mergeCommit ?? null, mergedAt: st.mergedAt ?? null, newComments: [] };
       if (st.state === 'open') {
         const activity = await forge.prActivity({ repo: pr.repo, number: pr.number });
-        entry.newComments = unhandled(l, pr, activity, settings.forge.self);
+        entry.newComments = unhandled(l, pr, activity, settings.forge.self, settings.commentHeader);
         Object.assign(entry, reviewerSignals(activity, settings.forge.self, [...expertsOf(settings, pr).reviewers, ...(pr.reviewersRequested ?? [])]));
       }
       out.set(`${l.key}/${prId(pr)}`, entry);
@@ -287,13 +288,15 @@ export async function readPrs({ settings, forge, ledgers }) {
 // in `posted`, as `review-on-lines` gives it) is the pipeline's too, whether or not its own id was recorded: the
 // pipeline posts from the owner's login, so it would read as the owner's. A submitted review takes no new comment: a
 // person's reply opens a review of their own. Each carries its text (`body`): the rule reads the owner's reply by number
-// and suggestion blocks in it (lib/edits.mjs).
-export function unhandled(ledger, pr, activity, self) {
+// and suggestion blocks in it (lib/edits.mjs). With the settings' comment header, a comment that starts with it is the
+// pipeline's too, recorded or not: a summary whose id a session failed to record is never read as the owner's reply.
+export function unhandled(ledger, pr, activity, self, header = null) {
   const posted = new Set((ledger.posted?.pr ?? []).map(String));
+  const headed = (c) => Boolean(header) && withoutHeader(c.body, header) !== String(c.body ?? '');
   const ownReview = (c) => c.reviewId !== null && c.reviewId !== undefined && posted.has(String(c.reviewId));
   const handled = new Map((ledger.reviewComments ?? []).filter((c) => c.repo === pr.repo && Number(c.pr) === Number(pr.number)).map((c) => [String(c.id), c.updatedAt ?? c.at ?? '']));
   const isBot = (c) => c.authorBot === true || /\[bot\]$/.test(c.author ?? '');
-  const fresh = (c) => !isBot(c) && !posted.has(String(c.id)) && !(handled.has(String(c.id)) && (handled.get(String(c.id)) ?? '') >= (c.updatedAt ?? c.submittedAt ?? ''));
+  const fresh = (c) => !isBot(c) && !posted.has(String(c.id)) && !headed(c) && !(handled.has(String(c.id)) && (handled.get(String(c.id)) ?? '') >= (c.updatedAt ?? c.submittedAt ?? ''));
   const who = (author) => (self && author === self ? 'owner' : 'reviewer');
   const out = [];
   for (const t of activity.threads ?? []) {
@@ -302,7 +305,7 @@ export function unhandled(ledger, pr, activity, self) {
   for (const c of activity.comments ?? []) if (fresh(c)) out.push({ id: c.id, kind: 'comment', author: c.author, by: who(c.author), updatedAt: c.updatedAt, body: c.body ?? '' });
   for (const r of activity.reviews ?? []) {
     if (!String(r.body ?? '').trim()) continue; // a verdict with no text asks nothing
-    const c = { id: r.id, author: r.author, authorBot: r.authorBot, updatedAt: r.submittedAt };
+    const c = { id: r.id, author: r.author, authorBot: r.authorBot, updatedAt: r.submittedAt, body: r.body };
     if (fresh(c)) out.push({ id: r.id, kind: 'review', state: r.state, author: r.author, by: who(r.author), updatedAt: r.submittedAt, body: r.body ?? '' });
   }
   return out;

@@ -346,7 +346,16 @@ export function createGithubAdapter(gh, { owner, pageSize = PAGE }) {
       return { id: made.id };
     },
 
-    // Labels by name, in one GraphQL request. A name the repository doesn't have is refused: labels are never created.
+    // A label on the repository, in the forge's default grey. One there already (GitHub answers 422) is no error.
+    async createLabel({ repo, name }) {
+      try {
+        await gh.write('POST', `${repoPath(repo)}/labels`, { name, color: 'ededed' });
+      } catch (e) {
+        if (e?.data?.status !== 422) throw e;
+      }
+    },
+
+    // Labels by name, in one GraphQL request. A name the repository doesn't have is refused: it is not created here.
     async changeLabels({ repo, number, add, remove }) {
       if (!add.length && !remove.length) return;
       let prId = null;
@@ -361,7 +370,7 @@ export function createGithubAdapter(gh, { owner, pageSize = PAGE }) {
       }
       const idOf = (name) => {
         const id = ids.get(name.trim().toLowerCase());
-        if (!id) throw new Refusal('unknown', `the repository ${repo} has no label '${name}'; the module does not create labels`, { label: name });
+        if (!id) throw new Refusal('unknown', `the repository ${repo} has no label '${name}'; the module creates only the ready label`, { label: name });
         return id;
       };
       const addIds = add.map(idOf);

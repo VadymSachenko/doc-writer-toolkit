@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import { CliError, Refused } from './errors.mjs';
 import { checkKey, findPr, keyOf, newLedger, newPr, prId, readLedger, writeLedger } from './ledger.mjs';
 import { lockOf, renewLock } from './locks.mjs';
-import { CARD_STATUS_OF, CHAIN, LABEL_OF, PR_ORDER, PR_STAGE_OF_STATUS, PR_STAGES, STATUSES, TICKET_STAGES, followsMove, stageLabelOf } from './stages.mjs';
+import { CARD_STATUS_OF, CHAIN, LABEL_OF, PR_ORDER, PR_STAGE_OF_STATUS, PR_STAGES, STATUSES, TICKET_STAGES, followsMove, forwardMove, stageLabelOf } from './stages.mjs';
 import { labelCheck } from './intake.mjs';
 import { KINDS, recordedSize } from './cleanup.mjs';
 import { imagePairsAt } from './pairs.mjs';
@@ -392,6 +392,8 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
           }
         }
         if (to === 'done' || to === 'outOfScope') l.stages.close = { status: 'done', seq: l.seq + 1, at, note: `a person moved the card to ${card.list?.name ?? to}` };
+        // A person's forward move: the owner's check is done, and the questions put to the owner with it (D-128).
+        if (forwardMove(from, to)) for (const p of l.prs) if (to === 'done' || p.stage === 'translation') delete p.openQuestions;
         l.left = { ...brief(card), at };
         return;
       }
@@ -404,6 +406,9 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         // The numbered list of the reply: the summary comment it was posted in, going on from the PR's last number.
         if (result.edits !== undefined && !result.summary?.id) throw new CliError('answerComments: "edits" are the numbered list of the summary comment: give "summary": { "id" } too', { code: 2 });
         warnings.push(...addEdits(pr, result.edits, { list: result.summary?.id, stage, at, seq: l.seq + 1 }));
+        // The questions to the owner left open after this round: the summary's own and the earlier ones its comments
+        // didn't answer (the brief lists them). The runner sets the check label from them.
+        pr.openQuestions = { items: questionsOf(result, stage, { required: true }), stage, at, seq: l.seq + 1 };
         for (const u of result.places ?? []) {
           const place = l.places.find((p) => p.id === u.id && p.repo === pr.repo && Number(p.pr) === pr.number);
           if (place) Object.assign(place, u, { at });
@@ -425,6 +430,10 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         if (result.summary?.id && !postedIds.includes(String(result.summary.id))) throw new CliError('styleCheck: the summary comment goes in "posted" too, so the pipeline never answers it', { code: 2 });
         if (result.summary) l.summaries.push({ repo: pr.repo, pr: pr.number, at, ...result.summary, ...(result.notes?.length ? { notes: result.notes } : {}) });
         warnings.push(...addEdits(pr, result.edits, { list: result.summary?.id, stage, at, seq: l.seq + 1 }));
+        // A style check answers no question: the ones still open stay, with any its summary asks. The skip (the card was
+        // moved on) changes none.
+        const asked = questionsOf(result, stage);
+        if (!result.skipped) pr.openQuestions = { items: [...(pr.openQuestions?.items ?? []), ...asked], stage, at, seq: l.seq + 1 };
         pr.styleChecked ??= [];
         for (const r of reviewed) {
           const sha = String(r.sha);
@@ -512,6 +521,19 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
     const i = l.files.findIndex((f) => f.path === p);
     if (i >= 0) l.files[i] = { ...l.files[i], bytes: entry.bytes };
     else l.files.push(entry);
+  }
+
+  // `questions`: what the summary asks the owner to decide, each `{ "text", "n"? }` (`n`, the item of the numbered list
+  // it asks about). In a summary only: a question is read on the PR, so none is recorded without the comment.
+  function questionsOf(res, st, { required = false } = {}) {
+    const q = res.questions;
+    if (q === undefined || q === null) {
+      if (required) throw new CliError(`${st}: give "questions": the questions to the owner left open, [{ "text", "n"? }], or [] when none is`, { code: 2 });
+      return [];
+    }
+    if (!Array.isArray(q) || q.some((x) => !x || typeof x.text !== 'string' || !x.text.trim() || (x.n !== undefined && x.n !== null && !Number.isInteger(Number(x.n))))) throw new CliError(`${st}: "questions" is a list of { "text", "n"? }`, { code: 2 });
+    if (q.length && !res.summary?.id) throw new CliError(`${st}: "questions" are asked in the summary comment: give "summary": { "id" } too`, { code: 2 });
+    return q.map((x) => ({ text: x.text, ...(x.n !== undefined && x.n !== null ? { n: Number(x.n) } : {}) }));
   }
 
   function targetOf(p) {

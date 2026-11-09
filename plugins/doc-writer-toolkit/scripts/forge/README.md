@@ -12,11 +12,12 @@ The module has one job per rule. `lib/forge.mjs` holds every decision; the **Git
 
 ## Settings
 
-The same ticket flow settings file as the `tracker` script, found the same way: the first of `--settings <file>`, the `Ticket flow settings:` field of the `Documentation toolkit configuration` block of `<root>/CLAUDE.md` (registered in `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`, "Ticket flow settings"), `.claude/ticket-flow.json`. A file named `<name>.local.json` next to it is merged over it: objects key by key, anything else replaced. The `forge` object and the `targets` list are read here.
+The same ticket flow settings file as the `tracker` script, found the same way: the first of `--settings <file>`, the `Ticket flow settings:` field of the `Documentation toolkit configuration` block of `<root>/CLAUDE.md` (registered in `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`, "Ticket flow settings"), `.claude/ticket-flow.json`. A file named `<name>.local.json` next to it is merged over it: objects key by key, anything else replaced. The `forge` object, the `targets` list and `commentHeader` are read here.
 
 ```json
 {
-  "forge": { "kind": "github", "owner": "acme-docs", "self": "pat", "assignee": "pat", "checkLabel": "Check me" },
+  "commentHeader": "**[bot]**",
+  "forge": { "kind": "github", "owner": "acme-docs", "self": "pat", "assignee": "pat", "checkLabel": "Check me", "readyLabel": "merge advised" },
   "targets": [
     { "id": "guide", "repo": "guide-docs", "review": "sme", "reviewers": ["rev-one"],
       "labels": { "inProgress": "in progress", "review": "in SME review", "finalReview": "In final review", "translation": "in translation" } },
@@ -32,7 +33,9 @@ The same ticket flow settings file as the `tracker` script, found the same way: 
 | `forge.owner` | required | The account or organization that owns the repositories. |
 | `forge.self` | no | The login the pipeline writes with. `reply` uses it to see its own earlier reply. |
 | `forge.assignee` | no | Assigned to a PR that `open-pr` creates, unless `--assignee` says another. |
-| `forge.checkLabel` | no | The label that asks the owner to look at a PR. The module may add it, and may remove it: the ticket flow removes it when a person moves the card past the final review, the owner's check done. |
+| `commentHeader` | no | One line at the top of the file, shared with the `tracker` script: every comment, reply, suggestion and line comment (and a review's own text) is sent with it in front, then an empty line, then the text; a text that already starts with it gets it once. A PR's title and description take none. `--unless-header` and the duplicate checks read a comment without it, so one from before the header counts the same. None: no header. |
+| `forge.checkLabel` | no | The label that asks the owner to look at a PR. The module may add it, and may remove it: the ticket flow sets it from the questions left open to the owner, and removes it when a person moves the card past the final review, the owner's check done. |
+| `forge.readyLabel` | no | The label on a PR the ticket flow marked ready for merge, its recommendation to merge; a label of its own (not a stage, check or expert label). The module may add it and remove it, and creates it on a repository that lacks it. The owner's own merge label is another, which the settings never name. None: no such label. |
 | `forge.expertLabel` | no | The label on a PR whose writer recommends an expert review (the ticket flow's `pr` record adds it). The module may add it and never removes it. None: no such label. |
 | `targets[].id`, `targets[].repo` | required | A target's id (unique), and its repository (`name`, or `owner/name` with the forge's owner). |
 | `targets[].reviewers` | no | Logins the module may ask for a review. |
@@ -43,7 +46,7 @@ The same ticket flow settings file as the `tracker` script, found the same way: 
 
 - **Repositories:** only those a target names. Any other is refused (`notAllowed`).
 - **Logins** (assignee, reviewers): `self`, `assignee` and the targets' `reviewers`. Any other is refused (`notAllowed`).
-- **Labels it adds:** every target's stage labels, `checkLabel` and `expertLabel`. Any other label is refused before a request is made (`notNamed`), so a label the settings do not name (the owner's own label that marks a PR ready to merge) cannot be set by any operation. **Labels it removes:** the stage labels and `checkLabel`; `expertLabel` is never removed. A label is compared without case and spacing, as GitHub does. A label the repository does not have is reported (`unknown`); labels are never created.
+- **Labels it adds:** every target's stage labels, `checkLabel`, `expertLabel` and `readyLabel`. Any other label is refused before a request is made (`notNamed`), so a label the settings do not name (the owner's own label that marks a PR ready to merge) cannot be set by any operation. **Labels it removes:** the stage labels, `checkLabel` and `readyLabel`; `expertLabel` is never removed. A label is compared without case and spacing, as GitHub does. A label the repository does not have is reported (`unknown`), and not created, but for `readyLabel`: `add-label` creates it (grey, `ededed`) and adds it, with `created: true`; one made meanwhile (GitHub's 422) is no error.
 
 ## Commands
 
@@ -62,8 +65,8 @@ All print JSON on stdout: `{ "ok": true, "command": …, … }`. Every command t
 | `review-on-lines --repo <r> --number <n> --commit <sha> --comments-file <file\|-> [--body <t>] [--drop-outside] [--skip-diff-check]` (`reviewOnLines`) | One review with event `COMMENT` and a line comment per place; the file is a JSON list of `{ path, line, body }`, `line` on the new side. See "Line comments" below. | `reviewId`, `commentIds[]`, `comments[]` (`id`, `path`, `line`), `skipped[]` (already on the PR), `outside[]` (left out with `--drop-outside`), `posted`. |
 | `reply --repo <r> --number <n> --comment <id> --body <t>` (`reply`) | A reply in a review thread. `--comment` may be any comment of the thread: the reply goes to its first comment. A comment of another PR is refused. The same text already in the thread from the pipeline's login is not posted again. | `replied`, `id`, `thread` (the first comment's id), `posted`. |
 | `suggest --repo <r> --number <n> --comment <id> --replacement <t> [--body <t>]` (`suggest`) | A reply whose text is the optional note and a `suggestion` block with the replacement (the fence is longer than any backticks inside it). Replaces the lines the thread's first comment is on. | as `reply`. |
-| `comment --repo <r> --number <n> --body <t> [--unless-header <h> [--since <time>]]` (`comment`) | A comment in the PR's conversation. `--unless-header` skips it when a comment (since the time) already starts with the header. | `commented`, `id`, `existing`, `posted`. |
-| `add-label --repo <r> --number <n> --label <name>`, `remove-label …` (`addLabel`, `removeLabel`) | One label, under the label rules above. One the PR has (or lacks) is a no-op. | `label`, `changed`, `reason`. |
+| `comment --repo <r> --number <n> --body <t> [--unless-header <h> [--since <time>]]` (`comment`) | A comment in the PR's conversation. `--unless-header` skips it when a comment (since the time) already starts with the header, both read without `commentHeader`; a header that is `commentHeader` alone is refused (`empty`). | `commented`, `id`, `existing`, `posted`. |
+| `add-label --repo <r> --number <n> --label <name>`, `remove-label …` (`addLabel`, `removeLabel`) | One label, under the label rules above. One the PR has (or lacks) is a no-op. | `label`, `changed`, `created` (the ready label was made on the repository), `reason`. |
 | `set-stage-label --target <id> --number <n> --stage inProgress\|review\|finalReview\|translation [--repo <r>]` (`setStageLabel`) | The PR's stage label follows the card. Adds the target's label for the stage and removes the target's other stage labels the PR has, **in one request**. It reads the PR's labels as they are, so it does not matter who moved the card, or who set the old label: a person's move is followed like the pipeline's own. A stage the target names no label for is refused (`notNamed`). Labels outside the target's stage labels (the owner's, `checkLabel`, another target's) are not touched. The repository comes from the target; `--repo` must match it. | `target`, `stage`, `label`, `added[]`, `removed[]`, `changed`. |
 
 ## Line comments (`review-on-lines`)
@@ -72,7 +75,7 @@ All print JSON on stdout: `{ "ok": true, "command": …, … }`. Every command t
 - **A comment on a line outside the PR's diff cannot be posted.** Checked on a real PR (see the task's evidence): GitHub answers `422 Line could not be resolved` and rejects the **whole** review, comments inside the diff included; nothing is posted. The module therefore reads the PR's diff first and refuses (`outsideDiff`, with the list in `outside`) before anything is sent. With `--drop-outside` it posts the comments inside the diff and lists the others in `outside`: they stay in the PR description. A context line next to a change counts as inside; a file with no diff text (an image) is left to GitHub.
 - **`--commit` must be the PR's head**, else `stale`: the diff read is the head's.
 - **`--skip-diff-check`** sends the comments as they are and reports GitHub's answer; for checking GitHub, not for the pipeline.
-- **Retries are safe.** A comment already on the PR with the same path, line and text is not posted again (`skipped`). Each comment's id is matched to the one GitHub made by path, line and text.
+- **Retries are safe.** A comment already on the PR with the same path, line and text (read without `commentHeader`) is not posted again (`skipped`). Each comment's id is matched to the one GitHub made by path, line and the text sent.
 
 ## Suggested changes (`suggest`)
 
@@ -87,7 +90,7 @@ A reply in a review thread with a `suggestion` block is rendered by GitHub as a 
 | `--dry-run` | Reads still run; every change is printed in `calls[]` (`method`, `path`, `body`) and not sent. A created PR has number `0`, other ids `dry-run-N`. The output has `"dryRun": true`. |
 | `--repo <r>` | A repository a target names: its name, or `owner/name`. |
 | `--number <n>`, `--head <branch>`, `--base <branch>`, `--commit <sha>`, `--comment <id>` | A PR number, a branch, the commit a review's lines refer to, a review comment's id. |
-| `--title <t>`, `--body <t>`, `--body-file <file\|->`, `--replacement <t>`, `--replacement-file <file\|->` | Texts; a file, or `-` for standard input. Sent exactly: nothing is trimmed, added or appended (no footer, no tool name, no trailer), U+200C kept. Give one of the two. |
+| `--title <t>`, `--body <t>`, `--body-file <file\|->`, `--replacement <t>`, `--replacement-file <file\|->` | Texts; a file, or `-` for standard input. Sent exactly: nothing is trimmed, added or appended (no footer, no tool name, no trailer), U+200C kept, but for `commentHeader` in front of a comment, reply, suggestion or line comment. Give one of the two. |
 | `--assignee <login>`, `--reviewer <login>` (repeatable), `--label <name>` (repeatable for `open-pr`), `--draft` | `open-pr`, `request-reviewers`, `add-label`, `remove-label`. |
 | `--since <time>`, `--types <a,b>` | An ISO time; the event types of `events-since`. |
 | `--comments-file <file\|->`, `--drop-outside`, `--skip-diff-check` | `review-on-lines`. |
@@ -109,7 +112,7 @@ A refusal has `refused` in the JSON: `notAllowed` (a repository or login the set
 - **Idempotent writes.** An open PR of the head, a label already there (or gone), the same title and description, a comment with a header already posted, a reply already in the thread, a line comment already on the PR change nothing and say so.
 - **One write function.** Every change goes through `write` in `adapters/github/gh.mjs`, which `--dry-run` stops. A GraphQL read refuses a document that changes anything.
 - **No credentials handled.** `gh` brings its own login. Request bodies go to `gh` on standard input, never on a command line. The module never reads, prints, logs or writes a token, and cleans every message of `GH_TOKEN` / `GITHUB_TOKEN` values and of anything shaped like a GitHub token.
-- **Texts go out as given,** under the account `gh` is logged in as. The module adds nothing to them. What the team may read (no tool names, no trailers) is the caller's text.
+- **Texts go out as given,** under the account `gh` is logged in as. The module adds nothing to them but the settings' `commentHeader` in front of a comment, reply, suggestion or line comment, so the team sees which comments the pipeline posted from the owner's account. What the team may read (no tool names, no trailers) is the caller's text.
 - **The watcher keeps the cursor,** not this module: `events-since`, `changed-prs-since` and `pr-activity` take the time and give what is newer; a window that overlaps the last check is the caller's to drop duplicates from (by `id`).
 
 ## Files
