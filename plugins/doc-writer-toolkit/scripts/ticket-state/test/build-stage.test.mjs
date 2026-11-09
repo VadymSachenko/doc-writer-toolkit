@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { mock, test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -6,7 +6,8 @@ import { NOW, card, pr, tmp } from './fakes.mjs';
 import { ledger, read, world } from './helpers.mjs';
 import { briefFor, runDaily, scriptedCalls } from '../lib/runner.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
-import { buildLockState, pidAlive, takeBuildLock } from '../lib/build-lock.mjs';
+import { buildLockState, freeBuildLock, pidAlive, takeBuildLock } from '../lib/build-lock.mjs';
+import { allLocks } from '../lib/locks.mjs';
 import { runSiteBuild } from '../lib/site-build.mjs';
 import { localDate } from '../lib/report.mjs';
 
@@ -243,6 +244,41 @@ test('AC-2: a session that builds the site itself runs under the build lock, whi
   }, { named: ['701'] });
   assert.equal(seen2[0].holder, null);
   assert.match(seen2[0].brief, new RegExp(`run visual-pack with \`--build-dir ${path.join(u.trees.get('ticket-61'), 'build').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\``));
+});
+
+test('AC-2: while a session that builds waits for the build lock, its group\'s lock is renewed, so it never goes stale', async () => {
+  // The visual pack with no build to reuse waits behind another ticket's build for 12 minutes; the runner's 5-minute
+  // renewal runs on a mocked interval, with the clock the wait moves.
+  const t = atBuild(1, { done: 6 });
+  takeBuildLock(t.w.settings.state, { ticket: '888', pid: process.pid, now: NOW });
+  let clock = NOW;
+  const leases = [];
+  const sleep = async (ms) => {
+    clock += ms;
+    mock.timers.tick(ms);
+    leases.push(Date.parse(allLocks(t.w.settings.state, clock).find((l) => l.group === '701').expiresAt));
+    if (clock - NOW >= 12 * 60000) freeBuildLock(t.w.settings.state, { tickets: ['888'] });
+  };
+  const holders = [];
+  mock.timers.enable({ apis: ['setInterval'] });
+  try {
+    await run(t.w, {
+      now: () => clock,
+      sleep,
+      ensureWorktree: t.ensureWorktree,
+      spawnClaude: async () => {
+        holders.push(buildLockState(t.w.settings.state).holder?.ticket);
+        return { code: 0, stdout: RESULT };
+      },
+    }, { named: ['701'] });
+  } finally {
+    mock.timers.reset();
+  }
+  assert.equal(holders[0], '701', 'the session ran under its own build lock once the other was freed');
+  const lease = t.w.settings.limits.lockLeaseMinutes * 60000;
+  assert.equal(leases.length, 48, 'polled every 15 s for 12 min');
+  assert.equal(leases[0], NOW + lease, 'the lease as the step took it');
+  assert.equal(leases.at(-1), NOW + 10 * 60000 + lease, 'renewed at 5 and 10 minutes of the wait');
 });
 
 test('AC-1: the locales brief runs the locale-translator with --no-build; the re-sync\'s keeps its build, under the lock', () => {
