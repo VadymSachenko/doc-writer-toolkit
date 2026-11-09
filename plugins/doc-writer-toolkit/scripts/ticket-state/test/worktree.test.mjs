@@ -8,7 +8,7 @@ import { ledger, read, world } from './helpers.mjs';
 import { runDaily, scriptedCalls } from '../lib/runner.mjs';
 import { runRecord } from '../lib/record.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
-import { adoptSources, checkClone, codeClonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureReadCheckout, ensureWorktree, listWorktrees, canon, readCheckoutPath, prsForStep, unsavedWork, worktreePath } from '../lib/worktree.mjs';
+import { adoptSources, checkClone, codeClonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureReadCheckout, ensureWorktree, headOf, listWorktrees, canon, setAsideWork, readCheckoutPath, prsForStep, unsavedWork, worktreePath } from '../lib/worktree.mjs';
 import { makeGit } from '../lib/world.mjs';
 import { commandFor } from '../lib/runner.mjs';
 import { spentOf } from '../lib/limits.mjs';
@@ -193,6 +193,11 @@ test('AC-5: a session failing on a head a person moved is followed by the step s
       const g = (...a) => execFileSync('git', ['-C', t.wt, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
       g('add', '-A');
       g('-c', 'user.email=s@example.com', '-c', 'user.name=Session', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'Locales: tr');
+      // A second commit of the same session, as in a run over two locales: both stay unpushed.
+      fs.mkdirSync(path.join(t.wt, 'i18n/kk/docusaurus-plugin-content-docs/current/x'), { recursive: true });
+      fs.writeFileSync(path.join(t.wt, 'i18n/kk/docusaurus-plugin-content-docs/current/x/index.md'), '# Бет\n');
+      g('add', '-A');
+      g('-c', 'user.email=s@example.com', '-c', 'user.name=Session', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'Locales: kk');
       mine = g('rev-parse', 'HEAD');
       moved = t.handEdit({ 'docs/x/index.md': '# Сторінка\n\nНовий абзац, виправлений.\n' });
       t.forgePr.headCommit = moved;
@@ -224,6 +229,31 @@ test('AC-5: a session failing on a head a person moved is followed by the step s
   // No hold and no wait: the chain goes on from enReview at the new head (status with the clone's own git).
   const tk = await t.w.one('1501', { git: makeGit(t.w.settings) });
   assert.deepEqual([tk.held ?? false, tk.failed ?? null, tk.next?.stage, tk.next?.waits ?? null], [false, null, 'enReview', null]);
+});
+
+test('AC-5: after a moved head, only the failed session\'s own commits on the step\'s head are set aside; uncommitted changes or other unpushed work keep the stuck worktree', () => {
+  const p = { repo: 'guide-docs', targets: ['guide'], branch: 'ticket-71', base: 'main' };
+  // The session's two commits on h1: set aside, the worktree back at h1.
+  const a = finalReviewTicket();
+  ensureWorktree(a.w.settings, p);
+  commitIn(a.wt, 'docs/x/index.md', 'one\n');
+  const two = commitIn(a.wt, 'docs/x/index.md', 'two\n');
+  const kept = setAsideWork(p, a.wt, a.h1);
+  assert.deepEqual([kept.commit, headOf(a.wt)], [two, a.h1]);
+  // Uncommitted changes to a tracked file: left as they are.
+  const b = finalReviewTicket();
+  ensureWorktree(b.w.settings, p);
+  commitIn(b.wt, 'docs/x/index.md', 'one\n');
+  fs.writeFileSync(path.join(b.wt, 'docs/x/index.md'), 'unsaved\n');
+  assert.match(setAsideWork(p, b.wt, b.h1).left, /uncommitted changes/);
+  // Work not built on the step's head (an earlier session's, under it): left as it is.
+  const c = finalReviewTicket();
+  ensureWorktree(c.w.settings, p);
+  const g = (...x) => execFileSync('git', ['-C', c.wt, ...x], { encoding: 'utf8' }).trim();
+  g('checkout', '-q', '--detach', 'origin/main');
+  const other = commitIn(c.wt, 'docs/x/index.md', 'elsewhere\n');
+  assert.match(setAsideWork(p, c.wt, c.h1).left, /not built on/);
+  assert.equal(headOf(c.wt), other);
 });
 
 test('AC-5: a session that pushed its own commit and then failed is an ordinary failure: the forge head is its worktree\'s', async () => {
