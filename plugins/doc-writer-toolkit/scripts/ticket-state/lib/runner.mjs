@@ -534,9 +534,12 @@ export function sessionEnv(step, settings, { roots, roleRules, trees }) {
   return { [ROLE_SESSION_VARIABLE]: step.role, [DOWNLOAD_DIRS_VARIABLE]: JSON.stringify(downloadDirsFor(step, settings)), [HOOK_VARIABLE]: JSON.stringify(config) };
 }
 
+// How long a role session may run before the runner kills it; a resumed session gets what its first process left.
+export const SESSION_TIMEOUT_MS = 4 * 3600 * 1000;
+
 // Runs one session; resolves { code, stdout, stderr }, and `timedOut` when the runner killed it.
 // The child gets no API key or auth token (`lib/env.mjs`), so the plan pays.
-export function spawnClaude({ bin, args, cwd, env: session = {} }, { timeoutMs = 4 * 3600 * 1000, env = process.env } = {}) {
+export function spawnClaude({ bin, args, cwd, env: session = {} }, { timeoutMs = SESSION_TIMEOUT_MS, env = process.env } = {}) {
   return new Promise((resolve) => {
     const child = spawn(bin, args, { cwd, env: sessionChildEnv(env, session), stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
@@ -1486,9 +1489,6 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
       // Failed sessions of this step in a row with no person's action between them: two hold the ticket for the owner.
       let failures = step.prior ?? 0;
       const ledgered = step.keys.some((k) => readLedger(settings.state, k));
-      // A session that stopped on a text message with nothing recorded is resumed once a step, never a second time,
-      // the retry on a bigger model included.
-      let resumable = true;
       for (let attempt = 0; attempt < 2; attempt++) {
         const seqBefore = new Map(step.keys.map((k) => [k, readLedger(settings.state, k)?.seq ?? 0]));
         const before = usage?.week?.percent ?? null;
@@ -1505,12 +1505,15 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         }, 5 * 60000);
         let res;
         let r;
-        // The session id of the resumed session (the same id, as probed on 2.1.319), when there was one.
+        // The resumed session, when there was one: `session`, its id (the same id, as probed on 2.1.319), or null when
+        // its process gave no result.
         let resumed = null;
+        // The moved-head check made before a resume (`movedUnder`): a branch a person moved is never resumed.
+        let movedEarly = null;
         // A session whose `browser-lock.mjs take` gave up on a lock someone else held: waiting, not failed.
         let busy = false;
         const busyNow = () => busyEnded(settings.state, { tickets: step.keys, since: Date.parse(start) }).length > 0;
-        const spawnOne = (c) => (io.spawnClaude ?? spawnClaude)(c, io.claudeEnv ? { env: io.claudeEnv } : {});
+        const spawnOne = (c, extra = {}) => (io.spawnClaude ?? spawnClaude)(c, { ...(io.claudeEnv ? { env: io.claudeEnv } : {}), ...extra });
         // The step's wall-clock time, from the session's start to its process's end: `duration_ms` is the CLI's own
         // count, which leaves out what the session waited for after its last turn (a background build, say).
         let wallMs = null;
@@ -1518,16 +1521,19 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
           res = await spawnOne(cmd);
           r = parseResult(res.stdout) ?? {};
           busy = busyNow();
-          // The resume runs before the browser lock is freed and a read checkout's new `.sources/` moves (below), which
-          // the resumed session still needs, and before the gate, which would record a `running` stage failed. Not on
-          // a busy browser lock (that waits), nor when the session recorded anything, even failed, or a record of it
-          // was refused (`recordRefused`).
-          if (resumable && !busy && endedOnText(res, r) && unrecorded(step, seqBefore) && !recordRefused(r.session, { root: settings.root, transcripts: io.transcripts, env: io.claudeEnv ?? process.env })) {
-            resumable = false;
+          // A session that stopped on a text message with nothing recorded is resumed once a step: only the first
+          // attempt's, never the retry on a bigger model. The resume runs before the browser lock is freed and a read
+          // checkout's new `.sources/` moves (below), which the resumed session still needs, and before the gate, which
+          // would record a `running` stage failed. Not on a busy browser lock (that waits), nor when the session
+          // recorded anything, even failed, or a record of it was refused (`recordRefused`), nor when the first process
+          // used the whole timeout, nor on a PR branch a person moved meanwhile (`movedUnder`: the step is `moved`, as
+          // with no resume). The resumed process gets the time the first one left.
+          const left = SESSION_TIMEOUT_MS - (clock() - began);
+          if (attempt === 0 && !busy && left > 0 && endedOnText(res, r) && unrecorded(step, seqBefore) && !recordRefused(r.session, { root: settings.root, transcripts: io.transcripts, env: io.claudeEnv ?? process.env }) && !(movedEarly = await movedUnder(step))) {
             say({ kind: 'resume', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, role: step.role, model, session: r.session, note: 'the session ended on a text message with the stage unrecorded: resumed once' });
-            const again = await spawnOne(resumeCommand(cmd, r.session, step));
+            const again = await spawnOne(resumeCommand(cmd, r.session, step), { timeoutMs: left });
             const r2 = parseResult(again.stdout) ?? {};
-            resumed = r2.session ?? r.session;
+            resumed = { session: r2.session ?? null };
             r = addUp(r, r2);
             res = again;
             busy = busyNow();
@@ -1556,12 +1562,12 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         let outcome = await gateOf(step, seqBefore, { busy });
         // A session that failed because a person moved the PR's branch under it (its push rejected, its record refused as
         // stale): not the model's failure. None is counted, no bigger model is tried, and the step's status is read again.
-        const moved = outcome === 'failed' ? await movedUnder(step) : null;
+        const moved = outcome === 'failed' ? movedEarly ?? (await movedUnder(step)) : null;
         if (moved) outcome = 'moved';
         if (outcome === 'failed') failures += 1;
         // What the ticket looks like now the session is over, so its own unrecorded writes never count as a person's.
         const marks = outcome !== 'failed' || !ledgered ? {} : await marksOf(step);
-        const run = { stage: step.stage, role: step.role, model, effort: cmd.effort, trigger: manual ? 'manual' : trigger, start, durationMs: r.durationMs, wallMs, turns: r.turns, costUsd: r.costUsd, tokens: r.tokens, weekPercent: { before, after }, session: r.session, ...(resumed ? { resumedSession: resumed } : {}), outcome, share: Number((1 / step.keys.length).toFixed(4)), ...(attempt ? { retryOf: settings.roles[step.role].model } : {}), ...(r.denials ? { denials: r.denials } : {}), ...(outcome === 'failed' ? { failures } : {}), ...(moved ? { note: moved.note.slice(0, 300) } : {}) };
+        const run = { stage: step.stage, role: step.role, model, effort: cmd.effort, trigger: manual ? 'manual' : trigger, start, durationMs: r.durationMs, wallMs, turns: r.turns, costUsd: r.costUsd, tokens: r.tokens, weekPercent: { before, after }, session: r.session, ...(resumed ? { resumed: true, ...(resumed.session ? { resumedSession: resumed.session } : {}) } : {}), outcome, share: Number((1 / step.keys.length).toFixed(4)), ...(attempt ? { retryOf: settings.roles[step.role].model } : {}), ...(r.denials ? { denials: r.denials } : {}), ...(outcome === 'failed' ? { failures } : {}), ...(moved ? { note: moved.note.slice(0, 300) } : {}) };
         for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, run: JSON.stringify({ ...run, ...(marks[k] ? { after: marks[k] } : {}) }), pr: step.pr, now: clock() }).catch(() => {});
         const entry = { kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, role: step.role, model, exit: res.code, ...(resumed ? { resumed: true } : {}), ...(r.denials ? { denials: r.denials } : {}) };
         if (outcome === 'done') {

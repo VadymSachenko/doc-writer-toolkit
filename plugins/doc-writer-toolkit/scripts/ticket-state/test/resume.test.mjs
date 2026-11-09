@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { NOW, ago, card, pr, tmp } from './fakes.mjs';
+import { LISTS, NOW, ago, card, pr, tmp } from './fakes.mjs';
 import { ledger, read, world } from './helpers.mjs';
 import { runRecord } from '../lib/record.mjs';
 import { noteBusy, takeBrowserLock } from '../lib/browser-lock.mjs';
@@ -203,4 +203,102 @@ test('a PR stage the session recorded failed on its PR is not resumed', async ()
   }, { ensureWorktree: () => tree });
   assert.deepEqual(calls, [null]);
   assert.equal(out.ran[0].outcome, 'failed');
+});
+
+test('only the first attempt is resumed: a first session at max turns is not, and the retry up the ladder that ends on text is not either; the step fails', async () => {
+  const w = planWorld('claude-sonnet-5-5');
+  const calls = [];
+  await run(w, async (cmd) => {
+    calls.push([flag(cmd, '--model'), flag(cmd, '--resume')]);
+    return { code: 0, stdout: calls.length === 1 ? ENDED({ subtype: 'error_max_turns', is_error: true, stop_reason: 'tool_use' }) : ENDED() };
+  });
+  assert.deepEqual(calls, [['claude-sonnet-5-5', null], ['claude-opus-5-5', null]]);
+  const runs = read(w, '502').runs.filter((r) => r.stage === 'plan');
+  assert.deepEqual(runs.map((r) => [r.model, r.outcome, r.failures, r.resumed ?? false]), [['claude-sonnet-5-5', 'failed', 1, false], ['claude-opus-5-5', 'failed', 2, false]]);
+});
+
+test('a plan session that recorded its questions and then ended on text is done, not resumed', async () => {
+  const w = planWorld();
+  const calls = [];
+  const out = await run(w, async (cmd) => {
+    calls.push(flag(cmd, '--resume'));
+    w.tracker.cards[0].placeId = LISTS.blocked.id;
+    await runRecord({ settings: w.settings, clients: w.clients(), key: '502', stage: 'questions', status: 'done', result: { questions: [{ id: 'q1', kind: 'fit', text: 'the block lists something else' }] }, now: NOW });
+    return { code: 0, stdout: ENDED() };
+  });
+  assert.deepEqual(calls, [null]);
+  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['plan', 'done']]);
+});
+
+test('a start that ended on text with only the runner\'s own `running` record is resumed, and its record makes it done', async () => {
+  const c = card({ number: 501, status: 'ready', labels: ['Guide'] });
+  const w = world({ cards: [c], extra: { limits: { stepsPerTicket: 1, estimates: { edit: 4, newPage: 8 } } } });
+  ledger(w, c, { stages: { triage: 'done' }, triage: { verdict: 'docs-required', targets: ['guide'], size: 'edit' } });
+  const calls = [];
+  const out = await run(w, async (cmd) => {
+    calls.push(flag(cmd, '--resume'));
+    assert.equal(read(w, '501').stages.start.status, 'running', 'the runner recorded the start before the session');
+    if (flag(cmd, '--resume')) {
+      c.placeId = LISTS.inProgress.id;
+      await runRecord({ settings: w.settings, clients: w.clients(), key: '501', stage: 'start', status: 'done', card: c.shortLink, result: { group: '501' }, now: NOW });
+    }
+    return { code: 0, stdout: ENDED() };
+  });
+  assert.deepEqual(calls, [null, 'sess-1']);
+  assert.deepEqual(out.starts.map((s) => s.steps.map((x) => [x.stage, x.outcome])), [[['start', 'done']]]);
+  assert.equal(read(w, '501').stages.start.status, 'done');
+});
+
+// A PR in the chain at its first stage, at HEAD, with its worktree.
+function chainWorld() {
+  const HEAD = 'c'.repeat(40);
+  const c = card({ number: 701, status: 'translation' });
+  const forgePr = pr({ repo: 'guide-docs', number: 61, headCommit: HEAD });
+  const w = world({ cards: [c], prs: [forgePr], extra: { limits: { stepsPerTicket: 1 } } });
+  ledger(w, c, { stages: { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' }, prs: [{ repo: 'guide-docs', number: 61, targets: ['guide'], review: 'sme', branch: 'ticket-61', stage: 'translation', chain: {} }] });
+  const tree = tmp();
+  const ensureWorktree = (settings, p) => ({ repo: p.repo, branch: p.branch, path: tree, head: HEAD, push: '', linked: [], missing: [], notes: [], stuck: [] });
+  return { w, forgePr, ensureWorktree };
+}
+
+test('a PR step whose branch a person moved while the session ran is not resumed: it is `moved`, as with no resume; an unmoved one is resumed', async () => {
+  for (const move of [true, false]) {
+    const t = chainWorld();
+    const calls = [];
+    const out = await run(t.w, async (cmd) => {
+      calls.push(flag(cmd, '--resume'));
+      if (move) t.forgePr.headCommit = 'd'.repeat(40);
+      return { code: 0, stdout: ENDED() };
+    }, { ensureWorktree: t.ensureWorktree });
+    const stage = out.ran[0].stage;
+    assert.equal(stage, 'translate');
+    assert.deepEqual([calls, out.ran[0].outcome], move ? [[null], 'moved'] : [[null, 'sess-1', null], 'failed'], `moved: ${move} (unmoved: resumed, then the retry up the ladder, not resumed)`);
+  }
+});
+
+test('the resume gets the time the first process left, and none when it used it all; a resume with no result is marked resumed with no session id', async () => {
+  const w = planWorld();
+  let t = NOW;
+  const seen = [];
+  await run(w, async (cmd, opts) => {
+    seen.push([flag(cmd, '--resume'), opts?.timeoutMs ?? null]);
+    if (!flag(cmd, '--resume')) {
+      t += 3600000;
+      return { code: 0, stdout: ENDED() };
+    }
+    return { code: 1, stdout: '' };
+  }, { now: () => t });
+  assert.deepEqual(seen, [[null, null], ['sess-1', 3 * 3600000]]);
+  const r = read(w, '502').runs.filter((x) => x.stage === 'plan');
+  assert.deepEqual(r.map((x) => [x.outcome, x.resumed ?? false, x.resumedSession ?? null, x.session]), [['failed', true, null, 'sess-1']]);
+
+  const v = planWorld();
+  let u = NOW;
+  const later = [];
+  await run(v, async (cmd) => {
+    later.push(flag(cmd, '--resume'));
+    u += 4 * 3600000;
+    return { code: 0, stdout: ENDED() };
+  }, { now: () => u });
+  assert.deepEqual(later, [null], 'the first process used the whole timeout');
 });
