@@ -20,7 +20,7 @@ const bare = (t) => String(t ?? '').replace(/‌/g, '').trim();
 const OPEN_STATES = new Set(['ready', 'needsInfo', 'new', 'closed', 'outside', 'merged']);
 
 // `tried` and `retryWaiting` come from a run (lib/runner.mjs): the tickets it already started or tried, and whether it may
-// give a waiting failed start its one more try (`startable` in lib/limits.mjs). `inFlight`: the tickets of the starts
+// give a waiting failed start its one more try (`startable` in lib/limits.mjs: `true`, or a Set of the tickets that may). `inFlight`: the tickets of the starts
 // handed to a process of their own that go on (lib/forge-state.mjs), read from the state folder when not given.
 export async function computeStatus({ settings, clients, now = Date.now(), only = null, usage = null, git = makeGit(settings), ignoreLocks = null, marks = null, tried = new Set(), retryWaiting = false, inFlight = null }) {
   const ledgers = readAllLedgers(settings.state);

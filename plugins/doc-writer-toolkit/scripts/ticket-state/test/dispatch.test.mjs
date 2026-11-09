@@ -4,7 +4,7 @@ import { BOARD, LISTS, NOW, card, noTree, quietGit } from './fakes.mjs';
 import { ledger, read, world } from './helpers.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
 import { emptyFeed, readFeed, sourcesOf, writeFeed } from '../lib/feed.mjs';
-import { allLocks, takeLock } from '../lib/locks.mjs';
+import { allLocks, releaseLock, takeLock } from '../lib/locks.mjs';
 import { runRecord } from '../lib/record.mjs';
 import { runCheck, startPrint } from '../lib/watch.mjs';
 import { runHandOn } from '../lib/forge-watch.mjs';
@@ -408,4 +408,140 @@ test('review 4: a run handed on counts the runs again under its lock; past limit
   assert.deepEqual([h.calls.sessions, r.run.waits.map((x) => x.keys), allLocks(w.settings.state, NOW + MIN).map((l) => l.group)], [[], [['601']], ['777']]);
   const out = await h.full(NOW + 5 * MIN);
   assert.deepEqual(out.pending, ['601']);
+});
+
+// A failed step's one more try that the morning run handed on, whose run then gave way at the recount (another run's
+// lock older than its own): the try is owed again the same day, so the next check hands it on and it runs.
+function failedAnswers(w, number) {
+  const c = card({ number, status: 'inProgress' });
+  w.tracker.cards.push(c);
+  const at = iso(NOW - 30 * MIN);
+  ledger(w, c, { stages: { triage: 'done', start: 'done', plan: 'done', questions: 'done' }, left: 'blocked', runs: [{ seq: 9, stage: 'answers', role: 'writer', outcome: 'failed', failures: 1, start: at, after: { at, list: c.placeId, comments: [], prs: {} } }] });
+  return c;
+}
+
+function failedStart(w, number) {
+  const c = card({ number, status: 'ready' });
+  w.tracker.cards.push(c);
+  const at = iso(NOW - 20 * 3600000);
+  ledger(w, c, { stages: { triage: 'done', start: { status: 'failed', note: 'the session ended without recording the stage' } }, startedBy: 'schedule', triage: { verdict: 'docs', targets: ['guide'], size: 'edit' }, runs: [{ seq: 9, stage: 'start', role: 'writer', outcome: 'failed', failures: 1, start: at, after: { at, list: LISTS.ready.id, comments: [], prs: {} } }] });
+  return c;
+}
+
+test('review 5a: a morning one more try whose run gives way at the recount is handed on again the same day, and runs', async () => {
+  const w = world({ extra: { limits: { parallel: 1 } } });
+  failedAnswers(w, 601);
+  seed(w, NOW - 5 * MIN, { morning: '2026-11-09' });
+  const h = harness(w);
+  await h.full(NOW);
+  assert.deepEqual(h.spawned(), [[0, 'answers', ['601']]]);
+  assert.equal(h.calls.spawns[0].step.retryWaiting, true);
+  assert.equal(readFeed(w.settings.state).handOns[0].retried, true, 'the record carries the try');
+  // Another run took its lock first: this one frees its own and ends as waiting.
+  takeLock(w.settings.state, { group: '777', kind: 'schedule', stage: 'write', leaseMinutes: 60, now: NOW });
+  const r = await h.finish(h.calls.spawns[0], NOW + MIN);
+  assert.deepEqual([h.calls.sessions, r.run.waits.map((x) => x.keys)], [[], [['601']]]);
+  releaseLock(w.settings.state, '777');
+  const out = await h.full(NOW + 5 * MIN);
+  assert.deepEqual([h.spawned().map((x) => x[2]), out.pending], [[['601'], ['601']], []]);
+  assert.equal(h.calls.spawns[1].step.retryWaiting, true);
+  assert.equal(readFeed(w.settings.state).owed, null, 'handed on: owed no more');
+  await h.finish(h.calls.spawns[1], NOW + 6 * MIN);
+  assert.deepEqual(h.calls.sessions.map((s) => [s.stage, s.key]), [['answers', '601']]);
+});
+
+test('review 5b: a morning one more try that finds mode off keeps its try for the same day', async () => {
+  const w = world({ extra: { limits: { parallel: 1 } } });
+  failedAnswers(w, 601);
+  seed(w, NOW - 5 * MIN, { morning: '2026-11-09' });
+  const h = harness(w);
+  await h.full(NOW);
+  w.settings.mode = 'off';
+  assert.equal((await h.finish(h.calls.spawns[0], NOW + MIN)).run.stopped, 'mode off: nothing runs');
+  w.settings.mode = 'on';
+  await h.full(NOW + 5 * MIN);
+  assert.deepEqual(h.spawned().map((x) => [x[0], x[2]]), [[0, ['601']], [5, ['601']]]);
+  assert.equal(h.calls.spawns[1].step.retryWaiting, true);
+  assert.equal(readFeed(w.settings.state).owed, null, 'handed on again: owed no more');
+});
+
+test("review 5c: a lost start's one more try is kept: the start pass 30 minutes later hands it on, and it starts", async () => {
+  const w = world({ extra: { limits: { estimates: { edit: 4 }, parallel: 1, startHours: '08-22' } } });
+  const cards = { 501: failedStart(w, 501) };
+  seed(w, NOW - 5 * MIN, { morning: '2026-11-09' });
+  const h = harness(w, { cards });
+  await h.full(NOW);
+  assert.deepEqual(h.spawned(), [[0, 'start', ['501']]]);
+  takeLock(w.settings.state, { group: '777', kind: 'schedule', stage: 'write', leaseMinutes: 60, now: NOW });
+  const r = await h.finish(h.calls.spawns[0], NOW + MIN);
+  assert.deepEqual([h.calls.sessions, r.run.waits.map((x) => x.keys)], [[], [['501']]]);
+  releaseLock(w.settings.state, '777');
+  await h.full(NOW + 5 * MIN);
+  const feed = readFeed(w.settings.state);
+  assert.deepEqual([feed.starts.retryAt, feed.owed], [iso(NOW + 35 * MIN), { date: '2026-11-10', keys: ['501'] }]);
+  const out = await h.full(NOW + 35 * MIN);
+  assert.match(out.startPass.why, /^again: the start of 501 ended with no start recorded/);
+  assert.deepEqual(h.spawned(), [[0, 'start', ['501']], [35, 'start', ['501']]]);
+  assert.equal(h.calls.spawns[1].step.retryWaiting, true);
+  assert.equal(readFeed(w.settings.state).owed, null);
+  await h.finish(h.calls.spawns[1], NOW + 36 * MIN);
+  assert.equal(read(w, '501').stages.start.status, 'done');
+});
+
+test('review 5d: a start pass gives the one more try only to the start owed it, not to another failed start', async () => {
+  const w = world({ extra: { limits: { estimates: { edit: 4 }, parallel: 3, startHours: '08-22' } } });
+  const cards = { 501: failedStart(w, 501), 502: failedStart(w, 502) };
+  const lost = { date: '2026-11-10', at: iso(NOW - 40 * MIN), by: 'morning', print: startPrint({ date: '2026-11-10', openKeys: [], ready: [] }), nextDueAt: null, deferred: null, again: 'the start of 501 ended with no start recorded', retryAt: iso(NOW - 5 * MIN) };
+  seed(w, NOW - 5 * MIN, { starts: lost });
+  writeFeed(w.settings.state, { ...readFeed(w.settings.state), owed: { date: '2026-11-10', keys: ['501'] } });
+  const h = harness(w, { cards });
+  const out = await h.full(NOW);
+  assert.equal(out.startPass.ran, true);
+  assert.deepEqual(h.spawned(), [[0, 'start', ['501']]]);
+  assert.match(out.startPass.run.notStarted.find((x) => x.keys.includes('502')).reasons.join(' '), /its start failed .*the next morning run/);
+});
+
+test("review 5e: a triage's locks are not runs: a run handed on doesn't give way to them at the recount", async () => {
+  const w = world({ extra: { limits: { parallel: 1 } } });
+  failedAnswers(w, 601);
+  seed(w, NOW - 5 * MIN, { morning: '2026-11-09' });
+  const h = harness(w);
+  await h.full(NOW);
+  // The morning run's triage, in the check's process, took a lock per intake card before this run took its own.
+  takeLock(w.settings.state, { group: '901', kind: 'schedule', stage: 'triage', leaseMinutes: 60, now: NOW });
+  takeLock(w.settings.state, { group: '902', kind: 'schedule', stage: 'triage', leaseMinutes: 60, now: NOW });
+  const r = await h.finish(h.calls.spawns[0], NOW + MIN);
+  assert.deepEqual([r.run.waits, h.calls.sessions.map((s) => [s.stage, s.key])], [[], [['answers', '601']]]);
+});
+
+test('review 5f: a morning start retry it could not hand on (the runs full) is owed: the start pass gives it once a slot frees', async () => {
+  const w = world({ extra: { limits: { estimates: { edit: 4 }, parallel: 1, startHours: '08-22' } } });
+  const cards = { 501: failedStart(w, 501) };
+  seed(w, NOW - 5 * MIN, { morning: '2026-11-09' });
+  const h = harness(w, { cards });
+  takeLock(w.settings.state, { group: '777', kind: 'schedule', stage: 'write', leaseMinutes: 60, now: NOW - MIN });
+  const out = await h.full(NOW);
+  assert.deepEqual([h.spawned(), out.morning.startRetriesLeft], [[], ['501']]);
+  assert.deepEqual(readFeed(w.settings.state).owed, { date: '2026-11-10', keys: ['501'] });
+  releaseLock(w.settings.state, '777');
+  await h.full(NOW + 5 * MIN);
+  assert.deepEqual(h.spawned(), [[5, 'start', ['501']]]);
+  assert.equal(h.calls.spawns[0].step.retryWaiting, true);
+  await h.finish(h.calls.spawns[0], NOW + 6 * MIN);
+  assert.equal(read(w, '501').stages.start.status, 'done');
+});
+
+test('review 5g: a plain step whose run gives way carries no try, so none is owed; it is handed on again as before', async () => {
+  const w = world({ extra: { limits: { parallel: 1 } } });
+  answered(w, 601);
+  seed(w, NOW - 5 * MIN, { morning: '2026-11-09' });
+  const h = harness(w);
+  await h.full(NOW);
+  assert.equal(readFeed(w.settings.state).handOns[0].retried, undefined);
+  takeLock(w.settings.state, { group: '777', kind: 'schedule', stage: 'write', leaseMinutes: 60, now: NOW });
+  await h.finish(h.calls.spawns[0], NOW + MIN);
+  releaseLock(w.settings.state, '777');
+  await h.full(NOW + 5 * MIN);
+  assert.deepEqual([h.spawned().map((x) => x[2]), readFeed(w.settings.state).owed], [[['601'], ['601']], null]);
+  assert.equal(h.calls.spawns[1].step.retryWaiting, false);
 });

@@ -153,7 +153,8 @@ export const isOpen = (t) => t.ledger === 'present' && t.mode === 'pipeline' && 
 
 // `tried`: the tickets this run already started (or tried to): their groups hold no slot in its later calculations, so a
 // start that failed lets the run try the next group. `retryWaiting`: the run may give a waiting failed start its one more try
-// (the morning run, a manual run). `inFlight`: the tickets of starts a check handed to a process of their own that hasn't
+// (the morning run, a manual run): `true` for every group, or a Set of tickets for those groups only (a start pass gives
+// it to the start whose try the morning run handed on and lost, lib/watch.mjs `owed`). `inFlight`: the tickets of starts a check handed to a process of their own that hasn't
 // recorded them yet (lib/forge-state.mjs `startsInFlight`): their ready groups are starting now, so they take their slots,
 // their share of the allowance and their relations here, and are not started again.
 export function startable({ tickets, groups, settings, allowance, estimates, inWork, locked, tried = new Set(), retryWaiting = false, inFlight = new Set() }) {
@@ -253,6 +254,7 @@ function failedStartReason(g, { tried, retryWaiting }) {
   if (g.keys.some((k) => tried.has(k))) return 'tried in this run already: its start did not get the card into work';
   const f = g.failedStart;
   if (f?.held.length) return `held for the owner: ${f.held.map((h) => `${h.key}: ${h.why}`).join('; ')}`;
-  if (f?.waits.length && !retryWaiting) return `its start failed${f.at ? ` at ${f.at}` : ''} (${f.waits.join(', ')}): waits for a person acting on the ticket, or the next morning run`;
+  const retry = retryWaiting === true || (retryWaiting instanceof Set && g.keys.some((k) => retryWaiting.has(k)));
+  if (f?.waits.length && !retry) return `its start failed${f.at ? ` at ${f.at}` : ''} (${f.waits.join(', ')}): waits for a person acting on the ticket, or the next morning run`;
   return null;
 }

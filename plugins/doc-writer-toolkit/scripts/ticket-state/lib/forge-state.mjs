@@ -13,7 +13,7 @@ import { readFeed, watchDir } from './feed.mjs';
 //   `<state>/watch/hand-on/<id>.step.json`: the one group's step a full check handed on (lib/dispatch.mjs), with the
 //   check's `/usage` reading; written by the full check before the run's process starts, read by that run.
 // The full check keeps the runs it started in its own `feed.json` (`handOns`, the same shape plus `group`, `stage`,
-// `by` and `why`): every reader below takes the live runs of both files, so the forge check, the full check and the
+// `by`, `why` and `retried`): every reader below takes the live runs of both files, so the forge check, the full check and the
 // runner see the same runs going.
 
 export const FORGE_VERSION = 1;

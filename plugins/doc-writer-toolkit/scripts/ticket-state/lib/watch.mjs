@@ -264,6 +264,9 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
     const requeued = [];
     let lostStart = null;
     const started = [];
+    // The tickets whose one more try (a failed step's or a failed start's, the morning run's) went with a run that didn't
+    // use it: owed again for the rest of the day.
+    const reowed = [];
     next.handOns = [];
     for (const h of dryRun ? [] : feed.handOns ?? []) {
       const live = handOnLive(h, { now: checkStart, ...isAlive });
@@ -292,7 +295,16 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
       // A start whose run ended without recording it (it died, failed, found `mode off`, its group locked, its status no
       // longer letting it, a slot taken first): the card is still ready, and no change would bring a start pass back.
       if (h.stage === 'start' && !startedSince(settings.state, h)) lostStart = `the start of ${h.keys.join(', ')} ended with no start recorded${r?.run?.stopped ? ` (${r.run.stopped})` : !r ? ' (no result)' : ''}`;
+      // A run that carried a one more try and didn't use it (it found `mode off`, gave way at the recount, failed or left
+      // no result; a start: recorded none): the try is owed again that day, so the check (a finishing step) or the start
+      // pass (a start) that hands it on next gives it. One that ran and failed again is held for the owner (lib/rule.mjs),
+      // so no try is given twice.
+      if (h.retried && localDate(Date.parse(h.at)) === today) {
+        const unused = !r || r.error || (h.stage === 'start' ? !startedSince(settings.state, h) : Boolean(r.run?.stopped || r.run?.waits?.length));
+        if (unused) reowed.push(...h.keys);
+      }
     }
+    if (reowed.length) next.owed = { date: today, keys: [...new Set([...(next.owed?.date === today ? next.owed.keys : []), ...reowed])] };
     if (dryRun) next.handOns = feed.handOns ?? [];
     if (lostStart) next.starts = { ...(next.starts ?? {}), again: lostStart, retryAt: iso(checkStart + RETRY_MS) };
     out.finished = ended.map((h) => ({ id: h.id, keys: h.keys, stage: h.stage }));
@@ -306,6 +318,12 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
     const holdForReading = (r) => {
       const keys = readingHeld(r);
       if (keys.length) next.readingWait = { until: iso(clock() + RETRY_MS), keys: [...new Set([...(next.readingWait?.keys ?? []), ...keys])] };
+    };
+    // The tickets handed on (or gone) owe nothing more; an empty memory is none.
+    const dropOwed = (keys) => {
+      if (!next.owed) return;
+      const left = next.owed.keys.filter((k) => !keys.includes(k));
+      next.owed = left.length ? { ...next.owed, keys: left } : null;
     };
     const readingWaits = next.readingWait && checkStart < Date.parse(next.readingWait.until) ? next.readingWait.keys : [];
     if (!readingWaits.length) next.readingWait = null;
@@ -402,7 +420,8 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
     const wanted = [...(feed.pending ?? [])];
     const want = (k) => !wanted.includes(k) && wanted.push(k);
     for (const k of requeued) want(k);
-    // The tickets the morning run had to leave to a later check while their failed step still had its one more try.
+    // The tickets the morning run had to leave to a later check while their failed step still had its one more try, and
+    // those whose run didn't use it (step 0).
     const owed = next.owed?.date === today ? next.owed.keys : [];
     try {
       const { ledgers, bad } = readLedgersApart(settings.state);
@@ -445,8 +464,9 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
         noteSession(out.morning);
         holdForReading(out.morning);
         next.pending = notHanded(out.morning);
-        const left = (out.morning.handedOn ?? []).filter((x) => !x.handedOn && x.retried).flatMap((x) => x.keys);
-        next.owed = left.length ? { date: today, keys: left } : null;
+        // A failed start's one more try it couldn't hand on (the runs full) is the start pass's to give that day.
+        const left = [...(out.morning.handedOn ?? []).filter((x) => !x.handedOn && x.retried).flatMap((x) => x.keys), ...(out.morning.startRetriesLeft ?? [])];
+        next.owed = left.length ? { date: today, keys: [...new Set(left)] } : null;
       } catch (e) {
         // A morning run that failed before its first step is started again at the next check; one that failed part
         // way counts as the day's, so its triage, starts and retries are not repeated at every check.
@@ -497,7 +517,7 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
             next.pending = [...new Set([...next.pending, ...notHanded(out.run)])];
             noteSession(out.run);
             holdForReading(out.run);
-            if (next.owed) next.owed = { ...next.owed, keys: next.owed.keys.filter((k) => !(out.run.handedOn ?? []).some((x) => x.handedOn && x.keys.includes(k))) };
+            dropOwed((out.run.handedOn ?? []).filter((x) => x.handedOn).flatMap((x) => x.keys));
           } catch (e) {
             failed('the run', e);
             next.pending = [...new Set([...next.pending, ...handing])];
@@ -653,10 +673,14 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
         return null;
       }
       const base = { date: today, at: iso(checkStart), by: 'watcher', print, nextDueAt, deferred: null, retryAt: null };
+      // The failed starts still owed the morning run's one more try (`owed`): ready groups for this pass, which gives that
+      // try to them alone (`retryKeys`); the print leaves every failed start out.
+      const owedNow = next.owed?.date === today ? next.owed.keys : [];
+      const retryKeys = (view.groups ?? []).filter((g) => g.failedStart && g.keys.some((k) => owedNow.includes(k))).flatMap((g) => g.keys.filter((k) => owedNow.includes(k)));
       // Only the intake cards newly due are triaged here; nothing to triage, and nothing that could start whatever the
       // allowance: no runner, no /usage.
       const triageKeys = newlyDue(last?.print ?? null, print);
-      const noRoom = triageKeys.length ? null : !print.ready.length ? 'no ready ticket' : noRoomOf(view.wip);
+      const noRoom = triageKeys.length ? null : !print.ready.length && !retryKeys.length ? 'no ready ticket' : noRoomOf(view.wip);
       if (noRoom) {
         next.starts = { ...base, outcome: `not run: ${noRoom}` };
         return { why, ran: false, skipped: noRoom };
@@ -677,8 +701,9 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
       try {
         // No triage and no further start once the hours end while the pass runs; a started group's chain goes on.
         const startUntil = startHoursEnd(clock(), settings.limits.startHours);
-        const r = await run({ settings, clients, io: runnerIo, options: { dryRun, trigger: 'schedule', startPass: true, startUntil, triageKeys, claude, progress, dispatch: dispatchFor('startPass', why) } });
+        const r = await run({ settings, clients, io: runnerIo, options: { dryRun, trigger: 'schedule', startPass: true, startUntil, triageKeys, claude, progress, dispatch: dispatchFor('startPass', why), ...(retryKeys.length ? { retryKeys } : {}) } });
         const handed = (r.starts ?? []).filter((x) => x.handedOn);
+        dropOwed(handed.flatMap((x) => x.keys));
         noteSession(r);
         next.starts = { ...base, at: iso(clock()), print: printOfSummary(r.after, today) ?? print, nextDueAt: r.after?.intakeQuietAt ?? nextDueAt, outcome: handed.length ? `handed on the start of ${handed.map((x) => x.keys.join(', ')).join('; ')}` : 'started nothing', ...againOf(r, clock()) };
         return { why, ran: true, run: r };

@@ -17,9 +17,11 @@ import { dropHandOnStep, forgeHandOns, handOnLive, runsGoing, writeHandOnStep } 
 //     (the window before that run takes its lock);
 //   - not past `limits.parallel` runs going across processes (`runsGoing`: the live group locks and both checks' live
 //     runs; 1 at the session bar): the group waits, and the next check that finds a slot hands it on;
-//   - the record of the run (`handOns` in `feed.json`: { id, pid, keys, group, stage, at, by, why }) is written at once,
-//     so the forge check, which may run at the same time, holds its tickets too; the step and the check's /usage
-//     reading go to `hand-on/<id>.step.json` before the process starts.
+//   - the record of the run (`handOns` in `feed.json`: { id, pid, keys, group, stage, at, by, why, retried }) is written
+//     at once, so the forge check, which may run at the same time, holds its tickets too; the step and the check's /usage
+//     reading go to `hand-on/<id>.step.json` before the process starts. `retried`: the run carries a failed step's (or a
+//     failed start's) one more try; if it comes back not having used it, the check that collects it owes it again
+//     that day (lib/watch.mjs `owed`).
 // Two checks that read each other's record before either wrote it can still hand one ticket on twice: the run takes
 // its group's lock before its first step and reads the step again under it (lib/runner.mjs `advance`), so it runs once.
 
@@ -85,7 +87,8 @@ export function makeDispatcher({ settings, io = {}, records, by, why = null, cla
       dropHandOnStep(settings.state, id);
       return { ...base, error: errorText(e) };
     }
-    records.push({ id, pid: child.pid, keys: step.keys, group, stage: step.stage, at: iso(at), by, ...(why ? { why } : {}) });
+    const retried = retryWaiting && Boolean(step.waits || (step.stage === 'start' && step.prior));
+    records.push({ id, pid: child.pid, keys: step.keys, group, stage: step.stage, at: iso(at), by, ...(why ? { why } : {}), ...(retried ? { retried: true } : {}) });
     // At once, not at the end of the check: the forge check reads it to hold these tickets.
     writeFeed(settings.state, { ...readFeed(settings.state), handOns: records });
     return { ...base, id, pid: child.pid };
