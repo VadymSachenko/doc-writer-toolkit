@@ -23,6 +23,7 @@ import { BUSY_NAME, LOCK_NAME, busyEnded, freeBrowserLock } from './browser-lock
 import { HOOK_VARIABLE, commandsOfRules, hookSettings } from './role-hook.mjs';
 import { parseClaudeConfig } from '../../ui-labels/lib/config.mjs';
 import { liveProgress } from './progress.mjs';
+import { transcriptDirs } from './trace.mjs';
 import { runsGoingIn } from './forge-state.mjs';
 import { replyLines, resyncItemLines, styleAfterCommentsLines, styleCheckLines, suggestionLines } from './edits.mjs';
 
@@ -518,14 +519,18 @@ export function sessionEnv(step, settings, { roots, roleRules, trees }) {
   return { [ROLE_SESSION_VARIABLE]: step.role, [DOWNLOAD_DIRS_VARIABLE]: JSON.stringify(downloadDirsFor(step, settings)), [HOOK_VARIABLE]: JSON.stringify(config) };
 }
 
-// Runs one session; resolves { code, stdout, stderr }.
+// Runs one session; resolves { code, stdout, stderr }, and `timedOut` when the runner killed it.
 // The child gets no API key or auth token (`lib/env.mjs`), so the plan pays.
 export function spawnClaude({ bin, args, cwd, env: session = {} }, { timeoutMs = 4 * 3600 * 1000, env = process.env } = {}) {
   return new Promise((resolve) => {
     const child = spawn(bin, args, { cwd, env: sessionChildEnv(env, session), stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
-    const timer = setTimeout(() => child.kill('SIGTERM'), timeoutMs);
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGTERM');
+    }, timeoutMs);
     child.stdout.on('data', (d) => (stdout += d));
     child.stderr.on('data', (d) => (stderr += d));
     child.on('error', (e) => {
@@ -534,7 +539,7 @@ export function spawnClaude({ bin, args, cwd, env: session = {} }, { timeoutMs =
     });
     child.on('close', (code) => {
       clearTimeout(timer);
-      resolve({ code: code ?? 1, stdout, stderr });
+      resolve({ code: code ?? 1, stdout, stderr, ...(timedOut ? { timedOut } : {}) });
     });
   });
 }
@@ -553,10 +558,81 @@ export function parseResult(stdout) {
       session: r.session_id ?? null,
       denials: (r.permission_denials ?? []).length,
       durationMs: r.duration_ms ?? null,
+      subtype: r.subtype ?? null,
+      stopReason: r.stop_reason ?? null,
+      terminalReason: r.terminal_reason ?? null,
+      apiError: r.api_error_status ?? null,
     };
   } catch {
     return null;
   }
+}
+
+// Whether a session ended on its own on a text message with no tool call. In `claude -p` such a message ends the turn,
+// and so the session, though the stage may be half done (a clean style review written out as the last word, with the
+// commit, the push and the record still to come). The CLI's result event (`--output-format json`) is the signal, every
+// field of it, as probed on 2.1.319: exit 0, `subtype: success`, no `is_error`, `stop_reason: end_turn`,
+// `terminal_reason: completed`, no `api_error_status`, and a session id to resume. A field that isn't there is a no, so
+// a CLI that doesn't give them resumes nothing. The runner's kill on timeout closes with no exit code (1 here) and sets
+// `timedOut`; max turns and the budget are `error_*` subtypes; a usage-limit stop is an error.
+export const endedOnText = (res, r) =>
+  res?.code === 0 && !res.timedOut && r?.subtype === 'success' && r.isError === false && r.stopReason === 'end_turn' && r.terminalReason === 'completed' && r.apiError == null && typeof r.session === 'string' && r.session !== '';
+
+// Whether a session's own transcript shows a `record` that was refused (`nothing recorded: …`): the session met a rule
+// the world doesn't satisfy, which a resume can't fix. Only positive evidence counts: a transcript that isn't found or
+// can't be read says nothing. `readTranscript` keeps only an error's first line ("Exit code 1"), so the result is read
+// whole here.
+export function recordRefused(session, { root, transcripts = null, env = process.env } = {}) {
+  if (!/^[A-Za-z0-9_][\w.-]*$/.test(String(session ?? ''))) return false;
+  const file = transcriptDirs({ root, transcripts, env }).map((d) => path.join(d, `${session}.jsonl`)).find((f) => fs.existsSync(f));
+  if (!file) return false;
+  let text;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch {
+    return false;
+  }
+  const records = new Set();
+  const textOf = (c) => (typeof c === 'string' ? c : Array.isArray(c) ? c.map((x) => (typeof x === 'string' ? x : typeof x?.text === 'string' ? x.text : '')).join('\n') : '');
+  for (const line of text.split('\n')) {
+    let o;
+    try {
+      o = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const blocks = Array.isArray(o?.message?.content) ? o.message.content : [];
+    for (const b of blocks) {
+      if (o.type === 'assistant' && b?.type === 'tool_use' && b.name === 'Bash' && /ticket-state\.mjs record\b/.test(String(b.input?.command ?? ''))) records.add(b.id);
+      if (o.type === 'user' && b?.type === 'tool_result' && records.has(b.tool_use_id) && /nothing recorded:/.test(textOf(b.content))) return true;
+    }
+  }
+  return false;
+}
+
+// The prompt a resumed session gets: what stopped it, and how the stage ends.
+export function continuationFor(step) {
+  const keys = step.keys.join(', ');
+  const branch = step.worktrees?.length ? 'commit and push your changes as the brief says, post what the stage posts, and record it' : 'record it as the brief says';
+  return [
+    `The stage \`${step.stage}\` of ticket${step.keys.length > 1 ? 's' : ''} ${keys} is not finished: nothing is recorded for it. Your last message was text with no tool call, which in this mode ends the session.`,
+    `Continue the stage from where it stopped and finish it: ${branch}, with the record command in the brief.`,
+    'If it truly cannot be finished, record it failed with the reason (`--status failed --note <the reason>`).',
+  ].join('\n');
+}
+
+// The resumed session's command: the first one's model, effort, settings, tools, hook, folders and environment, with
+// the continuation in place of the brief.
+export const resumeCommand = (cmd, session, step) => ({ ...cmd, args: ['-p', continuationFor(step), '--resume', session, ...cmd.args.slice(2)] });
+
+// One run's figures from a session and its resumption. Turns, duration, tokens and denials are per process and add up.
+// The CLI restores a resumed session's cost (probed on 2.1.319: its `total_cost_usd` counts both processes), so the
+// resumed figure is the total; one below the first means a CLI that didn't restore it, and the two add up.
+export function addUp(a, b) {
+  const sum = (x, y) => (typeof x === 'number' || typeof y === 'number' ? (x ?? 0) + (y ?? 0) : null);
+  const cost = typeof a.costUsd === 'number' && typeof b.costUsd === 'number' ? (b.costUsd >= a.costUsd ? b.costUsd : a.costUsd + b.costUsd) : (b.costUsd ?? a.costUsd ?? null);
+  const tokens = a.tokens || b.tokens ? Object.fromEntries(['in', 'out', 'cacheRead', 'cacheWrite'].map((k) => [k, (a.tokens?.[k] ?? 0) + (b.tokens?.[k] ?? 0)])) : null;
+  return { ...b, session: a.session ?? b.session, turns: sum(a.turns, b.turns), costUsd: cost, tokens, denials: (a.denials ?? 0) + (b.denials ?? 0), durationMs: sum(a.durationMs, b.durationMs) };
 }
 
 // `claude -p /usage` gives no reading now and then while the sign-in is fine (a reading a few minutes later works), so
@@ -1262,6 +1338,9 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
       // Failed sessions of this step in a row with no person's action between them: two hold the ticket for the owner.
       let failures = step.prior ?? 0;
       const ledgered = step.keys.some((k) => readLedger(settings.state, k));
+      // A session that stopped on a text message with nothing recorded is resumed once a step, never a second time,
+      // the retry on a bigger model included.
+      let resumable = true;
       for (let attempt = 0; attempt < 2; attempt++) {
         const seqBefore = new Map(step.keys.map((k) => [k, readLedger(settings.state, k)?.seq ?? 0]));
         const before = usage?.week?.percent ?? null;
@@ -1271,8 +1350,31 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
           for (const g of [step.group, ...held].filter(Boolean)) renewLock(settings.state, g, { leaseMinutes: settings.limits.lockLeaseMinutes, now: clock() });
         }, 5 * 60000);
         let res;
+        let r;
+        // The session id of the resumed session (the same id, as probed on 2.1.319), when there was one.
+        let resumed = null;
+        // A session whose `browser-lock.mjs take` gave up on a lock someone else held: waiting, not failed.
+        let busy = false;
+        const busyNow = () => busyEnded(settings.state, { tickets: step.keys, since: Date.parse(start) }).length > 0;
+        const spawnOne = (c) => (io.spawnClaude ?? spawnClaude)(c, io.claudeEnv ? { env: io.claudeEnv } : {});
         try {
-          res = await (io.spawnClaude ?? spawnClaude)(cmd, io.claudeEnv ? { env: io.claudeEnv } : {});
+          res = await spawnOne(cmd);
+          r = parseResult(res.stdout) ?? {};
+          busy = busyNow();
+          // The resume runs before the browser lock is freed and a read checkout's new `.sources/` moves (below), which
+          // the resumed session still needs, and before the gate, which would record a `running` stage failed. Not on
+          // a busy browser lock (that waits), nor when the session recorded anything, even failed, or a record of it
+          // was refused (`recordRefused`).
+          if (resumable && !busy && endedOnText(res, r) && unrecorded(step, seqBefore) && !recordRefused(r.session, { root: settings.root, transcripts: io.transcripts, env: io.claudeEnv ?? process.env })) {
+            resumable = false;
+            say({ kind: 'resume', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, role: step.role, model, session: r.session, note: 'the session ended on a text message with the stage unrecorded: resumed once' });
+            const again = await spawnOne(resumeCommand(cmd, r.session, step));
+            const r2 = parseResult(again.stdout) ?? {};
+            resumed = r2.session ?? r.session;
+            r = addUp(r, r2);
+            res = again;
+            busy = busyNow();
+          }
         } finally {
           clearInterval(renew);
           // The browser lock a session took (`browser-lock.mjs`) and didn't free, crashed or not: freed now, so the next
@@ -1292,17 +1394,14 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
           }
         }
         usage = (await readUsage()) ?? usage;
-        const r = parseResult(res.stdout) ?? {};
         const after = usage?.week?.percent ?? null;
-        // A session whose `browser-lock.mjs take` gave up on a lock someone else held: waiting, not failed.
-        const busy = busyEnded(settings.state, { tickets: step.keys, since: Date.parse(start) }).length > 0;
         const outcome = await gateOf(step, seqBefore, { busy });
         if (outcome === 'failed') failures += 1;
         // What the ticket looks like now the session is over, so its own unrecorded writes never count as a person's.
         const marks = outcome !== 'failed' || !ledgered ? {} : await marksOf(step);
-        const run = { stage: step.stage, role: step.role, model, effort: cmd.effort, trigger: manual ? 'manual' : trigger, start, durationMs: r.durationMs, turns: r.turns, costUsd: r.costUsd, tokens: r.tokens, weekPercent: { before, after }, session: r.session, outcome, share: Number((1 / step.keys.length).toFixed(4)), ...(attempt ? { retryOf: settings.roles[step.role].model } : {}), ...(r.denials ? { denials: r.denials } : {}), ...(outcome === 'failed' ? { failures } : {}) };
+        const run = { stage: step.stage, role: step.role, model, effort: cmd.effort, trigger: manual ? 'manual' : trigger, start, durationMs: r.durationMs, turns: r.turns, costUsd: r.costUsd, tokens: r.tokens, weekPercent: { before, after }, session: r.session, ...(resumed ? { resumedSession: resumed } : {}), outcome, share: Number((1 / step.keys.length).toFixed(4)), ...(attempt ? { retryOf: settings.roles[step.role].model } : {}), ...(r.denials ? { denials: r.denials } : {}), ...(outcome === 'failed' ? { failures } : {}) };
         for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, run: JSON.stringify({ ...run, ...(marks[k] ? { after: marks[k] } : {}) }), pr: step.pr, now: clock() }).catch(() => {});
-        const entry = { kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, role: step.role, model, exit: res.code, ...(r.denials ? { denials: r.denials } : {}) };
+        const entry = { kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, role: step.role, model, exit: res.code, ...(resumed ? { resumed: true } : {}), ...(r.denials ? { denials: r.denials } : {}) };
         if (outcome === 'done') {
           say({ ...entry, outcome });
           return { ...pick(step), model, outcome };
@@ -1352,6 +1451,26 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
     } catch {
       return Object.fromEntries(step.keys.map((k) => [k, { at: new Date(clock()).toISOString(), list: null, comments: null, prs: {} }]));
     }
+  }
+
+  // Whether the session recorded nothing at all for any ticket of the step after it began: no stage record (a
+  // `running` one is the runner's own, from before it), and for a plan or a write no questions record. A session that
+  // recorded the stage failed ended on that record.
+  function unrecorded(step, seqBefore) {
+    return step.keys.every((k) => {
+      const l = readLedger(settings.state, k);
+      const before = seqBefore.get(k) ?? 0;
+      const rec = !l ? null : step.pr ? (() => {
+        try {
+          const p = findPr(l, step.pr);
+          return p.chain?.[step.stage] ?? p.steps?.[step.stage];
+        } catch {
+          return null;
+        }
+      })() : l.stages?.[step.stage];
+      const asked = !step.pr && ['plan', 'write'].includes(step.stage) ? l?.stages?.questions : null;
+      return !(rec && rec.status !== 'running' && rec.seq > before) && !(asked && asked.seq > before);
+    });
   }
 
   // Whether the session passed its gate: every ticket recorded the stage done after the session began. A stage left
