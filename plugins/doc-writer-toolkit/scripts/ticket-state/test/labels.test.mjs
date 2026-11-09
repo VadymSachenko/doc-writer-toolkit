@@ -252,3 +252,16 @@ test('AC-4: the plan of row 8 takes the ready label off a ready PR it sends back
   assert.deepEqual(scriptedCalls({ ...step, keys: ['957'] }, read(w, '957'), w.settings).slice(0, 2), ['forge set-stage-label --target guide --number 57 --stage finalReview', `forge remove-label --repo guide-docs --number 57 --label "${READY}"`]);
   assert.deepEqual(scriptedCalls({ stage: 'readyForMerge', pr: 'guide-docs#57', keys: ['957'] }, read(w, '957'), w.settings), ['forge set-stage-label --target guide --number 57 --stage finalReview', `forge add-label --repo guide-docs --number 57 --label "${READY}"`]);
 });
+
+test('AC-1, AC-2: the video gate comment the runner posts gets the header once, and its first line is looked for past it', async () => {
+  const c = card({ number: 958, status: 'inProgress' });
+  const failedTry = [{ at: ago(1), outcome: 'failed', reason: 'a sign-in wall' }];
+  const gateOf = (gateComment) => ({ videos: [{ file: 't/v.mp4', parts: [{ file: 't/v-part1.mp4', start: 0, transcript: 't/v-part1-transcript.txt', tries: failedTry }] }], gateComment, at: ago(5) });
+  // A session that copied the header into its gate text: posted with one header, and its first line is the gate's.
+  const w = world({ cards: [c], extra: { commentHeader: HEADER, video: { browserProfile: '/somewhere/profile', partsPerDay: 3 } } });
+  ledger(w, c, { stages: { start: 'done', plan: 'done', videoGate: 'done', videoTry: 'done' }, video: gateOf(`${HEADER}\n\nBlocked: a video is needed\nParts: v-part1`) });
+  const out = await run(w, noSession, { named: ['958'] });
+  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['videoBlock', 'done']]);
+  assert.deepEqual(w.tracker.log.filter((x) => x[0] === 'comment').map((x) => x[2]), [`${HEADER}\n\nBlocked: a video is needed\nParts: v-part1`]);
+  assert.equal(c.placeId, LISTS.blocked.id);
+});

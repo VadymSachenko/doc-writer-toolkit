@@ -28,6 +28,7 @@ import { liveProgress } from './progress.mjs';
 import { runsGoingIn } from './forge-state.mjs';
 import { openQuestionLines, replyLines, resyncItemLines, styleAfterCommentsLines, styleCheckLines, suggestionLines } from './edits.mjs';
 import { followLabels, labelSnapshot } from './pr-labels.mjs';
+import { withoutHeader } from '../../tracker/lib/comment-header.mjs';
 
 // The daily run (design §7): finish first, then triage the quiet intake cards (mornings, and the watcher's start pass
 // when a slot frees), then start ready groups while
@@ -867,7 +868,8 @@ async function runScripted(step, ctx) {
       const gate = ledger.video?.gateComment;
       let commentId = null;
       if (gate) {
-        const c = await clients.tracker.comment({ card, text: gate, unlessHeader: gate.split('\n')[0], since: ledger.video.at });
+        // Its first line past the comment header, should the session have copied the header in.
+        const c = await clients.tracker.comment({ card, text: gate, unlessHeader: withoutHeader(gate, settings.commentHeader).split('\n')[0], since: ledger.video.at });
         commentId = c.id ?? c.existing ?? null;
       }
       await clients.tracker.move({ card, to: 'blocked' });
