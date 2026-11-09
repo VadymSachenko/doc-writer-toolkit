@@ -26,7 +26,9 @@ import { HOOK_VARIABLE, commandsOfRules, hookSettings } from './role-hook.mjs';
 import { parseClaudeConfig } from '../../ui-labels/lib/config.mjs';
 import { liveProgress } from './progress.mjs';
 import { runsGoingIn, startsInFlight } from './forge-state.mjs';
-import { replyLines, resyncItemLines, styleAfterCommentsLines, styleCheckLines, suggestionLines } from './edits.mjs';
+import { openQuestionLines, replyLines, resyncItemLines, styleAfterCommentsLines, styleCheckLines, suggestionLines } from './edits.mjs';
+import { followLabels, labelSnapshot } from './pr-labels.mjs';
+import { withoutHeader } from '../../tracker/lib/comment-header.mjs';
 
 // The daily run (design §7): finish first, then triage the quiet intake cards (mornings, and the watcher's start pass
 // when a slot frees), then start ready groups while
@@ -163,15 +165,15 @@ export const ROLE_SCRIPTS = {
 export const scriptRulesFor = (roots = [], role = null) => [...new Set(roots.flatMap((r) => (role ? ROLE_SCRIPTS[role] : NODE_SCRIPTS).map((s) => `Bash(node ${path.join(r, 'scripts', s)}:*)`)))];
 // Script flags that run code: ui-labels' `--source 'command <cmd>'` (a shell) and visual-pack's `--playwright-from
 // <dir>` (JavaScript from that folder), denied first, last or between other words, as `--x v` and `--x=v`. And the
-// forge's `remove-label`, the runner's alone: the check label comes off only on a person's forward move (D-128).
+// forge's `add-label` and `remove-label`, the runner's alone: it sets the check and ready labels from the records
+// (lib/pr-labels.mjs), and the check label comes off on a person's forward move (D-128).
 const SCRIPT_FLAGS = { 'ui-labels/ui-labels.mjs': ['--source'], 'visual-pack/visual-pack.mjs': ['--playwright-from'] };
 export const scriptFlagsDenied = (roots = []) => [...new Set(roots.flatMap((r) => [
   ...Object.entries(SCRIPT_FLAGS).flatMap(([s, flags]) => {
     const cmd = `node ${path.join(r, 'scripts', s)}`;
     return flags.flatMap((f) => [`Bash(${cmd} ${f})`, `Bash(${cmd} ${f} *)`, `Bash(${cmd} * ${f})`, `Bash(${cmd} * ${f} *)`, `Bash(${cmd} ${f}=*)`, `Bash(${cmd} * ${f}=*)`]);
   }),
-  `Bash(node ${path.join(r, 'scripts', 'forge/forge.mjs')} remove-label:*)`,
-  `Bash(node ${path.join(r, 'scripts', 'forge/forge.mjs')} * remove-label *)`,
+  ...['add-label', 'remove-label'].flatMap((c) => [`Bash(node ${path.join(r, 'scripts', 'forge/forge.mjs')} ${c}:*)`, `Bash(node ${path.join(r, 'scripts', 'forge/forge.mjs')} * ${c} *)`]),
 ]))];
 
 // The toolkit roots a session may run scripts from: the runner's own, and every install of the plugin the hub's
@@ -376,7 +378,7 @@ export function briefFor(step, settings) {
     step.nextEdit ? `A numbered list of edits you post on this PR starts at ${step.nextEdit}: the numbers already posted keep their items.` : null,
     ...replyLines(step.replies),
     ...suggestionLines(step.suggestions),
-    ...(step.stage === 'answerComments' ? styleAfterCommentsLines() : []),
+    ...(step.stage === 'answerComments' ? [...styleAfterCommentsLines(), ...openQuestionLines(step.openQuestions)] : []),
     step.askApprove ? `The PR is in the expert's review and the expert hasn't approved it: end the summary with one line that asks the expert, when nothing else is needed, to approve: the link ${step.askApprove} and the path «Review changes» → «Approve» → «Submit review».` : null,
     ...(step.stage === 'styleCheck' ? styleCheckLines(step.commits, step.fixes) : []),
     step.stale ? `The UA pages changed after this stage last ran (${step.stale} file(s)): run it again on the current head.` : null,
@@ -646,6 +648,9 @@ export function scriptedCalls(step, ledger, settings) {
     const key = stageLabelOf(stage, t);
     return key && t?.labels?.[key] ? [`forge set-stage-label --target ${t.id} --number ${pr.number} --stage ${key}`] : [];
   };
+  // The ready label (lib/pr-labels.mjs): on when a PR is marked ready, off when it leaves ready for merge.
+  const ready = settings.forge.readyLabel;
+  const readyOff = (pr) => (ready ? [`forge remove-label --repo ${pr.repo} --number ${pr.number} --label ${JSON.stringify(ready)}`] : []);
   switch (step.stage) {
     case 'move': {
       if (step.pr) {
@@ -653,7 +658,7 @@ export function scriptedCalls(step, ledger, settings) {
         const after = structuredClone(ledger);
         findPr(after, step.pr).stage = step.to;
         const expected = cardStatusFor(after);
-        return [...label(pr, step.to), ...(step.to === 'smeReview' ? [...expertCalls(settings, [pr], [card], { request: false }), ...reviewCommentCall(pr)] : []), ...(expected && expected !== step.card?.status ? [`tracker move ${card} --to ${expected}`] : [])];
+        return [...label(pr, step.to), ...(pr.stage === 'readyForMerge' ? readyOff(pr) : []), ...(step.to === 'smeReview' ? [...expertCalls(settings, [pr], [card], { request: false }), ...reviewCommentCall(pr)] : []), ...(expected && expected !== step.card?.status ? [`tracker move ${card} --to ${expected}`] : [])];
       }
       return [...ledger.prs.filter((p) => p.number && !p.merged).flatMap((p) => label(p, p.stage)), ...(step.ready ? [`tracker comment ${card} --text <the ready comment>`] : []), `tracker move ${card} --to ${step.to}`];
     }
@@ -674,10 +679,13 @@ export function scriptedCalls(step, ledger, settings) {
           ...own.flatMap((p) => label(p, PR_STAGE_OF_STATUS[step.to])),
         ]),
         ...unchecked.map((p) => `forge remove-label --repo ${p.repo} --number ${p.number} --label ${JSON.stringify(settings.forge.checkLabel)}`),
+        ...[...following, ...taken.filter((p) => !following.includes(p))].filter((p) => p.stage === 'readyForMerge').flatMap(readyOff),
       ];
     }
-    case 'readyForMerge':
-      return label(findPr(ledger, step.pr), 'readyForMerge');
+    case 'readyForMerge': {
+      const pr = findPr(ledger, step.pr);
+      return [...label(pr, 'readyForMerge'), ...(ready ? [`forge add-label --repo ${pr.repo} --number ${pr.number} --label ${JSON.stringify(ready)}`] : [])];
+    }
     case 'build': {
       const b = settings.build;
       return [`${b.command.join(' ')} in ${worktreePath(settings, findPr(ledger, step.pr))} at ${String(step.head ?? 'the head').slice(0, 12)}, under the build lock (a wait of up to ${b.waitMinutes} min, a timeout of ${b.timeoutMinutes} min)`];
@@ -860,7 +868,8 @@ async function runScripted(step, ctx) {
       const gate = ledger.video?.gateComment;
       let commentId = null;
       if (gate) {
-        const c = await clients.tracker.comment({ card, text: gate, unlessHeader: gate.split('\n')[0], since: ledger.video.at });
+        // Its first line past the comment header, should the session have copied the header in.
+        const c = await clients.tracker.comment({ card, text: gate, unlessHeader: withoutHeader(gate, settings.commentHeader).split('\n')[0], since: ledger.video.at });
         commentId = c.id ?? c.existing ?? null;
       }
       await clients.tracker.move({ card, to: 'blocked' });
@@ -1228,7 +1237,10 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
       let movedInRow = 0;
       for (let i = 0; step && i < settings.limits.stepsPerTicket; i++) {
         if (step.role && !guard(step.stage, step.group)) break;
+        const before = labelSnapshot(settings.state, step.keys);
         const r = await live.tracked(step, () => (step.role ? runModelStep(step) : step.stage === 'build' ? runBuildStep(step) : runScriptedStep(step)));
+        // The ready and check labels follow what the step recorded (lib/pr-labels.mjs), whoever recorded it.
+        for (const note of await followLabels({ settings, clients, keys: step.keys, before })) say({ kind: 'label', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, outcome: 'failed', note });
         done.push(r);
         ran(r);
         // The branch moved under the step (a person's commit): its status is read again, and what it gives now runs. Twice

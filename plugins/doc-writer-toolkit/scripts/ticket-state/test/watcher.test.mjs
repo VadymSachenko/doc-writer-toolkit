@@ -583,7 +583,7 @@ test('a loop of any cause: a stage that "succeeds" but makes a fresh event each 
     sessions.push(iso(clock));
     // It handles the newest comment and records the stage, but its own reply isn't in `posted`: a new comment.
     const list = activity['guide-docs#81'].comments;
-    await runRecord({ settings: w.settings, clients: w.clients(), key: '481', stage: 'answerComments', pr: 'guide-docs#81', status: 'done', result: { handled: list.map((x) => ({ id: x.id, updatedAt: x.updatedAt })) }, now: clock });
+    await runRecord({ settings: w.settings, clients: w.clients(), key: '481', stage: 'answerComments', pr: 'guide-docs#81', status: 'done', result: { questions: [], handled: list.map((x) => ({ id: x.id, updatedAt: x.updatedAt })) }, now: clock });
     const id = 8100 + list.length;
     list.push({ id, author: 'owner-login', body: 'a reply', createdAt: iso(clock), updatedAt: iso(clock + 1000) });
     p81.updatedAt = iso(clock + MIN);

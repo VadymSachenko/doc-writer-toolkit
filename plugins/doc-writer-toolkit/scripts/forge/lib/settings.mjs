@@ -1,4 +1,4 @@
-import { deepMerge, localSettingsPath, readJsonFile, settingsFile } from '../../tracker/lib/settings.mjs';
+import { deepMerge, localSettingsPath, readJsonFile, settingsFile, validateCommentHeader } from '../../tracker/lib/settings.mjs';
 import { CliError } from './errors.mjs';
 
 // The forge reads the same ticket flow settings file as the tracker, found the same way (`--settings`, the
@@ -25,11 +25,14 @@ export const labelKey = (name) => String(name ?? '').trim().toLowerCase();
 // Checks the `forge` object and the `targets` of the settings and returns them in a fixed shape. Nothing here talks to
 // the forge. The sets that follow from them are what the module is allowed to touch:
 //   repos          the repositories named by a target; a call on any other is refused;
-//   addable        the labels the module may add: every target's stage labels, `checkLabel` and `expertLabel`;
-//   removable      the labels it may remove: the stage labels and `checkLabel` (a person's forward move of the card
-//                  means the owner's check is done); `expertLabel` is never removed;
+//   addable        the labels the module may add: every target's stage labels, `checkLabel`, `expertLabel` and
+//                  `readyLabel`;
+//   removable      the labels it may remove: the stage labels, `checkLabel` (the ticket flow sets it from the open
+//                  questions and takes it off at a person's forward move) and `readyLabel` (off when the PR leaves
+//                  ready for merge); `expertLabel` is never removed;
 //   logins         the users it may assign or ask for a review: `self`, `assignee`, every target's reviewers.
-export function validateForge(forge, targets) {
+// `header` is the shared file's `commentHeader`, the line every comment the module posts starts with.
+export function validateForge(forge, targets, header = null) {
   if (!isObject(forge)) fail("the file has no 'forge' object");
   const kind = str(forge.kind, 'forge.kind (for example "github")');
   const owner = str(forge.owner, 'forge.owner');
@@ -38,6 +41,9 @@ export function validateForge(forge, targets) {
   const checkLabel = str(forge.checkLabel, 'forge.checkLabel', { optional: true });
   // The label on a PR whose writer recommends an expert review (the ticket flow's `pr` record).
   const expertLabel = str(forge.expertLabel, 'forge.expertLabel', { optional: true });
+  // The label on a PR the ticket flow marked ready for merge, the pipeline's recommendation: never the owner's own
+  // merge label, which the settings don't name.
+  const readyLabel = str(forge.readyLabel, 'forge.readyLabel', { optional: true });
   if (!Array.isArray(targets) || !targets.length) fail("the file has no 'targets' list (the forge works only on the repos the targets name)");
   const list = targets.map((t, i) => {
     if (!isObject(t)) fail(`targets[${i}] must be an object`);
@@ -68,10 +74,11 @@ export function validateForge(forge, targets) {
       if (!removable.has(labelKey(name))) removable.set(labelKey(name), name);
     }
   }
-  for (const extra of [checkLabel, expertLabel]) if (extra && !addable.has(labelKey(extra))) addable.set(labelKey(extra), extra);
-  if (checkLabel && !removable.has(labelKey(checkLabel))) removable.set(labelKey(checkLabel), checkLabel);
+  if (readyLabel && [...addable.keys(), labelKey(checkLabel), labelKey(expertLabel)].includes(labelKey(readyLabel))) fail(`forge.readyLabel '${readyLabel}' is also a stage, check or expert label: it needs a label of its own`);
+  for (const extra of [checkLabel, expertLabel, readyLabel]) if (extra && !addable.has(labelKey(extra))) addable.set(labelKey(extra), extra);
+  for (const extra of [checkLabel, readyLabel]) if (extra && !removable.has(labelKey(extra))) removable.set(labelKey(extra), extra);
   const logins = new Set([self, assignee, ...list.flatMap((t) => t.reviewers)].filter(Boolean));
-  return { kind, owner, self, assignee, checkLabel, expertLabel, targets: list, repos: [...new Set(list.map((t) => t.repo))], addable, removable, logins };
+  return { kind, owner, self, assignee, checkLabel, expertLabel, readyLabel, commentHeader: validateCommentHeader(header), targets: list, repos: [...new Set(list.map((t) => t.repo))], addable, removable, logins };
 }
 
 export async function loadSettings({ root, settings: flag }) {
@@ -80,5 +87,5 @@ export async function loadSettings({ root, settings: flag }) {
   if (!shared) throw new CliError(`no settings file at ${file}. Declare 'Ticket flow settings:' in CLAUDE.md or pass --settings.`, { code: 2 });
   const local = readJsonFile(localSettingsPath(file), 'local settings file');
   const merged = deepMerge(shared, local ?? {});
-  return { root, file, local: Boolean(local), forge: validateForge(merged.forge, merged.targets) };
+  return { root, file, local: Boolean(local), forge: validateForge(merged.forge, merged.targets, merged.commentHeader) };
 }

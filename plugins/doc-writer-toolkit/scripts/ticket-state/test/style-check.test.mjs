@@ -136,7 +136,7 @@ test('AC-1, AC-4: after the comments are applied the brief asks for the style ch
   // The summary as the writer records it: the suggestion applied (with the reason the comment gave), then the fix.
   const applied = { n: 3, page: PAGE, block: 'Крок 1', before: 'Натисніть **Зберегти**, яке партнер передав.', after: 'Натисніть на кнопку **Зберегти**, щоб зберегти зміни.', reason: 'оператору не треба знати про партнера' };
   const fix = { n: 4, page: PAGE, block: 'Крок 1', before: 'Натисніть на кнопку **Зберегти**, щоб зберегти зміни.', after: 'Натисніть **Зберегти**, щоб зберегти зміни.', rule: 'gdsg: ui-elements §2' };
-  await runRecord({ settings: w.settings, clients: w.clients(), key: '807', stage: 'answerComments', status: 'done', pr: 'guide-docs#87', result: { handled: [{ id: 9811, updatedAt: ago(1), sort: 'owner' }], summary: { id: 7811 }, edits: [applied, fix], posted: [7811] }, now: Date.now() });
+  await runRecord({ settings: w.settings, clients: w.clients(), key: '807', stage: 'answerComments', status: 'done', pr: 'guide-docs#87', result: { questions: [], handled: [{ id: 9811, updatedAt: ago(1), sort: 'owner' }], summary: { id: 7811 }, edits: [applied, fix], posted: [7811] }, now: Date.now() });
   const edits = read(w, '807').prs[0].edits;
   assert.deepEqual(edits.slice(-2).map((e) => [e.n, e.reason ?? null, e.rule ?? null]), [[3, 'оператору не треба знати про партнера', null], [4, null, 'gdsg: ui-elements §2']]);
   // «4 — поверни» puts back the owner's text, not the one before the owner's edit; «3 — поверни» is asked back.
@@ -149,7 +149,7 @@ test('AC-2: a fix that would change what the edit meant is a note in the summary
   const c = card({ number: 808, status: 'finalReview' });
   const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 88, headCommit: HEAD })] });
   ledger(w, c, { stages: BASE, prs: [{ repo: 'guide-docs', number: 88, targets: ['guide'], review: 'sme', stage: 'finalReview', edits: DESC }] });
-  const rec = (result) => runRecord({ settings: w.settings, clients: w.clients(), key: '808', stage: 'answerComments', status: 'done', pr: 'guide-docs#88', result, now: Date.now() });
+  const rec = (result) => runRecord({ settings: w.settings, clients: w.clients(), key: '808', stage: 'answerComments', status: 'done', pr: 'guide-docs#88', result: { questions: [], ...result }, now: Date.now() });
   await assert.rejects(rec({ notes: [{ page: PAGE, block: 'Крок 1', text: 'x' }] }), (e) => e.exitCode === 2 && /give "summary"/.test(e.message));
   await rec({ notes: [] });
   const note = { page: PAGE, block: 'Крок 1', text: 'gdsg: wordiness: «для того, щоб» → «щоб» would drop the condition the owner added; left as written' };

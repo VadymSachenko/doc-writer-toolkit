@@ -41,14 +41,17 @@
 //   reply({repo, number, comment, body})          -> { id }
 //   comment({repo, number, body})                 -> { id }
 //   changeLabels({repo, number, add: [names], remove: [names]})
-//        one request; a name the repository doesn't have is a Refusal('unknown'): labels are never created.
+//        one request; a name the repository doesn't have is a Refusal('unknown', …, { label }): it is not created here.
+//   createLabel({repo, name})
+//        a label on the repository; one already there (in any case) is no error. The module calls it only for the
+//        settings' `readyLabel`.
 //
 // An adapter has no operation that settles a discussion, withdraws a review, gives a verdict, joins the branch into
 // its base, closes a PR or removes a branch, and none that a caller could add: those rules are held by what the
 // interface does not contain.
 
 export const READS = ['pr', 'prByHead', 'openPrByHead', 'changedPrs', 'reviews', 'threads', 'issueComments', 'reviewComments', 'reviewComment', 'events', 'diffLines'];
-export const WRITES = ['createPr', 'updatePr', 'addAssignees', 'requestReviewers', 'createReview', 'reply', 'comment', 'changeLabels'];
+export const WRITES = ['createPr', 'updatePr', 'addAssignees', 'requestReviewers', 'createReview', 'reply', 'comment', 'changeLabels', 'createLabel'];
 
 export function assertAdapter(adapter) {
   const missing = [...READS, ...WRITES].filter((m) => typeof adapter?.[m] !== 'function');

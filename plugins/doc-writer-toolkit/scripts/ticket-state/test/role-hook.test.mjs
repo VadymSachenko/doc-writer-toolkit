@@ -91,7 +91,9 @@ const REFUSED = ({ state, root }) => {
     `git log '--output=${root}/.claude/ticket-flow.local.json'`, `git log --out''put=${root}/.claude/settings.local.json`, `git log --out\\put=/x`, `git log "--output" /x`, `git show HEAD --output=/x`, `git diff --output /x`, `git -C ${WT} log '--output=/x'`, `git -C ${WT} diff --ou''tput=/x`, 'git log --output=/x', 'git log -1 --output /x',
     // Scripts' flags that run code.
     `node ${ui} check --sour''ce 'command id'`, `node ${ui} check '--source=command id'`, `node ${ui} "--source" x`, `node ${ui} check --sou\\rce=x`, `node ${vp} --range a..b '--playwright-from' /tmp/x`, `node ${vp} --range a..b --playwright''-from=/tmp/x`,
-    // The check label comes off only by the runner, on a person's forward move.
+    // The check and ready labels are the runner's alone: it sets them from the records, and takes the check label off
+    // on a person's forward move.
+    `node ${R}/scripts/forge/forge.mjs add-label --repo guide-docs --number 3 --label x`, `node ${R}/scripts/forge/forge.mjs --repo guide-docs add-label --number 3 --label x`,
     `node ${R}/scripts/forge/forge.mjs remove-label --repo guide-docs --number 3 --label x`, `node ${R}/scripts/forge/forge.mjs --repo guide-docs remove-label --number 3 --label x`, `node ${R}/scripts/forge/forge.mjs 'remove-label' --repo guide-docs --number 3 --label x`,
     // A browser lock by hand.
     `mkdir ${state}/.play''wright.lock`, `mkdir "${state}/.playwright.lock"`, `mkdir '${state}/.playwright.lock'`, 'mkdir .playwright.lock', `mkdir -p ${state}/tmp/.playwright.lock/x`, `mkdir ${state}/.PLAYWRIGHT.LOCK`, `mkdir ${state}/.playwright-busy`, `mkdir ${state}/.play*`,
@@ -158,7 +160,7 @@ test('each stage\'s own commands pass in their real forms: the brief\'s, the rol
       `${toolkit('ticket-state/ticket-state.mjs')} record 503 --stage triage --status done --card abc --result-file ${state}/tmp/r.json`, 'git ls-tree -r HEAD docs', 'git -C /work/clone ls-tree -r HEAD docs',
     ],
     writer: [
-      `${toolkit('tracker/tracker.mjs')} read-card abc`, `${toolkit('tracker/tracker.mjs')} download-attachment abc --attachment 5f --out ${root}/work/tickets/502/video-1.mp4`, `${toolkit('tracker/tracker.mjs')} move abc --to inProgress`, `${toolkit('forge/forge.mjs')} open-pr --repo guide-docs --body-file ${state}/tmp/b.md`, `${toolkit('forge/forge.mjs')} review-on-lines --repo guide-docs --number 3`, `${toolkit('forge/forge.mjs')} add-label --label 'check needed'`,
+      `${toolkit('tracker/tracker.mjs')} read-card abc`, `${toolkit('tracker/tracker.mjs')} download-attachment abc --attachment 5f --out ${root}/work/tickets/502/video-1.mp4`, `${toolkit('tracker/tracker.mjs')} move abc --to inProgress`, `${toolkit('forge/forge.mjs')} open-pr --repo guide-docs --body-file ${state}/tmp/b.md`, `${toolkit('forge/forge.mjs')} review-on-lines --repo guide-docs --number 3`, `${toolkit('forge/forge.mjs')} comment --repo guide-docs --number 3 --body-file ${state}/tmp/s.md`,
       `${toolkit('ticket-state/browser-lock.mjs')} take --root ${root} --ticket 502 --wait 9`, `${toolkit('ticket-state/browser-lock.mjs')} free --root ${root} --ticket 502`, `${toolkit('video-parts/video-parts.mjs')} --root ${root} --work work/tickets/502 --video a.mp4`, `${toolkit('ui-labels/ui-labels.mjs')} check --root ${WT}`, `${toolkit('ui-labels/ui-labels.mjs')} lookup 'Зберегти' 'Статус' --root ${WT}`, `${toolkit('screenshot-locales/screenshot-locales.mjs')} paths --root ${WT} --page docs/a.md`,
       `git -C ${WT} add -A`, `git -C ${WT} add -- docs/a.md docs/.assets/b.png`, `git -C ${WT} status --short`, `git -C ${WT} diff origin/main`, `git -C ${WT} log -3`, `git -C ${WT} show HEAD`, `git -C ${WT} worktree list`, `git -C ${WT} commit -m "Write the page"`, `git -C ${WT} commit -m "Say why git push --force is denied" -m "Second paragraph: --output and .env are only words here"`, `git -C ${WT} commit -m .env`,
       TREE.push, `git -C ${WT} fetch origin`, `git -C ${WT} fetch origin ticket-71`, `git -C ${WT} fetch origin main`, `mkdir -p ${WT}/docs/a/.assets`, `mkdir -p ${state}/tmp/run-1`, `mkdir ${root}/work/tickets/502`, 'npx playwright test screenshot-tests/a.spec.ts',
@@ -595,11 +597,11 @@ test('settings validation: a skill job whose allow list opens all of git or all 
   assert.doesNotThrow(() => validateJobs(job(['Bash(git:*)'], { script: 'a.mjs' })), 'a script job has no session, and so no rules');
 });
 
-test('forge remove-label is refused only as the command, wherever the options put it; a label named so is no command', async () => {
+test('forge add-label and remove-label are refused only as the command, wherever the options put it; a label named so is no command', async () => {
   const { cfg, root } = SHARED();
   const fg = `${R}/scripts/forge/forge.mjs`;
-  for (const cmd of [`node ${fg} --dry-run remove-label --repo r --number 3 --label x`, `node ${fg} --repo=r remove-label --number 3 --label x`, `node ${fg} --repo r --number 3 --label x -- remove-label`, `node ${fg} -- remove-label --repo r`]) assert.ok(refusalOf(cmd, cfg.writer, { cwd: root }), cmd);
-  for (const cmd of [`node ${fg} add-label --repo r --number 3 --label remove-label`, `node ${fg} --label remove-label add-label --repo r --number 3`]) assert.equal(refusalOf(cmd, cfg.writer, { cwd: root }), null, cmd);
+  for (const sub of ['add-label', 'remove-label']) for (const cmd of [`node ${fg} --dry-run ${sub} --repo r --number 3 --label x`, `node ${fg} --repo=r ${sub} --number 3 --label x`, `node ${fg} --repo r --number 3 --label x -- ${sub}`, `node ${fg} -- ${sub} --repo r`]) assert.ok(refusalOf(cmd, cfg.writer, { cwd: root }), cmd);
+  for (const cmd of [`node ${fg} comment --repo r --number 3 --body-file b --label remove-label`, `node ${fg} --label add-label set-stage-label --target t --number 3 --stage review`]) assert.equal(refusalOf(cmd, cfg.writer, { cwd: root }), null, cmd);
   const { OPTIONS } = await import('../../forge/forge.mjs');
   const booleans = Object.entries(OPTIONS).filter(([, o]) => o.type === 'boolean').flatMap(([k, o]) => [`--${k}`, ...(o.short ? [`-${o.short}`] : [])]);
   assert.deepEqual([...SCRIPT_COMMANDS['forge/forge.mjs'].booleans].sort(), booleans.sort(), "the hook's list of forge's options with no value");
