@@ -143,6 +143,30 @@ test('AC-5: a build whose worktree could not fetch the branch is a failure, not 
   assert.match(fs.readFileSync(path.join(t.w.settings.state, 'reports', `${localDate(NOW)}.md`), 'utf8'), /could not fetch ticket-61 into the worktree/);
 });
 
+test('AC-5: two moved heads in a row stop the group: the status is read again once, not at every step', async () => {
+  // A forge that lags its git refs: the worktree (fetched) is at another head than the status gives, at every read.
+  const t = atBuild();
+  t.w.settings.limits.stepsPerTicket = 5;
+  let tries = 0;
+  const out = await run(t.w, { ensureWorktree: (s, p) => (tries++, { ...t.ensureWorktree(s, p), head: 'd'.repeat(40) }), runBuild: () => assert.fail('no build at a head the chain did not see') }, { named: ['701'] });
+  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['build', 'moved'], ['build', 'moved']]);
+  assert.equal(tries, 2);
+  const l = read(t.w, '701');
+  assert.equal(l.runs.filter((r) => r.outcome === 'failed').length, 0);
+  assert.notEqual(l.prs[0].chain.build?.status, 'failed');
+  // One move alone doesn't stop it: the status read again gives the build, which the next fetch finds at its head.
+  const u = atBuild();
+  u.w.settings.limits.stepsPerTicket = 5;
+  let n = 0;
+  const once = await run(u.w, {
+    ensureWorktree: (s, p) => ({ ...u.ensureWorktree(s, p), head: n++ === 0 ? 'd'.repeat(40) : HEAD }),
+    runBuild: async () => ({ code: 0, tail: [] }),
+    spawnClaude: async () => ({ code: 0, stdout: RESULT }),
+  }, { named: ['701'] });
+  assert.deepEqual(once.ran.map((r) => [r.stage, r.outcome]).slice(0, 2), [['build', 'moved'], ['build', 'done']]);
+  assert.equal(read(u.w, '701').prs[0].chain.build.status, 'done');
+});
+
 test('AC-3: the dry run names the build command and starts nothing; the brief of a chain session never asks for the build', async () => {
   const t = atBuild();
   const out = await run(t.w, { ensureWorktree: t.ensureWorktree, runBuild: () => assert.fail('no build in a dry run') }, { named: ['701'], dryRun: true });
