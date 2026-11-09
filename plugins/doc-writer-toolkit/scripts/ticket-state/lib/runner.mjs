@@ -18,7 +18,7 @@ import { ROLES } from './settings.mjs';
 import { cleanupTicket } from './cleanup.mjs';
 import { removeClosedMarkdown } from './import.mjs';
 import { DOWNLOAD_DIRS_VARIABLE, ROLE_SESSION_VARIABLE, childEnv, sessionChildEnv } from './env.mjs';
-import { TREE_STAGES, adoptSources, checkClone, clonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureReadCheckout, ensureWorktree, headOf, prsForStep, setAsideWork, worktreePath } from './worktree.mjs';
+import { TREE_STAGES, adoptSources, builtOn, checkClone, clonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureReadCheckout, ensureWorktree, headOf, prsForStep, setAsideWork, worktreePath } from './worktree.mjs';
 import { BUSY_NAME, LOCK_NAME, busyEnded, freeBrowserLock } from './browser-lock.mjs';
 import { BUILD_LOCK_NAME, freeBuildLock, renewBuildLock, waitForBuildLock } from './build-lock.mjs';
 import { runSiteBuild } from './site-build.mjs';
@@ -930,6 +930,9 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
   const { dryRun = false, morning = false, trigger = 'schedule', named = [], claude = 'claude', progress = {} } = options;
   const startPass = Boolean(options.startPass) && trigger === 'schedule' && !morning;
   const clock = io.now ?? Date.now;
+  // The lock renewals' timer: `io.setInterval` and `io.clearInterval` replace it in tests, as `io.sleep` does the wait.
+  const every = io.setInterval ?? setInterval;
+  const stopEvery = io.clearInterval ?? clearInterval;
   // `startUntil` (ms): the end of the watcher's start hours. A start pass triages nothing and starts no further group
   // from then on; a group it started goes on with its next steps, as after any scheduled start.
   const startUntil = startPass && Number.isFinite(options.startUntil) ? options.startUntil : null;
@@ -1245,19 +1248,32 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
       return failed(`the worktree: ${String(e.message).slice(0, 400)}`, { ran: false });
     }
     const head = tree.head ?? step.head ?? null;
-    // The branch moved since the status was read: the chain's stages saw another head, so the status is read again.
+    // The branch moved since the status was read: the chain's stages saw another head, so the status is read again. One
+    // the worktree couldn't fetch is not known to have moved: read again, it would read `moved` at every check and never
+    // be told. It fails, so the failed-step rules apply (it waits for a person, then holds) and the report shows it.
+    if (step.head && tree.head && tree.head !== step.head && tree.unfetched) return failed(`could not fetch ${pr.branch} into the worktree: it is at ${tree.head.slice(0, 7)}, not ${step.head.slice(0, 7)}, so nothing was built`, { ran: false });
     if (step.head && tree.head && tree.head !== step.head) return moved(`the branch is at ${tree.head.slice(0, 7)}, not ${step.head.slice(0, 7)}: the status is read again`);
     const mine = step.group ?? key;
     if (allLocks(settings.state, clock()).some((l) => l.group === mine && l.pid === process.pid)) renewLock(settings.state, mine, { leaseMinutes: settings.limits.lockLeaseMinutes, stage: step.stage, now: clock() });
-    const renew = setInterval(() => {
+    const renew = every(() => {
       if (step.group) renewLock(settings.state, step.group, { leaseMinutes: settings.limits.lockLeaseMinutes, now: clock() });
-      renewBuildLock(settings.state, { ticket: key, now: clock() });
+      try {
+        renewBuildLock(settings.state, { ticket: key, now: clock() });
+      } catch {
+        // a write that failed (the disk, the rights): the next renewal tries again, never an error out of the run
+      }
     }, 5 * 60000);
     let res;
     let waitedMs = 0;
     try {
       const waitFrom = clock();
-      const lock = await waitForBuildLock(settings.state, { ticket: key, stage: step.stage, waitMs: b.waitMinutes * 60000, now: clock, sleep: io.sleep ?? pause });
+      let lock;
+      try {
+        lock = await (io.waitForBuildLock ?? waitForBuildLock)(settings.state, { ticket: key, stage: step.stage, waitMs: b.waitMinutes * 60000, now: clock, sleep: io.sleep ?? pause });
+      } catch (e) {
+        // A lock folder the runner can't read or write (its rights, say): the stage failed, never an error out of the run.
+        return await failed(`the build lock: ${String(e.message ?? e).slice(0, 300)}`, { ran: false });
+      }
       waitedMs = clock() - waitFrom;
       if (lock.broken) return await failed(`the build lock: ${lock.broken}`, { ran: false });
       if (!lock.taken) {
@@ -1270,7 +1286,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
       if (lock.tookOver) say({ kind: 'buildLock', group: step.group, stage: step.stage, outcome: 'tookOver', note: `a stale build lock taken over from ${lock.tookOver.ticket ? `ticket ${lock.tookOver.ticket}` : 'a holder with no record'} (since ${lock.tookOver.since})` });
       res = await (io.runBuild ?? runSiteBuild)({ cwd: tree.path, command: b.command, timeoutMs: b.timeoutMinutes * 60000 });
     } finally {
-      clearInterval(renew);
+      stopEvery(renew);
       try {
         freeBuildLock(settings.state, { tickets: step.keys });
       } catch {
@@ -1357,31 +1373,31 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         const buildDir = step.stage === 'visualPack' ? reusableBuild(step, trees) : null;
         step = { ...step, worktrees: trees, codeTrees, clones, ...(buildDir ? { buildDir } : {}) };
       } catch (e) {
-        const note = `the worktree: ${String(e.message).slice(0, 400)}`;
-        for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'failed', pr: step.pr, note, now: clock() }).catch(() => {});
-        // A failed step like a failed session, so the failed-step rules apply (it waits for a person, then holds), with
-        // no `start`: no session ran, so it counts toward no cap, cost or report of sessions.
-        const marks = await marksOf(step);
-        const failures = (step.prior ?? 0) + 1;
-        for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, run: JSON.stringify({ stage: step.stage, role: step.role, outcome: 'failed', session: null, note, failures, ...(marks[k] ? { after: marks[k] } : {}) }), pr: step.pr, now: clock() }).catch(() => {});
-        say({ kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, role: step.role, outcome: 'failed', note });
-        return { ...pick(step), outcome: 'failed', note };
+        return await failedBeforeSession(step, `the worktree: ${String(e.message).slice(0, 400)}`);
       }
       // A session that builds the site itself runs under the build lock, taken here and freed when the step ends.
       if (sessionBuilds(step)) {
         // The group's lock is renewed while it waits, as while a session runs.
-        const waiting = setInterval(() => {
+        const waiting = every(() => {
           for (const g of [step.group, ...held].filter(Boolean)) renewLock(settings.state, g, { leaseMinutes: settings.limits.lockLeaseMinutes, now: clock() });
         }, 5 * 60000);
+        const waitFrom = clock();
         let lock;
         try {
-          lock = await waitForBuildLock(settings.state, { ticket: step.keys[0], stage: step.stage, waitMs: settings.build.waitMinutes * 60000, now: clock, sleep: io.sleep ?? pause });
+          lock = await (io.waitForBuildLock ?? waitForBuildLock)(settings.state, { ticket: step.keys[0], stage: step.stage, waitMs: settings.build.waitMinutes * 60000, now: clock, sleep: io.sleep ?? pause });
+        } catch (e) {
+          // A lock folder the runner can't read or write: the step failed, never an error out of the run.
+          lock = { taken: false, error: String(e.message ?? e) };
         } finally {
-          clearInterval(waiting);
+          stopEvery(waiting);
         }
+        // A lock that isn't a folder, or one the runner can't use, stays so until a person acts: a failure, told.
+        if (lock.broken || lock.error) return await failedBeforeSession(step, `the build lock: ${lock.broken ?? lock.error}`.slice(0, 400));
         if (!lock.taken) {
-          const note = lock.broken ? `the build lock: ${lock.broken}` : `the build lock was held by ${lock.holder?.ticket ? `ticket ${lock.holder.ticket}` : 'someone else'} since ${lock.since} for the whole wait (${settings.build.waitMinutes} min): runs again at a later check`;
-          for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, run: JSON.stringify({ stage: step.stage, role: step.role, outcome: 'busy', session: null, note: note.slice(0, 300) }), pr: step.pr, now: clock() }).catch(() => {});
+          // No session ran, so no `start`: the wait counts toward no cap, cost or report of sessions; its time is kept.
+          const waitedMs = clock() - waitFrom;
+          const note = `the build lock was held by ${lock.holder?.ticket ? `ticket ${lock.holder.ticket}` : 'someone else'} since ${lock.since} for the whole wait (${settings.build.waitMinutes} min): runs again at a later check`;
+          for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, run: JSON.stringify({ stage: step.stage, role: step.role, outcome: 'busy', session: null, wallMs: waitedMs, waitedMs, note: note.slice(0, 300) }), pr: step.pr, now: clock() }).catch(() => {});
           say({ kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, role: step.role, outcome: 'busy', note: note.slice(0, 300) });
           return { ...pick(step), outcome: 'busy', note };
         }
@@ -1400,9 +1416,13 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         const cmd = commandFor(step, settings, { model, agentsPath, claude });
         const began = clock();
         const start = new Date(began).toISOString();
-        const renew = setInterval(() => {
+        const renew = every(() => {
           for (const g of [step.group, ...held].filter(Boolean)) renewLock(settings.state, g, { leaseMinutes: settings.limits.lockLeaseMinutes, now: clock() });
-          if (buildLocked) renewBuildLock(settings.state, { ticket: step.keys[0], now: clock() });
+          try {
+            if (buildLocked) renewBuildLock(settings.state, { ticket: step.keys[0], now: clock() });
+          } catch {
+            // the next renewal tries again
+          }
         }, 5 * 60000);
         let res;
         // The step's wall-clock time, from the session's start to its process's end: `duration_ms` is the CLI's own
@@ -1412,7 +1432,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
           res = await (io.spawnClaude ?? spawnClaude)(cmd, io.claudeEnv ? { env: io.claudeEnv } : {});
         } finally {
           wallMs = clock() - began;
-          clearInterval(renew);
+          stopEvery(renew);
           // The browser lock a session took (`browser-lock.mjs`) and didn't free, crashed or not: freed now, so the next
           // Playwright run doesn't wait for it. A lock another ticket or a hand run holds stays.
           try {
@@ -1485,10 +1505,23 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
     }
   }
 
+  // A model step that failed before its session (its worktree, its build lock): recorded failed like a failed session, so
+  // the failed-step rules apply (it waits for a person, then holds), with no `start`: no session ran, so it counts
+  // toward no cap, cost or report of sessions.
+  async function failedBeforeSession(step, note) {
+    for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'failed', pr: step.pr, note, now: clock() }).catch(() => {});
+    const marks = await marksOf(step);
+    const failures = (step.prior ?? 0) + 1;
+    for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, run: JSON.stringify({ stage: step.stage, role: step.role, outcome: 'failed', session: null, note, failures, ...(marks[k] ? { after: marks[k] } : {}) }), pr: step.pr, now: clock() }).catch(() => {});
+    say({ kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, role: step.role, outcome: 'failed', note });
+    return { ...pick(step), outcome: 'failed', note };
+  }
+
   // Whether a person moved the PR's branch while the session ran, by heads, never by an error's text: the forge's head
-  // is neither the head the step was given nor the worktree's (the session's own push that went through is the
-  // worktree's head). A move covers a push the forge rejected and a record refused as stale. The session's unpushed
-  // commits are set aside (lib/worktree.mjs, `setAsideWork`), so the next step's worktree follows the branch.
+  // is neither the head the step was given nor the worktree's head or one of its ancestors (the session's own push that
+  // went through, with its later commits not pushed yet). A move covers a push the forge rejected and a record refused
+  // as stale. The session's unpushed commits are set aside (lib/worktree.mjs, `setAsideWork`), so the next step's
+  // worktree follows the branch.
   async function movedUnder(step) {
     if (!step.pr || !step.head) return null;
     let pr;
@@ -1503,7 +1536,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
     if (!forgeHead || forgeHead === step.head) return null;
     const tree = (step.worktrees ?? []).find((t) => t.branch === pr.branch && t.repo === pr.repo) ?? null;
     const treeHead = headOf(tree?.path);
-    if (treeHead && treeHead === forgeHead) return null;
+    if (treeHead && (treeHead === forgeHead || builtOn(tree.path, forgeHead, treeHead))) return null;
     const kept = tree?.path && treeHead && treeHead !== step.head ? setAsideWork(pr, tree.path, step.head) : null;
     return { forgeHead, kept, note: `the branch moved to ${forgeHead.slice(0, 7)} while the session worked on ${step.head.slice(0, 7)}: no retry, no failure counted; the status is read again${kept?.left ? `; the worktree is left as it is (${kept.left})` : ''}` };
   }

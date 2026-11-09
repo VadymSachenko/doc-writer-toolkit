@@ -69,7 +69,12 @@ function withClone(w, { declare = true } = {}) {
   og('config', 'user.name', 'Owner');
   og('config', 'commit.gpgsign', 'false');
   og('checkout', '-q', 'ticket-71');
-  const handEdit = (files) => {
+  // `fromOrigin`: on the branch as pushed now (a session's push too), not where this clone last stood.
+  const handEdit = (files, { fromOrigin = false } = {}) => {
+    if (fromOrigin) {
+      og('fetch', '-q', 'origin');
+      og('reset', '-q', '--hard', 'origin/ticket-71');
+    }
     for (const [rel, text] of Object.entries(files)) {
       fs.mkdirSync(path.dirname(path.join(other, rel)), { recursive: true });
       fs.writeFileSync(path.join(other, rel), text);
@@ -272,6 +277,44 @@ test('AC-5: a session that pushed its own commit and then failed is an ordinary 
   assert.deepEqual(calls, ['claude-sonnet-5-5', 'claude-opus-5-5'], 'the ladder as before');
   assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['locales', 'failed']]);
   assert.deepEqual(read(t.w, '1501').runs.filter((r) => r.stage === 'locales').map((r) => [r.outcome, r.failures]), [['failed', 1], ['failed', 2]]);
+});
+
+test('AC-5: a session that pushed one commit, made another it did not push, and failed is an ordinary failure; a person\'s commit on top of its push is a move', async () => {
+  // The forge's head is the session's pushed commit, an ancestor of the worktree's head: the session's own work, so the
+  // ladder as before.
+  const t = finalReviewTicket({ done: CHAIN.slice(0, 2), extra: { roles: { translator: { model: 'claude-sonnet-5-5' } }, limits: { stepsPerTicket: 1 } } });
+  const calls = [];
+  const spawnClaude = async (cmd) => {
+    calls.push(cmd.args[cmd.args.indexOf('--model') + 1]);
+    if (calls.length === 1) {
+      const pushed = commitIn(t.wt, 'docs/x/index.md', '# Сторінка\n\nНовий абзац.\n\nЩе один.\n');
+      execFileSync('git', ['-C', t.wt, 'push', '-q', 'origin', 'HEAD:refs/heads/ticket-71'], { stdio: 'ignore' });
+      t.forgePr.headCommit = pushed;
+      commitIn(t.wt, 'docs/x/index.md', '# Сторінка\n\nНовий абзац.\n\nЩе один.\n\nІ ще.\n');
+    }
+    return { code: 1, stdout: '', stderr: '' };
+  };
+  const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1501'] } });
+  assert.deepEqual(calls, ['claude-sonnet-5-5', 'claude-opus-5-5'], 'the ladder as before');
+  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['locales', 'failed']]);
+  assert.deepEqual(read(t.w, '1501').runs.filter((r) => r.stage === 'locales').map((r) => [r.outcome, r.failures]), [['failed', 1], ['failed', 2]]);
+
+  // The same, but a person pushed a commit on top of the session's push while it went on: the forge's head is not in
+  // the worktree's history, so the branch moved under it.
+  const u = finalReviewTicket({ done: CHAIN.slice(0, 2), extra: { roles: { translator: { model: 'claude-sonnet-5-5' } }, limits: { stepsPerTicket: 1 } } });
+  const models = [];
+  const spawnClaude2 = async (cmd) => {
+    models.push(cmd.args[cmd.args.indexOf('--model') + 1]);
+    commitIn(u.wt, 'docs/x/index.md', '# Сторінка\n\nНовий абзац.\n\nЩе один.\n');
+    execFileSync('git', ['-C', u.wt, 'push', '-q', 'origin', 'HEAD:refs/heads/ticket-71'], { stdio: 'ignore' });
+    u.forgePr.headCommit = u.handEdit({ 'docs/x/index.md': '# Сторінка\n\nНовий абзац, виправлений.\n\nЩе один.\n' }, { fromOrigin: true });
+    commitIn(u.wt, 'docs/x/index.md', '# Сторінка\n\nНовий абзац.\n\nЩе один.\n\nІ ще.\n');
+    return { code: 1, stdout: '', stderr: '' };
+  };
+  const moved = await runDaily({ settings: u.w.settings, clients: u.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude: spawnClaude2 }, options: { trigger: 'watcher', named: ['1501'] } });
+  assert.deepEqual(models, ['claude-sonnet-5-5'], 'no bigger model');
+  assert.deepEqual(moved.ran.map((r) => [r.stage, r.outcome]), [['locales', 'moved']]);
+  assert.deepEqual(read(u.w, '1501').runs.filter((r) => r.stage === 'locales').map((r) => [r.outcome, r.failures ?? null]), [['moved', null]]);
 });
 
 test('AC-1: .env too when the target names it; a clone without node_modules is said in the brief; a branch not pushed yet starts from the base', async () => {
