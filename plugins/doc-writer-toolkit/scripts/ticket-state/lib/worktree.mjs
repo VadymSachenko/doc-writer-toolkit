@@ -192,6 +192,8 @@ export function ensureWorktree(settings, pr) {
 // checked out comes back with `error`, and the session still runs. `remote` is where a new clone comes from (tests).
 // The commit a worktree is at, or null (no worktree there).
 export const headOf = (wt) => (wt && fs.existsSync(wt) ? tryRun(wt, ['rev-parse', 'HEAD']) : null);
+// Whether `commit` is `head` or one of its ancestors, in the worktree's repo. A commit the repo doesn't have is neither.
+export const builtOn = (wt, commit, head) => Boolean(wt && commit && head && fs.existsSync(wt) && tryRun(wt, ['merge-base', '--is-ancestor', commit, head]) !== null);
 
 // After a session whose PR branch a person moved under it (lib/runner.mjs, `movedUnder`): the worktree's commits that
 // never reached the branch (its push was rejected) would leave it stuck at the next step. They are kept under

@@ -18,7 +18,7 @@ import { ROLES } from './settings.mjs';
 import { cleanupTicket } from './cleanup.mjs';
 import { removeClosedMarkdown } from './import.mjs';
 import { DOWNLOAD_DIRS_VARIABLE, ROLE_SESSION_VARIABLE, childEnv, sessionChildEnv } from './env.mjs';
-import { TREE_STAGES, adoptSources, checkClone, clonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureReadCheckout, ensureWorktree, headOf, prsForStep, setAsideWork, worktreePath } from './worktree.mjs';
+import { TREE_STAGES, adoptSources, builtOn, checkClone, clonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureReadCheckout, ensureWorktree, headOf, prsForStep, setAsideWork, worktreePath } from './worktree.mjs';
 import { BUSY_NAME, LOCK_NAME, busyEnded, freeBrowserLock } from './browser-lock.mjs';
 import { BUILD_LOCK_NAME, freeBuildLock, renewBuildLock, waitForBuildLock } from './build-lock.mjs';
 import { runSiteBuild } from './site-build.mjs';
@@ -1486,9 +1486,10 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
   }
 
   // Whether a person moved the PR's branch while the session ran, by heads, never by an error's text: the forge's head
-  // is neither the head the step was given nor the worktree's (the session's own push that went through is the
-  // worktree's head). A move covers a push the forge rejected and a record refused as stale. The session's unpushed
-  // commits are set aside (lib/worktree.mjs, `setAsideWork`), so the next step's worktree follows the branch.
+  // is neither the head the step was given nor the worktree's head or one of its ancestors (the session's own push that
+  // went through, with its later commits not pushed yet). A move covers a push the forge rejected and a record refused
+  // as stale. The session's unpushed commits are set aside (lib/worktree.mjs, `setAsideWork`), so the next step's
+  // worktree follows the branch.
   async function movedUnder(step) {
     if (!step.pr || !step.head) return null;
     let pr;
@@ -1503,7 +1504,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
     if (!forgeHead || forgeHead === step.head) return null;
     const tree = (step.worktrees ?? []).find((t) => t.branch === pr.branch && t.repo === pr.repo) ?? null;
     const treeHead = headOf(tree?.path);
-    if (treeHead && treeHead === forgeHead) return null;
+    if (treeHead && (treeHead === forgeHead || builtOn(tree.path, forgeHead, treeHead))) return null;
     const kept = tree?.path && treeHead && treeHead !== step.head ? setAsideWork(pr, tree.path, step.head) : null;
     return { forgeHead, kept, note: `the branch moved to ${forgeHead.slice(0, 7)} while the session worked on ${step.head.slice(0, 7)}: no retry, no failure counted; the status is read again${kept?.left ? `; the worktree is left as it is (${kept.left})` : ''}` };
   }
