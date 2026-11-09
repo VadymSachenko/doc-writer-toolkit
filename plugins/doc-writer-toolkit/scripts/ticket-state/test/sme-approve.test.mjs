@@ -65,7 +65,7 @@ test('AC-2: approved with new comments of the expert\'s: the comments are answer
   let t = await w.one('902');
   assert.deepEqual(steps(t), ['answerComments guide-docs#7'], 'row 11 first');
   assert.equal(t.steps[0].askApprove, undefined, 'the expert already approved: no Approve line');
-  await runRecord({ settings: w.settings, clients: w.clients(), key: '902', stage: 'answerComments', pr: 'guide-docs#7', status: 'done', result: { handled: [{ id: 9201, updatedAt: ago(2) }] }, now: NOW });
+  await runRecord({ settings: w.settings, clients: w.clients(), key: '902', stage: 'answerComments', pr: 'guide-docs#7', status: 'done', result: { questions: [], handled: [{ id: 9201, updatedAt: ago(2) }] }, now: NOW });
   t = await w.one('902');
   assert.deepEqual(steps(t), ['move guide-docs#7 -> finalReview']);
 });

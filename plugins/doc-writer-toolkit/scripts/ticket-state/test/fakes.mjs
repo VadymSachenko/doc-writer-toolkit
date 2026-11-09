@@ -218,6 +218,7 @@ export function forgeAdapter({ prs = [], activity = {}, changed = {}, events = {
       throw new Error('not in these tests');
     },
     comment: async (a) => (log.push(['comment', a]), { id: 900 + log.length }),
+    createLabel: async (a) => void log.push(['createLabel', a.repo, a.name]),
     changeLabels: async (a) => {
       log.push(['changeLabels', a.repo, a.number, a.add, a.remove]);
       const p = get(a);

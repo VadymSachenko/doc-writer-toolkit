@@ -12,7 +12,7 @@ import { validateJobs } from './jobs.mjs';
 // (`<name>.local.json`), merged key by key at any depth (a local key wins), for the local file's keys only (`localOnly`).
 // The tracker and forge scripts read the same files, as they stand and with no such limit.
 //
-// The shared file holds `state`, `workFolder`, `tracker`, `forge`, `targets`, `noReviewLabel`, `appRepos`, `hostRules`, `hostJobs`,
+// The shared file holds `state`, `workFolder`, `commentHeader`, `tracker`, `forge`, `targets`, `noReviewLabel`, `appRepos`, `hostRules`, `hostJobs`,
 // `build`, and each role's tool rules (`roles.<role>.allowedTools`, `disallowedTools`).
 // The local file holds `mode`, `limits`, `schedule`, `roles` (no tool rules), `modelLadder`, `video`, `cleanup` and `progress`. Defaults below.
 
@@ -164,9 +164,11 @@ function validateTargets(raw, forge) {
 // Checks the merged settings and returns them with every default filled in. Nothing here reads the tracker or the forge.
 export function validateSettings(merged, { root, stateRootDefault }) {
   if (!isObject(merged)) fail('the file is not a JSON object');
-  const tracker = validateTracker(merged.tracker, merged.targets);
+  // `commentHeader`: the line every comment the pipeline posts starts with, on the tracker and the forge alike (the two
+  // modules put it in front; none: no header).
+  const tracker = validateTracker(merged.tracker, merged.targets, merged.commentHeader);
   for (const s of REQUIRED_STATUSES) if (!(s in tracker.statuses)) fail(`tracker.statuses has no '${s}': the ticket flow reads it`);
-  const forge = validateForge(merged.forge, merged.targets);
+  const forge = validateForge(merged.forge, merged.targets, merged.commentHeader);
   const targets = validateTargets(merged.targets ?? [], forge);
   if (targets.some((t) => t.review === 'sme') && !('smeReview' in tracker.statuses)) fail("a target has review 'sme', so tracker.statuses needs 'smeReview'");
   const rawTracker = merged.tracker;
@@ -250,6 +252,7 @@ export function validateSettings(merged, { root, stateRootDefault }) {
     state: path.resolve(root, stateRel),
     stateRel,
     workFolder,
+    commentHeader: tracker.commentHeader,
     mode,
     tracker,
     intake,
@@ -336,6 +339,6 @@ export function printable(s) {
   return {
     ...rest,
     tracker: { ...tracker, credentials: { ...tracker.credentials } },
-    forge: { kind: forge.kind, owner: forge.owner, self: forge.self, assignee: forge.assignee, checkLabel: forge.checkLabel, expertLabel: forge.expertLabel ?? null, repos: forge.repos },
+    forge: { kind: forge.kind, owner: forge.owner, self: forge.self, assignee: forge.assignee, checkLabel: forge.checkLabel, expertLabel: forge.expertLabel ?? null, readyLabel: forge.readyLabel ?? null, repos: forge.repos },
   };
 }

@@ -176,7 +176,7 @@ test('a PR stage on a worktree, answering comments: resumed with the commit and 
   const spawnClaude = async (cmd) => {
     calls.push(cmd);
     if (!flag(cmd, '--resume')) return { code: 0, stdout: ENDED() };
-    await runRecord({ settings: w.settings, clients: w.clients(), key: '902', stage: 'answerComments', pr: 'guide-docs#7', status: 'done', result: { handled: [{ id: 9201, updatedAt: ago(2) }] }, now: NOW });
+    await runRecord({ settings: w.settings, clients: w.clients(), key: '902', stage: 'answerComments', pr: 'guide-docs#7', status: 'done', result: { handled: [{ id: 9201, updatedAt: ago(2) }], questions: [] }, now: NOW });
     return { code: 0, stdout: ENDED({ cost: 0.6 }) };
   };
   const out = await run(w, spawnClaude, { ensureWorktree: () => tree });

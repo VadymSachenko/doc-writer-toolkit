@@ -706,8 +706,9 @@ test('AC-5: a recorded folder that is a repository of its own is kept whole, nev
 // records each model stage at the head it was given. A UA change sends the PR back to the owner's queue with no
 // session (`first`); then, unless `move` is false, the owner moves the card to In translation and the run goes on
 // (`out`, its follow left out).
-async function afterReady(files, { pipeline = false, move = true } = {}) {
-  const t = finalReviewTicket({ done: CHAIN, stage: 'readyForMerge' });
+async function afterReady(files, { pipeline = false, move = true, extra = {}, labels } = {}) {
+  const t = finalReviewTicket({ done: CHAIN, stage: 'readyForMerge', extra });
+  if (labels) t.forgePr.labels = labels;
   const h2 = t.handEdit(files);
   t.forgePr.headCommit = h2;
   if (pipeline) {
@@ -742,6 +743,16 @@ test('a UA change after ready for merge: back to the owner\'s queue with no sess
   assert.deepEqual([back.prs[0].stage, back.left.status, back.prs[0].readyForMerge.length], ['finalReview', 'finalReview', 1]);
   assert.deepEqual(run2.ran.map((r) => r.stage), ['follow', 'resync', 'readyForMerge', 'move']);
   assert.equal(t.c.placeId, LISTS.finalReview.id, 'ready again: the card back in the owner\'s queue');
+});
+
+test('the ready label: off when a UA change sends the PR back to the owner\'s queue, on again when it is ready again; the owner\'s merge label untouched', async () => {
+  const READY = 'Merge advised';
+  const { t, first, run2 } = await afterReady({ 'docs/x/index.md': '# Сторінка\n\nВиправлений абзац.\n' }, { extra: { forge: { ...rawSettings().forge, readyLabel: READY } }, labels: ['In final review', READY, 'ready for merge'] });
+  assert.deepEqual(first.ran.map((r) => r.stage), ['move', 'styleCheck']);
+  assert.deepEqual(run2.ran.map((r) => r.stage), ['follow', 'resync', 'readyForMerge', 'move']);
+  const changes = t.w.forge.log.filter((x) => x[0] === 'changeLabels' && [...x[3], ...x[4]].includes(READY)).map((x) => [x[3], x[4]]);
+  assert.deepEqual(changes, [[[], [READY]], [[READY], []]], 'off at the move back, on at ready for merge');
+  assert.ok(t.forgePr.labels.includes('ready for merge') && t.forgePr.labels.includes(READY));
 });
 
 test('AC-4: a hand commit that changes an image after ready for merge: the re-sync, the visual pack, then ready again', async () => {

@@ -78,6 +78,9 @@ test('settings: found by flag, by the CLAUDE.md field, or at the default place; 
   await assert.rejects(loadSettings({ root }), /no settings file/);
   write('.claude/ticket-flow.json', { tracker: trackerSettings({ board: 'default-board' }) });
   assert.equal((await loadSettings({ root })).tracker.board, 'default-board');
+  assert.equal((await loadSettings({ root })).tracker.commentHeader, null);
+  write('.claude/ticket-flow.json', { commentHeader: '[BOT]', tracker: trackerSettings({ board: 'default-board' }) });
+  assert.equal((await loadSettings({ root })).tracker.commentHeader, '[BOT]', 'the header is read from the top of the shared file');
   write('.claude/ticket-flow.local.json', { tracker: { board: 'local-board' } });
   const local = await loadSettings({ root });
   assert.equal(local.tracker.board, 'local-board');
@@ -727,6 +730,58 @@ test('the interface: the module runs unchanged on an adapter that is not Trello'
   await rejects(tracker.createCard({ status: 'ready', name: 'x' }), 'intake');
   assert.equal((await tracker.createCard({ status: 'intake', name: 'x' })).id, 'PROJ-3');
   assert.deepEqual(adapter.log.at(-1), ['createCard', 'p1', 'x']);
+});
+
+// ------------------------------------------------------------------ the comment header
+
+const HEADER = '🤖 **[BOT]**';
+const memorySettings = (extra = {}) => ({
+  kind: 'memory', board: 'main', credentials: { key: 'A', token: 'B' },
+  statuses: { intake: ['Inbox'], drafts: ['Drafts'], ready: ['Ready'], inProgress: ['Doing'] },
+  neverRead: ['drafts'], transitions: [['intake', 'ready'], ['ready', 'inProgress']], ...extra,
+});
+// The memory adapter with the card's comments kept, oldest first.
+function commentingAdapter(existing = []) {
+  const adapter = memoryAdapter();
+  const comments = [...existing];
+  adapter.comments = async () => comments;
+  const post = adapter.comment;
+  adapter.comment = async (ref, text) => {
+    const made = await post(ref, text);
+    comments.push({ id: `c${comments.length + 1}`, time: '2026-11-04T00:00:00.000Z', text });
+    return made;
+  };
+  return adapter;
+}
+
+test('the comment header: set, every comment starts with it, then an empty line; unset, none; a text that has it gets it once', async () => {
+  const on = commentingAdapter();
+  const tracker = createTracker({ adapter: on, tracker: validateTracker(memorySettings(), [], HEADER) });
+  await tracker.comment({ card: 'PROJ-1', text: 'Triage: docs needed\nKey: 10' });
+  assert.equal(on.log.at(-1)[2], `${HEADER}\n\nTriage: docs needed\nKey: 10`);
+  await tracker.comment({ card: 'PROJ-1', text: `${HEADER}\n\nPR: https://forge.example/pull/1` });
+  assert.equal(on.log.at(-1)[2], `${HEADER}\n\nPR: https://forge.example/pull/1`, 'not twice');
+  await rejects(tracker.comment({ card: 'PROJ-1', text: `${HEADER}\n\n ` }), 'empty');
+  const off = commentingAdapter();
+  await createTracker({ adapter: off, tracker: validateTracker(memorySettings()) }).comment({ card: 'PROJ-1', text: 'Triage: docs needed' });
+  assert.equal(off.log.at(-1)[2], 'Triage: docs needed');
+  assert.equal(validateTracker(memorySettings()).commentHeader, null);
+  assert.equal(validateTracker(memorySettings(), [], `  ${HEADER} `).commentHeader, HEADER);
+  for (const bad of ['', '  ', 'two\nlines', 7]) assert.throws(() => validateTracker(memorySettings(), [], bad), /commentHeader must be one line of text/);
+});
+
+test('the comment header: --unless-header finds a comment with the header and one from before it, and refuses the header alone', async () => {
+  for (const old of [`${HEADER}\n\nBlocked: an answer is needed\nQuestion: which list?`, 'Blocked: an answer is needed\nQuestion: which list?']) {
+    const adapter = commentingAdapter([{ id: 'c0', time: '2026-11-03T00:00:00.000Z', text: old }]);
+    const tracker = createTracker({ adapter, tracker: validateTracker(memorySettings(), [], HEADER) });
+    for (const unlessHeader of ['Blocked: an answer is needed', `${HEADER}\n\nBlocked: an answer is needed`]) {
+      const r = await tracker.comment({ card: 'PROJ-1', text: 'Blocked: an answer is needed\nQuestion: again', unlessHeader });
+      assert.equal(r.commented, false, `${JSON.stringify(old)} / ${JSON.stringify(unlessHeader)}`);
+      assert.equal(r.existing, 'c0');
+    }
+    await rejects(tracker.comment({ card: 'PROJ-1', text: 'Blocked: x', unlessHeader: HEADER }), 'empty');
+    assert.equal((await tracker.comment({ card: 'PROJ-1', text: 'Plan: pages', unlessHeader: 'Plan:' })).commented, true);
+  }
 });
 
 test('the interface: an adapter that lacks a method is rejected; the Trello adapter has them all; the registry names the kinds', () => {

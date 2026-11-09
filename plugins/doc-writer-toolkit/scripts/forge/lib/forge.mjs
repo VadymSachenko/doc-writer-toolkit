@@ -1,17 +1,20 @@
 import { CliError, Refusal } from './errors.mjs';
 import { assertAdapter } from './adapter-contract.mjs';
 import { STAGES, labelKey } from './settings.mjs';
+import { withHeader, withoutHeader } from '../../tracker/lib/comment-header.mjs';
 
 // The forge module. It owns every decision and calls an adapter (see `adapter-contract.mjs`) for the forge's own API.
 // Nothing here knows GitHub.
 //
 // The rules held here, whatever the adapter:
 //   - it works only on the repositories the settings' targets name, and asks only the logins the settings name;
-//   - it adds only labels the settings name (the targets' stage labels, `checkLabel` and `expertLabel`) and removes only
-//     the stage labels and `checkLabel`, so a label the settings don't name (the owner's merge label) can't be set and
-//     `expertLabel` is never removed;
+//   - it adds only labels the settings name (the targets' stage labels, `checkLabel`, `expertLabel` and `readyLabel`)
+//     and removes only the stage labels, `checkLabel` and `readyLabel`, so a label the settings don't name (the owner's
+//     merge label) can't be set and `expertLabel` is never removed;
+//   - it creates no label, but `readyLabel` on a repository that lacks it;
 //   - a review on lines only comments, and a line outside the PR's diff is refused before anything is sent;
-//   - the texts it is given are sent exactly: it adds no footer and no tool name;
+//   - the texts it is given are sent exactly, but for the settings' `commentHeader` in front of every comment, line
+//     comment and reply (not a PR's title or description): it adds no footer and no tool name;
 //   - every write says which ids it posted;
 //   - the operations are the ones in `OPERATIONS`; there is none to settle a discussion, withdraw a review, give a
 //     verdict, join a branch, close a PR or delete a branch.
@@ -53,6 +56,11 @@ export function suggestionBlock(replacement) {
 
 export function createForge({ adapter, forge, dryRun = false }) {
   assertAdapter(adapter);
+  const header = forge.commentHeader ?? null;
+  // A comment as sent, and as read for its first words or for a duplicate: without the header, so one posted before
+  // the header existed counts the same (lib/comment-header.mjs in the tracker module).
+  const posting = (body) => withHeader(body, header);
+  const plain = (body) => withoutHeader(body, header);
 
   const repoOf = (input) => {
     const raw = String(input ?? '').trim();
@@ -88,7 +96,7 @@ export function createForge({ adapter, forge, dryRun = false }) {
     return t;
   };
   const text = (value, what) => {
-    if (!bare(value)) throw new Refusal('empty', `an empty ${what} is refused`);
+    if (!bare(plain(value))) throw new Refusal('empty', `an empty ${what} is refused`);
     return value;
   };
   const same = (a, b) => labelKey(a) === labelKey(b);
@@ -145,6 +153,9 @@ export function createForge({ adapter, forge, dryRun = false }) {
       const assignees = who ? loginsOf([who], 'assignee') : [];
       const asked = loginsOf(reviewers, 'reviewer');
       const wanted = labelsToAdd(labels);
+      // The check and ready labels follow the ticket flow's records (its runner adds and removes them), never a PR's opening.
+      const runners = wanted.filter((l) => [forge.checkLabel, forge.readyLabel].some((x) => x && same(x, l)));
+      if (runners.length) throw new Refusal('notNamed', `open-pr does not set ${runners.map((l) => `'${l}'`).join(', ')}: the check and ready labels are added on their own (add-label)`, { labels: runners });
       const existing = await adapter.openPrByHead({ repo, head: branch });
       if (existing) {
         return { repo, created: false, ...brief(existing), reason: 'an open PR for this head already exists', posted: [] };
@@ -318,12 +329,12 @@ export function createForge({ adapter, forge, dryRun = false }) {
       const skipped = [];
       const toPost = [];
       for (const c of inside) {
-        const dup = known.find((k) => k.path === c.path && k.line === c.line && k.body === c.body);
+        const dup = known.find((k) => k.path === c.path && k.line === c.line && plain(k.body) === plain(c.body));
         if (dup) skipped.push({ path: c.path, line: c.line, reason: 'the same comment is already on the PR', existing: dup.id });
-        else toPost.push(c);
+        else toPost.push({ ...c, body: posting(c.body) });
       }
       if (!toPost.length) return { repo, number: n, commit: commit.trim(), reviewId: null, commentIds: [], comments: [], skipped, outside, posted: [] };
-      const made = await adapter.createReview({ repo, number: n, commit: commit.trim(), ...(bare(body) ? { body } : {}), comments: toPost });
+      const made = await adapter.createReview({ repo, number: n, commit: commit.trim(), ...(bare(plain(body)) ? { body: posting(body) } : {}), comments: toPost });
       // Each comment we sent is matched to the one the forge made, by path, line and text, so an id never lands on the wrong place.
       const left = [...made.comments];
       const placed = toPost.map((c) => {
@@ -364,20 +375,33 @@ export function createForge({ adapter, forge, dryRun = false }) {
       text(body, 'comment');
       if (unlessHeader) {
         const from = toIso(since);
-        const header = bare(unlessHeader);
-        const existing = (await adapter.issueComments({ repo, number: n })).find((c) => (!from || c.createdAt >= from) && bare(c.body).startsWith(header));
+        const first = bare(plain(unlessHeader));
+        if (!first) throw new Refusal('empty', "the header to look for is the comment header alone: give the message's first line");
+        const existing = (await adapter.issueComments({ repo, number: n })).find((c) => (!from || c.createdAt >= from) && bare(plain(c.body)).startsWith(first));
         if (existing) return { repo, number: n, commented: false, reason: 'a comment with this header is already there', existing: existing.id, posted: [] };
       }
-      const made = await adapter.comment({ repo, number: n, body });
+      const made = await adapter.comment({ repo, number: n, body: posting(body) });
       return { repo, number: n, commented: true, id: made.id, posted: [{ kind: 'comment', id: made.id }] };
     },
 
+    // The ready label is created on a repository that lacks it, then added; any other label the repository lacks is
+    // refused, as before.
     async addLabel({ repo: repoIn, number, label }) {
       const repo = repoOf(repoIn);
       const n = needNumber(number);
       const [name] = labelsToAdd([label]);
-      const r = await swapLabels(repo, n, [name], []);
-      return { repo, number: n, label: name, changed: r.changed, ...(r.changed ? {} : { reason: 'the PR already has the label' }), posted: [] };
+      let r;
+      let created = false;
+      try {
+        r = await swapLabels(repo, n, [name], []);
+      } catch (e) {
+        if (!(e instanceof Refusal && e.refused === 'unknown' && forge.readyLabel && same(name, forge.readyLabel) && same(e.data?.label, name))) throw e;
+        await adapter.createLabel({ repo, name });
+        created = true;
+        // A dry run created nothing, so the repository still lacks it: the add it would make is reported.
+        r = dryRun ? { added: [name], removed: [], changed: true } : await swapLabels(repo, n, [name], []);
+      }
+      return { repo, number: n, label: name, changed: r.changed, ...(created ? { created: true } : {}), ...(r.changed ? {} : { reason: 'the PR already has the label' }), posted: [] };
     },
 
     async removeLabel({ repo: repoIn, number, label }) {
@@ -413,9 +437,9 @@ export function createForge({ adapter, forge, dryRun = false }) {
     if (found.number !== n) throw new Refusal('unknown', `review comment ${id} is on PR #${found.number}, not #${n}`, { comment: id, number: found.number });
     const root = found.inReplyTo ?? found.id;
     const thread = (await adapter.reviewComments({ repo, number: n })).filter((c) => c.id === root || c.inReplyTo === root);
-    const dup = thread.find((c) => c.id !== root && c.body === body && (!forge.self || c.author === forge.self));
+    const dup = thread.find((c) => c.id !== root && plain(c.body) === plain(body) && (!forge.self || c.author === forge.self));
     if (dup) return { repo, number: n, replied: false, reason: 'the thread already has this reply', thread: root, existing: dup.id, posted: [] };
-    const made = await adapter.reply({ repo, number: n, comment: root, body });
+    const made = await adapter.reply({ repo, number: n, comment: root, body: posting(body) });
     return { repo, number: n, replied: true, id: made.id, thread: root, posted: [{ kind: 'review-comment', id: made.id }] };
   }
 }

@@ -30,10 +30,11 @@ const GIT_READS = new Set(['status', 'diff', 'log', 'show', 'ls-tree', 'ls-files
 const GIT_READ_FLAGS = ['--output', '--no-index', '--ext-diff', '--exec', '--open-files-in-pager', '--upload-pack', '--receive-pack'];
 const FIND_WRITES = new Set(['-fprint', '-fprint0', '-fprintf', '-fls', '-exec', '-execdir', '-ok', '-okdir', '-delete']);
 const SCRIPT_FLAGS = { 'ui-labels/ui-labels.mjs': ['--source'], 'visual-pack/visual-pack.mjs': ['--playwright-from'] };
-// Script commands that are the runner's alone: the check label comes off only on a person's forward move (D-128). The
-// command is the script's first positional word: an option's value (`--label remove-label`) is not it. `booleans`: the
-// script's options that take no value (forge.mjs `OPTIONS`; a test keeps the two in step).
-export const SCRIPT_COMMANDS = { 'forge/forge.mjs': { denied: ['remove-label'], booleans: ['--dry-run', '--draft', '--with-body', '--drop-outside', '--skip-diff-check', '--help', '-h'] } };
+// Script commands that are the runner's alone: the check label comes off only on a person's forward move (D-128), and the
+// runner sets it, and the ready label, from the records (lib/pr-labels.mjs). The command is the script's first
+// positional word: an option's value (`--label remove-label`) is not it. `booleans`: the script's options that take no
+// value (forge.mjs `OPTIONS`; a test keeps the two in step).
+export const SCRIPT_COMMANDS = { 'forge/forge.mjs': { denied: ['add-label', 'remove-label'], booleans: ['--dry-run', '--draft', '--with-body', '--drop-outside', '--skip-diff-check', '--help', '-h'] } };
 function subcommandOf(words, booleans) {
   for (let i = 0; i < words.length; i++) {
     const v = words[i].value;

@@ -93,7 +93,7 @@ function ticker(w, { gate = null } = {}) {
       const act = w.forge.activity[idOf(n)];
       if (!act) continue;
       const list = [...act.comments, ...act.threads.flatMap((t) => t.comments), ...act.reviews.filter((r) => r.body)];
-      await runRecord({ settings: w.settings, clients: w.clients(), key, stage: 'answerComments', pr: idOf(n), status: 'done', result: { handled: list.map((x) => ({ id: x.id, updatedAt: x.updatedAt ?? x.submittedAt })) }, now: at });
+      await runRecord({ settings: w.settings, clients: w.clients(), key, stage: 'answerComments', pr: idOf(n), status: 'done', result: { questions: [], handled: list.map((x) => ({ id: x.id, updatedAt: x.updatedAt ?? x.submittedAt })) }, now: at });
     }
     if (gate) await gate(a);
     return { mode: w.settings.mode, named: a.options.named ?? [], ran: [], starts: [], guard: [] };
@@ -448,7 +448,7 @@ test('a step that waited in the pool behind another chain is read again once its
   say(82, NOW - 10 * MIN);
   const answer = (n) => {
     const act = w.forge.activity[idOf(n)];
-    return runRecord({ settings: w.settings, clients: w.clients(), key: String(400 + n), stage: 'answerComments', pr: idOf(n), status: 'done', result: { handled: act.comments.map((x) => ({ id: x.id, updatedAt: x.updatedAt })) }, now: NOW });
+    return runRecord({ settings: w.settings, clients: w.clients(), key: String(400 + n), stage: 'answerComments', pr: idOf(n), status: 'done', result: { questions: [], handled: act.comments.map((x) => ({ id: x.id, updatedAt: x.updatedAt })) }, now: NOW });
   };
   const sessions = [];
   const RESULT = JSON.stringify({ type: 'result', subtype: 'success', is_error: false, num_turns: 3, total_cost_usd: 0.2, session_id: 's' });
@@ -509,7 +509,7 @@ test('limits.parallel: the forge check and the runner count the same runs: a loc
     await new Promise((r) => setTimeout(r, 20));
     const n = JSON.stringify(cmd.args).includes(idOf(81)) ? 81 : 82;
     const act = w.forge.activity[idOf(n)];
-    await runRecord({ settings: w.settings, clients: w.clients(), key: String(400 + n), stage: 'answerComments', pr: idOf(n), status: 'done', result: { handled: act.comments.map((x) => ({ id: x.id, updatedAt: x.updatedAt })) }, now: NOW });
+    await runRecord({ settings: w.settings, clients: w.clients(), key: String(400 + n), stage: 'answerComments', pr: idOf(n), status: 'done', result: { questions: [], handled: act.comments.map((x) => ({ id: x.id, updatedAt: x.updatedAt })) }, now: NOW });
     running--;
     return { code: 0, stdout: RESULT, stderr: '' };
   };

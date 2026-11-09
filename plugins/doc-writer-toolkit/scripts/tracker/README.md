@@ -12,10 +12,11 @@ The toolkit speaks in **statuses** (`intake`, `ready`, `inProgress`, `done`, …
 
 ## Settings
 
-The host's ticket flow settings file holds the `tracker` object. Its place is the first of: `--settings <file>`, the `Ticket flow settings:` field of the `Documentation toolkit configuration` block of `<root>/CLAUDE.md` (registered in `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`, "Ticket flow settings"), `.claude/ticket-flow.json`. A file named `<name>.local.json` next to it (`.claude/ticket-flow.local.json`) is merged over it: objects key by key, anything else replaced. The `tracker` object is read here, and each target's `cardMembers` (the `targets` list).
+The host's ticket flow settings file holds the `tracker` object. Its place is the first of: `--settings <file>`, the `Ticket flow settings:` field of the `Documentation toolkit configuration` block of `<root>/CLAUDE.md` (registered in `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`, "Ticket flow settings"), `.claude/ticket-flow.json`. A file named `<name>.local.json` next to it (`.claude/ticket-flow.local.json`) is merged over it: objects key by key, anything else replaced. The `tracker` object is read here, each target's `cardMembers` (the `targets` list), and `commentHeader`.
 
 ```json
 {
+  "commentHeader": "**[bot]**",
   "tracker": {
     "kind": "trello",
     "credentials": { "envFile": ".env", "key": "TRACKER_API_KEY", "token": "TRACKER_API_TOKEN" },
@@ -37,6 +38,7 @@ The host's ticket flow settings file holds the `tracker` object. Its place is th
 
 | Key | | |
 |---|---|---|
+| `commentHeader` | no | One line at the top of the file (not in `tracker`), shared with the `forge` script: every comment is sent with it in front, then an empty line, then the text; a text that already starts with it gets it once. `--unless-header` reads the card's comments, and the header given, without it, so a comment from before the header counts the same. None: no header. |
 | `kind` | required | The adapter: `trello`. |
 | `board` | required | The board the statuses are on. |
 | `watchBoards` | no | Other boards the module may read (`find-cards`, `actions-since`). It never moves or writes on them. |
@@ -69,7 +71,7 @@ All print JSON on stdout: `{ "ok": true, "command": …, … }`. `<card>` is a c
 | `find-cards --link <url>` | The card behind a card URL or short link, wherever it is and archived too. A link to nothing finds nothing (`count: 0`). | as above |
 | `actions-since --since <time>` | The board's actions since an ISO time, **oldest first**, paged by `before`. `--types a,b` is Trello's action filter. `--board <id>` names the board or a watched one. The module keeps no cursor: the caller passes the time. | `board`, `since`, `count`, `skippedNeverRead`, `actions[]`. |
 | `download-attachment <card> --attachment <id\|name> --out <file>` | Saves an uploaded file. A name that fits two attachments is refused (`ambiguous`: give the id); a link is not downloaded; an existing file is not replaced without `--overwrite`; the folder must exist. In a role session (the runner sets `DOC_TOOLKIT_ROLE_SESSION` and `DOC_TOOLKIT_DOWNLOAD_DIRS`), `--out` goes only in the ticket's work folder or the flow's `tmp/`, compared as real paths, and never through a link. | `card`, `attachment` (`id`, `name`, `mimeType`, `bytes`), `path`, `bytes`, `warning` if the size differs from the card's. |
-| `comment <card> --text <t>` | Adds a comment. An empty text (or U+200C and spaces only) is refused (`empty`). `--unless-header <h> [--since <time>]` skips it when the card already has a comment, since the time, that starts with the header. | `card`, `commented`, `id`, `time`; when skipped, `reason` and `existing`. |
+| `comment <card> --text <t>` | Adds a comment. An empty text (or U+200C and spaces only) is refused (`empty`). `--unless-header <h> [--since <time>]` skips it when the card already has a comment, since the time, that starts with the header, both read without `commentHeader` (a header that is `commentHeader` alone is refused, `empty`). With `commentHeader` set, the comment is sent with it in front. | `card`, `commented`, `id`, `time`; when skipped, `reason` and `existing`. |
 | `move <card> --to <status>` | Moves the card to the top of the status's first named list, **only if (from, to) is in `transitions`**. The card's own status is read from its list. | `card`, `moved`, `from`, `to`, `list`. A card already in that list: `moved: false`. |
 | `add-label <card> --label <name>`, `remove-label <card> --label <name>` | By label name on the card's board, or a key of `labels`. A label the card has (or hasn't) is a no-op. An unknown name is refused; two labels with the same name are `ambiguous`, unless one matches exactly. | `card`, `label`, `changed`, `reason`. |
 | `add-member <card> --member <name>` | Adds a person the settings name to the card: `owner` stands for `owner`, any other name must be the owner or one of the targets' `cardMembers` (else `notAllowed`). A person already on the card is a no-op. An archived card is refused. There is no command that removes anyone. | `card`, `member` (the username), `changed`, `reason`. |

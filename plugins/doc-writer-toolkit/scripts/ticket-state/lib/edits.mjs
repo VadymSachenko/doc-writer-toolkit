@@ -282,6 +282,16 @@ export function styleAfterCommentsLines() {
   ];
 }
 
+// The questions to the owner the PR's earlier summaries left open (`openQuestions`): the session lists again, in
+// `questions`, those the new comments didn't answer, with its own new ones; the runner sets the check label from them.
+export function openQuestionLines(items) {
+  const open = [
+    'Record in `questions` every question to the owner left open after this round, each `{ "text", "n"? }` (`n`: the item of the numbered list it asks about), or `[]` when none is: the ones your summary asks, and the earlier ones below that the new comments didn\'t answer. The runner sets the check label from them; never add or remove it yourself.',
+  ];
+  if (!items?.length) return open;
+  return [...open, 'Questions to the owner still open on this PR, from its earlier summaries:', ...items.map((x) => `- ${x.n ? `${x.n}: ` : ''}${q(x.text)}`)];
+}
+
 // The hand commits a style check reviews: the commits on the branch the pipeline didn't make that changed UA, with
 // the UA pages each changed, oldest first.
 export function styleCheckLines(commits, fixes) {
