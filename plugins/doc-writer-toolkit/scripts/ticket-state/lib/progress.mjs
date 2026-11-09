@@ -281,11 +281,14 @@ export function renderProgress({ ledgers = [], bad = [], memory = {}, run = null
   const hand = open.filter((l) => l.mode !== 'pipeline').map((l) => l.key);
   const gates = mine.flatMap(gatesOf).filter((g) => g.who === 'owner' && !busyAt(flights, g));
   const out = ['# Ticket flow progress', '', `Updated ${hhmm(now)}${mode ? ` · mode ${mode}` : ''}`, '', '## Waiting for you', ''];
-  if (!gates.length) out.push('Nothing waits for you.');
+  // A colleague's comment the pipeline doesn't take (the trigger words): the owner hands it on or leaves it.
+  const others = Object.entries(memory.others ?? {}).filter(([k]) => mine.some((l) => k.startsWith(`${l.key}|`))).flatMap(([k, list]) => list.map((c) => ({ key: k.split('|')[0], pr: k.split('|').slice(1).join('|'), ...c })));
+  if (!gates.length && !others.length) out.push('Nothing waits for you.');
   for (const g of gates) {
     const l = mine.find((x) => x.key === g.key);
     out.push(`- 👉 ${g.key}${l?.card?.name ? ` · ${oneLine(l.card.name, 70)}` : ''} — ${g.pr ? `${g.pr}: ` : ''}${GATE_ACTION[g.kind] ?? g.why}${g.recommended ? ` (an expert review is recommended: ${g.recommended})` : ''}`);
   }
+  for (const c of others) out.push(`- 💬 ${c.key} — ${c.pr}: a comment of ${c.author ?? 'a colleague'}'s the pipeline doesn't take${c.link ? ` (${c.link})` : ''}: hand it on with a comment that starts with the trigger word, or leave it`);
   out.push('', live ? '## The current run' : '## The last run', '', ...runSection(run, flights, now, live, { starts, startHours, ledgers }), '', '## Tickets in work', '');
   if (!ledgers.length && !bad.length) out.push('No ledgers yet: nothing has started.');
   else if (!mine.length) out.push('No ticket is in work.');
@@ -353,6 +356,18 @@ function staleFrom(st, previous = {}) {
   return next;
 }
 
+// Colleagues' PR comments the trigger words keep from the pipeline (lib/world.mjs `sortComments`), from the status:
+// { '<key>|<pr>': [{ id, author, link }] }, for the tickets the status covers. The owner hands one on or leaves it; it
+// goes once a session handled it.
+function othersFrom(st, previous = {}) {
+  const next = { ...previous };
+  for (const t of st?.tickets ?? []) {
+    for (const k of Object.keys(next)) if (k.startsWith(`${t.key}|`)) delete next[k];
+    for (const p of t.prs ?? []) if (p.others?.length) next[`${t.key}|${p.id}`] = p.others.map((c) => ({ id: c.id, author: c.author ?? null, link: c.link ?? null }));
+  }
+  return next;
+}
+
 // What the run looks like in the file, from what the runner has so far. Plain data, kept in the memory so a quiet
 // watcher pass can still show the last run.
 export function digestRun({ out = {}, st = null, log = [], trigger = null, startedAt = null, now = Date.now() } = {}) {
@@ -390,7 +405,7 @@ export function writeProgress({ settings, now = Date.now(), st = null, run = nul
     const state = settings.state;
     const { ledgers, bad } = readLedgersApart(state);
     const mem = readMemory(state);
-    const memory = { ...mem.data, stale: staleFrom(st, mem.data.stale), ...(run ? { lastRun: run } : {}) };
+    const memory = { ...mem.data, stale: staleFrom(st, mem.data.stale), others: othersFrom(st, mem.data.others), ...(run ? { lastRun: run } : {}) };
     // The first write seeds the gates already standing, so a host that starts using the file isn't told about all of them.
     if (!mem.exists) memory.notified = Object.fromEntries(ledgers.flatMap((l) => gatesOf(l).filter((g) => g.notify).map((g) => [gateId(g), iso(now)])));
     const text = renderProgress({ ledgers, bad, memory, run: run ?? memory.lastRun ?? null, live: live && Boolean(run), flights, now, mode: settings.mode ?? null, stepsText: readSteps(settings.progress?.stepsFile), starts: startsOf(state), startHours: settings.limits?.startHours ?? null });

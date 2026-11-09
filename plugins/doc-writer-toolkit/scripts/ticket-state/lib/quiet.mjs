@@ -1,5 +1,6 @@
 import { prId } from './ledger.mjs';
 import { unhandled } from './world.mjs';
+import { expertsOf } from './experts.mjs';
 
 // The start rule for comments on a pipeline PR (D-126), held at the watcher's hand-on (lib/watch.mjs), not in the rule:
 // the rule says a ticket has comments to answer; this says when the session for them starts.
@@ -52,7 +53,8 @@ export async function commentWait({ settings, clients, ledger, prIds = null, now
     if (prIds && !prIds.includes(prId(p))) continue;
     const activity = await clients.forge.prActivity({ repo: p.repo, number: p.number });
     if (activity.pr?.state && activity.pr.state !== 'open') continue;
-    const items = unhandled(ledger, p, activity, settings.forge.self, settings.commentHeader);
+    // The same comments the rule answers: with the trigger words, only the owner's that start with one and the experts'.
+    const items = unhandled(ledger, p, activity, settings.forge.self, settings.commentHeader, { words: settings.triggerWords, experts: [...expertsOf(settings, p).reviewers, ...(p.reviewersRequested ?? [])] });
     const r = startRule(items, activity, { now, quietMs });
     if (r) looks.push({ pr: prId(p), comments: items.length, ...r });
   }
