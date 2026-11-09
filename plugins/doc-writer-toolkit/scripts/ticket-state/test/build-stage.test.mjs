@@ -1,4 +1,4 @@
-import { mock, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -53,6 +53,25 @@ function atBuild(n = 1, { done = 5 } = {}) {
   });
   const ensureWorktree = (settings, p) => ({ repo: p.repo, branch: p.branch, path: trees.get(p.branch), head: HEAD, push: '', linked: [], missing: [], notes: [], stuck: [] });
   return { w, cards, prs, trees, ensureWorktree };
+}
+
+// The runner's renewal timer, by hand (Node 18 has no mock timers): `tick(ms)` moves its own time and runs each
+// interval whose time came.
+function fakeTimers() {
+  const timers = new Map();
+  let id = 0;
+  let at = 0;
+  return {
+    setInterval: (fn, ms) => (timers.set(++id, { fn, ms, next: at + ms }), id),
+    clearInterval: (i) => timers.delete(i),
+    tick(ms) {
+      at += ms;
+      for (const t of [...timers.values()]) while (t.next <= at) {
+        t.next += t.ms;
+        t.fn();
+      }
+    },
+  };
 }
 
 const run = (w, io, options = {}) => runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude: noSession, sleep: quick, ...io }, options: { morning: false, trigger: 'watch', ...options } });
@@ -253,27 +272,25 @@ test('AC-2: while a session that builds waits for the build lock, its group\'s l
   takeBuildLock(t.w.settings.state, { ticket: '888', pid: process.pid, now: NOW });
   let clock = NOW;
   const leases = [];
+  const timers = fakeTimers();
   const sleep = async (ms) => {
     clock += ms;
-    mock.timers.tick(ms);
+    timers.tick(ms);
     leases.push(Date.parse(allLocks(t.w.settings.state, clock).find((l) => l.group === '701').expiresAt));
     if (clock - NOW >= 12 * 60000) freeBuildLock(t.w.settings.state, { tickets: ['888'] });
   };
   const holders = [];
-  mock.timers.enable({ apis: ['setInterval'] });
-  try {
-    await run(t.w, {
-      now: () => clock,
-      sleep,
-      ensureWorktree: t.ensureWorktree,
-      spawnClaude: async () => {
-        holders.push(buildLockState(t.w.settings.state).holder?.ticket);
-        return { code: 0, stdout: RESULT };
-      },
-    }, { named: ['701'] });
-  } finally {
-    mock.timers.reset();
-  }
+  await run(t.w, {
+    now: () => clock,
+    sleep,
+    setInterval: timers.setInterval,
+    clearInterval: timers.clearInterval,
+    ensureWorktree: t.ensureWorktree,
+    spawnClaude: async () => {
+      holders.push(buildLockState(t.w.settings.state).holder?.ticket);
+      return { code: 0, stdout: RESULT };
+    },
+  }, { named: ['701'] });
   assert.equal(holders[0], '701', 'the session ran under its own build lock once the other was freed');
   const lease = t.w.settings.limits.lockLeaseMinutes * 60000;
   assert.equal(leases.length, 48, 'polled every 15 s for 12 min');
@@ -328,20 +345,18 @@ test('AC-2: a build lock that isn\'t a folder fails a session that builds, befor
   // The build lock's renewal fails in its timer (here a folder where its temp file goes): the build goes on and is
   // recorded, and the run ends as usual.
   const u = atBuild();
-  mock.timers.enable({ apis: ['setInterval'] });
-  try {
-    const out2 = await run(u.w, {
-      ensureWorktree: u.ensureWorktree,
-      runBuild: async () => {
-        fs.mkdirSync(path.join(buildLockDir(u.w.settings.state), `${HOLDER}.tmp-${process.pid}`));
-        mock.timers.tick(5 * 60000);
-        return { code: 0, tail: [] };
-      },
-    }, { named: ['701'] });
-    assert.deepEqual(out2.ran.map((r) => [r.stage, r.outcome]), [['build', 'done']]);
-  } finally {
-    mock.timers.reset();
-  }
+  const timers = fakeTimers();
+  const out2 = await run(u.w, {
+    setInterval: timers.setInterval,
+    clearInterval: timers.clearInterval,
+    ensureWorktree: u.ensureWorktree,
+    runBuild: async () => {
+      fs.mkdirSync(path.join(buildLockDir(u.w.settings.state), `${HOLDER}.tmp-${process.pid}`));
+      timers.tick(5 * 60000);
+      return { code: 0, tail: [] };
+    },
+  }, { named: ['701'] });
+  assert.deepEqual(out2.ran.map((r) => [r.stage, r.outcome]), [['build', 'done']]);
   assert.equal(read(u.w, '701').prs[0].chain.build.status, 'done');
   assert.equal(buildLockState(u.w.settings.state).held, false);
 });

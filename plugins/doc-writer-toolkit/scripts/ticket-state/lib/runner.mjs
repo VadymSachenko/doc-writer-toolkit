@@ -930,6 +930,9 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
   const { dryRun = false, morning = false, trigger = 'schedule', named = [], claude = 'claude', progress = {} } = options;
   const startPass = Boolean(options.startPass) && trigger === 'schedule' && !morning;
   const clock = io.now ?? Date.now;
+  // The lock renewals' timer: `io.setInterval` and `io.clearInterval` replace it in tests, as `io.sleep` does the wait.
+  const every = io.setInterval ?? setInterval;
+  const stopEvery = io.clearInterval ?? clearInterval;
   // `startUntil` (ms): the end of the watcher's start hours. A start pass triages nothing and starts no further group
   // from then on; a group it started goes on with its next steps, as after any scheduled start.
   const startUntil = startPass && Number.isFinite(options.startUntil) ? options.startUntil : null;
@@ -1252,7 +1255,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
     if (step.head && tree.head && tree.head !== step.head) return moved(`the branch is at ${tree.head.slice(0, 7)}, not ${step.head.slice(0, 7)}: the status is read again`);
     const mine = step.group ?? key;
     if (allLocks(settings.state, clock()).some((l) => l.group === mine && l.pid === process.pid)) renewLock(settings.state, mine, { leaseMinutes: settings.limits.lockLeaseMinutes, stage: step.stage, now: clock() });
-    const renew = setInterval(() => {
+    const renew = every(() => {
       if (step.group) renewLock(settings.state, step.group, { leaseMinutes: settings.limits.lockLeaseMinutes, now: clock() });
       try {
         renewBuildLock(settings.state, { ticket: key, now: clock() });
@@ -1283,7 +1286,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
       if (lock.tookOver) say({ kind: 'buildLock', group: step.group, stage: step.stage, outcome: 'tookOver', note: `a stale build lock taken over from ${lock.tookOver.ticket ? `ticket ${lock.tookOver.ticket}` : 'a holder with no record'} (since ${lock.tookOver.since})` });
       res = await (io.runBuild ?? runSiteBuild)({ cwd: tree.path, command: b.command, timeoutMs: b.timeoutMinutes * 60000 });
     } finally {
-      clearInterval(renew);
+      stopEvery(renew);
       try {
         freeBuildLock(settings.state, { tickets: step.keys });
       } catch {
@@ -1375,7 +1378,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
       // A session that builds the site itself runs under the build lock, taken here and freed when the step ends.
       if (sessionBuilds(step)) {
         // The group's lock is renewed while it waits, as while a session runs.
-        const waiting = setInterval(() => {
+        const waiting = every(() => {
           for (const g of [step.group, ...held].filter(Boolean)) renewLock(settings.state, g, { leaseMinutes: settings.limits.lockLeaseMinutes, now: clock() });
         }, 5 * 60000);
         const waitFrom = clock();
@@ -1386,7 +1389,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
           // A lock folder the runner can't read or write: the step failed, never an error out of the run.
           lock = { taken: false, error: String(e.message ?? e) };
         } finally {
-          clearInterval(waiting);
+          stopEvery(waiting);
         }
         // A lock that isn't a folder, or one the runner can't use, stays so until a person acts: a failure, told.
         if (lock.broken || lock.error) return await failedBeforeSession(step, `the build lock: ${lock.broken ?? lock.error}`.slice(0, 400));
@@ -1413,7 +1416,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         const cmd = commandFor(step, settings, { model, agentsPath, claude });
         const began = clock();
         const start = new Date(began).toISOString();
-        const renew = setInterval(() => {
+        const renew = every(() => {
           for (const g of [step.group, ...held].filter(Boolean)) renewLock(settings.state, g, { leaseMinutes: settings.limits.lockLeaseMinutes, now: clock() });
           try {
             if (buildLocked) renewBuildLock(settings.state, { ticket: step.keys[0], now: clock() });
@@ -1429,7 +1432,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
           res = await (io.spawnClaude ?? spawnClaude)(cmd, io.claudeEnv ? { env: io.claudeEnv } : {});
         } finally {
           wallMs = clock() - began;
-          clearInterval(renew);
+          stopEvery(renew);
           // The browser lock a session took (`browser-lock.mjs`) and didn't free, crashed or not: freed now, so the next
           // Playwright run doesn't wait for it. A lock another ticket or a hand run holds stays.
           try {
