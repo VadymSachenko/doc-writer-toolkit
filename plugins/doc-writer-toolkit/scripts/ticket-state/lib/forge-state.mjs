@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { watchDir } from './feed.mjs';
+import { readFeed, watchDir } from './feed.mjs';
 
 // The forge check's own memory (lib/forge-watch.mjs), apart from the full check's `feed.json`, so the two checks,
 // which may run at the same time, never write one file: one file, one writer.
@@ -9,7 +9,12 @@ import { watchDir } from './feed.mjs';
 //   not quiet yet: { <key>: { prs, dueAt, why, since } }), `handOns` (the runs it started: { id, pid, keys, at }) and
 //   `notified`. Written by the forge check only, under its lock; the full check and the tick read it.
 //   `<state>/watch/hand-on/<id>.json`: what one detached run gave (written by that run only), collected and removed
-//   by the next forge check after the run's process ended.
+//   by the next check of the one that started it (the forge check or the full check) after the run's process ended.
+//   `<state>/watch/hand-on/<id>.step.json`: the one group's step a full check handed on (lib/watch.mjs), with the
+//   check's `/usage` reading; written by the full check before the run's process starts, read by that run.
+// The full check keeps the runs it started in its own `feed.json` (`handOns`, the same shape plus `group`, `stage` and
+// `by`): every reader below takes the live runs of both files, so the forge check, the full check and the runner see
+// the same runs going.
 
 export const FORGE_VERSION = 1;
 // A hand-on's process older than this is taken for a pid used again, not for the run: the watcher lock's rule.
@@ -18,6 +23,7 @@ export const HAND_ON_STALE_MS = 12 * 3600 * 1000;
 export const forgePath = (state) => path.join(watchDir(state), 'forge.json');
 export const handOnDir = (state) => path.join(watchDir(state), 'hand-on');
 export const handOnFile = (state, id) => path.join(handOnDir(state), `${id}.json`);
+export const handOnStepFile = (state, id) => path.join(handOnDir(state), `${id}.step.json`);
 
 export const emptyForge = () => ({ schemaVersion: FORGE_VERSION, sources: {}, waits: {}, handOns: [], notified: {} });
 
@@ -39,6 +45,17 @@ const writeJson = (file, value) => {
 
 export const writeForge = (state, forge) => writeJson(forgePath(state), forge);
 export const writeHandOn = (state, id, result) => writeJson(handOnFile(state, id), result);
+export const writeHandOnStep = (state, id, task) => writeJson(handOnStepFile(state, id), task);
+
+// The step a full check handed to run `id`, or null (a forge check's run has none: it finishes the tickets it names).
+export function readHandOnStep(state, id) {
+  try {
+    return JSON.parse(fs.readFileSync(handOnStepFile(state, id), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+export const dropHandOnStep = (state, id) => fs.rmSync(handOnStepFile(state, id), { force: true });
 
 export function takeHandOn(state, id) {
   const file = handOnFile(state, id);
@@ -77,9 +94,9 @@ export function liveHandOnKeys(state, { now = Date.now(), isAlive = alive } = {}
 }
 
 // The runs going now across processes, as groups: each live group lock (a run holds it from its first step on), and
-// each live run the forge check started that holds no lock yet (its /usage reading and its status come first), less
-// those of `exceptPid`. The forge check and the runner count `limits.parallel` against this same set. `groupOf`: a
-// ticket's group (its ledger's).
+// each live run a check started that holds no lock yet (its /usage reading and its status come first), less those of
+// `exceptPid`. The forge check, the full check and the runner count `limits.parallel` against this same set.
+// `groupOf`: a ticket's group (its ledger's).
 export function runsGoing({ locks = [], handOns = [], now = Date.now(), isAlive = alive, exceptPid = null, groupOf = (k) => k } = {}) {
   const groups = new Set(locks.filter((x) => x.live).map((x) => x.group));
   for (const h of handOns) {
@@ -90,13 +107,14 @@ export function runsGoing({ locks = [], handOns = [], now = Date.now(), isAlive 
   return groups;
 }
 
-// The same, read from the state folder: the group locks and the forge check's record (a file that doesn't read: no runs).
+// The same, read from the state folder: the group locks and both checks' records (a file that doesn't read: no runs).
 export function runsGoingIn(state, { locks = [], now = Date.now(), isAlive = alive, exceptPid = null, groupOf = (k) => k } = {}) {
-  let handOns = [];
-  try {
-    handOns = readForge(state).handOns ?? [];
-  } catch {
-    /* none */
-  }
-  return runsGoing({ locks, handOns, now, isAlive, exceptPid, groupOf });
+  return runsGoing({ locks, handOns: allHandOns(state), now, isAlive, exceptPid, groupOf });
+}
+
+// The starts a check handed on whose run holds no lock yet: until it takes its group's lock and records the start, the
+// status doesn't count the group as open, so no other start is decided meanwhile (lib/watch.mjs).
+export function startsInFlight(state, { locks = [], now = Date.now(), isAlive = alive } = {}) {
+  const held = new Set(locks.filter((x) => x.live).map((x) => x.group));
+  return fullHandOns(state).filter((h) => h.stage === 'start' && handOnLive(h, { now, isAlive }) && !held.has(h.group ?? h.keys[0]));
 }
