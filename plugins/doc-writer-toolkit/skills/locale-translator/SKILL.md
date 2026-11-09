@@ -42,7 +42,7 @@ All optional. Without arguments the run covers every in-scope page that is stale
 - `--overwrite` — also translate pages that have a locale file but no recorded state (a manual bootstrap). Their files are replaced.
 - `--ticket <n>` — the ticket whose frontend branches overlay the label store, when the branch name doesn't start with it.
 - `--worker-model <model>` — the model for the translation workers (default: the session's model).
-- `--no-build` — skip the build in Step 7. Only for quick iterations; say in the report that no build ran.
+- `--no-build` — skip the build in Step 7. For quick iterations, and in the ticket flow's `locales` stage, whose brief passes it: the flow builds the site once for the PR at its own `build` stage. Say in the report that no build ran.
 
 Pass `<page|folder>…`, `--pair`, `--locales` and `--overwrite` to every `LS` call that takes them. Never pass `--pair` to the label check (`UL`): it patches renamed labels in every pair, and a sync narrowed to one pair leaves the diff pending.
 

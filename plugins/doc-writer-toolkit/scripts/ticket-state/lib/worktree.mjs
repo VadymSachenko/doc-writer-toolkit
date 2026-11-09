@@ -124,7 +124,7 @@ function link(clone, worktree, names) {
 const hasRef = (cwd, ref) => tryRun(cwd, ['rev-parse', '--verify', '-q', `${ref}^{commit}`]) !== null;
 
 // Makes (or brings up to date) the worktree of one PR branch. Returns { repo, branch, path, head, push, linked,
-// missing, notes } or throws with git's reason. The worktree is detached at `origin/<branch>` (or the base, for a
+// missing, notes, stuck }, with `unfetched` when the branch could not be fetched, or throws with git's reason. The worktree is detached at `origin/<branch>` (or the base, for a
 // branch not pushed yet); the session pushes with `git -C <path> push origin HEAD:refs/heads/<branch>`.
 export function ensureWorktree(settings, pr) {
   const target = targetOf(settings, pr);
@@ -178,7 +178,7 @@ export function ensureWorktree(settings, pr) {
   const { linked, missing } = link(clone, wt, target?.links ?? DEFAULT_LINKS);
   exclude(wt, linked);
   for (const name of missing) notes.push(`${name}: not in the clone (${clone}), so not linked`);
-  return { repo: pr.repo, branch: pr.branch, base, path: wt, clone, head: tryRun(wt, ['rev-parse', 'HEAD']), push: `git -C ${wt} push origin HEAD:refs/heads/${pr.branch}`, linked, missing, notes, stuck };
+  return { repo: pr.repo, branch: pr.branch, base, path: wt, clone, head: tryRun(wt, ['rev-parse', 'HEAD']), push: `git -C ${wt} push origin HEAD:refs/heads/${pr.branch}`, linked, missing, notes, stuck, ...(branchFetched ? {} : { unfetched: true }) };
 }
 
 // A code repo a session reads as evidence (`appRepos`). The runner keeps its own clone of it, bare, under the state
@@ -190,6 +190,34 @@ export function ensureWorktree(settings, pr) {
 // `git worktree remove`: only the one this session needs stays. One git refuses to remove stays, listed in `kept`.
 // Returns { repo, path, commit, url, notes, removed, kept }; one that can't be cloned, has no fetched base, or can't be
 // checked out comes back with `error`, and the session still runs. `remote` is where a new clone comes from (tests).
+// The commit a worktree is at, or null (no worktree there).
+export const headOf = (wt) => (wt && fs.existsSync(wt) ? tryRun(wt, ['rev-parse', 'HEAD']) : null);
+// Whether `commit` is `head` or one of its ancestors, in the worktree's repo. A commit the repo doesn't have is neither.
+export const builtOn = (wt, commit, head) => Boolean(wt && commit && head && fs.existsSync(wt) && tryRun(wt, ['merge-base', '--is-ancestor', commit, head]) !== null);
+
+// After a session whose PR branch a person moved under it (lib/runner.mjs, `movedUnder`): the worktree's commits that
+// never reached the branch (its push was rejected) would leave it stuck at the next step. They are kept under
+// `refs/ticket-flow/set-aside/<branch>/<commit>` in the clone, never dropped, and the worktree goes back to `from`, the
+// head the session started at, which the branch had: the next `ensureWorktree` then follows the branch to its new head.
+// A worktree with uncommitted changes to tracked files, or whose head isn't built on `from`, is left as it is (stuck, as
+// before). Returns { ref, commit }, { left: why }, or null when there is nothing to set aside.
+export function setAsideWork(pr, wt, from) {
+  const head = headOf(wt);
+  if (!head || !from || head === from) return null;
+  tryRun(wt, ['fetch', '-q', 'origin', `+refs/heads/${pr.branch}:refs/remotes/origin/${pr.branch}`]);
+  if (tryRun(wt, ['merge-base', '--is-ancestor', head, `refs/remotes/origin/${pr.branch}`]) !== null) return null;
+  if (tryRun(wt, ['status', '--porcelain', '--untracked-files=no'])) return { left: 'uncommitted changes to tracked files' };
+  if (tryRun(wt, ['merge-base', '--is-ancestor', from, head]) === null) return { left: `its head ${head.slice(0, 7)} is not built on ${from.slice(0, 7)}` };
+  const ref = `refs/ticket-flow/set-aside/${pr.branch}/${head.slice(0, 12)}`;
+  try {
+    run(wt, ['update-ref', ref, head]);
+    run(wt, ['checkout', '-q', '--detach', from]);
+  } catch (e) {
+    return { left: gitError(e) };
+  }
+  return { ref, commit: head };
+}
+
 export const codeTreesRoot = (settings) => path.join(path.resolve(settings.state), 'code');
 export const codeClonePath = (settings, app) => path.join(codeTreesRoot(settings), `${app.repo}.git`);
 export const codeTreePath = (settings, app, commit) => path.join(codeTreesRoot(settings), app.repo, String(commit).slice(0, 12));

@@ -116,12 +116,23 @@ const WHO = { owner: 'you', reviewer: 'the reviewer', team: 'the team', transcri
 function runOf(l, stage, pr) {
   return (l.runs ?? []).filter((r) => r.stage === stage && (pr ? r.pr === pr : !r.pr) && r.outcome === 'done').at(-1) ?? null;
 }
+// A run's time: its wall-clock time (start to end), with the session's own count after it when they differ by a minute or
+// more (a session that waited for something after its last turn); a run from before `wallMs` shows the session's count.
+export function timeOf(run) {
+  const wall = typeof run?.wallMs === 'number' ? run.wallMs : null;
+  const own = typeof run?.durationMs === 'number' ? run.durationMs : null;
+  if (wall === null) return own === null ? '' : duration(own);
+  return `${duration(wall)}${own !== null && Math.abs(wall - own) >= 60000 ? ` (session ${duration(own)})` : ''}`;
+}
 function costAndTime(run) {
   if (!run) return '';
   const bits = [];
   const shared = typeof run.share === 'number' && run.share < 1;
   if (typeof run.costUsd === 'number') bits.push(`$${(run.costUsd * (run.share ?? 1)).toFixed(2)}${shared ? ' (a share)' : ''}`);
-  if (!shared && typeof run.durationMs === 'number') bits.push(duration(run.durationMs));
+  if (!shared) {
+    const t = timeOf(run);
+    if (t) bits.push(t);
+  }
   return bits.length ? ` — ${bits.join(', ')}` : '';
 }
 const flightOf = (flights, key, stage, pr) => flights.find((f) => f.keys?.includes(key) && f.stage === stage && (pr ? f.pr === pr : !f.pr)) ?? null;
@@ -246,8 +257,8 @@ function runSection(run, flights, now, live, { starts = null, startHours = null,
   for (const f of flights) out.push(`- ⏳ ${labelOf(f.stage)} — ${f.keys?.join(', ')}${f.pr ? ` (${f.pr})` : ''}, since ${hhmm(f.since)} (${duration(now - f.since)})`);
   if (run?.triage) {
     // A triage session is shared by its cards: its duration is shown here once, from one card's run of it.
-    const session = ledgers.filter((l) => run.triage.keys?.includes(l.key)).flatMap((l) => l.runs ?? []).filter((r) => r.stage === 'triage' && typeof r.durationMs === 'number' && Date.parse(r.start) >= Date.parse(run.startedAt ?? 0)).at(-1);
-    out.push(`- ${run.triage.outcome === 'done' ? '✅' : run.triage.outcome ? '❌' : '⬜'} Triaging: ${run.triage.keys?.length ?? run.triage.due ?? 0} intake card(s)${run.triage.outcome ? ` — ${run.triage.outcome}${session ? `, ${duration(session.durationMs)}` : ''}` : ' due'}`);
+    const session = ledgers.filter((l) => run.triage.keys?.includes(l.key)).flatMap((l) => l.runs ?? []).filter((r) => r.stage === 'triage' && (typeof r.durationMs === 'number' || typeof r.wallMs === 'number') && Date.parse(r.start) >= Date.parse(run.startedAt ?? 0)).at(-1);
+    out.push(`- ${run.triage.outcome === 'done' ? '✅' : run.triage.outcome ? '❌' : '⬜'} Triaging: ${run.triage.keys?.length ?? run.triage.due ?? 0} intake card(s)${run.triage.outcome ? ` — ${run.triage.outcome}${session ? `, ${timeOf(session)}` : ''}` : ' due'}`);
   }
   else if (run?.intakeDue) out.push(`- ⬜ Triaging: ${run.intakeDue} intake card(s) due`);
   for (const s of run?.steps ?? []) out.push(`- ${s.outcome === 'done' ? '✅' : s.outcome === 'failed' ? '❌' : '⏸'} ${labelOf(s.stage)} — ${(s.keys ?? []).join(', ')}${s.pr ? ` (${s.pr})` : ''}${s.outcome && s.outcome !== 'done' ? `: ${s.outcome}${s.note ? ` (${oneLine(s.note, 100)})` : ''}` : s.note ? ` — ${oneLine(s.note, 100)}` : ''}`);

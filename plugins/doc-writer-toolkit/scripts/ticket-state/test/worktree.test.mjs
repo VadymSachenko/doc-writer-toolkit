@@ -8,7 +8,7 @@ import { ledger, read, world } from './helpers.mjs';
 import { runDaily, scriptedCalls } from '../lib/runner.mjs';
 import { runRecord } from '../lib/record.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
-import { adoptSources, checkClone, codeClonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureReadCheckout, ensureWorktree, listWorktrees, canon, readCheckoutPath, prsForStep, unsavedWork, worktreePath } from '../lib/worktree.mjs';
+import { adoptSources, checkClone, codeClonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureReadCheckout, ensureWorktree, headOf, listWorktrees, canon, setAsideWork, readCheckoutPath, prsForStep, unsavedWork, worktreePath } from '../lib/worktree.mjs';
 import { makeGit } from '../lib/world.mjs';
 import { commandFor } from '../lib/runner.mjs';
 import { spentOf } from '../lib/limits.mjs';
@@ -69,7 +69,12 @@ function withClone(w, { declare = true } = {}) {
   og('config', 'user.name', 'Owner');
   og('config', 'commit.gpgsign', 'false');
   og('checkout', '-q', 'ticket-71');
-  const handEdit = (files) => {
+  // `fromOrigin`: on the branch as pushed now (a session's push too), not where this clone last stood.
+  const handEdit = (files, { fromOrigin = false } = {}) => {
+    if (fromOrigin) {
+      og('fetch', '-q', 'origin');
+      og('reset', '-q', '--hard', 'origin/ticket-71');
+    }
     for (const [rel, text] of Object.entries(files)) {
       fs.mkdirSync(path.dirname(path.join(other, rel)), { recursive: true });
       fs.writeFileSync(path.join(other, rel), text);
@@ -115,20 +120,31 @@ function finalReviewTicket({ done = CHAIN.slice(0, 5), stage = 'translation', ex
 test('AC-1: the runner makes the ticket worktree with the clone\'s node_modules linked and excluded; the build passes with no role action', async () => {
   const t = finalReviewTicket();
   const seen = [];
+  const builds = [];
+  // The runner's build (no session): in the PR's worktree, the site builds from the linked node_modules, and git shows
+  // nothing untracked. Nothing is installed or linked by hand.
+  const runBuild = async ({ cwd, command }) => {
+    builds.push({ cwd, command });
+    const built = execFileSync(process.execPath, ['-e', 'process.stdout.write(require("./node_modules/fake-build"))'], { cwd, encoding: 'utf8' });
+    assert.equal(built, 'built');
+    assert.equal(execFileSync('git', ['-C', cwd, 'status', '--porcelain'], { encoding: 'utf8' }), '', 'the link is excluded: nothing untracked');
+    fs.mkdirSync(path.join(cwd, 'build'), { recursive: true });
+    fs.writeFileSync(path.join(cwd, 'build', 'index.html'), '<html></html>\n');
+    return { code: 0, tail: [] };
+  };
   const spawnClaude = async (cmd) => {
     const stage = stageOf(cmd);
     seen.push({ stage, brief: briefOf(cmd), addDirs: cmd.args.filter((a, i) => cmd.args[i - 1] === '--add-dir') });
-    // The session: in the worktree its brief names, the site builds from the linked node_modules, and git shows
-    // nothing untracked. It installs nothing and links nothing.
-    const built = execFileSync(process.execPath, ['-e', 'process.stdout.write(require("./node_modules/fake-build"))'], { cwd: t.wt, encoding: 'utf8' });
-    assert.equal(built, 'built');
-    assert.equal(execFileSync('git', ['-C', t.wt, 'status', '--porcelain'], { encoding: 'utf8' }), '', 'the link is excluded: nothing untracked');
-    await runRecord({ settings: t.w.settings, clients: t.w.clients(), key: '1501', stage, pr: 'guide-docs#71', status: 'done', head: t.h1, result: { ok: true }, now: NOW });
+    await runRecord({ settings: t.w.settings, clients: t.w.clients(), key: '1501', stage, pr: 'guide-docs#71', status: 'done', head: t.h1, result: {}, now: NOW });
     return { code: 0, stdout: RESULT, stderr: '' };
   };
-  const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1501'] } });
-  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]).slice(0, 1), [['build', 'done']]);
-  assert.equal(read(t.w, '1501').prs[0].chain.build.status, 'done');
+  const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude, runBuild }, options: { trigger: 'watcher', named: ['1501'] } });
+  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]).slice(0, 2), [['build', 'done'], ['visualPack', 'done']]);
+  assert.deepEqual(builds.map((b) => [canon(b.cwd), b.command]), [[canon(t.wt), ['npm', 'run', 'build']]], 'one build, the default command, in the worktree');
+  assert.deepEqual(seen.map((x) => x.stage), ['visualPack'], 'no session for the build');
+  assert.match(seen[0].brief, new RegExp(`--build-dir ${path.join(t.wt, 'build').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`), 'the pack reuses the build of its head');
+  const l = read(t.w, '1501');
+  assert.deepEqual([l.prs[0].chain.build.status, l.prs[0].chain.build.head, l.prs[0].chain.build.result], ['done', t.h1, { ok: true }]);
   // The worktree: detached at the branch's head although the clone has the branch checked out, node_modules a link
   // to the clone's, listed in the common git dir's info/exclude without a trailing slash.
   assert.equal(execFileSync('git', ['-C', t.wt, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), t.h1);
@@ -140,6 +156,165 @@ test('AC-1: the runner makes the ticket worktree with the clone\'s node_modules 
   assert.match(seen[0].brief, new RegExp(`guide-docs ticket-71: ${t.wt.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\(linked from the clone: node_modules\\)`));
   assert.match(seen[0].brief, /push origin HEAD:refs\/heads\/ticket-71/);
   assert.ok(seen[0].addDirs.includes(t.wt));
+});
+
+test('AC-1: a ticket\'s chain from translate to ready for merge runs one full build: the runner\'s, with the locales stage told --no-build and the pack reusing it', async () => {
+  const t = finalReviewTicket({ done: [] });
+  const bin = tmp('bin-');
+  const count = path.join(bin, 'builds.txt');
+  fs.writeFileSync(path.join(bin, 'build.mjs'), `import fs from 'node:fs';\nfs.appendFileSync(${JSON.stringify(count)}, 'x');\nfs.mkdirSync('build', { recursive: true });\nfs.writeFileSync('build/index.html', '<html></html>');\n`);
+  t.w.settings.build.command = [process.execPath, path.join(bin, 'build.mjs')];
+  const seen = [];
+  const spawnClaude = async (cmd) => {
+    const stage = stageOf(cmd);
+    seen.push({ stage, brief: briefOf(cmd) });
+    await runRecord({ settings: t.w.settings, clients: t.w.clients(), key: '1501', stage, pr: 'guide-docs#71', status: 'done', head: t.h1, result: {}, now: NOW });
+    return { code: 0, stdout: RESULT, stderr: '' };
+  };
+  const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1501'] } });
+  assert.deepEqual(out.ran.map((r) => r.stage).slice(0, 8), [...CHAIN, 'readyForMerge']);
+  assert.ok(out.ran.slice(0, 8).every((r) => r.outcome === 'done'));
+  assert.equal(fs.readFileSync(count, 'utf8'), 'x', 'one build in the whole chain');
+  assert.deepEqual(seen.map((x) => x.stage), CHAIN.filter((s) => s !== 'build'), 'no session for the build');
+  assert.match(seen.find((x) => x.stage === 'locales').brief, /locale-translator with `--no-build`/);
+  assert.match(seen.find((x) => x.stage === 'visualPack').brief, /--build-dir .*\/build`/);
+  for (const x of seen.filter((y) => y.stage !== 'locales')) assert.doesNotMatch(x.brief, /--no-build/);
+  assert.equal(read(t.w, '1501').prs[0].readyForMerge.at(-1).head, t.h1);
+});
+
+test('AC-5: a session failing on a head a person moved is followed by the step status gives at the new head: no model retry, no failure, no hold', async () => {
+  // The locales stage works on h1; the owner's hand commit (a UA paragraph) moves the branch; the session's push is
+  // rejected (non-fast-forward) and it records the stage failed.
+  const t = finalReviewTicket({ done: CHAIN.slice(0, 2), extra: { roles: { translator: { model: 'claude-sonnet-5-5' } }, limits: { stepsPerTicket: 3 } } });
+  const calls = [];
+  let moved = null;
+  let mine = null;
+  const spawnClaude = async (cmd) => {
+    const stage = stageOf(cmd);
+    calls.push({ stage, model: cmd.args[cmd.args.indexOf('--model') + 1], brief: briefOf(cmd), head: execFileSync('git', ['-C', t.wt, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() });
+    if (stage === 'locales') {
+      fs.mkdirSync(path.join(t.wt, 'i18n/tr/docusaurus-plugin-content-docs/current/x'), { recursive: true });
+      fs.writeFileSync(path.join(t.wt, 'i18n/tr/docusaurus-plugin-content-docs/current/x/index.md'), '# Sayfa\n');
+      const g = (...a) => execFileSync('git', ['-C', t.wt, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+      g('add', '-A');
+      g('-c', 'user.email=s@example.com', '-c', 'user.name=Session', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'Locales: tr');
+      // A second commit of the same session, as in a run over two locales: both stay unpushed.
+      fs.mkdirSync(path.join(t.wt, 'i18n/kk/docusaurus-plugin-content-docs/current/x'), { recursive: true });
+      fs.writeFileSync(path.join(t.wt, 'i18n/kk/docusaurus-plugin-content-docs/current/x/index.md'), '# Бет\n');
+      g('add', '-A');
+      g('-c', 'user.email=s@example.com', '-c', 'user.name=Session', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'Locales: kk');
+      mine = g('rev-parse', 'HEAD');
+      moved = t.handEdit({ 'docs/x/index.md': '# Сторінка\n\nНовий абзац, виправлений.\n' });
+      t.forgePr.headCommit = moved;
+      assert.throws(() => g('push', '-q', 'origin', 'HEAD:refs/heads/ticket-71'), /rejected|non-fast-forward|fetch first/);
+      await runRecord({ settings: t.w.settings, clients: t.w.clients(), key: '1501', stage, pr: 'guide-docs#71', status: 'failed', note: 'the push was rejected: the branch moved', now: NOW });
+      return { code: 0, stdout: RESULT, stderr: '' };
+    }
+    await runRecord({ settings: t.w.settings, clients: t.w.clients(), key: '1501', stage, pr: 'guide-docs#71', status: 'done', head: moved, result: {}, now: NOW });
+    return { code: 0, stdout: RESULT, stderr: '' };
+  };
+  const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1501'] } });
+  // The steps status gives at the new head: the hand commit's style check (skipped: the card was moved on), then
+  // translate, stale, on the role's own model, in a worktree that followed the branch (the rejected commit set aside,
+  // not stuck).
+  assert.deepEqual(calls.map((c) => [c.stage, c.model]), [['locales', 'claude-sonnet-5-5'], ['translate', 'claude-sonnet-5-5']]);
+  assert.match(calls[1].brief, /The UA pages changed after this stage last ran \(1 file\(s\)\): run it again on the current head/);
+  assert.deepEqual([calls[0].head, calls[1].head], [t.h1, moved]);
+  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['locales', 'moved'], ['styleCheck', 'done'], ['translate', 'done']]);
+  const l = read(t.w, '1501');
+  const run = l.runs.find((r) => r.stage === 'locales');
+  assert.deepEqual([run.outcome, run.failures ?? null, run.retryOf ?? null], ['moved', null, null]);
+  assert.match(run.note, new RegExp(`the branch moved to ${moved.slice(0, 7)} while the session worked on ${t.h1.slice(0, 7)}`));
+  const log = fs.readFileSync(path.join(t.w.settings.state, 'runs', `${localDate(NOW)}.jsonl`), 'utf8').trim().split('\n').map((x) => JSON.parse(x));
+  assert.equal(log.filter((e) => e.kind === 'retry').length, 0, 'no model retry');
+  // The session's commit is kept under a ref in the clone, never dropped.
+  const kept = log.find((e) => e.kind === 'worktree' && e.outcome === 'setAside');
+  assert.match(kept.note, new RegExp(`${mine.slice(0, 7)} kept as refs/ticket-flow/set-aside/ticket-71/${mine.slice(0, 12)}`));
+  assert.equal(execFileSync('git', ['-C', t.clone.dir, 'rev-parse', `refs/ticket-flow/set-aside/ticket-71/${mine.slice(0, 12)}`], { encoding: 'utf8' }).trim(), mine);
+  // No hold and no wait: the chain goes on from enReview at the new head (status with the clone's own git).
+  const tk = await t.w.one('1501', { git: makeGit(t.w.settings) });
+  assert.deepEqual([tk.held ?? false, tk.failed ?? null, tk.next?.stage, tk.next?.waits ?? null], [false, null, 'enReview', null]);
+});
+
+test('AC-5: after a moved head, only the failed session\'s own commits on the step\'s head are set aside; uncommitted changes or other unpushed work keep the stuck worktree', () => {
+  const p = { repo: 'guide-docs', targets: ['guide'], branch: 'ticket-71', base: 'main' };
+  // The session's two commits on h1: set aside, the worktree back at h1.
+  const a = finalReviewTicket();
+  ensureWorktree(a.w.settings, p);
+  commitIn(a.wt, 'docs/x/index.md', 'one\n');
+  const two = commitIn(a.wt, 'docs/x/index.md', 'two\n');
+  const kept = setAsideWork(p, a.wt, a.h1);
+  assert.deepEqual([kept.commit, headOf(a.wt)], [two, a.h1]);
+  // Uncommitted changes to a tracked file: left as they are.
+  const b = finalReviewTicket();
+  ensureWorktree(b.w.settings, p);
+  commitIn(b.wt, 'docs/x/index.md', 'one\n');
+  fs.writeFileSync(path.join(b.wt, 'docs/x/index.md'), 'unsaved\n');
+  assert.match(setAsideWork(p, b.wt, b.h1).left, /uncommitted changes/);
+  // Work not built on the step's head (an earlier session's, under it): left as it is.
+  const c = finalReviewTicket();
+  ensureWorktree(c.w.settings, p);
+  const g = (...x) => execFileSync('git', ['-C', c.wt, ...x], { encoding: 'utf8' }).trim();
+  g('checkout', '-q', '--detach', 'origin/main');
+  const other = commitIn(c.wt, 'docs/x/index.md', 'elsewhere\n');
+  assert.match(setAsideWork(p, c.wt, c.h1).left, /not built on/);
+  assert.equal(headOf(c.wt), other);
+});
+
+test('AC-5: a session that pushed its own commit and then failed is an ordinary failure: the forge head is its worktree\'s', async () => {
+  const t = finalReviewTicket({ done: CHAIN.slice(0, 2), extra: { roles: { translator: { model: 'claude-sonnet-5-5' } }, limits: { stepsPerTicket: 1 } } });
+  const calls = [];
+  const spawnClaude = async (cmd) => {
+    calls.push(cmd.args[cmd.args.indexOf('--model') + 1]);
+    if (calls.length === 1) {
+      const pushed = commitIn(t.wt, 'docs/x/index.md', '# Сторінка\n\nНовий абзац.\n\nЩе один.\n');
+      execFileSync('git', ['-C', t.wt, 'push', '-q', 'origin', 'HEAD:refs/heads/ticket-71'], { stdio: 'ignore' });
+      t.forgePr.headCommit = pushed;
+    }
+    return { code: 1, stdout: '', stderr: '' };
+  };
+  const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1501'] } });
+  assert.deepEqual(calls, ['claude-sonnet-5-5', 'claude-opus-5-5'], 'the ladder as before');
+  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['locales', 'failed']]);
+  assert.deepEqual(read(t.w, '1501').runs.filter((r) => r.stage === 'locales').map((r) => [r.outcome, r.failures]), [['failed', 1], ['failed', 2]]);
+});
+
+test('AC-5: a session that pushed one commit, made another it did not push, and failed is an ordinary failure; a person\'s commit on top of its push is a move', async () => {
+  // The forge's head is the session's pushed commit, an ancestor of the worktree's head: the session's own work, so the
+  // ladder as before.
+  const t = finalReviewTicket({ done: CHAIN.slice(0, 2), extra: { roles: { translator: { model: 'claude-sonnet-5-5' } }, limits: { stepsPerTicket: 1 } } });
+  const calls = [];
+  const spawnClaude = async (cmd) => {
+    calls.push(cmd.args[cmd.args.indexOf('--model') + 1]);
+    if (calls.length === 1) {
+      const pushed = commitIn(t.wt, 'docs/x/index.md', '# Сторінка\n\nНовий абзац.\n\nЩе один.\n');
+      execFileSync('git', ['-C', t.wt, 'push', '-q', 'origin', 'HEAD:refs/heads/ticket-71'], { stdio: 'ignore' });
+      t.forgePr.headCommit = pushed;
+      commitIn(t.wt, 'docs/x/index.md', '# Сторінка\n\nНовий абзац.\n\nЩе один.\n\nІ ще.\n');
+    }
+    return { code: 1, stdout: '', stderr: '' };
+  };
+  const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1501'] } });
+  assert.deepEqual(calls, ['claude-sonnet-5-5', 'claude-opus-5-5'], 'the ladder as before');
+  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['locales', 'failed']]);
+  assert.deepEqual(read(t.w, '1501').runs.filter((r) => r.stage === 'locales').map((r) => [r.outcome, r.failures]), [['failed', 1], ['failed', 2]]);
+
+  // The same, but a person pushed a commit on top of the session's push while it went on: the forge's head is not in
+  // the worktree's history, so the branch moved under it.
+  const u = finalReviewTicket({ done: CHAIN.slice(0, 2), extra: { roles: { translator: { model: 'claude-sonnet-5-5' } }, limits: { stepsPerTicket: 1 } } });
+  const models = [];
+  const spawnClaude2 = async (cmd) => {
+    models.push(cmd.args[cmd.args.indexOf('--model') + 1]);
+    commitIn(u.wt, 'docs/x/index.md', '# Сторінка\n\nНовий абзац.\n\nЩе один.\n');
+    execFileSync('git', ['-C', u.wt, 'push', '-q', 'origin', 'HEAD:refs/heads/ticket-71'], { stdio: 'ignore' });
+    u.forgePr.headCommit = u.handEdit({ 'docs/x/index.md': '# Сторінка\n\nНовий абзац, виправлений.\n\nЩе один.\n' }, { fromOrigin: true });
+    commitIn(u.wt, 'docs/x/index.md', '# Сторінка\n\nНовий абзац.\n\nЩе один.\n\nІ ще.\n');
+    return { code: 1, stdout: '', stderr: '' };
+  };
+  const moved = await runDaily({ settings: u.w.settings, clients: u.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude: spawnClaude2 }, options: { trigger: 'watcher', named: ['1501'] } });
+  assert.deepEqual(models, ['claude-sonnet-5-5'], 'no bigger model');
+  assert.deepEqual(moved.ran.map((r) => [r.stage, r.outcome]), [['locales', 'moved']]);
+  assert.deepEqual(read(u.w, '1501').runs.filter((r) => r.stage === 'locales').map((r) => [r.outcome, r.failures ?? null]), [['moved', null]]);
 });
 
 test('AC-1: .env too when the target names it; a clone without node_modules is said in the brief; a branch not pushed yet starts from the base', async () => {

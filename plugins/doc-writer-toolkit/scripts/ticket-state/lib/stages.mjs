@@ -13,7 +13,8 @@ export const PR_STAGES = ['move', 'follow', 'answerComments', 'styleCheck', 'que
 
 export const STATUSES = ['running', 'done', 'failed'];
 
-// Who runs a stage: a role (one `claude -p` session) or null (the runner itself, with no model).
+// Who runs a stage: a role (one `claude -p` session) or null (the runner itself, with no model). The chain's `build` is
+// the runner's: the host's build command in the PR's worktree, under the build lock (lib/build-lock.mjs).
 export const ROLE_OF = {
   triage: 'triage',
   start: 'writer',
@@ -39,7 +40,7 @@ export const ROLE_OF = {
   locales: 'translator',
   align: 'translator',
   labelSync: 'translator',
-  build: 'translator',
+  build: null,
   visualPack: 'reviewer',
   readyForMerge: null,
   resync: 'translator',
