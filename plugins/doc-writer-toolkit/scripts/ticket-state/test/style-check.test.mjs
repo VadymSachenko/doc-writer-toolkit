@@ -44,6 +44,7 @@ test('AC-3: a hand commit that changed UA gets one style check, listed with its 
   assert.ok(text.includes(`- ${HAND}: ${PAGE}`));
   assert.match(text, /Run the style check \(the writer role, "The style check"\) over the UA blocks each one changed/);
   assert.match(text, /Record every sha below in `reviewed`, fixed or not, with the reason its commit message gives/);
+  assert.match(text, /The style check's report is a step of the stage, never its end/, 'TASK-096');
   assert.ok(text.includes('A numbered list of edits you post on this PR starts at 3'));
 
   // A record with no `reviewed` is a usage error; one with a list and no summary too.
@@ -127,6 +128,8 @@ test('AC-1, AC-4: after the comments are applied the brief asks for the style ch
   const text = brief(w, s, '807');
   assert.match(text, /Once the comments are applied, the style check runs over the UA blocks they changed \(the writer role, "The style check"\), and over no other block: a block an item of the reply restores or keeps stays as the owner chose it\./);
   assert.match(text, /Its fixes go on the summary's numbered list after your edits, each with its `rule`; a fix that would change what the edit meant is not applied and is a note after the list, never numbered\./);
+  // TASK-096: a clean review is not the end of the stage.
+  assert.match(text, /The style check's report is a step of the stage, never its end, whatever it found \(no finding, suggestions only, fixes\): after it, record, commit, push and post the summary as the stage says\./);
   // AC-4: a plain comment quoting a sentence with words removed is that sentence's replacement.
   assert.match(text, /A plain comment \(no `suggestion` block, no reply by number\) that quotes a sentence of the page with words removed or changed is the reviewer's replacement for that sentence: put it in as quoted/);
 
