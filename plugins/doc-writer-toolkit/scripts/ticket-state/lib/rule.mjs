@@ -212,10 +212,12 @@ export function actedAfter(l, w, mark) {
 }
 
 // The ticket's last session, when it failed at the stage the ticket would run now: how many sessions failed in a row,
-// and whether a person acted since the last of them. A session that ended on a busy browser lock (`busy`) is neither a
-// failure nor a success: the one before it counts.
+// and whether a person acted since the last of them. A session that ended on a busy lock (`busy`), or on a branch a
+// person moved under it (`moved`), is neither a failure nor a success: the one before it counts. A run of the runner's
+// own build (`script`) counts as a run with no session.
+const PASSING = new Set(['busy', 'moved']);
 function failedStep(l, w, steps) {
-  const last = (l.runs ?? []).findLast((r) => r.outcome !== 'busy');
+  const last = (l.runs ?? []).findLast((r) => !PASSING.has(r.outcome));
   const s = steps[0];
   if (!s || last?.outcome !== 'failed' || !last.after || last.stage !== s.stage || (last.pr ?? null) !== (s.pr ?? null)) return null;
   // `sessions`: the failures in a row, a session's or not (the runner's count).
@@ -224,9 +226,9 @@ function failedStep(l, w, steps) {
   // A failure with no session (no `start`: a worktree that couldn't be made or was stuck) says so, with its reason. So
   // do the earlier failures of the row that had none: a stuck worktree, then a failed session, is two failures and one
   // session.
-  const row = (l.runs ?? []).filter((r) => r.outcome !== 'busy').slice(-sessions).filter((r) => r.outcome === 'failed' && r.stage === last.stage && (r.pr ?? null) === (last.pr ?? null));
-  const withoutSession = row.filter((r) => !r.start).length;
-  return { stage: last.stage, ...(last.pr ? { pr: last.pr } : {}), at: last.after.at, sessions, ...(withoutSession ? { withoutSession } : {}), ...(last.start ? {} : { noSession: String(last.note ?? 'no session started') }), ...(acted ? { acted } : { held: sessions >= 2 }) };
+  const row = (l.runs ?? []).filter((r) => !PASSING.has(r.outcome)).slice(-sessions).filter((r) => r.outcome === 'failed' && r.stage === last.stage && (r.pr ?? null) === (last.pr ?? null));
+  const withoutSession = row.filter((r) => !r.start || r.script).length;
+  return { stage: last.stage, ...(last.pr ? { pr: last.pr } : {}), at: last.after.at, sessions, ...(withoutSession ? { withoutSession } : {}), ...(last.start && !last.script ? {} : { noSession: String(last.note ?? 'no session started') }), ...(last.script ? { script: true } : {}), ...(acted ? { acted } : { held: sessions >= 2 }) };
 }
 
 const times = (n) => (n === 1 ? 'once' : n === 2 ? 'twice' : `${n} times`);
@@ -235,6 +237,7 @@ const times = (n) => (n === 1 ? 'once' : n === 2 ? 'twice' : `${n} times`);
 // session's.
 function heldWhy(failed) {
   const where = `${failed.stage}${failed.pr ? ` on ${failed.pr}` : ''}`;
+  if (failed.script) return `${where} failed ${times(failed.sessions)} with no one acting in between, the last time in the runner's own build (${failed.noSession.slice(0, 200)})`;
   if (failed.noSession) return `${where} failed ${times(failed.sessions)} with no one acting in between, the last time before any session started (${failed.noSession.slice(0, 200)})`;
   if (failed.withoutSession) return `${where} failed ${times(failed.sessions)} with no one acting in between, ${times(failed.withoutSession)} before any session started`;
   return `${where} failed in ${failed.sessions} sessions with no one acting in between`;

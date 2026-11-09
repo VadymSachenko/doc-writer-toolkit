@@ -115,20 +115,31 @@ function finalReviewTicket({ done = CHAIN.slice(0, 5), stage = 'translation', ex
 test('AC-1: the runner makes the ticket worktree with the clone\'s node_modules linked and excluded; the build passes with no role action', async () => {
   const t = finalReviewTicket();
   const seen = [];
+  const builds = [];
+  // The runner's build (no session): in the PR's worktree, the site builds from the linked node_modules, and git shows
+  // nothing untracked. Nothing is installed or linked by hand.
+  const runBuild = async ({ cwd, command }) => {
+    builds.push({ cwd, command });
+    const built = execFileSync(process.execPath, ['-e', 'process.stdout.write(require("./node_modules/fake-build"))'], { cwd, encoding: 'utf8' });
+    assert.equal(built, 'built');
+    assert.equal(execFileSync('git', ['-C', cwd, 'status', '--porcelain'], { encoding: 'utf8' }), '', 'the link is excluded: nothing untracked');
+    fs.mkdirSync(path.join(cwd, 'build'), { recursive: true });
+    fs.writeFileSync(path.join(cwd, 'build', 'index.html'), '<html></html>\n');
+    return { code: 0, tail: [] };
+  };
   const spawnClaude = async (cmd) => {
     const stage = stageOf(cmd);
     seen.push({ stage, brief: briefOf(cmd), addDirs: cmd.args.filter((a, i) => cmd.args[i - 1] === '--add-dir') });
-    // The session: in the worktree its brief names, the site builds from the linked node_modules, and git shows
-    // nothing untracked. It installs nothing and links nothing.
-    const built = execFileSync(process.execPath, ['-e', 'process.stdout.write(require("./node_modules/fake-build"))'], { cwd: t.wt, encoding: 'utf8' });
-    assert.equal(built, 'built');
-    assert.equal(execFileSync('git', ['-C', t.wt, 'status', '--porcelain'], { encoding: 'utf8' }), '', 'the link is excluded: nothing untracked');
-    await runRecord({ settings: t.w.settings, clients: t.w.clients(), key: '1501', stage, pr: 'guide-docs#71', status: 'done', head: t.h1, result: { ok: true }, now: NOW });
+    await runRecord({ settings: t.w.settings, clients: t.w.clients(), key: '1501', stage, pr: 'guide-docs#71', status: 'done', head: t.h1, result: {}, now: NOW });
     return { code: 0, stdout: RESULT, stderr: '' };
   };
-  const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1501'] } });
-  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]).slice(0, 1), [['build', 'done']]);
-  assert.equal(read(t.w, '1501').prs[0].chain.build.status, 'done');
+  const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude, runBuild }, options: { trigger: 'watcher', named: ['1501'] } });
+  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]).slice(0, 2), [['build', 'done'], ['visualPack', 'done']]);
+  assert.deepEqual(builds.map((b) => [canon(b.cwd), b.command]), [[canon(t.wt), ['npm', 'run', 'build']]], 'one build, the default command, in the worktree');
+  assert.deepEqual(seen.map((x) => x.stage), ['visualPack'], 'no session for the build');
+  assert.match(seen[0].brief, new RegExp(`--build-dir ${path.join(t.wt, 'build').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`), 'the pack reuses the build of its head');
+  const l = read(t.w, '1501');
+  assert.deepEqual([l.prs[0].chain.build.status, l.prs[0].chain.build.head, l.prs[0].chain.build.result], ['done', t.h1, { ok: true }]);
   // The worktree: detached at the branch's head although the clone has the branch checked out, node_modules a link
   // to the clone's, listed in the common git dir's info/exclude without a trailing slash.
   assert.equal(execFileSync('git', ['-C', t.wt, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), t.h1);
@@ -140,6 +151,30 @@ test('AC-1: the runner makes the ticket worktree with the clone\'s node_modules 
   assert.match(seen[0].brief, new RegExp(`guide-docs ticket-71: ${t.wt.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\(linked from the clone: node_modules\\)`));
   assert.match(seen[0].brief, /push origin HEAD:refs\/heads\/ticket-71/);
   assert.ok(seen[0].addDirs.includes(t.wt));
+});
+
+test('AC-1: a ticket\'s chain from translate to ready for merge runs one full build: the runner\'s, with the locales stage told --no-build and the pack reusing it', async () => {
+  const t = finalReviewTicket({ done: [] });
+  const bin = tmp('bin-');
+  const count = path.join(bin, 'builds.txt');
+  fs.writeFileSync(path.join(bin, 'build.mjs'), `import fs from 'node:fs';\nfs.appendFileSync(${JSON.stringify(count)}, 'x');\nfs.mkdirSync('build', { recursive: true });\nfs.writeFileSync('build/index.html', '<html></html>');\n`);
+  t.w.settings.build.command = [process.execPath, path.join(bin, 'build.mjs')];
+  const seen = [];
+  const spawnClaude = async (cmd) => {
+    const stage = stageOf(cmd);
+    seen.push({ stage, brief: briefOf(cmd) });
+    await runRecord({ settings: t.w.settings, clients: t.w.clients(), key: '1501', stage, pr: 'guide-docs#71', status: 'done', head: t.h1, result: {}, now: NOW });
+    return { code: 0, stdout: RESULT, stderr: '' };
+  };
+  const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1501'] } });
+  assert.deepEqual(out.ran.map((r) => r.stage).slice(0, 8), [...CHAIN, 'readyForMerge']);
+  assert.ok(out.ran.slice(0, 8).every((r) => r.outcome === 'done'));
+  assert.equal(fs.readFileSync(count, 'utf8'), 'x', 'one build in the whole chain');
+  assert.deepEqual(seen.map((x) => x.stage), CHAIN.filter((s) => s !== 'build'), 'no session for the build');
+  assert.match(seen.find((x) => x.stage === 'locales').brief, /locale-translator with `--no-build`/);
+  assert.match(seen.find((x) => x.stage === 'visualPack').brief, /--build-dir .*\/build`/);
+  for (const x of seen.filter((y) => y.stage !== 'locales')) assert.doesNotMatch(x.brief, /--no-build/);
+  assert.equal(read(t.w, '1501').prs[0].readyForMerge.at(-1).head, t.h1);
 });
 
 test('AC-1: .env too when the target names it; a clone without node_modules is said in the brief; a branch not pushed yet starts from the base', async () => {

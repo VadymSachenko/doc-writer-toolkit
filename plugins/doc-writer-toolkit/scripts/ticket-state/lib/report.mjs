@@ -196,7 +196,8 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
   const failures = runLog.filter((e) => e.outcome === 'failed' || e.kind === 'guard');
   out.push('## Failures and guard stops', '', list(failures.map((e) => `${e.at} ${[e.key ?? e.group ?? (e.keys ?? []).join(', '), e.stage ?? e.what ?? (e.job ? `job ${e.job}` : null)].filter(Boolean).join(' ')}: ${e.note ?? e.reason ?? e.outcome}`)), '');
 
-  const today = ledgers.flatMap((l) => (l.runs ?? []).filter((r) => onDate(r.start)).map((r) => ({ ...r, key: l.key })));
+  // A session is a run with a model: the runner's own build (`script`) is not one.
+  const today = ledgers.flatMap((l) => (l.runs ?? []).filter((r) => onDate(r.start) && !r.script).map((r) => ({ ...r, key: l.key })));
   const cost = today.reduce((s, r) => s + (typeof r.costUsd === 'number' ? r.costUsd * (r.share ?? 1) : 0), 0);
   out.push("## The day's cost", '', `${today.length} session(s) today, about $${cost.toFixed(2)} by the CLI's estimate.${a ? ` Week: ${a.used}% used.` : ''}`, '');
   if (proposal?.proposals?.length) {

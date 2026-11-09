@@ -20,7 +20,8 @@ import { removeClosedMarkdown } from './import.mjs';
 import { DOWNLOAD_DIRS_VARIABLE, ROLE_SESSION_VARIABLE, childEnv, sessionChildEnv } from './env.mjs';
 import { TREE_STAGES, adoptSources, checkClone, clonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureReadCheckout, ensureWorktree, prsForStep, worktreePath } from './worktree.mjs';
 import { BUSY_NAME, LOCK_NAME, busyEnded, freeBrowserLock } from './browser-lock.mjs';
-import { BUILD_LOCK_NAME } from './build-lock.mjs';
+import { BUILD_LOCK_NAME, freeBuildLock, renewBuildLock, waitForBuildLock } from './build-lock.mjs';
+import { runSiteBuild } from './site-build.mjs';
 import { HOOK_VARIABLE, commandsOfRules, hookSettings } from './role-hook.mjs';
 import { parseClaudeConfig } from '../../ui-labels/lib/config.mjs';
 import { liveProgress } from './progress.mjs';
@@ -379,6 +380,7 @@ export function briefFor(step, settings) {
     step.askApprove ? `The PR is in the expert's review and the expert hasn't approved it: end the summary with one line that asks the expert, when nothing else is needed, to approve: the link ${step.askApprove} and the path «Review changes» → «Approve» → «Submit review».` : null,
     ...(step.stage === 'styleCheck' ? styleCheckLines(step.commits, step.fixes) : []),
     step.stale ? `The UA pages changed after this stage last ran (${step.stale} file(s)): run it again on the current head.` : null,
+    ...buildLines(step),
     step.cards ? `Cards, highest priority first:\n${step.cards.map((c) => `- ${c.key}: ${c.url ?? c.shortLink} (${c.priority})`).join('\n')}` : null,
     step.worktrees?.length ? worktreeLines(step.worktrees) : null,
     step.codeTrees?.length ? codeLines(step.codeTrees) : null,
@@ -398,6 +400,17 @@ export function briefFor(step, settings) {
   ]
     .filter((x) => x !== null)
     .join('\n');
+}
+
+// What the brief says about the site's build. A PR's chain builds the site once, at its `build` stage, which the runner
+// runs itself: the locales stage runs the locale-translator with no build of its own, and the visual pack reuses the
+// build of its head when there is one. A session that builds the site itself (a re-sync, a visual pack with no build to
+// reuse) runs under the build lock, which the runner holds for it.
+export function buildLines(step) {
+  if (step.stage === 'locales') return ['Run the locale-translator with `--no-build`: the runner builds the site once for this PR, at the chain\'s `build` stage after `labelSync`, so this stage builds nothing.'];
+  if (step.stage === 'visualPack' && step.buildDir) return [`The chain's \`build\` stage built this head into ${step.buildDir}: run visual-pack with \`--build-dir ${step.buildDir}\`, so the site is not built again.`];
+  if (step.stage === 'visualPack' || step.stage === 'resync') return [`The runner holds the build lock for this session: ${step.stage === 'resync' ? 'the locale-translator\'s build' : 'visual-pack\'s own build (no build of this head is there to reuse)'} runs as usual, and no other pipeline build runs meanwhile.`];
+  return [];
 }
 
 // What the brief says about the worktrees the runner made for the session.
@@ -665,6 +678,10 @@ export function scriptedCalls(step, ledger, settings) {
     }
     case 'readyForMerge':
       return label(findPr(ledger, step.pr), 'readyForMerge');
+    case 'build': {
+      const b = settings.build;
+      return [`${b.command.join(' ')} in ${worktreePath(settings, findPr(ledger, step.pr))} at ${String(step.head ?? 'the head').slice(0, 12)}, under the build lock (a wait of up to ${b.waitMinutes} min, a timeout of ${b.timeoutMinutes} min)`];
+    }
     case 'close':
       return step.card?.status === 'done' ? [] : [`tracker move ${card} --to done`];
     case 'videoBlock':
@@ -875,8 +892,8 @@ export function proposeRoles(ledgers, settings, now = Date.now()) {
   const since = new Date(now - 7 * 86400000).toISOString();
   const proposals = [];
   for (const role of ROLES) {
-    // A session that ended on a busy browser lock says nothing about the model: left out.
-    const runs = ledgers.flatMap((l) => l.runs ?? []).filter((r) => r.role === role && r.outcome !== 'busy' && String(r.start ?? '') >= since);
+    // A session that ended on a busy browser lock, or on a branch a person moved under it, says nothing about the model: left out.
+    const runs = ledgers.flatMap((l) => l.runs ?? []).filter((r) => r.role === role && r.outcome !== 'busy' && r.outcome !== 'moved' && String(r.start ?? '') >= since);
     if (!runs.length) continue;
     const steps = runs.filter((r) => !r.retryOf).length;
     const retried = runs.filter((r) => r.retryOf).length;
@@ -1154,10 +1171,11 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
       }
       for (let i = 0; step && i < settings.limits.stepsPerTicket; i++) {
         if (step.role && !guard(step.stage, step.group)) break;
-        const r = await live.tracked(step, () => (step.role ? runModelStep(step) : runScriptedStep(step)));
+        const r = await live.tracked(step, () => (step.role ? runModelStep(step) : step.stage === 'build' ? runBuildStep(step) : runScriptedStep(step)));
         done.push(r);
         ran(r);
-        if (r.outcome !== 'done') break;
+        // The branch moved under the step (a person's commit): its status is read again, and what it gives now runs.
+        if (r.outcome !== 'done' && r.outcome !== 'moved') break;
         const now = await computeStatus({ settings, clients, usage, git: runGit(), now: clock(), only: step.keys, ignoreLocks: own });
         const next = collectSteps(now, { named: step.keys, includeStart: false, retryWaiting })[0] ?? null;
         step = next ? { ...next, keys: next.keys.filter((k) => step.keys.includes(k)) } : null;
@@ -1187,6 +1205,93 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
     }
   }
 
+  // The chain's `build`, run by the runner itself with no model (`ROLE_OF.build` is null): the host's build command
+  // (`build.command`) in the PR's worktree at the step's head, under the build lock (lib/build-lock.mjs) and a timeout.
+  // It is recorded as a session recorded it: done with `{ ok: true }` at the head, or failed with the error's tail. A
+  // failure leaves a run (`script`, no session) with its count and the ticket's mark, so the failed-step rules wait for
+  // a person and then hold, as for a failed session: a broken build is not built again at every check.
+  async function runBuildStep(step) {
+    const began = clock();
+    const key = step.keys[0];
+    const b = settings.build;
+    const pr = findPr(readLedger(settings.state, key), step.pr);
+    const base = { stage: step.stage, role: null, script: true, trigger: manual ? 'manual' : trigger };
+    const log = (outcome, note) => say({ kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, outcome, ...(note ? { note: note.slice(0, 300) } : {}) });
+    // A failed build, or one that couldn't start: the stage failed, and a run with the failures in a row so far. One
+    // that never ran (no worktree) has no `start`, as for a model step.
+    const failed = async (note, { ran = true, result = null, exit = null } = {}) => {
+      for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'failed', pr: step.pr, note, ...(result ? { result: JSON.stringify(result) } : {}), now: clock() }).catch(() => {});
+      const marks = await marksOf(step);
+      const failures = (step.prior ?? 0) + 1;
+      const { script, ...noBuild } = base;
+      const run = { ...(ran ? { ...base, start: new Date(began).toISOString(), wallMs: clock() - began } : noBuild), outcome: 'failed', session: null, note: note.slice(0, 300), failures, ...(exit !== null ? { exit } : {}) };
+      for (const k of step.keys) await runRecord({ settings, clients, key: k, run: JSON.stringify({ ...run, ...(marks[k] ? { after: marks[k] } : {}) }), pr: step.pr, now: clock() }).catch(() => {});
+      log('failed', note);
+      return { ...pick(step), outcome: 'failed', note: note.slice(0, 300) };
+    };
+    const moved = (note) => {
+      log('moved', note);
+      return { ...pick(step), outcome: 'moved', note };
+    };
+    let tree;
+    try {
+      tree = (io.ensureWorktree ?? ensureWorktree)(settings, pr);
+      const stuck = (tree.stuck ?? []).map((n) => `${tree.path}: ${n}`);
+      if (stuck.length) throw new Error(stuck.join('; '));
+    } catch (e) {
+      return failed(`the worktree: ${String(e.message).slice(0, 400)}`, { ran: false });
+    }
+    const head = tree.head ?? step.head ?? null;
+    // The branch moved since the status was read: the chain's stages saw another head, so the status is read again.
+    if (step.head && tree.head && tree.head !== step.head) return moved(`the branch is at ${tree.head.slice(0, 7)}, not ${step.head.slice(0, 7)}: the status is read again`);
+    const mine = step.group ?? key;
+    if (allLocks(settings.state, clock()).some((l) => l.group === mine && l.pid === process.pid)) renewLock(settings.state, mine, { leaseMinutes: settings.limits.lockLeaseMinutes, stage: step.stage, now: clock() });
+    const renew = setInterval(() => {
+      if (step.group) renewLock(settings.state, step.group, { leaseMinutes: settings.limits.lockLeaseMinutes, now: clock() });
+      renewBuildLock(settings.state, { ticket: key, now: clock() });
+    }, 5 * 60000);
+    let res;
+    let waitedMs = 0;
+    try {
+      const waitFrom = clock();
+      const lock = await waitForBuildLock(settings.state, { ticket: key, stage: step.stage, waitMs: b.waitMinutes * 60000, now: clock, sleep: io.sleep ?? pause });
+      waitedMs = clock() - waitFrom;
+      if (lock.broken) return await failed(`the build lock: ${lock.broken}`, { ran: false });
+      if (!lock.taken) {
+        // Someone else built for the whole wait: waiting, not failed, as a session on a busy browser lock.
+        const note = `the build lock was held by ${lock.holder?.ticket ? `ticket ${lock.holder.ticket}` : 'someone else'} since ${lock.since} for the whole wait (${b.waitMinutes} min): runs again at a later check`;
+        for (const k of step.keys) await runRecord({ settings, clients, key: k, run: JSON.stringify({ ...base, start: new Date(began).toISOString(), wallMs: clock() - began, waitedMs, outcome: 'busy', session: null, note: note.slice(0, 300) }), pr: step.pr, now: clock() }).catch(() => {});
+        log('busy', note);
+        return { ...pick(step), outcome: 'busy', note };
+      }
+      if (lock.tookOver) say({ kind: 'buildLock', group: step.group, stage: step.stage, outcome: 'tookOver', note: `a stale build lock taken over from ${lock.tookOver.ticket ? `ticket ${lock.tookOver.ticket}` : 'a holder with no record'} (since ${lock.tookOver.since})` });
+      res = await (io.runBuild ?? runSiteBuild)({ cwd: tree.path, command: b.command, timeoutMs: b.timeoutMinutes * 60000 });
+    } finally {
+      clearInterval(renew);
+      try {
+        freeBuildLock(settings.state, { tickets: step.keys });
+      } catch {
+        // a lock that isn't a folder is left alone
+      }
+    }
+    const wallMs = clock() - began;
+    if (res.code !== 0) {
+      const tail = (res.tail ?? []).join('\n').trim();
+      const why = res.timedOut ? `the build timed out after ${b.timeoutMinutes} min (build.timeoutMinutes)` : `the build failed (exit ${res.code})`;
+      return failed(`${why}${tail ? `: ${tail.slice(-1500)}` : ''}`, { result: { ok: false, exit: res.code, ...(res.timedOut ? { timedOut: true } : {}), tail: (res.tail ?? []).slice(-30) }, exit: res.code });
+    }
+    try {
+      for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'done', pr: step.pr, head, result: JSON.stringify({ ok: true }), now: clock() });
+    } catch (e) {
+      // The branch moved while it built (a person's commit): the record's head check refused it.
+      if (e.refused === 'stale') return moved(`the branch moved while the site built: ${String(e.message).slice(0, 200)}`);
+      return failed(`the build passed, but its record was refused: ${String(e.message).slice(0, 300)}`);
+    }
+    for (const k of step.keys) await runRecord({ settings, clients, key: k, run: JSON.stringify({ ...base, start: new Date(began).toISOString(), wallMs, waitedMs, outcome: 'done', session: null, exit: 0 }), pr: step.pr, now: clock() }).catch(() => {});
+    log('done');
+    return { ...pick(step), outcome: 'done' };
+  }
+
   // Another live session that may read a read checkout: a lock of a stage with no worktree, or one that names no stage
   // (a hand run's). Each model step puts its own stage on its group's lock first, so a chain that goes on in one lock
   // from a worktree stage to one with none is seen as what it runs now.
@@ -1202,6 +1307,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
     if (allLocks(settings.state, clock()).some((l) => l.group === own && l.pid === process.pid)) renewLock(settings.state, own, { leaseMinutes: settings.limits.lockLeaseMinutes, stage: step.stage, now: clock() });
     // Triage has no group yet: each card's key is its lock.
     const held = [];
+    let buildLocked = false;
     for (const g of lockGroups) {
       const t = takeLock(settings.state, { group: g, kind: manual ? 'manual' : 'schedule', stage: step.stage, leaseMinutes: settings.limits.lockLeaseMinutes, now: clock() });
       if (t.taken) held.push(g);
@@ -1245,7 +1351,8 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
           return { ...c, readError: r.error };
         }).filter(Boolean);
         const codeTrees = CODE_ROLES.has(step.role) ? (settings.appRepos ?? []).map((a) => (io.ensureCodeTree ?? ensureCodeTree)(settings, a, { othersRunning })) : [];
-        step = { ...step, worktrees: trees, codeTrees, clones };
+        const buildDir = step.stage === 'visualPack' ? reusableBuild(step, trees) : null;
+        step = { ...step, worktrees: trees, codeTrees, clones, ...(buildDir ? { buildDir } : {}) };
       } catch (e) {
         const note = `the worktree: ${String(e.message).slice(0, 400)}`;
         for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'failed', pr: step.pr, note, now: clock() }).catch(() => {});
@@ -1256,6 +1363,17 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, run: JSON.stringify({ stage: step.stage, role: step.role, outcome: 'failed', session: null, note, failures, ...(marks[k] ? { after: marks[k] } : {}) }), pr: step.pr, now: clock() }).catch(() => {});
         say({ kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, role: step.role, outcome: 'failed', note });
         return { ...pick(step), outcome: 'failed', note };
+      }
+      // A session that builds the site itself runs under the build lock, taken here and freed when the step ends.
+      if (sessionBuilds(step)) {
+        const lock = await waitForBuildLock(settings.state, { ticket: step.keys[0], stage: step.stage, waitMs: settings.build.waitMinutes * 60000, now: clock, sleep: io.sleep ?? pause });
+        if (!lock.taken) {
+          const note = lock.broken ? `the build lock: ${lock.broken}` : `the build lock was held by ${lock.holder?.ticket ? `ticket ${lock.holder.ticket}` : 'someone else'} since ${lock.since} for the whole wait (${settings.build.waitMinutes} min): runs again at a later check`;
+          for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, run: JSON.stringify({ stage: step.stage, role: step.role, outcome: 'busy', session: null, note: note.slice(0, 300) }), pr: step.pr, now: clock() }).catch(() => {});
+          say({ kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, role: step.role, outcome: 'busy', note: note.slice(0, 300) });
+          return { ...pick(step), outcome: 'busy', note };
+        }
+        buildLocked = true;
       }
       const agentsPath = path.join(settings.state, 'roles', 'agents.json');
       fs.mkdirSync(path.dirname(agentsPath), { recursive: true });
@@ -1271,6 +1389,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         const start = new Date(clock()).toISOString();
         const renew = setInterval(() => {
           for (const g of [step.group, ...held].filter(Boolean)) renewLock(settings.state, g, { leaseMinutes: settings.limits.lockLeaseMinutes, now: clock() });
+          if (buildLocked) renewBuildLock(settings.state, { ticket: step.keys[0], now: clock() });
         }, 5 * 60000);
         let res;
         try {
@@ -1330,6 +1449,33 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
       return { ...pick(step), outcome: 'failed' };
     } finally {
       for (const g of held) releaseLock(settings.state, g);
+      // The build lock this step took, and any its tickets still hold: freed, so the next build doesn't wait for it.
+      try {
+        if (freeBuildLock(settings.state, { tickets: step.keys }).freed && !buildLocked) say({ kind: 'buildLock', group: step.group, stage: step.stage, outcome: 'freed', note: 'the step ended with its ticket holding the build lock' });
+      } catch {
+        // a lock that isn't a folder is left alone
+      }
+    }
+  }
+
+  // Whether a session builds the whole site itself: a re-sync (its locale-translator builds), and a visual pack with
+  // no build of its head to reuse. The locales stage runs with `--no-build`, and the chain's build is the runner's.
+  function sessionBuilds(step) {
+    return step.stage === 'resync' || (step.stage === 'visualPack' && !step.buildDir);
+  }
+
+  // The folder of the chain's build of the step's head, when the visual pack can reuse it: the `build` stage done at
+  // this head, the PR's worktree at it, and a site in `build.outDir` there.
+  function reusableBuild(step, trees) {
+    try {
+      const pr = findPr(readLedger(settings.state, step.keys[0]), step.pr);
+      const rec = pr.chain?.build;
+      const tree = trees.find((t) => t.branch === pr.branch && t.repo === pr.repo) ?? trees[0];
+      if (rec?.status !== 'done' || !rec.head || !step.head || rec.head !== step.head || !tree?.path || (tree.head && tree.head !== step.head)) return null;
+      const dir = path.join(tree.path, settings.build.outDir);
+      return fs.existsSync(path.join(dir, 'index.html')) ? dir : null;
+    } catch {
+      return null;
     }
   }
 

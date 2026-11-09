@@ -13,7 +13,7 @@ import { validateJobs } from './jobs.mjs';
 // The tracker and forge scripts read the same files, as they stand and with no such limit.
 //
 // The shared file holds `state`, `workFolder`, `tracker`, `forge`, `targets`, `noReviewLabel`, `appRepos`, `hostRules`, `hostJobs`,
-// and each role's tool rules (`roles.<role>.allowedTools`, `disallowedTools`).
+// `build`, and each role's tool rules (`roles.<role>.allowedTools`, `disallowedTools`).
 // The local file holds `mode`, `limits`, `schedule`, `roles` (no tool rules), `modelLadder`, `video`, `cleanup` and `progress`. Defaults below.
 
 export const MODES = ['off', 'observe', 'on'];
@@ -93,6 +93,12 @@ export function parseStartHours(text) {
   return from < to && to <= 24 * 60 ? { from, to } : null;
 }
 
+// The chain's site build, which the runner runs itself (no model) in the PR's worktree: the command (a list of words,
+// or a text split on spaces; no shell), the folder it writes the site to (the visual pack reuses it), how long it may run
+// and how long the runner waits for the build lock. A command the runner runs with its own rights, so it is read only
+// from the shared file at HEAD, as the host jobs are: a local `build` is ignored.
+export const BUILD_DEFAULTS = { command: ['npm', 'run', 'build'], outDir: 'build', timeoutMinutes: 60, waitMinutes: 90 };
+
 const isObject = (v) => v && typeof v === 'object' && !Array.isArray(v);
 const fail = (msg) => {
   throw new CliError(`ticket flow settings: ${msg}`, { code: 2 });
@@ -115,6 +121,18 @@ function validateAppRepos(raw) {
     if (typeof r.url !== 'string' || !/^https:\/\//.test(r.url)) fail(`appRepos[${i}].url is required: the repo's https address, which the runner clones it from`);
     return { repo: r.repo, path: r.path ?? null, base: typeof r.base === 'string' && r.base.trim() ? r.base : 'main', url: r.url.replace(/\/+$/, '') };
   });
+}
+
+function validateBuild(raw) {
+  if (raw === undefined || raw === null) return { ...BUILD_DEFAULTS, command: [...BUILD_DEFAULTS.command] };
+  if (!isObject(raw)) fail('build must be { command, outDir, timeoutMinutes, waitMinutes }');
+  const b = { ...BUILD_DEFAULTS, ...raw };
+  const command = typeof b.command === 'string' ? b.command.trim().split(/\s+/).filter(Boolean) : b.command;
+  if (!Array.isArray(command) || !command.length || command.some((w) => typeof w !== 'string' || !w)) fail('build.command must be the build command, as a list of words ("npm", "run", "build") or a text of words with no quotes');
+  if (typeof b.outDir !== 'string' || !b.outDir.trim() || path.isAbsolute(b.outDir) || b.outDir.split(/[\\/]/).includes('..')) fail('build.outDir must be the folder the build writes, from the repo top (such as "build")');
+  num(b.timeoutMinutes, 'build.timeoutMinutes', { min: 1 });
+  num(b.waitMinutes, 'build.waitMinutes');
+  return { command, outDir: b.outDir.replace(/^\.\/+/, '').replace(/\/+$/, ''), timeoutMinutes: b.timeoutMinutes, waitMinutes: b.waitMinutes };
 }
 
 function validateTargets(raw, forge) {
@@ -224,6 +242,8 @@ export function validateSettings(merged, { root, stateRootDefault }) {
   const styleCheck = { since: merged.styleCheck?.since ?? null };
   if (styleCheck.since !== null && (typeof styleCheck.since !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d(:\d\d(\.\d+)?)?(Z|[+-]\d\d:\d\d)$/.test(styleCheck.since) || Number.isNaN(Date.parse(styleCheck.since)))) fail('styleCheck.since must be an ISO date-time with its zone, such as 2026-11-08T12:00:00Z');
 
+  const build = validateBuild(merged.build);
+
   const stateRel = typeof merged.state === 'string' && merged.state.trim() ? merged.state : stateRootDefault;
   return {
     root,
@@ -242,6 +262,7 @@ export function validateSettings(merged, { root, stateRootDefault }) {
     hostRules: merged.hostRules ?? {},
     hostJobs: validateJobs(merged.hostJobs ?? [], root),
     styleCheck,
+    build,
     limits,
     schedule,
     roles,
