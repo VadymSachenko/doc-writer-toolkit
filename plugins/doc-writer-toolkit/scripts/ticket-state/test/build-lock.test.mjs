@@ -78,3 +78,40 @@ test('AC-2: stale takeover: a holder whose process is gone at once, one that sto
   assert.match(freeBuildLock(state, { tickets: ['501'] }).broken, /not a folder/);
   assert.equal(fs.readFileSync(dir, 'utf8'), 'not a folder');
 });
+
+test('AC-2: two takers of one stale lock: the takeover is atomic, so the second never removes the first\'s fresh lock', () => {
+  const state = tmp();
+  takeBuildLock(state, { ticket: '501', pid: DEAD, now: T0, isAlive: alive });
+  // Taker B reads the lock as stale; before it acts, taker A (another runner) reads it stale too, takes it over and
+  // makes its own. B's takeover then finds a folder that is not the one it judged: it gives way, and A's lock stands.
+  let a = null;
+  const b = takeBuildLock(state, {
+    ticket: '503',
+    pid: 300,
+    now: T0 + MIN,
+    isAlive: (pid) => {
+      if (!a) a = takeBuildLock(state, { ticket: '502', pid: 200, now: T0 + MIN, isAlive: (p) => p !== DEAD });
+      return pid !== DEAD;
+    },
+  });
+  assert.deepEqual([a.taken, a.tookOver.ticket], [true, '501']);
+  assert.deepEqual([b.taken, b.holder.ticket], [false, '502']);
+  const s = buildLockState(state, { now: T0 + MIN, isAlive: alive });
+  assert.deepEqual([s.holder.ticket, s.holder.pid, s.stale], ['502', 200, false]);
+  assert.deepEqual(fs.readdirSync(state), [BUILD_LOCK_NAME], 'nothing left aside');
+
+  // A taker whose rename finds the folder gone (the other one moved it aside first) gives way too, and takes it once free.
+  assert.deepEqual(freeBuildLock(state, { tickets: ['502'], pid: 200 }), { freed: true });
+  takeBuildLock(state, { ticket: '501', pid: DEAD, now: T0, isAlive: alive });
+  const c = takeBuildLock(state, {
+    ticket: '504',
+    pid: 400,
+    now: T0 + MIN,
+    isAlive: (pid) => {
+      fs.rmSync(buildLockDir(state), { recursive: true, force: true });
+      return pid !== DEAD;
+    },
+  });
+  assert.equal(c.taken, true, 'gone by the time of the rename: free, so it makes the lock');
+  assert.equal(buildLockState(state, { now: T0 + MIN, isAlive: alive }).holder.ticket, '504');
+});
