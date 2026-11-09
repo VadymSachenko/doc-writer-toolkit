@@ -153,6 +153,9 @@ export function createForge({ adapter, forge, dryRun = false }) {
       const assignees = who ? loginsOf([who], 'assignee') : [];
       const asked = loginsOf(reviewers, 'reviewer');
       const wanted = labelsToAdd(labels);
+      // The check and ready labels follow the ticket flow's records (its runner adds and removes them), never a PR's opening.
+      const runners = wanted.filter((l) => [forge.checkLabel, forge.readyLabel].some((x) => x && same(x, l)));
+      if (runners.length) throw new Refusal('notNamed', `open-pr does not set ${runners.map((l) => `'${l}'`).join(', ')}: the check and ready labels are added on their own (add-label)`, { labels: runners });
       const existing = await adapter.openPrByHead({ repo, head: branch });
       if (existing) {
         return { repo, created: false, ...brief(existing), reason: 'an open PR for this head already exists', posted: [] };

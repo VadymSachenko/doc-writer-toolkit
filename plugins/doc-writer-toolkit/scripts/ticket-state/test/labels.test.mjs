@@ -280,3 +280,28 @@ test('AC-5: a PR with two cards: each ledger is compared with itself, so a step 
   for (const key of keys) await runRecord({ settings: w.settings, clients: w.clients(), key, stage: 'answerComments', pr: 'guide-docs#59', status: 'done', result: { handled: [], summary: { id: 7059 }, questions: [{ text: 'Which?' }], posted: [7059] }, now: NOW });
   assert.deepEqual(labelChanges(before, w.settings.state, keys, w.settings.forge), [{ repo: 'guide-docs', number: 59, label: CHECK, add: true }]);
 });
+
+test('AC-5 at the switch: the first record of a PR with no open questions kept puts the check label on only when it has questions, and never takes it off; then the rule applies', async () => {
+  const c = card({ number: 961, status: 'finalReview' });
+  const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 61, headCommit: HEAD, labels: [CHECK] })] });
+  ledger(w, c, { stages: BASE, prs: [{ repo: 'guide-docs', number: 61, targets: ['guide'], review: 'sme', stage: 'finalReview' }] });
+  const step = async (stage, result) => {
+    const before = labelSnapshot(w.settings.state, ['961']);
+    await runRecord({ settings: w.settings, clients: w.clients(), key: '961', stage, pr: 'guide-docs#61', status: 'done', result, now: NOW });
+    return labelChanges(before, w.settings.state, ['961'], w.settings.forge).map((x) => [x.label, x.add]);
+  };
+  assert.deepEqual(await step('styleCheck', { reviewed: [{ sha: 'c'.repeat(40) }] }), [], 'a PR from before the switch keeps its label: earlier questions are not known');
+  assert.deepEqual(await step('answerComments', { handled: [], summary: { id: 2 }, questions: [], posted: [2] }), [[CHECK, false]], 'from the second record on, the rule: none open, off');
+  // An answer as the first record is the same: none open, the label stays.
+  const e = card({ number: 963, status: 'finalReview' });
+  ledger(w, e, { stages: BASE, prs: [{ repo: 'guide-docs', number: 63, targets: ['guide'], review: 'sme', stage: 'finalReview' }] });
+  const first = labelSnapshot(w.settings.state, ['963']);
+  await runRecord({ settings: w.settings, clients: w.clients(), key: '963', stage: 'answerComments', pr: 'guide-docs#63', status: 'done', result: { handled: [], summary: { id: 4 }, questions: [], posted: [4] }, now: NOW });
+  assert.deepEqual(labelChanges(first, w.settings.state, ['963'], w.settings.forge), []);
+  // Another legacy PR whose first record has a question: on.
+  const d = card({ number: 962, status: 'finalReview' });
+  ledger(w, d, { stages: BASE, prs: [{ repo: 'guide-docs', number: 62, targets: ['guide'], review: 'sme', stage: 'finalReview' }] });
+  const before = labelSnapshot(w.settings.state, ['962']);
+  await runRecord({ settings: w.settings, clients: w.clients(), key: '962', stage: 'answerComments', pr: 'guide-docs#62', status: 'done', result: { handled: [], summary: { id: 3 }, questions: [{ text: 'q' }], posted: [3] }, now: NOW });
+  assert.deepEqual(labelChanges(before, w.settings.state, ['962'], w.settings.forge).map((x) => [x.label, x.add]), [[CHECK, true]]);
+});

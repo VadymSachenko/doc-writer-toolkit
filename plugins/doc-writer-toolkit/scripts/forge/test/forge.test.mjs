@@ -422,6 +422,12 @@ test('openPr: refuses, before any call, a repo, login or label the settings do n
   assert.equal(calls.length, 0);
 });
 
+test('openPr: the check and ready labels are refused, before any call: the runner sets them on their own', async () => {
+  const { forge, calls } = setup({ settings: readySettings() });
+  for (const label of ['Check me', 'CHECK ME', READY]) await rejects(forge.openPr({ repo: 'guide-docs', head: 'docs/x', base: 'main', title: 'T', labels: ['in progress', label] }), 'notNamed');
+  assert.equal(calls.length, 0);
+});
+
 test('openPr: when a step after the PR was made fails, the error says which PR exists', async () => {
   const { forge } = setup({
     routes: { 'graphql PrsByHead': fixture('gql-prs-by-head-none'), 'POST repos/acme-docs/guide-docs/pulls': fixture('rest-create-pull'), 'POST repos/acme-docs/guide-docs/issues/8/assignees': ghFail(422, 'Validation Failed') },
@@ -933,7 +939,7 @@ test('every operation, run in full, sends no request that settles, withdraws, ap
     },
   });
   const ok = { repo: 'guide-docs', number: 7 };
-  await forge.openPr({ repo: 'guide-docs', head: 'docs/n', base: 'main', title: 'T', reviewers: ['rev-one'], labels: ['Check me'] });
+  await forge.openPr({ repo: 'guide-docs', head: 'docs/n', base: 'main', title: 'T', reviewers: ['rev-one'], labels: ['in progress'] });
   await forge.editPr({ ...ok, title: 'New title' });
   await forge.prState(ok);
   await forge.changedPrsSince({ repo: 'guide-docs', since: '2026-11-04T10:00:00Z' });
@@ -983,7 +989,7 @@ test('--dry-run: reads still run, every change is recorded and not sent, and the
     dryRun: true,
     routes: { ...reviewRoutes(), 'graphql PrsByHead': fixture('gql-prs-by-head-none') },
   });
-  const opened = await forge.openPr({ repo: 'guide-docs', head: 'docs/dry', base: 'main', title: 'T', body: 'B', reviewers: ['rev-one'], labels: ['Check me'] });
+  const opened = await forge.openPr({ repo: 'guide-docs', head: 'docs/dry', base: 'main', title: 'T', body: 'B', reviewers: ['rev-one'], labels: ['in progress'] });
   assert.equal(opened.created, true);
   assert.equal(opened.number, 0);
   assert.match(String(opened.posted[0].id), /^dry-run-/);
@@ -1006,7 +1012,7 @@ test('the module runs over any adapter with the contract: an in-memory one stand
   const forge = createForge({ adapter, forge: forgeSettings() });
   const s = await forge.prState({ repo: 'guide-docs', number: 1 });
   assert.equal(s.headCommit, 'c0ffee0');
-  const opened = await forge.openPr({ repo: 'guide-docs', head: 'topic-b', base: 'main', title: 'Second', labels: ['check me'] });
+  const opened = await forge.openPr({ repo: 'guide-docs', head: 'topic-b', base: 'main', title: 'Second', labels: ['in progress'] });
   assert.equal(opened.created, true);
   assert.equal((await forge.openPr({ repo: 'guide-docs', head: 'topic-a', base: 'main', title: 'Again' })).created, false);
   await forge.setStageLabel({ target: 'guide', number: 1, stage: 'review' });
