@@ -1169,13 +1169,16 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
           return { group, skipped: 'stale' };
         }
       }
+      let movedInRow = 0;
       for (let i = 0; step && i < settings.limits.stepsPerTicket; i++) {
         if (step.role && !guard(step.stage, step.group)) break;
         const r = await live.tracked(step, () => (step.role ? runModelStep(step) : step.stage === 'build' ? runBuildStep(step) : runScriptedStep(step)));
         done.push(r);
         ran(r);
-        // The branch moved under the step (a person's commit): its status is read again, and what it gives now runs.
-        if (r.outcome !== 'done' && r.outcome !== 'moved') break;
+        // The branch moved under the step (a person's commit): its status is read again, and what it gives now runs. Twice
+        // in a row stops the group (a forge that lags its git refs would otherwise loop).
+        movedInRow = r.outcome === 'moved' ? movedInRow + 1 : 0;
+        if (r.outcome !== 'done' && (r.outcome !== 'moved' || movedInRow >= 2)) break;
         const now = await computeStatus({ settings, clients, usage, git: runGit(), now: clock(), only: step.keys, ignoreLocks: own });
         const next = collectSteps(now, { named: step.keys, includeStart: false, retryWaiting })[0] ?? null;
         step = next ? { ...next, keys: next.keys.filter((k) => step.keys.includes(k)) } : null;
@@ -1366,7 +1369,16 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
       }
       // A session that builds the site itself runs under the build lock, taken here and freed when the step ends.
       if (sessionBuilds(step)) {
-        const lock = await waitForBuildLock(settings.state, { ticket: step.keys[0], stage: step.stage, waitMs: settings.build.waitMinutes * 60000, now: clock, sleep: io.sleep ?? pause });
+        // The group's lock is renewed while it waits, as while a session runs.
+        const waiting = setInterval(() => {
+          for (const g of [step.group, ...held].filter(Boolean)) renewLock(settings.state, g, { leaseMinutes: settings.limits.lockLeaseMinutes, now: clock() });
+        }, 5 * 60000);
+        let lock;
+        try {
+          lock = await waitForBuildLock(settings.state, { ticket: step.keys[0], stage: step.stage, waitMs: settings.build.waitMinutes * 60000, now: clock, sleep: io.sleep ?? pause });
+        } finally {
+          clearInterval(waiting);
+        }
         if (!lock.taken) {
           const note = lock.broken ? `the build lock: ${lock.broken}` : `the build lock was held by ${lock.holder?.ticket ? `ticket ${lock.holder.ticket}` : 'someone else'} since ${lock.since} for the whole wait (${settings.build.waitMinutes} min): runs again at a later check`;
           for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, run: JSON.stringify({ stage: step.stage, role: step.role, outcome: 'busy', session: null, note: note.slice(0, 300) }), pr: step.pr, now: clock() }).catch(() => {});
