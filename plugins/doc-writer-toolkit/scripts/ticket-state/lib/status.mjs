@@ -9,6 +9,7 @@ import { estimatesOf, groupsOf, related, startable } from './limits.mjs';
 import { allowanceOf } from './allowance.mjs';
 import { fileHash } from './record.mjs';
 import { readRearm, rearmedAt } from './setlocal.mjs';
+import { startsInFlight } from './forge-state.mjs';
 
 // `status`: every ticket's state, next step, open gate and mismatches, the intake, the WIP counts and the groups a
 // scheduled run may start now. It reads the ledgers, the tracker, the forge and git, and writes nothing: the one change
@@ -18,8 +19,9 @@ const bare = (t) => String(t ?? '').replace(/‌/g, '').trim();
 const OPEN_STATES = new Set(['ready', 'needsInfo', 'new', 'closed', 'outside', 'merged']);
 
 // `tried` and `retryWaiting` come from a run (lib/runner.mjs): the tickets it already started or tried, and whether it may
-// give a waiting failed start its one more try (`startable` in lib/limits.mjs).
-export async function computeStatus({ settings, clients, now = Date.now(), only = null, usage = null, git = makeGit(settings), ignoreLocks = null, marks = null, tried = new Set(), retryWaiting = false }) {
+// give a waiting failed start its one more try (`startable` in lib/limits.mjs). `inFlight`: the tickets of the starts
+// handed to a process of their own that go on (lib/forge-state.mjs), read from the state folder when not given.
+export async function computeStatus({ settings, clients, now = Date.now(), only = null, usage = null, git = makeGit(settings), ignoreLocks = null, marks = null, tried = new Set(), retryWaiting = false, inFlight = null }) {
   const ledgers = readAllLedgers(settings.state);
   const ledgersByCard = new Map(ledgers.filter((l) => l.card?.id).map((l) => [l.card.id, l]));
   const { cards, byStatus } = await readCards({ settings, tracker: clients.tracker, ledgers });
@@ -128,7 +130,7 @@ export async function computeStatus({ settings, clients, now = Date.now(), only 
   const estimates = estimatesOf(ledgers, settings.limits);
   const inWork = ledgers.filter((l) => l.mode === 'pipeline' && inWorkTickets.some((t) => t.key === l.key));
   const lockedGroup = (g) => Boolean(locks.get(g.group)?.live) || g.keys.some((k) => tickets.find((t) => t.key === k)?.locked);
-  const plan = startable({ tickets, groups, settings, allowance, estimates, inWork, locked: { has: (k) => lockedGroup(groups.find((g) => g.keys.includes(k)) ?? { group: k, keys: [k] }) }, tried, retryWaiting });
+  const plan = startable({ tickets, groups, settings, allowance, estimates, inWork, locked: { has: (k) => lockedGroup(groups.find((g) => g.keys.includes(k)) ?? { group: k, keys: [k] }) }, tried, retryWaiting, inFlight: inFlight ?? startsInFlight(settings.state, { now }) });
 
   const intakeCards = byStatus.intake ?? [];
   const intake = intakeList({ cards: intakeCards, ledgersByCard, settings, now, pagesOf: git.pagesOf });

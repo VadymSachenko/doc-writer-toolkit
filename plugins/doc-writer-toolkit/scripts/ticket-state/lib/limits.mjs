@@ -153,8 +153,10 @@ export const isOpen = (t) => t.ledger === 'present' && t.mode === 'pipeline' && 
 
 // `tried`: the tickets this run already started (or tried to): their groups hold no slot in its later calculations, so a
 // start that failed lets the run try the next group. `retryWaiting`: the run may give a waiting failed start its one more try
-// (the morning run, a manual run).
-export function startable({ tickets, groups, settings, allowance, estimates, inWork, locked, tried = new Set(), retryWaiting = false }) {
+// (the morning run, a manual run). `inFlight`: the tickets of starts a check handed to a process of their own that hasn't
+// recorded them yet (lib/forge-state.mjs `startsInFlight`): their ready groups are starting now, so they take their slots,
+// their share of the allowance and their relations here, and are not started again.
+export function startable({ tickets, groups, settings, allowance, estimates, inWork, locked, tried = new Set(), retryWaiting = false, inFlight = new Set() }) {
   const { limits } = settings;
   const repos = (t) => new Set((t.targets ?? []).map((id) => settings.targets.find((x) => x.id === id)?.repo).filter(Boolean));
   const startingMembers = []; // the tickets this calculation starts: a ticket related to one of them waits like one in work
@@ -164,22 +166,40 @@ export function startable({ tickets, groups, settings, allowance, estimates, inW
   const openKeys = tickets.filter(isOpen).map((t) => t.key);
   let open = openKeys.length;
   const starting = []; // the keys of the groups this calculation starts, which take open slots too
+  // The starts handed on that go on elsewhere, counted first, as if this calculation had started them: a failed start's
+  // one more try too, which only the run that hands it on may give (the morning run's).
+  const flying = groups.filter((g) => g.keys.some((k) => inFlight.has(k)) && !g.keys.some((k) => tried.has(k)));
+  for (const g of flying) {
+    inProgress += g.size;
+    open += g.size;
+    starting.push(...g.keys);
+    startingMembers.push(...g.members);
+  }
   const wip = { inProgress, waiting, open, openKeys, limits: { inProgress: limits.inProgress, waiting: limits.waiting, open: limits.open }, manual: tickets.filter((t) => t.counts && !t.counted && t.startedBy === 'manual').length };
   const easiest = limits.startOrder === 'easiest';
   const holders = () => [...openKeys, ...starting.map((k) => `${k} starting now`)].join(', ');
 
   // The remaining cost of every ticket in work, scheduled or not: they all spend the same allowance.
   const unknown = inWork.filter((l) => remainingOf(l, estimates) === null).map((l) => l.key);
-  let committed = round(inWork.reduce((sum, l) => sum + (remainingOf(l, estimates) ?? 0), 0));
+  const estimateOf = (g) => {
+    const est = g.members.map((m) => estimates[m.size]?.percent ?? null);
+    return est.every((x) => typeof x === 'number') ? round(est.reduce((a, b) => a + b, 0)) : null;
+  };
+  let committed = round(inWork.reduce((sum, l) => sum + (remainingOf(l, estimates) ?? 0), 0) + flying.reduce((sum, g) => sum + (estimateOf(g) ?? 0), 0));
   const budget = allowance ? { remaining: allowance.remaining, cap: allowance.cap, used: allowance.used, day: allowance.day, inWork: committed, inWorkUnknown: unknown } : null;
 
   const out = [];
   const notStarted = [];
   let blockedLevel = null; // priority order: a higher priority that waits holds back every lower one
   let blockedBy = null; // easiest order: an easier group that waits holds back every harder one
+  if (flying.some((g) => estimateOf(g) === null)) inWork = [...inWork, ...flying.filter((g) => estimateOf(g) === null).map((g) => ({ key: g.group }))];
   for (const g of groups) {
     const est = g.members.map((m) => estimates[m.size]?.percent ?? null);
-    const estimate = est.every((x) => typeof x === 'number') ? round(est.reduce((a, b) => a + b, 0)) : null;
+    const estimate = estimateOf(g);
+    if (flying.includes(g)) {
+      notStarted.push({ group: g.group, keys: g.keys, priority: g.priority, estimate, reasons: ['starting now in a process of its own'] });
+      continue;
+    }
     // A start that failed waits as any failed step: the group can't start in this run, so it takes no slot and holds
     // back no other group.
     const failed = failedStartReason(g, { tried, retryWaiting });

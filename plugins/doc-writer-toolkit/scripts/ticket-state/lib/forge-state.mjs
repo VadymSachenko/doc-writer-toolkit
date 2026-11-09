@@ -10,11 +10,11 @@ import { readFeed, watchDir } from './feed.mjs';
 //   `notified`. Written by the forge check only, under its lock; the full check and the tick read it.
 //   `<state>/watch/hand-on/<id>.json`: what one detached run gave (written by that run only), collected and removed
 //   by the next check of the one that started it (the forge check or the full check) after the run's process ended.
-//   `<state>/watch/hand-on/<id>.step.json`: the one group's step a full check handed on (lib/watch.mjs), with the
+//   `<state>/watch/hand-on/<id>.step.json`: the one group's step a full check handed on (lib/dispatch.mjs), with the
 //   check's `/usage` reading; written by the full check before the run's process starts, read by that run.
-// The full check keeps the runs it started in its own `feed.json` (`handOns`, the same shape plus `group`, `stage` and
-// `by`): every reader below takes the live runs of both files, so the forge check, the full check and the runner see
-// the same runs going.
+// The full check keeps the runs it started in its own `feed.json` (`handOns`, the same shape plus `group`, `stage`,
+// `by` and `why`): every reader below takes the live runs of both files, so the forge check, the full check and the
+// runner see the same runs going.
 
 export const FORGE_VERSION = 1;
 // A hand-on's process older than this is taken for a pid used again, not for the run: the watcher lock's rule.
@@ -81,16 +81,27 @@ const alive = (pid) => {
 // Whether a hand-on's run still goes on: its process lives, and is not older than HAND_ON_STALE_MS.
 export const handOnLive = (h, { now = Date.now(), isAlive = alive } = {}) => Boolean(h?.pid) && isAlive(h.pid) && now - Date.parse(h.at) < HAND_ON_STALE_MS;
 
-// The tickets of the forge check's runs that still go on. Their run may not have taken its group lock yet (it reads
-// /usage and the status first), so a check holds them as it holds a locked ticket. A file that doesn't read: none.
-export function liveHandOnKeys(state, { now = Date.now(), isAlive = alive } = {}) {
-  let forge;
+// The runs each check started, as its file has them (a file that doesn't read: none).
+export function forgeHandOns(state) {
   try {
-    forge = readForge(state);
+    return readForge(state).handOns ?? [];
   } catch {
-    return new Set();
+    return [];
   }
-  return new Set((forge.handOns ?? []).filter((h) => handOnLive(h, { now, isAlive })).flatMap((h) => h.keys));
+}
+export function fullHandOns(state) {
+  try {
+    return readFeed(state).handOns ?? [];
+  } catch {
+    return [];
+  }
+}
+export const allHandOns = (state) => [...forgeHandOns(state), ...fullHandOns(state)];
+
+// The tickets of both checks' runs that still go on. Their run may not have taken its group lock yet (it reads its
+// status first), so a check holds them as it holds a locked ticket.
+export function liveHandOnKeys(state, { now = Date.now(), isAlive = alive } = {}) {
+  return new Set(allHandOns(state).filter((h) => handOnLive(h, { now, isAlive })).flatMap((h) => h.keys));
 }
 
 // The runs going now across processes, as groups: each live group lock (a run holds it from its first step on), and
@@ -112,9 +123,10 @@ export function runsGoingIn(state, { locks = [], now = Date.now(), isAlive = ali
   return runsGoing({ locks, handOns: allHandOns(state), now, isAlive, exceptPid, groupOf });
 }
 
-// The starts a check handed on whose run holds no lock yet: until it takes its group's lock and records the start, the
-// status doesn't count the group as open, so no other start is decided meanwhile (lib/watch.mjs).
-export function startsInFlight(state, { locks = [], now = Date.now(), isAlive = alive } = {}) {
-  const held = new Set(locks.filter((x) => x.live).map((x) => x.group));
-  return fullHandOns(state).filter((h) => h.stage === 'start' && handOnLive(h, { now, isAlive }) && !held.has(h.group ?? h.keys[0]));
+// The starts the full check handed on whose run still goes on, as the tickets they start. Until that run has taken the
+// group's lock and recorded the start, nothing else shows the group as open (a ready card may have no ledger yet), so
+// every start decision counts these as starting now (lib/limits.mjs `startable`, for the tickets still ready).
+// `exceptId`: the run asking about itself.
+export function startsInFlight(state, { now = Date.now(), isAlive = alive, exceptId = null } = {}) {
+  return new Set(fullHandOns(state).filter((h) => h.stage === 'start' && h.id !== exceptId && handOnLive(h, { now, isAlive })).flatMap((h) => h.keys));
 }
