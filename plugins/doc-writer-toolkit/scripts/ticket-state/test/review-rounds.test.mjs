@@ -136,13 +136,21 @@ test('AC-3: «helper: поверни» in a style fix\'s thread restores that it
   assert.deepEqual((await w.one('981')).steps, []);
 });
 
-test('a reply in a place\'s thread is the answer to that place: the owner\'s with the word, an expert\'s with none', async () => {
+test('a reply in a place\'s thread is the answer to that place: the owner\'s with the word, an expert\'s with none; the owner\'s with no word and a colleague\'s are not', async () => {
   const c = card({ number: 982, status: 'finalReview' });
-  const replies = [comment(7302, 'expert-one', 'Yes, for every method but one.', { reviewId: 6300 }), comment(7303, 'owner-login', 'helper: the expert confirmed it, leave it.', { reviewId: 6301 })];
+  const replies = [
+    comment(7304, 'owner-login', '@expert-one check this, please', { reviewId: 6299 }),
+    comment(7302, 'expert-one', 'Yes, for every method but one.', { reviewId: 6300 }),
+    comment(7305, 'colleague-two', 'I think so too.', { reviewId: 6302 }),
+    comment(7303, 'owner-login', 'helper: the expert confirmed it, leave it.', { reviewId: 6301 }),
+  ];
   const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 81, headCommit: HEAD })], activity: { 'guide-docs#81': { threads: [thread(7301, 'A place to check', replies)] } }, extra: ROUNDS() });
   roundLedger(w, c);
-  const s = (await w.one('982')).steps[0];
+  const t = await w.one('982');
+  const s = t.steps[0];
   assert.deepEqual(s.placeReplies.map((r) => [r.id, r.place, r.by, r.text]), [[7302, 'p1', 'reviewer', 'Yes, for every method but one.'], [7303, 'p1', 'owner', 'the expert confirmed it, leave it.']]);
+  assert.deepEqual(t.prs[0].others.map((x) => x.id), [7305], 'the colleague\'s reply is listed for the owner');
+  assert.equal(s.threadReplies, undefined, 'no item\'s thread');
   const brief = briefFor({ ...s, role: 'writer', keys: ['982'] }, w.settings);
   assert.match(brief, /record that reply's id as the place's `replyId`: the runner then settles the thread\. Never settle a thread yourself\./);
   assert.ok(brief.includes('- reply 7302 by the expert expert-one, place p1 (docs/x/a.md, line 12, now open): "Yes, for every method but one."'));
