@@ -18,7 +18,7 @@ import { ROLES } from './settings.mjs';
 import { cleanupTicket } from './cleanup.mjs';
 import { removeClosedMarkdown } from './import.mjs';
 import { DOWNLOAD_DIRS_VARIABLE, ROLE_SESSION_VARIABLE, childEnv, sessionChildEnv } from './env.mjs';
-import { TREE_STAGES, adoptSources, checkClone, clonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureReadCheckout, ensureWorktree, prsForStep, worktreePath } from './worktree.mjs';
+import { TREE_STAGES, adoptSources, checkClone, clonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureReadCheckout, ensureWorktree, headOf, prsForStep, setAsideWork, worktreePath } from './worktree.mjs';
 import { BUSY_NAME, LOCK_NAME, busyEnded, freeBrowserLock } from './browser-lock.mjs';
 import { BUILD_LOCK_NAME, freeBuildLock, renewBuildLock, waitForBuildLock } from './build-lock.mjs';
 import { runSiteBuild } from './site-build.mjs';
@@ -1422,16 +1422,26 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         const after = usage?.week?.percent ?? null;
         // A session whose `browser-lock.mjs take` gave up on a lock someone else held: waiting, not failed.
         const busy = busyEnded(settings.state, { tickets: step.keys, since: Date.parse(start) }).length > 0;
-        const outcome = await gateOf(step, seqBefore, { busy });
+        let outcome = await gateOf(step, seqBefore, { busy });
+        // A session that failed because a person moved the PR's branch under it (its push rejected, its record refused as
+        // stale): not the model's failure. None is counted, no bigger model is tried, and the step's status is read again.
+        const moved = outcome === 'failed' ? await movedUnder(step) : null;
+        if (moved) outcome = 'moved';
         if (outcome === 'failed') failures += 1;
         // What the ticket looks like now the session is over, so its own unrecorded writes never count as a person's.
         const marks = outcome !== 'failed' || !ledgered ? {} : await marksOf(step);
-        const run = { stage: step.stage, role: step.role, model, effort: cmd.effort, trigger: manual ? 'manual' : trigger, start, durationMs: r.durationMs, wallMs, turns: r.turns, costUsd: r.costUsd, tokens: r.tokens, weekPercent: { before, after }, session: r.session, outcome, share: Number((1 / step.keys.length).toFixed(4)), ...(attempt ? { retryOf: settings.roles[step.role].model } : {}), ...(r.denials ? { denials: r.denials } : {}), ...(outcome === 'failed' ? { failures } : {}) };
+        const run = { stage: step.stage, role: step.role, model, effort: cmd.effort, trigger: manual ? 'manual' : trigger, start, durationMs: r.durationMs, wallMs, turns: r.turns, costUsd: r.costUsd, tokens: r.tokens, weekPercent: { before, after }, session: r.session, outcome, share: Number((1 / step.keys.length).toFixed(4)), ...(attempt ? { retryOf: settings.roles[step.role].model } : {}), ...(r.denials ? { denials: r.denials } : {}), ...(outcome === 'failed' ? { failures } : {}), ...(moved ? { note: moved.note.slice(0, 300) } : {}) };
         for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, run: JSON.stringify({ ...run, ...(marks[k] ? { after: marks[k] } : {}) }), pr: step.pr, now: clock() }).catch(() => {});
         const entry = { kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, role: step.role, model, exit: res.code, ...(r.denials ? { denials: r.denials } : {}) };
         if (outcome === 'done') {
           say({ ...entry, outcome });
           return { ...pick(step), model, outcome };
+        }
+        // No failure counted, no bigger model, no hold: what the status gives at the new head runs now (`advance`).
+        if (outcome === 'moved') {
+          if (moved.kept?.ref) say({ kind: 'worktree', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, outcome: 'setAside', note: `the session's unpushed commit ${moved.kept.commit.slice(0, 7)} kept as ${moved.kept.ref}; the worktree is back at ${step.head.slice(0, 7)}` });
+          say({ ...entry, outcome, note: moved.note });
+          return { ...pick(step), model, outcome, note: moved.note };
         }
         // No failure counted, no bigger model, no hold: the step runs again at a later check.
         if (outcome === 'busy') {
@@ -1461,6 +1471,29 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         // a lock that isn't a folder is left alone
       }
     }
+  }
+
+  // Whether a person moved the PR's branch while the session ran, by heads, never by an error's text: the forge's head
+  // is neither the head the step was given nor the worktree's (the session's own push that went through is the
+  // worktree's head). A move covers a push the forge rejected and a record refused as stale. The session's unpushed
+  // commits are set aside (lib/worktree.mjs, `setAsideWork`), so the next step's worktree follows the branch.
+  async function movedUnder(step) {
+    if (!step.pr || !step.head) return null;
+    let pr;
+    let forgeHead;
+    try {
+      pr = findPr(readLedger(settings.state, step.keys[0]), step.pr);
+      if (!pr.number) return null;
+      forgeHead = (await clients.forge.prState({ repo: pr.repo, number: pr.number })).headCommit;
+    } catch {
+      return null;
+    }
+    if (!forgeHead || forgeHead === step.head) return null;
+    const tree = (step.worktrees ?? []).find((t) => t.branch === pr.branch && t.repo === pr.repo) ?? null;
+    const treeHead = headOf(tree?.path);
+    if (treeHead && treeHead === forgeHead) return null;
+    const kept = tree?.path && treeHead && treeHead !== step.head ? setAsideWork(pr, tree.path, step.head) : null;
+    return { forgeHead, kept, note: `the branch moved to ${forgeHead.slice(0, 7)} while the session worked on ${step.head.slice(0, 7)}: no retry, no failure counted; the status is read again${kept?.left ? `; the worktree is left as it is (${kept.left})` : ''}` };
   }
 
   // Whether a session builds the whole site itself: a re-sync (its locale-translator builds), and a visual pack with

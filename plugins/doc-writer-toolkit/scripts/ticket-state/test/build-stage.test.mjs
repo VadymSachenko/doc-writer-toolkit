@@ -51,7 +51,7 @@ function atBuild(n = 1, { done = 5 } = {}) {
     trees.set(`ticket-${61 + i}`, tmp('wt-'));
   });
   const ensureWorktree = (settings, p) => ({ repo: p.repo, branch: p.branch, path: trees.get(p.branch), head: HEAD, push: '', linked: [], missing: [], notes: [], stuck: [] });
-  return { w, cards, trees, ensureWorktree };
+  return { w, cards, prs, trees, ensureWorktree };
 }
 
 const run = (w, io, options = {}) => runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude: noSession, sleep: quick, ...io }, options: { morning: false, trigger: 'watch', ...options } });
@@ -99,6 +99,27 @@ test('AC-3: a failing build is recorded failed with the error\'s tail, waits for
   const held = await t.w.one('701');
   assert.equal(held.held, true);
   assert.match(held.gate.why, /^build on guide-docs#61 failed twice with no one acting in between, the last time in the runner's own build \(the build failed \(exit 3\)/);
+});
+
+test('AC-5: the branch moved under the build: before it (the worktree is at another head) nothing builds; during it the record is refused as stale; neither is a failure', async () => {
+  const t = atBuild();
+  const other = 'd'.repeat(40);
+  const before = await run(t.w, { ensureWorktree: (s, p) => ({ ...t.ensureWorktree(s, p), head: other }), runBuild: () => assert.fail('no build at a head the chain did not see') }, { named: ['701'] });
+  assert.deepEqual(before.ran.map((r) => [r.stage, r.outcome]), [['build', 'moved']]);
+  const u = atBuild();
+  const during = await run(u.w, {
+    ensureWorktree: u.ensureWorktree,
+    runBuild: async () => {
+      // A person's commit lands while the site builds.
+      for (const p of u.prs) p.headCommit = other;
+      return { code: 0, tail: [] };
+    },
+  }, { named: ['701'] });
+  assert.deepEqual(during.ran.map((r) => [r.stage, r.outcome]), [['build', 'moved']]);
+  const l = read(u.w, '701');
+  assert.notEqual(l.prs[0].chain.build?.status, 'done');
+  assert.equal(l.runs.filter((r) => r.outcome === 'failed').length, 0);
+  assert.equal(buildLockState(u.w.settings.state).held, false);
 });
 
 test('AC-3: the dry run names the build command and starts nothing; the brief of a chain session never asks for the build', async () => {

@@ -177,6 +177,73 @@ test('AC-1: a ticket\'s chain from translate to ready for merge runs one full bu
   assert.equal(read(t.w, '1501').prs[0].readyForMerge.at(-1).head, t.h1);
 });
 
+test('AC-5: a session failing on a head a person moved is followed by the step status gives at the new head: no model retry, no failure, no hold', async () => {
+  // The locales stage works on h1; the owner's hand commit (a UA paragraph) moves the branch; the session's push is
+  // rejected (non-fast-forward) and it records the stage failed.
+  const t = finalReviewTicket({ done: CHAIN.slice(0, 2), extra: { roles: { translator: { model: 'claude-sonnet-5-5' } }, limits: { stepsPerTicket: 3 } } });
+  const calls = [];
+  let moved = null;
+  let mine = null;
+  const spawnClaude = async (cmd) => {
+    const stage = stageOf(cmd);
+    calls.push({ stage, model: cmd.args[cmd.args.indexOf('--model') + 1], brief: briefOf(cmd), head: execFileSync('git', ['-C', t.wt, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() });
+    if (stage === 'locales') {
+      fs.mkdirSync(path.join(t.wt, 'i18n/tr/docusaurus-plugin-content-docs/current/x'), { recursive: true });
+      fs.writeFileSync(path.join(t.wt, 'i18n/tr/docusaurus-plugin-content-docs/current/x/index.md'), '# Sayfa\n');
+      const g = (...a) => execFileSync('git', ['-C', t.wt, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+      g('add', '-A');
+      g('-c', 'user.email=s@example.com', '-c', 'user.name=Session', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'Locales: tr');
+      mine = g('rev-parse', 'HEAD');
+      moved = t.handEdit({ 'docs/x/index.md': '# Сторінка\n\nНовий абзац, виправлений.\n' });
+      t.forgePr.headCommit = moved;
+      assert.throws(() => g('push', '-q', 'origin', 'HEAD:refs/heads/ticket-71'), /rejected|non-fast-forward|fetch first/);
+      await runRecord({ settings: t.w.settings, clients: t.w.clients(), key: '1501', stage, pr: 'guide-docs#71', status: 'failed', note: 'the push was rejected: the branch moved', now: NOW });
+      return { code: 0, stdout: RESULT, stderr: '' };
+    }
+    await runRecord({ settings: t.w.settings, clients: t.w.clients(), key: '1501', stage, pr: 'guide-docs#71', status: 'done', head: moved, result: {}, now: NOW });
+    return { code: 0, stdout: RESULT, stderr: '' };
+  };
+  const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1501'] } });
+  // The steps status gives at the new head: the hand commit's style check (skipped: the card was moved on), then
+  // translate, stale, on the role's own model, in a worktree that followed the branch (the rejected commit set aside,
+  // not stuck).
+  assert.deepEqual(calls.map((c) => [c.stage, c.model]), [['locales', 'claude-sonnet-5-5'], ['translate', 'claude-sonnet-5-5']]);
+  assert.match(calls[1].brief, /The UA pages changed after this stage last ran \(1 file\(s\)\): run it again on the current head/);
+  assert.deepEqual([calls[0].head, calls[1].head], [t.h1, moved]);
+  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['locales', 'moved'], ['styleCheck', 'done'], ['translate', 'done']]);
+  const l = read(t.w, '1501');
+  const run = l.runs.find((r) => r.stage === 'locales');
+  assert.deepEqual([run.outcome, run.failures ?? null, run.retryOf ?? null], ['moved', null, null]);
+  assert.match(run.note, new RegExp(`the branch moved to ${moved.slice(0, 7)} while the session worked on ${t.h1.slice(0, 7)}`));
+  const log = fs.readFileSync(path.join(t.w.settings.state, 'runs', `${localDate(NOW)}.jsonl`), 'utf8').trim().split('\n').map((x) => JSON.parse(x));
+  assert.equal(log.filter((e) => e.kind === 'retry').length, 0, 'no model retry');
+  // The session's commit is kept under a ref in the clone, never dropped.
+  const kept = log.find((e) => e.kind === 'worktree' && e.outcome === 'setAside');
+  assert.match(kept.note, new RegExp(`${mine.slice(0, 7)} kept as refs/ticket-flow/set-aside/ticket-71/${mine.slice(0, 12)}`));
+  assert.equal(execFileSync('git', ['-C', t.clone.dir, 'rev-parse', `refs/ticket-flow/set-aside/ticket-71/${mine.slice(0, 12)}`], { encoding: 'utf8' }).trim(), mine);
+  // No hold and no wait: the chain goes on from enReview at the new head (status with the clone's own git).
+  const tk = await t.w.one('1501', { git: makeGit(t.w.settings) });
+  assert.deepEqual([tk.held ?? false, tk.failed ?? null, tk.next?.stage, tk.next?.waits ?? null], [false, null, 'enReview', null]);
+});
+
+test('AC-5: a session that pushed its own commit and then failed is an ordinary failure: the forge head is its worktree\'s', async () => {
+  const t = finalReviewTicket({ done: CHAIN.slice(0, 2), extra: { roles: { translator: { model: 'claude-sonnet-5-5' } }, limits: { stepsPerTicket: 1 } } });
+  const calls = [];
+  const spawnClaude = async (cmd) => {
+    calls.push(cmd.args[cmd.args.indexOf('--model') + 1]);
+    if (calls.length === 1) {
+      const pushed = commitIn(t.wt, 'docs/x/index.md', '# Сторінка\n\nНовий абзац.\n\nЩе один.\n');
+      execFileSync('git', ['-C', t.wt, 'push', '-q', 'origin', 'HEAD:refs/heads/ticket-71'], { stdio: 'ignore' });
+      t.forgePr.headCommit = pushed;
+    }
+    return { code: 1, stdout: '', stderr: '' };
+  };
+  const out = await runDaily({ settings: t.w.settings, clients: t.w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude }, options: { trigger: 'watcher', named: ['1501'] } });
+  assert.deepEqual(calls, ['claude-sonnet-5-5', 'claude-opus-5-5'], 'the ladder as before');
+  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['locales', 'failed']]);
+  assert.deepEqual(read(t.w, '1501').runs.filter((r) => r.stage === 'locales').map((r) => [r.outcome, r.failures]), [['failed', 1], ['failed', 2]]);
+});
+
 test('AC-1: .env too when the target names it; a clone without node_modules is said in the brief; a branch not pushed yet starts from the base', async () => {
   const t = finalReviewTicket();
   t.w.settings.targets.find((x) => x.id === 'guide').links = ['node_modules', '.env'];
