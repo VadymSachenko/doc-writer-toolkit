@@ -1386,15 +1386,20 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         const seqBefore = new Map(step.keys.map((k) => [k, readLedger(settings.state, k)?.seq ?? 0]));
         const before = usage?.week?.percent ?? null;
         const cmd = commandFor(step, settings, { model, agentsPath, claude });
-        const start = new Date(clock()).toISOString();
+        const began = clock();
+        const start = new Date(began).toISOString();
         const renew = setInterval(() => {
           for (const g of [step.group, ...held].filter(Boolean)) renewLock(settings.state, g, { leaseMinutes: settings.limits.lockLeaseMinutes, now: clock() });
           if (buildLocked) renewBuildLock(settings.state, { ticket: step.keys[0], now: clock() });
         }, 5 * 60000);
         let res;
+        // The step's wall-clock time, from the session's start to its process's end: `duration_ms` is the CLI's own
+        // count, which leaves out what the session waited for after its last turn (a background build, say).
+        let wallMs = null;
         try {
           res = await (io.spawnClaude ?? spawnClaude)(cmd, io.claudeEnv ? { env: io.claudeEnv } : {});
         } finally {
+          wallMs = clock() - began;
           clearInterval(renew);
           // The browser lock a session took (`browser-lock.mjs`) and didn't free, crashed or not: freed now, so the next
           // Playwright run doesn't wait for it. A lock another ticket or a hand run holds stays.
@@ -1421,7 +1426,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         if (outcome === 'failed') failures += 1;
         // What the ticket looks like now the session is over, so its own unrecorded writes never count as a person's.
         const marks = outcome !== 'failed' || !ledgered ? {} : await marksOf(step);
-        const run = { stage: step.stage, role: step.role, model, effort: cmd.effort, trigger: manual ? 'manual' : trigger, start, durationMs: r.durationMs, turns: r.turns, costUsd: r.costUsd, tokens: r.tokens, weekPercent: { before, after }, session: r.session, outcome, share: Number((1 / step.keys.length).toFixed(4)), ...(attempt ? { retryOf: settings.roles[step.role].model } : {}), ...(r.denials ? { denials: r.denials } : {}), ...(outcome === 'failed' ? { failures } : {}) };
+        const run = { stage: step.stage, role: step.role, model, effort: cmd.effort, trigger: manual ? 'manual' : trigger, start, durationMs: r.durationMs, wallMs, turns: r.turns, costUsd: r.costUsd, tokens: r.tokens, weekPercent: { before, after }, session: r.session, outcome, share: Number((1 / step.keys.length).toFixed(4)), ...(attempt ? { retryOf: settings.roles[step.role].model } : {}), ...(r.denials ? { denials: r.denials } : {}), ...(outcome === 'failed' ? { failures } : {}) };
         for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, run: JSON.stringify({ ...run, ...(marks[k] ? { after: marks[k] } : {}) }), pr: step.pr, now: clock() }).catch(() => {});
         const entry = { kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, role: step.role, model, exit: res.code, ...(r.denials ? { denials: r.denials } : {}) };
         if (outcome === 'done') {

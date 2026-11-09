@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { readAllLedgers } from './ledger.mjs';
 import { readFeed } from './feed.mjs';
 import { reviewCommentFor } from './experts.mjs';
+import { duration as spell } from './progress.mjs';
 
 // The morning report (design §7): a local file `<state>/reports/<date>.md`, written with no model call. Nothing goes to
 // the tracker or the forge. A separate skill reads it on demand.
@@ -200,6 +201,13 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
   const today = ledgers.flatMap((l) => (l.runs ?? []).filter((r) => onDate(r.start) && !r.script).map((r) => ({ ...r, key: l.key })));
   const cost = today.reduce((s, r) => s + (typeof r.costUsd === 'number' ? r.costUsd * (r.share ?? 1) : 0), 0);
   out.push("## The day's cost", '', `${today.length} session(s) today, about $${cost.toFixed(2)} by the CLI's estimate.${a ? ` Week: ${a.used}% used.` : ''}`, '');
+  // Each step today by its wall-clock time (start to end), the runner's own build too, with the session's own count when
+  // it is a minute or more shorter: what a step took, not only what its session counted.
+  const timed = ledgers.flatMap((l) => (l.runs ?? []).filter((r) => onDate(r.start) && typeof r.wallMs === 'number').map((r) => ({ ...r, key: l.key }))).sort((x, y) => String(x.start).localeCompare(String(y.start)));
+  if (timed.length) {
+    const total = timed.reduce((s, r) => s + r.wallMs * (r.share ?? 1), 0);
+    out.push("## Today's steps by wall-clock time", '', `${spell(total)} in all.`, '', list(timed.map((r) => `${new Date(Date.parse(r.start)).toTimeString().slice(0, 5)} ${r.key} ${r.stage}${r.pr ? ` (${r.pr})` : ''}${r.script ? ', the runner\'s build' : ''}: ${spell(r.wallMs)}${typeof r.durationMs === 'number' && r.wallMs - r.durationMs >= 60000 ? ` (session ${spell(r.durationMs)})` : ''}, ${r.outcome}`)), '');
+  }
   if (proposal?.proposals?.length) {
     out.push('## Proposed changes to the roles (yes or no)', '', list(proposal.proposals.map((p) => `${p.role}: ${p.change} (${p.why})`)), '');
   }
