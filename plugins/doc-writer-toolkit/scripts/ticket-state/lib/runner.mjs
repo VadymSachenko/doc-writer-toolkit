@@ -25,7 +25,7 @@ import { runSiteBuild } from './site-build.mjs';
 import { HOOK_VARIABLE, commandsOfRules, hookSettings } from './role-hook.mjs';
 import { parseClaudeConfig } from '../../ui-labels/lib/config.mjs';
 import { liveProgress } from './progress.mjs';
-import { runsGoingIn } from './forge-state.mjs';
+import { runsGoingIn, startsInFlight } from './forge-state.mjs';
 import { replyLines, resyncItemLines, styleAfterCommentsLines, styleCheckLines, suggestionLines } from './edits.mjs';
 
 // The daily run (design §7): finish first, then triage the quiet intake cards (mornings, and the watcher's start pass
@@ -941,12 +941,21 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
   const triageKeys = startPass && Array.isArray(options.triageKeys) ? options.triageKeys.map(String) : null;
   const hoursOver = () => startUntil !== null && clock() >= startUntil;
   const manual = trigger === 'manual';
-  // A failed step that waits for a person runs again once at the next morning run, or when the owner runs it by hand.
-  const retryWaiting = manual || morning;
+  // `startKeys`: a start a check handed on to a process of its own (lib/dispatch.mjs): a scheduled run that only starts
+  // the ready group of these tickets, if its own status still lets it, and runs that group's steps. No finishing, no
+  // triage, no other group.
+  const startKeys = trigger === 'schedule' && !morning && !startPass && Array.isArray(options.startKeys) ? options.startKeys.map(String) : null;
+  // A failed step that waits for a person runs again once at the next morning run, or when the owner runs it by hand;
+  // a step or a start the morning run handed on to a process of its own keeps that one more try (`retryWaiting`).
+  const retryWaiting = manual || morning || ((trigger === 'watcher' || startKeys !== null) && options.retryWaiting === true);
   const observe = settings.mode === 'observe' && !dryRun;
   const planOnly = dryRun || observe;
+  // `dispatch` (lib/dispatch.mjs): the full check's run, its morning run and its start pass decide here as any run does
+  // (one /usage reading, the order, the guard, the limits, the start order), then hand each group a process of its own
+  // instead of advancing it here, and end. Nothing is handed on in a dry run or in observe.
+  const dispatch = typeof options.dispatch === 'function' && !planOnly ? options.dispatch : null;
   const date = localDate(clock());
-  const out = { mode: settings.mode, dryRun, observe, trigger, morning, ...(startPass ? { startPass } : {}), named, planned: [], ran: [], triage: null, starts: [], guard: [], notes: [...(settings.settingsNotes ?? [])] };
+  const out = { mode: settings.mode, dryRun, observe, trigger, morning, ...(startPass ? { startPass } : {}), ...(startKeys ? { startKeys } : {}), named, planned: [], ran: [], triage: null, starts: [], ...(dispatch ? { handedOn: [] } : {}), guard: [], notes: [...(settings.settingsNotes ?? [])] };
   const log = [];
   const say = (e) => log.push({ at: new Date(clock()).toISOString(), ...e });
   // The live progress file (lib/progress.mjs): written at each step boundary, never fails a run, nothing in a dry run or observe.
@@ -966,7 +975,9 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
       usageTries = r.usage ? null : r.tries;
       return r.usage;
     });
-  let usage = await readUsage();
+  // A run a check handed on starts from the check's own reading (`options.usage`), so the processes it starts don't
+  // each read /usage at once; every reading after a session is the run's own.
+  let usage = options.usage ?? (await readUsage());
   out.usage = usage;
   // Why a scheduled model step may not start now, or null.
   const guardReason = () => {
@@ -996,7 +1007,10 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
   // The tickets this run already started or tried to: a start that failed holds no slot in the run's later
   // calculations, so the run tries the next group; the failed one waits as any failed step does.
   const tried = new Set();
-  const status = () => computeStatus({ settings, clients, usage, git: runGit(), now: clock(), ignoreLocks: own, tried, retryWaiting });
+  // The starts handed on to processes of their own that haven't recorded them yet count as starting now; a handed-on
+  // run's own is not one (`handOnId`).
+  const inFlight = () => startsInFlight(settings.state, { now: clock(), ...(io.isAlive ? { isAlive: io.isAlive } : {}), exceptId: options.handOnId ?? null });
+  const status = () => computeStatus({ settings, clients, usage, git: runGit(), now: clock(), ignoreLocks: own, tried, retryWaiting, inFlight: inFlight() });
   st = await status();
   out.before = summary(st);
   live.write();
@@ -1022,9 +1036,19 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
     return { ...pick(step), runs: `claude -p as ${agentName(step.role)}`, model: cmd.model, effort: cmd.effort, ...(trees.length ? { worktrees: trees.map((t) => t.path) } : {}), ...(held ? { guard: `a live run would not start it: ${held}` } : {}), command: [cmd.bin, ...cmd.args] };
   };
 
-  const finishing = startPass ? [] : collectSteps(st, { named, includeStart: manual && named.length > 0, retryWaiting });
+  const finishing = startPass || startKeys ? [] : collectSteps(st, { named, includeStart: manual && named.length > 0, retryWaiting });
   if (planOnly) {
     out.planned.push(...finishing.map(describe));
+  } else if (dispatch) {
+    // Each group to a process of its own, in the finishing order. A model step the guard holds isn't handed on: its
+    // process would only read /usage for nothing.
+    for (const step of finishing) {
+      if (step.role && !guard(step.stage, step.group)) {
+        out.handedOn.push({ ...pick(step), guard: guardReason() });
+        continue;
+      }
+      out.handedOn.push(await handOn(step));
+    }
   } else {
     // `limits.parallel` counts the runs of other processes too (the full check's, a manual one, those the forge check
     // started): the live group locks and the forge check's runs that hold none yet (lib/forge-state.mjs `runsGoing`),
@@ -1042,7 +1066,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
 
   // Mornings and the watcher's start pass: triage every intake card quiet for its hours, high priority first, in one
   // session. A manual run that names tickets triages only those.
-  if (morning || (startPass && !hoursOver())) {
+  if (morning || (startPass && !hoursOver() && !startKeys)) {
     const due = st.intake.due.filter((c) => (!manual || !named.length || named.includes(c.key)) && (!triageKeys || triageKeys.includes(String(c.key)))).slice(0, settings.limits.triageBatch);
     if (due.length) {
       const step = { stage: 'triage', role: 'triage', keys: due.map((c) => c.key), group: null, cards: due.map((c) => ({ key: c.key, url: c.card.url, shortLink: c.card.shortLink, priority: c.priority })) };
@@ -1064,6 +1088,20 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
   if (trigger === 'schedule') {
     if (planOnly) {
       out.starts = st.startable.map((g) => describe(startOf(g, 'schedule')));
+    } else if (dispatch) {
+      // One calculation decides the starts: `startable` already gives each later group the slots, the allowance and the
+      // relations of the earlier ones. A status read again now wouldn't see a start no process has recorded yet. A start
+      // that can't be handed on (the runs at `limits.parallel`) holds back the later ones, as the start order does.
+      for (const g of st.startable) {
+        if (hoursOver()) {
+          out.notes.push(`the start hours ended at ${new Date(startUntil).toISOString()}: no further start in this pass`);
+          break;
+        }
+        if (!guard('start')) break;
+        const r = await handOn(startOf(g, 'schedule'));
+        out.starts.push(r);
+        if (!r.handedOn) break;
+      }
     } else {
       while (st.startable.length) {
         if (hoursOver()) {
@@ -1071,11 +1109,16 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
           break;
         }
         if (!guard('start')) break;
-        const g = st.startable.find((x) => !x.keys.some((k) => tried.has(k)));
-        if (!g) break;
+        const g = st.startable.find((x) => !x.keys.some((k) => tried.has(k)) && (!startKeys || x.keys.some((k) => startKeys.includes(k))));
+        if (!g) {
+          if (startKeys) out.notes.push(`the start of ${startKeys.join(', ')} was handed on, but its status no longer lets it start: ${st.notStarted.find((n) => n.keys.some((k) => startKeys.includes(k)))?.reasons?.join('; ') ?? 'not ready'}`);
+          break;
+        }
         for (const k of g.keys) tried.add(k);
         const r = await advance(startOf(g, 'schedule'));
         out.starts.push(r);
+        // A start handed on runs its one group only.
+        if (startKeys) break;
         st = await status();
       }
     }
@@ -1115,7 +1158,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
 
   // After a live run, the state as the next run finds it: a start that failed in this run waits (for a person or the
   // next morning run), and the report says so.
-  st = planOnly ? st : await computeStatus({ settings, clients, usage, git: runGit(), now: clock(), ignoreLocks: own });
+  st = planOnly ? st : await computeStatus({ settings, clients, usage, git: runGit(), now: clock(), ignoreLocks: own, inFlight: inFlight() });
   out.after = summary(st);
   out.notStarted = st.notStarted;
   out.guard = log.filter((e) => e.kind === 'guard');
@@ -1195,6 +1238,17 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
 
   function ran(r) {
     out.ran.push(r);
+  }
+
+  // A group handed to a process of its own (`dispatch`): its run, a step that waits for a run slot, or one a run of
+  // another process holds. The run log says which.
+  async function handOn(step) {
+    progress.begun = true;
+    const r = await dispatch(step, { usage, retryWaiting });
+    const note = r.id ? `in a process of its own (run ${r.id}, pid ${r.pid})` : r.waits ? `waits for a run slot: ${r.waits}` : r.held ? `held: ${r.held}` : `could not be handed on: ${r.error}`;
+    say({ kind: 'handOn', group: step.group ?? null, keys: step.keys, stage: step.stage, pr: step.pr ?? null, outcome: r.id ? 'handed' : r.error ? 'failed' : 'waits', note });
+    // `retried`: a failed step's one more try, which a later check owes it when it waits here (lib/watch.mjs `owed`).
+    return { ...pick(step), handedOn: r.id ? { id: r.id, pid: r.pid } : null, ...(r.waits ? { waits: r.waits } : {}), ...(r.held ? { held: r.held } : {}), ...(r.error ? { error: r.error } : {}), ...(step.waits ? { retried: true } : {}) };
   }
 
   async function runScriptedStep(step) {

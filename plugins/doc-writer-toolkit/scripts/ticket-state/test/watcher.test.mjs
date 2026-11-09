@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { BOARD, LISTS, NOW, RELEASE, WATCH, card, noTree, pr, quietGit, rawSettings } from './fakes.mjs';
 import { runRecord } from '../lib/record.mjs';
-import { ledger, read, snapshot, world } from './helpers.mjs';
+import { inProcess, ledger, read, snapshot, world } from './helpers.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
 import { takeLock, releaseLock } from '../lib/locks.mjs';
 import { WINDOW_MS, emptyFeed, readFeed, sourcesOf, ticketsOf, writeFeed, feedPath } from '../lib/feed.mjs';
@@ -354,7 +354,7 @@ function failingTicket(extra = {}) {
   };
   const checkAt = (at) => {
     clock = at;
-    return runCheck({ settings: w.settings, clients: w.clients(), io: { now: () => clock, git: quietGit, runner, notify: (m) => (notes.push(m), { sent: true }) }, options: {} });
+    return runCheck({ settings: w.settings, clients: w.clients(), io: { now: () => clock, git: quietGit, runner, spawn: inProcess(w, runner), notify: (m) => (notes.push(m), { sent: true }) }, options: {} });
   };
   const day = async (from, to) => {
     for (let at = from; at < to; at += 5 * MIN) await checkAt(at);
@@ -436,7 +436,7 @@ test('the morning run waits for a check that can read the board: a Mac awake bef
   };
   const mornings = [];
   const check = (at) =>
-    runCheck({ settings: w.settings, clients: w.clients(), io: { now: () => at, git: quietGit, runner: { now: () => at, readUsage: () => usageAt(5) }, runDaily: async (a) => (mornings.push([iso(at), a.options.morning]), runDaily(a)), notify: () => ({ sent: true }) }, options: {} });
+    runCheck({ settings: w.settings, clients: w.clients(), io: { now: () => at, git: quietGit, runner: { now: () => at, readUsage: () => usageAt(5) }, spawn: inProcess(w, { now: () => at, readUsage: () => usageAt(5) }), runDaily: async (a) => (mornings.push([iso(at), a.options.morning]), runDaily(a)), notify: () => ({ sent: true }) }, options: {} });
   const first = await check(NOW);
   assert.deepEqual(mornings, [], 'not at 09:00: the board could not be read');
   assert.match(first.notes.join(' '), /the morning run waits: the board can't be read in this check \(fetch failed: getaddrinfo ENOTFOUND/);
@@ -462,7 +462,7 @@ function deadBoard({ lastCheck, down }) {
   const urgent = [];
   const check = (at) => {
     clock = at;
-    return runCheck({ settings: w.settings, clients: w.clients(), io: { now: () => at, git: quietGit, runner: { now: () => at, readUsage: () => usageAt(5) }, runDaily: async (a) => (mornings.push(iso(at)), runDaily(a)), notify: (m) => (m.urgent && urgent.push([iso(at), m.text]), { sent: true }) }, options: {} });
+    return runCheck({ settings: w.settings, clients: w.clients(), io: { now: () => at, git: quietGit, runner: { now: () => at, readUsage: () => usageAt(5) }, spawn: inProcess(w, { now: () => at, readUsage: () => usageAt(5) }), runDaily: async (a) => (mornings.push(iso(at)), runDaily(a)), notify: (m) => (m.urgent && urgent.push([iso(at), m.text]), { sent: true }) }, options: {} });
   };
   const checks = async (from, to, step) => {
     for (let at = from; at < to; at += step) await check(at);
@@ -591,7 +591,7 @@ test('a loop of any cause: a stage that "succeeds" but makes a fresh event each 
   };
   for (let at = NOW; at < NOW + HOUR; at += 5 * MIN) {
     clock = at;
-    await runCheck({ settings: w.settings, clients: w.clients(), io: { now: () => clock, git: quietGit, runner: { now: () => clock, readUsage: () => usageAt(5), spawnClaude, ensureWorktree: noTree }, notify: (m) => (notes.push(m), { sent: true }) }, options: {} });
+    await runCheck({ settings: w.settings, clients: w.clients(), io: { now: () => clock, git: quietGit, runner: { now: () => clock, readUsage: () => usageAt(5), spawnClaude, ensureWorktree: noTree }, spawn: inProcess(w, { now: () => clock, readUsage: () => usageAt(5), spawnClaude, ensureWorktree: noTree }), notify: (m) => (notes.push(m), { sent: true }) }, options: {} });
   }
   assert.equal(sessions.length, 3);
   const t = await w.one('481');

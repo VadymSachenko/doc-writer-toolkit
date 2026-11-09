@@ -11,21 +11,27 @@ import { latestRearm, readRearm } from './setlocal.mjs';
 import { rearmJob } from './rearm.mjs';
 import { ALERT_MS, HOLD_MS, WINDOW_MS, advance, pauseMs, readFeed, readSource, sourcesOf, ticketsOf, watchDir, writeFeed } from './feed.mjs';
 import { jobCommand, jobDue, jobEnv, listChanges, listMatcher, spawnJob, updateWatchState, writeJobLog } from './jobs.mjs';
-import { notificationsOf, notify, startedOf } from './notify.mjs';
+import { notificationsOf, notify, startedNote } from './notify.mjs';
+import { allLocks } from './locks.mjs';
 import { progressAfterCheck } from './progress.mjs';
 import { commentWait } from './quiet.mjs';
-import { liveHandOnKeys } from './forge-state.mjs';
+import { dropHandOnStep, handOnLive, liveHandOnKeys, runsGoingIn, startsInFlight, takeHandOn } from './forge-state.mjs';
+import { makeDispatcher } from './dispatch.mjs';
 
 // One check of the watcher (design §5, D-048), started by launchd every few minutes. No model call of its own:
 //   1. read every source since its cursor; a check that finds nothing ends here, with no status, no runner, no claude;
 //      a source failing for ALERT_MS of the watcher's awake time is a failed part (one per client), and so is its gap;
 //   2. map the new events to the host jobs' watched lists, and 3. to tickets through the ledgers;
+//   0. the runs earlier checks handed on that ended: collected (lib/dispatch.mjs);
 //   4. once a day after `schedule.morning`, the morning run (triage, finishing, starts) instead of step 5;
-//   5. `ticket-state status` for the tickets that changed; the runner finishes those that have a next step, each once;
-//   then the cursors, written after the hand-off;
+//   5. `ticket-state status` for the tickets that changed; the runner hands each group with a next step to a process
+//   of its own, each once; then the cursors, written after the hand-off;
 //   5b. inside `limits.startHours`, a start pass (triage, then starts, as a scheduled run) once per change of what a
 //   start depends on: a slot freed, a new ready group or intake card due, a new day (see startPassOf);
 //   6. the host jobs that are due; 7. the notifications.
+// The check waits for no ticket's session (TASK-092), only for a triage's and a due host job's: the finishing and the starts its run, its morning run
+// and its start pass decide go each to a run of one group in a process of its own (`watcher.mjs --hand-on`), recorded
+// in the feed's `handOns`, and the check ends. A group over `limits.parallel` waits in `pending` for a later check.
 // An error in one part is caught there, reported and notified, and the rest of the check goes on.
 // One check at a time: a lock in `<state>/watch/active/`, freed when its process is gone.
 // Between full checks, the forge check (lib/forge-watch.mjs, D-126): the PRs that changed only, for the comments on
@@ -169,6 +175,41 @@ export function noRoomOf(wip) {
 // A start pass that failed before its first step is tried again after this long, not at every check.
 export const RETRY_MS = 30 * 60 * 1000;
 
+// A ticket's group, by its ledger (a ticket with none, or one that doesn't read, is its own).
+function groupOfKey(state) {
+  return (k) => {
+    try {
+      return readLedger(state, k)?.group ?? k;
+    } catch {
+      return k;
+    }
+  };
+}
+
+// Whether a start handed on got its cards into work: each ticket's start recorded done since the hand-on.
+function startedSince(state, h) {
+  return h.keys.every((k) => {
+    try {
+      const s = readLedger(state, k)?.stages?.start;
+      return s?.status === 'done' && Date.parse(s.at) >= Date.parse(h.at);
+    } catch {
+      return false;
+    }
+  });
+}
+
+// What a start pass (or the morning run) that decided no start for a passing reason leaves, so the next look runs a
+// pass whatever changed (`again`), not only after the next change: no usage reading (tried again after RETRY_MS), or a
+// start that waited for a run slot (tried again once the runs are under `limits.parallel`).
+// A run with no reading stops at its first start (the guard), or decides none at all (with no allowance known,
+// `startable` gives no group): both are the same passing reason.
+export function againOf(r, now = Date.now()) {
+  const noReading = (r?.guard ?? []).find((g) => /^no usage reading/.test(g.reason ?? ''))?.reason ?? (r && 'usage' in r && !r.usage && !r.dryRun && !r.observe ? noUsageReading(null) : null);
+  if (noReading) return { again: noReading, retryAt: new Date(now + RETRY_MS).toISOString() };
+  const slot = (r?.starts ?? []).find((x) => x.waits);
+  return slot ? { again: `a start waits for a run slot (${slot.waits})` } : {};
+}
+
 // A card that came into, or changed in, the ready or the intake list of the flow's board.
 const START_STATUSES = new Set(['ready', 'intake']);
 
@@ -213,6 +254,47 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
     next.awakeSince = iso(awakeSince);
     // When the last full check began: the watcher's tick runs the next one `watchMinutes` after it (checkKindOf).
     next.fullAt = iso(checkStart);
+    const isAlive = io.isAlive ? { isAlive: io.isAlive } : {};
+
+    // 0. The runs earlier checks handed on (lib/dispatch.mjs). One that ended leaves its result: its notifications (a
+    // step failed twice, a guard stop); one that failed or left none (a crash, a reboot) puts its tickets back in
+    // `pending`, as a failed hand-off of the check's own did. A start the start pass handed on is told once its card is
+    // in work (its ledger's start done since the hand-on), whether its run still goes on or not.
+    const ended = [];
+    const requeued = [];
+    let lostStart = null;
+    const started = [];
+    next.handOns = [];
+    for (const h of dryRun ? [] : feed.handOns ?? []) {
+      const live = handOnLive(h, { now: checkStart, ...isAlive });
+      if (h.stage === 'start' && h.by === 'startPass' && !h.told && startedSince(settings.state, h)) {
+        started.push(h);
+        h.told = true;
+      }
+      if (live) {
+        next.handOns.push(h);
+        continue;
+      }
+      const r = takeHandOn(settings.state, h.id);
+      dropHandOnStep(settings.state, h.id);
+      if (r?.error) {
+        failed('the run', r.error);
+        requeued.push(...h.keys);
+      } else if (!r) {
+        out.notes.push(`the run of ${h.keys.join(', ')} (pid ${h.pid}) ended with no result: looked at again now`);
+        requeued.push(...h.keys);
+      } else ended.push({ ...h, run: r.run });
+      // A start whose run failed or died before recording it: still ready, so no change would bring a start pass back.
+      if (h.stage === 'start' && (!r || r.error) && !startedSince(settings.state, h)) lostStart = `the start of ${h.keys.join(', ')} ended with no result`;
+    }
+    if (dryRun) next.handOns = feed.handOns ?? [];
+    if (lostStart) next.starts = { ...(next.starts ?? {}), again: lostStart, retryAt: iso(checkStart + RETRY_MS) };
+    out.finished = ended.map((h) => ({ id: h.id, keys: h.keys, stage: h.stage }));
+    // One dispatcher per run this check makes; each adds its runs to `next.handOns`, written at once.
+    const dispatchFor = (by, why = null) => makeDispatcher({ settings, io, records: next.handOns, by, why, claude });
+    // A group the run didn't hand on waits for a later check: no run slot, a run of another process holds it, its
+    // process couldn't start, or no usage reading. A guard stop for the allowance drops it, as a run of its own would.
+    const notHanded = (r) => (r?.handedOn ?? []).filter((x) => !x.handedOn && !(x.guard && !/^no usage reading/.test(x.guard))).flatMap((x) => x.keys);
     // Written now, not after the check's run: a full check that crashes part way isn't started again at every tick.
     if (!dryRun) writeFeed(settings.state, { ...feed, fullAt: next.fullAt });
     const afterMorning = localMinutes(checkStart) >= minutesOf(settings.schedule.morning);
@@ -293,6 +375,9 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
     let unmapped = [];
     const wanted = [...(feed.pending ?? [])];
     const want = (k) => !wanted.includes(k) && wanted.push(k);
+    for (const k of requeued) want(k);
+    // The tickets the morning run had to leave to a later check while their failed step still had its one more try.
+    const owed = next.owed?.date === today ? next.owed.keys : [];
     try {
       const { ledgers, bad } = readLedgersApart(settings.state);
       for (const b of bad) {
@@ -329,8 +414,11 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
       const progress = {};
       let begun = true;
       try {
-        out.morning = await run({ settings, clients, io: runnerIo, options: { dryRun, morning: true, trigger: 'schedule', claude, progress } });
+        out.morning = await run({ settings, clients, io: runnerIo, options: { dryRun, morning: true, trigger: 'schedule', claude, progress, dispatch: dispatchFor('morning') } });
         out.handed = wanted;
+        next.pending = notHanded(out.morning);
+        const left = (out.morning.handedOn ?? []).filter((x) => !x.handedOn && x.retried).flatMap((x) => x.keys);
+        next.owed = left.length ? { date: today, keys: left } : null;
       } catch (e) {
         // A morning run that failed before its first step is started again at the next check; one that failed part
         // way counts as the day's, so its triage, starts and retries are not repeated at every check.
@@ -340,11 +428,11 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
       }
       if (begun) next.morning = { lastDate: today, at: iso(clock()), ...(out.errors.some((x) => x.part === 'the morning run') ? { error: out.errors.at(-1).error } : {}) };
       // The morning run is the day's first start pass: what it left is what the watcher's next pass compares with.
-      if (begun) next.starts = { date: today, at: iso(clock()), by: 'morning', print: printOfSummary(out.morning?.after, today), nextDueAt: out.morning?.after?.intakeQuietAt ?? null, deferred: null, outcome: out.morning ? 'the morning run' : 'the morning run failed part way' };
+      if (begun) next.starts = { date: today, at: iso(clock()), by: 'morning', print: printOfSummary(out.morning?.after, today), nextDueAt: out.morning?.after?.intakeQuietAt ?? null, deferred: null, outcome: out.morning ? 'the morning run' : 'the morning run failed part way', ...againOf(out.morning, clock()) };
     } else if (wanted.length) {
       let st = null;
       try {
-        st = await computeStatus({ settings, clients, now: checkStart, only: wanted, git: io.git ?? makeGit(settings) });
+        st = await computeStatus({ settings, clients, now: checkStart, only: wanted, git: io.git ?? makeGit(settings), inFlight: startsInFlight(settings.state, { now: checkStart, ...isAlive }) });
       } catch (e) {
         failed('status', e);
         next.pending = wanted;
@@ -355,10 +443,10 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
         out.capped = st.tickets.filter((t) => t.capped).map((t) => ({ key: t.key, ...t.capped, why: t.gate.why }));
         // A failed step that waits for a person is not handed on: the runner would read /usage for nothing. A start is
         // handed on only for a card already in work (a person's move, or a recorded start that goes on).
-        const runnable = st.tickets.filter((t) => t.next && !t.locked && !t.hand && !t.next.waits && (t.next.stage !== 'start' || t.next.byHand || t.next.again)).map((t) => t.key);
+        const runnable = st.tickets.filter((t) => t.next && !t.locked && !t.hand && (!t.next.waits || owed.includes(t.key)) && (t.next.stage !== 'start' || t.next.byHand || t.next.again)).map((t) => t.key);
         // A ticket a run holds now is looked at again on the next check, so a change made during that run isn't lost. So
         // is one the forge check handed on whose run may not have taken its lock yet (lib/forge-state.mjs).
-        const forgeHeld = liveHandOnKeys(settings.state, { now: checkStart, ...(io.isAlive ? { isAlive: io.isAlive } : {}) });
+        const forgeHeld = liveHandOnKeys(settings.state, { now: checkStart, ...isAlive });
         next.pending = st.tickets.filter((t) => t.locked).map((t) => t.key);
         out.handed = wanted;
         const handing = [];
@@ -369,9 +457,12 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
           else handing.push(key);
         }
         if (handing.length) {
-          say({ kind: 'watch', keys: handing, outcome: 'handed', note: `${fresh.length} new event(s); the runner finishes ${handing.join(', ')}` });
+          say({ kind: 'watch', keys: handing, outcome: 'handed', note: `${fresh.length} new event(s); the runner hands on ${handing.join(', ')}, a process per group` });
           try {
-            out.run = await run({ settings, clients, io: runnerIo, options: { dryRun, trigger: 'watcher', named: handing, claude } });
+            const retryWaiting = handing.some((k) => owed.includes(k));
+            out.run = await run({ settings, clients, io: runnerIo, options: { dryRun, trigger: 'watcher', named: handing, claude, dispatch: dispatchFor('watcher'), ...(retryWaiting ? { retryWaiting } : {}) } });
+            next.pending = [...new Set([...next.pending, ...notHanded(out.run)])];
+            if (next.owed) next.owed = { ...next.owed, keys: next.owed.keys.filter((k) => !(out.run.handedOn ?? []).some((x) => x.handedOn && x.keys.includes(k))) };
           } catch (e) {
             failed('the run', e);
             next.pending = [...new Set([...next.pending, ...handing])];
@@ -438,7 +529,13 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
     // 7. Notifications, once a day per reason; a caught error goes to the run log once a day too.
     if (!dryRun) {
       for (const k of Object.keys(next.notified ?? {})) if (!k.includes(today)) delete next.notified[k];
-      for (const n of notificationsOf({ morning: out.morning, run: out.run, startPass: out.startPass, jobs: [...out.jobs, ...heldAlerts], errors: out.errors, capped: out.capped ?? [], today })) {
+      // The check's own, then those of the runs handed on that ended, and each start handed on that got its card in work.
+      const notes = [
+        ...notificationsOf({ morning: out.morning, run: out.run, startPass: out.startPass, jobs: [...out.jobs, ...heldAlerts], errors: out.errors, capped: out.capped ?? [], today }),
+        ...ended.flatMap((h) => notificationsOf({ run: h.run, today })),
+        ...started.map((h) => startedNote(h, today)),
+      ];
+      for (const n of notes) {
         if (next.notified?.[n.key]) continue;
         const r = (io.notify ?? notify)(n, io.notifyIo ?? {});
         (next.notified ??= {})[n.key] = iso(clock());
@@ -453,7 +550,7 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
       progressAfterCheck({ settings, now: clock(), notify: io.notify, notifyIo: io.notifyIo ?? {} });
     }
     out.log = log;
-    out.quiet = !fresh.length && !wanted.length && !out.waiting.length && !out.morning && !out.startPass && !out.errors.length && !out.jobs.some((j) => j.due !== false) && out.sources.every((s) => s.outcome !== 'failed' && s.outcome !== 'gap');
+    out.quiet = !fresh.length && !wanted.length && !ended.length && !started.length && !out.waiting.length && !out.morning && !out.startPass && !out.errors.length && !out.jobs.some((j) => j.due !== false) && out.sources.every((s) => s.outcome !== 'failed' && s.outcome !== 'gap');
     return out;
 
     // Whether a ticket whose next step answers comments waits for them to be quiet (then it is in `out.waiting`). A
@@ -481,7 +578,7 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
     // list, a new day, an intake card due, a change deferred. Inside `limits.startHours` only; outside them a change is
     // kept for the first check inside them (the morning run takes it over).
     async function startPassOf() {
-      const last = feed.starts ?? null;
+      const last = next.starts ?? null;
       const cardMoved = unmapped.some((e) => e.board === settings.tracker.board && START_STATUSES.has(e.statusAfter ?? e.status));
       const dueAgain = Boolean(last?.nextDueAt) && checkStart >= Date.parse(last.nextDueAt);
       // The hours at this moment, not at the check's start: the watcher's own run may have taken past their end.
@@ -494,11 +591,11 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
       // A pass that failed before its first step (or its status read) is tried again after RETRY_MS, not at every check.
       if (last?.retryAt && clock() < Date.parse(last.retryAt)) return null;
       const retryLater = (why) => ({ ...(last ?? {}), deferred: last?.deferred ?? why, retryAt: iso(clock() + RETRY_MS) });
-      if (!seen && !last?.deferred && last?.date === today && !dueAgain && !cardMoved) return null;
+      if (!seen && !last?.deferred && !last?.again && last?.date === today && !dueAgain && !cardMoved) return null;
       let view = seen;
       if (!view) {
         try {
-          view = await computeStatus({ settings, clients, now: checkStart, only: [], git: io.git ?? makeGit(settings) });
+          view = await computeStatus({ settings, clients, now: checkStart, only: [], git: io.git ?? makeGit(settings), inFlight: startsInFlight(settings.state, { now: checkStart, ...isAlive }) });
         } catch (e) {
           next.starts = retryLater('the status could not be read');
           throw e;
@@ -511,7 +608,8 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
         next.starts = { ...last, print, nextDueAt, deferred: null };
         return null;
       }
-      const why = changeOf(last?.print ?? null, print);
+      // A pass whose last try ended for a passing reason (no usage reading, no run slot) runs again with no change.
+      const why = changeOf(last?.print ?? null, print) ?? (last?.again ? `again: ${last.again}` : null);
       if (!why) {
         // Nothing that could let a start happen; what was seen is the view the next change is measured from.
         if (last) next.starts = { ...last, print, nextDueAt, deferred: null, retryAt: null };
@@ -526,6 +624,14 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
         next.starts = { ...base, outcome: `not run: ${noRoom}` };
         return { why, ran: false, skipped: noRoom };
       }
+      // Nothing to triage, and the runs at `limits.parallel`: no start could be handed on, so no runner and no /usage.
+      // The pass runs again once a run ends.
+      const busy = triageKeys.length ? 0 : runsGoingIn(settings.state, { locks: allLocks(settings.state, clock()), now: clock(), ...isAlive, groupOf: groupOfKey(settings.state) }).size;
+      if (!triageKeys.length && typeof settings.limits.parallel === 'number' && busy >= settings.limits.parallel) {
+        const full = `${busy} run(s) going, limits.parallel ${settings.limits.parallel}`;
+        next.starts = { ...base, outcome: `not run: ${full}`, again: `a start waits for a run slot (${full})` };
+        return { why, ran: false, skipped: full };
+      }
       if (!dryRun) {
         next.starts = { ...base, outcome: 'running' };
         writeFeed(settings.state, next);
@@ -535,9 +641,9 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
       try {
         // No triage and no further start once the hours end while the pass runs; a started group's chain goes on.
         const startUntil = startHoursEnd(clock(), settings.limits.startHours);
-        const r = await run({ settings, clients, io: runnerIo, options: { dryRun, trigger: 'schedule', startPass: true, startUntil, triageKeys, claude, progress } });
-        const started = startedOf(r);
-        next.starts = { ...base, at: iso(clock()), print: printOfSummary(r.after, today) ?? print, nextDueAt: r.after?.intakeQuietAt ?? nextDueAt, outcome: started.length ? `started ${started.map((s) => s.keys.join(', ')).join('; ')}` : 'started nothing' };
+        const r = await run({ settings, clients, io: runnerIo, options: { dryRun, trigger: 'schedule', startPass: true, startUntil, triageKeys, claude, progress, dispatch: dispatchFor('startPass', why) } });
+        const handed = (r.starts ?? []).filter((x) => x.handedOn);
+        next.starts = { ...base, at: iso(clock()), print: printOfSummary(r.after, today) ?? print, nextDueAt: r.after?.intakeQuietAt ?? nextDueAt, outcome: handed.length ? `handed on the start of ${handed.map((x) => x.keys.join(', ')).join('; ')}` : 'started nothing', ...againOf(r, clock()) };
         return { why, ran: true, run: r };
       } catch (e) {
         // One that failed before its first step is tried again after RETRY_MS; one that failed part way counts.

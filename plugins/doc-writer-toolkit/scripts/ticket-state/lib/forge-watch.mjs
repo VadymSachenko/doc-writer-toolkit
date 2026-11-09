@@ -1,8 +1,4 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import crypto from 'node:crypto';
-import { spawn } from 'node:child_process';
-import { WINDOW_MS, advance, readFeed, readSource, sourcesOf, ticketsOf, watchDir } from './feed.mjs';
+import { WINDOW_MS, advance, readFeed, readSource, sourcesOf, ticketsOf } from './feed.mjs';
 import { readLedgersApart } from './ledger.mjs';
 import { allLocks } from './locks.mjs';
 import { commentWait, dueWaits } from './quiet.mjs';
@@ -11,10 +7,9 @@ import { notificationsOf, notify } from './notify.mjs';
 import { appendRunLog, localDate } from './report.mjs';
 import { progressAfterCheck } from './progress.mjs';
 import { tickSecondsOf } from './settings.mjs';
-import { scriptEnv } from './env.mjs';
-import { WATCHER } from './launchd.mjs';
 import { alive, runCheck, takeWatchLock, watchLockHolder } from './watch.mjs';
-import { handOnLive, readForge, runsGoing, takeHandOn, writeForge, writeHandOn } from './forge-state.mjs';
+import { dropHandOnStep, fullHandOns, handOnLive, readForge, readHandOnStep, runsGoing, takeHandOn, writeForge, writeHandOn } from './forge-state.mjs';
+import { fullArgs, handOnArgs, handOnId, spawnDetached } from './dispatch.mjs';
 
 // The forge check and the tick (D-126). The owner's and a reviewer's comments on the pipeline's PRs are picked up
 // within a minute, and nothing that runs long can hold that up:
@@ -27,7 +22,8 @@ import { handOnLive, readForge, runsGoing, takeHandOn, writeForge, writeHandOn }
 //     it: the next tick, a minute later, looks at the PRs again. The run's group locks decide who runs a ticket (the
 //     runner skips a group another run holds), and the forge check's record of its live runs (`handOns`) holds their
 //     tickets until the run took its locks, for the full check as well;
-//   - at most `limits.parallel` runs at a time across processes: the live group locks and the forge check's live runs.
+//   - at most `limits.parallel` runs at a time across processes: the live group locks and both checks' live runs;
+//   - a ticket the full check handed on (its record in `feed.json`, lib/dispatch.mjs) is held as one of its own runs'.
 
 const iso = (ms) => new Date(ms).toISOString();
 const errorText = (e) => String(e?.message ?? e).split('\n')[0].slice(0, 300);
@@ -42,35 +38,17 @@ function waitEntry(key, w, prev, { out, say, now }) {
   return entry;
 }
 
-// The run's result as a hand-on keeps it: what the notifications read (lib/notify.mjs).
+// The run's result as a hand-on keeps it: what the notifications read (lib/notify.mjs), a start's first step included.
 const summaryOf = (r) => ({
   named: r?.named ?? [],
   stopped: r?.stopped ?? null,
   guard: (r?.guard ?? []).map((g) => ({ kind: g.kind, reason: g.reason, what: g.what ?? null })),
   ran: (r?.ran ?? []).map((s) => ({ group: s.group ?? null, stage: s.stage ?? null, keys: s.keys ?? [], outcome: s.outcome ?? null, note: s.note ?? null })),
+  starts: (r?.starts ?? []).map((s) => ({ group: s.group ?? null, steps: (s.steps ?? []).slice(0, 1).map((x) => ({ stage: x.stage ?? null, keys: x.keys ?? [], outcome: x.outcome ?? null })) })),
+  notes: r?.notes ?? [],
 });
 
-// A process of its own, detached from the tick (its own session, so launchd's end of the tick doesn't end it; the
-// plist says `AbandonProcessGroup` too), its output appended to the LaunchAgent's log. No pipe: the tick exits first.
-export function spawnDetached(args, { settings, env = process.env, node = process.execPath }) {
-  const log = path.join(watchDir(settings.state), 'launchd.log');
-  fs.mkdirSync(path.dirname(log), { recursive: true });
-  const fd = fs.openSync(log, 'a');
-  try {
-    const child = spawn(node, args, { cwd: settings.root, env: scriptEnv(env), detached: true, stdio: ['ignore', fd, fd] });
-    child.unref();
-    return { pid: child.pid, args };
-  } finally {
-    fs.closeSync(fd);
-  }
-}
-
-const common = (settings, claude) => ['--root', settings.root, ...(settings.file ? ['--settings', settings.file] : []), '--claude', claude, '--quiet'];
-
-// The arguments of a hand-on's process and of a full check's: the watcher in a mode of its own. It prepares its own
-// environment (no API key; the sign-in token for its `claude` only), as the tick does.
-export const handOnArgs = (settings, { id, keys, claude = 'claude' }) => [WATCHER, '--hand-on', id, ...keys.flatMap((k) => ['--ticket', k]), ...common(settings, claude)];
-export const fullArgs = (settings, { claude = 'claude', dryRun = false }) => [WATCHER, '--full', ...common(settings, claude), ...(dryRun ? ['--dry-run'] : [])];
+export { fullArgs, handOnArgs, spawnDetached } from './dispatch.mjs';
 
 // ------------------------------------------------------------------ the forge check
 
@@ -154,7 +132,9 @@ export async function runForgeCheck({ settings, clients, io = {}, options = {} }
     for (const [key, events] of ticketsOf(fresh, ledgers).keys) looks.set(key, [...new Set(events.map((e) => `${e.repo}#${e.number}`))]);
     for (const key of dueWaits(waits, checkStart)) if (!looks.has(key)) looks.set(key, waits[key].prs ?? null);
     const locks = allLocks(settings.state, checkStart).filter((x) => x.live);
-    const running = new Set(next.handOns.flatMap((h) => h.keys));
+    // The full check's live runs too (lib/dispatch.mjs): a ticket it handed on is held as one of ours.
+    const fullRuns = fullHandOns(settings.state).filter((h) => handOnLive(h, { now: checkStart, isAlive }));
+    const running = new Set([...next.handOns, ...fullRuns].flatMap((h) => h.keys));
     const handing = [];
     for (const [key, prIds] of looks) {
       const l = ledgers.find((x) => x.key === key);
@@ -191,13 +171,13 @@ export async function runForgeCheck({ settings, clients, io = {}, options = {} }
     // live lock, and our live runs that hold none yet), the tickets wait for a slot.
     if (handing.length) {
       const groupOf = (k) => ledgers.find((x) => x.key === k)?.group ?? k;
-      const busy = runsGoing({ locks, handOns: next.handOns, now: checkStart, isAlive, groupOf }).size;
+      const busy = runsGoing({ locks, handOns: [...next.handOns, ...fullRuns], now: checkStart, isAlive, groupOf }).size;
       const limit = settings.limits.parallel;
       if (typeof limit === 'number' && busy >= limit) {
         out.notes.push(`${busy} run(s) going, limits.parallel ${limit}: ${handing.join(', ')} wait for a slot`);
         requeue(handing, `the runs are at limits.parallel (${limit})`, checkStart);
       } else {
-        const id = `${iso(checkStart).replace(/[-:.]/g, '')}-${crypto.randomBytes(3).toString('hex')}`;
+        const id = handOnId(checkStart);
         say({ kind: 'watch', keys: handing, outcome: 'handed', note: `the forge check: comments to answer on ${handing.join(', ')}; the run goes on in a process of its own (${id})` });
         try {
           const args = handOnArgs(settings, { id, keys: handing, claude });
@@ -239,17 +219,30 @@ export async function runForgeCheck({ settings, clients, io = {}, options = {} }
 
 // ------------------------------------------------------------------ the hand-on
 
-// A hand-on's process (`watcher.mjs --hand-on <id> --ticket <key>…`): the runner's watcher run for these tickets, as
-// the full check's own; its result goes to `watch/hand-on/<id>.json` for the next forge check.
+// A check's /usage reading a hand-on starts from, when it is no older than this; an older one is read again.
+export const USAGE_FRESH_MS = 10 * 60000;
+
+// A hand-on's process (`watcher.mjs --hand-on <id> --ticket <key>…`): the runner's watcher run for these tickets; its
+// result goes to `watch/hand-on/<id>.json` for the next check of the one that started it. One the full check started
+// has its step file (lib/dispatch.mjs): one group, from the check's /usage reading; a start is a scheduled run of that
+// group's start (`startKeys`), and a finishing step the morning run handed on keeps its one more try (`retryWaiting`).
 export async function runHandOn({ settings, clients, io = {}, options = {} }) {
   const { id, keys = [], claude = 'claude', dryRun = false } = options;
   const clock = io.now ?? Date.now;
   const at = iso(clock());
   const run = io.runDaily ?? runDaily;
   const runnerIo = { ...(io.runner ?? {}), ...(io.claudeEnv ? { claudeEnv: io.claudeEnv } : {}) };
+  const handed = readHandOnStep(settings.state, id);
+  if (handed && !dryRun) dropHandOnStep(settings.state, id);
+  const usage = handed?.usage && clock() - Date.parse(handed.usageAt) < USAGE_FRESH_MS ? { usage: handed.usage } : {};
+  const runOptions = !handed
+    ? { dryRun, trigger: 'watcher', named: keys, claude }
+    : handed.step?.stage === 'start'
+      ? { dryRun, trigger: 'schedule', startKeys: keys, claude, handOnId: id, retryWaiting: Boolean(handed.retryWaiting), ...usage }
+      : { dryRun, trigger: 'watcher', named: keys, claude, handOnId: id, retryWaiting: Boolean(handed.retryWaiting), ...usage };
   let result;
   try {
-    const r = await run({ settings, clients, io: runnerIo, options: { dryRun, trigger: 'watcher', named: keys, claude } });
+    const r = await run({ settings, clients, io: runnerIo, options: runOptions });
     result = { kind: 'hand-on', id, keys, at, ended: iso(clock()), run: summaryOf(r) };
   } catch (e) {
     result = { kind: 'hand-on', id, keys, at, ended: iso(clock()), error: errorText(e) };

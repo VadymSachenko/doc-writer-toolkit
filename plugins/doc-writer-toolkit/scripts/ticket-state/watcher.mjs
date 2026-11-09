@@ -13,11 +13,12 @@ const USAGE = `watcher [options]
 
 One check of the ticket flow's watcher, for launchd to start every few minutes (see launchd.mjs). With no model call
 of its own, it reads every event since the last check (the boards' actions, the PRs that changed and the PR events),
-maps them to tickets through the ledgers, asks 'ticket-state status' what each changed ticket does next, and has the
-runner finish those that have a next step, each once. Once a day after schedule.morning it starts the morning run
-instead. Inside limits.startHours (10-22 by default), when a slot frees or another start may have become possible,
-it has the runner triage and start as a scheduled run would, once per change. It also starts the host jobs that are
-due. A check that finds nothing starts nothing.
+maps them to tickets through the ledgers, asks 'ticket-state status' what each changed ticket does next, and hands
+each group that has a next step to a run in a process of its own (--hand-on), each once, and doesn't wait for it.
+Once a day after schedule.morning it starts the morning run instead. Inside limits.startHours (10-22 by default),
+when a slot frees or another start may have become possible, it has the runner triage and decide the starts as a
+scheduled run would, once per change, each start handed to a process of its own. It also runs the host jobs that
+are due. A triage and a due host job are the only things a check waits for. A check that finds nothing starts nothing.
 
 The LaunchAgent ticks every schedule.forgeSeconds (60 by default). Each tick runs the forge check: the PRs that
 changed only, no tracker read, no morning run, no start pass, no job. It hands a ticket with the owner's or a
@@ -28,7 +29,7 @@ schedule.watchMinutes the tick also starts the full check as a process of its ow
 Options
   --full                    run the full check now, here, whatever the tick would run
   --forge                   run the forge check now, here, whatever the tick would run
-  --hand-on <id>            the forge check's run for the tickets named with --ticket (it starts this itself)
+  --hand-on <id>            a check's run for the tickets named with --ticket (a check starts this itself)
   --ticket <key>            with --hand-on: a ticket to finish (repeatable)
   --dry-run                 read and plan only: no runner step, no job, no cursor, no notification is written
   --quiet                   print nothing for a quiet check, one line otherwise (for launchd's log)
@@ -62,9 +63,11 @@ export function startPassLine(p) {
   const triaged = r.triage?.outcome === 'done' && r.triage.keys?.length ?`triaged ${r.triage.keys.join(', ')}; ` : '';
   const started = startedOf(r);
   if (started.length) return `start pass (${p.why}): ${triaged}started ${started.map((s) => s.keys.join(', ')).join('; ')}`;
+  const handed = (r.starts ?? []).filter((s) => s.handedOn);
+  if (handed.length) return `start pass (${p.why}): ${triaged}handed on the start of ${handed.map((s) => `${s.keys.join(', ')} (run ${s.handedOn.id})`).join('; ')}`;
   const planned = (r.starts ?? []).filter((s) => s.stage === 'start' && !s.steps);
   if ((r.dryRun || r.observe) && planned.length) return `start pass (${p.why}): ${triaged}would start ${planned.map((s) => s.keys.join(', ')).join('; ')}`;
-  const why = r.guard?.[0]?.reason ?? r.notStarted?.[0]?.reasons?.join('; ') ?? (r.starts?.length ? 'its start did not get the card into work' : 'no group could start');
+  const why = r.guard?.[0]?.reason ?? r.starts?.find((s) => s.waits)?.waits ?? r.notStarted?.[0]?.reasons?.join('; ') ?? (r.starts?.length ? 'its start did not get the card into work' : 'no group could start');
   return `start pass (${p.why}): ${triaged}started nothing (${why})`;
 }
 
@@ -77,7 +80,12 @@ export function oneLine(out) {
   if (failed.length) bits.push(`${failed.length} source(s) failing`);
   if (out.morning) bits.push('morning run');
   if (out.errors?.length) bits.push(`${out.errors.length} part(s) failed: ${out.errors.map((e) => e.part).join(', ')}`);
-  if (out.run) bits.push(`finished ${out.run.named.join(', ')}`);
+  for (const f of out.finished ?? []) bits.push(`run ${f.id} of ${f.keys.join(', ')} ended`);
+  if (out.run?.handedOn) {
+    const handed = out.run.handedOn.filter((x) => x.handedOn);
+    if (handed.length) bits.push(`handed on ${handed.map((x) => `${x.keys.join(', ')} (run ${x.handedOn.id})`).join('; ')}`);
+    for (const x of out.run.handedOn.filter((y) => !y.handedOn)) bits.push(`${x.keys.join(', ')} not handed on: ${x.waits ?? x.held ?? x.guard ?? x.error}`);
+  } else if (out.run) bits.push(`finished ${out.run.named.join(', ')}`);
   for (const w of (out.waiting ?? []).filter((x) => x.new)) bits.push(`${w.key} waits for quiet until ${w.until}`);
   if (out.startPass) bits.push(startPassLine(out.startPass));
   for (const j of out.jobs.filter((x) => x.due)) bits.push(`job ${j.name}: ${j.outcome ?? (j.held ? 'held' : 'planned')}`);
