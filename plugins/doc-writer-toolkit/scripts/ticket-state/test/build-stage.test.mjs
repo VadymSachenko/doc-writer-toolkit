@@ -6,7 +6,7 @@ import { NOW, card, pr, tmp } from './fakes.mjs';
 import { ledger, read, world } from './helpers.mjs';
 import { briefFor, runDaily, scriptedCalls } from '../lib/runner.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
-import { buildLockState, freeBuildLock, pidAlive, takeBuildLock } from '../lib/build-lock.mjs';
+import { HOLDER, buildLockDir, buildLockState, freeBuildLock, pidAlive, takeBuildLock } from '../lib/build-lock.mjs';
 import { allLocks } from '../lib/locks.mjs';
 import { runSiteBuild } from '../lib/site-build.mjs';
 import { localDate } from '../lib/report.mjs';
@@ -312,6 +312,38 @@ test('AC-2: a build lock the runner can\'t use is a recorded failure of the step
   const busy = read(v.w, '701').runs.at(-1);
   assert.deepEqual([busy.outcome, busy.waitedMs, busy.wallMs, 'start' in busy], ['busy', v.w.settings.build.waitMinutes * 60000, v.w.settings.build.waitMinutes * 60000, false]);
   assert.match(fs.readFileSync(path.join(v.w.settings.state, 'reports', `${localDate(NOW)}.md`), 'utf8'), /0 session\(s\) today/);
+});
+
+test('AC-2: a build lock that isn\'t a folder fails a session that builds, before it starts, and is left alone; a renewal that throws ends nothing', async () => {
+  const t = atBuild(1, { done: 6 });
+  fs.mkdirSync(t.w.settings.state, { recursive: true });
+  fs.writeFileSync(buildLockDir(t.w.settings.state), 'not a folder');
+  const out = await run(t.w, { ensureWorktree: t.ensureWorktree, spawnClaude: noSession }, { named: ['701'] });
+  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['visualPack', 'failed']]);
+  const l = read(t.w, '701');
+  assert.match(l.prs[0].chain.visualPack.note, /^the build lock: .*not a folder/);
+  assert.deepEqual([l.runs.at(-1).outcome, l.runs.at(-1).failures, 'start' in l.runs.at(-1)], ['failed', 1, false]);
+  assert.equal(fs.readFileSync(buildLockDir(t.w.settings.state), 'utf8'), 'not a folder');
+
+  // The build lock's renewal fails in its timer (here a folder where its temp file goes): the build goes on and is
+  // recorded, and the run ends as usual.
+  const u = atBuild();
+  mock.timers.enable({ apis: ['setInterval'] });
+  try {
+    const out2 = await run(u.w, {
+      ensureWorktree: u.ensureWorktree,
+      runBuild: async () => {
+        fs.mkdirSync(path.join(buildLockDir(u.w.settings.state), `${HOLDER}.tmp-${process.pid}`));
+        mock.timers.tick(5 * 60000);
+        return { code: 0, tail: [] };
+      },
+    }, { named: ['701'] });
+    assert.deepEqual(out2.ran.map((r) => [r.stage, r.outcome]), [['build', 'done']]);
+  } finally {
+    mock.timers.reset();
+  }
+  assert.equal(read(u.w, '701').prs[0].chain.build.status, 'done');
+  assert.equal(buildLockState(u.w.settings.state).held, false);
 });
 
 test('AC-1: the locales brief runs the locale-translator with --no-build; the re-sync\'s keeps its build, under the lock', () => {
