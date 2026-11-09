@@ -12,16 +12,20 @@ import { withHeader, withoutHeader } from '../../tracker/lib/comment-header.mjs'
 //     and removes only the stage labels, `checkLabel` and `readyLabel`, so a label the settings don't name (the owner's
 //     merge label) can't be set and `expertLabel` is never removed;
 //   - it creates no label, but `readyLabel` on a repository that lacks it;
-//   - a review on lines only comments, and a line outside the PR's diff is refused before anything is sent;
+//   - a review on lines only comments, and a line outside the PR's diff is refused before anything is sent (or, asked,
+//     its text goes into the review's own text);
 //   - the texts it is given are sent exactly, but for the settings' `commentHeader` in front of every comment, line
 //     comment and reply (not a PR's title or description): it adds no footer and no tool name;
 //   - every write says which ids it posted;
-//   - the operations are the ones in `OPERATIONS`; there is none to settle a discussion, withdraw a review, give a
-//     verdict, join a branch, close a PR or delete a branch.
+//   - the operations are the ones in `OPERATIONS`; there is none to withdraw a review, give a verdict, join a branch,
+//     close a PR or delete a branch. Two touch what was posted, each only on the pipeline's own: `resolveThread`
+//     settles a thread whose first comment the caller posted (its id among the caller's own), and `deleteComment`
+//     removes a conversation comment the caller posted, written from `self` and starting with the comment header. A
+//     person's thread or comment is refused, and a submitted review can't be removed at all.
 
 export const OPERATIONS = [
   'openPr', 'editPr', 'prState', 'changedPrsSince', 'prActivity', 'eventsSince', 'requestReviewers',
-  'reviewOnLines', 'reply', 'suggest', 'comment', 'addLabel', 'removeLabel', 'setStageLabel',
+  'reviewOnLines', 'reply', 'suggest', 'comment', 'addLabel', 'removeLabel', 'setStageLabel', 'resolveThread', 'deleteComment',
 ];
 
 // What the event feed reads by default (`eventsSince`): the events that move a ticket.
@@ -45,6 +49,9 @@ const needId = (n, what) => {
   if (!Number.isInteger(v) || v <= 0 || String(n).trim() !== String(v)) throw new CliError(`'${n}' is not ${what}`, { code: 2 });
   return v;
 };
+
+// The ids a caller says it posted (its ledger's `posted`): a list, or a text of ids split by commas and spaces.
+const ownIds = (own) => new Set((Array.isArray(own) ? own : String(own ?? '').split(/[\s,]+/)).map((x) => String(x).trim()).filter(Boolean));
 
 // A suggestion block, with a fence longer than any run of backticks inside the replacement.
 export function suggestionBlock(replacement) {
@@ -100,6 +107,9 @@ export function createForge({ adapter, forge, dryRun = false }) {
     return value;
   };
   const same = (a, b) => labelKey(a) === labelKey(b);
+  // A comment of the pipeline's: from `self` (when set) and, with a header in the settings, starting with it. The
+  // pipeline posts from the owner's login, so the login alone tells nothing.
+  const ownedText = (c) => (!forge.self || c.author === forge.self) && (!header || plain(c.body) !== String(c.body ?? ''));
 
   // The PR fields a caller needs everywhere; nothing the module would not return twice.
   const brief = (pr) => ({
@@ -294,12 +304,17 @@ export function createForge({ adapter, forge, dryRun = false }) {
     },
 
     // One review with event COMMENT and a comment per place. Lines outside the diff are refused, or with dropOutside
-    // left out and listed. Comments already on the PR with the same path, line and text are not posted again.
-    async reviewOnLines({ repo: repoIn, number, commit, comments, body, dropOutside = false, skipDiffCheck = false }) {
+    // left out and listed, or with outsideInBody put into the review's own text (each as its path and line, then its
+    // text), so nothing the caller wrote is lost. Comments already on the PR with the same path, line and text are not
+    // posted again. With a text of its own, a review may hold no line comment (a round whose changes need none); one
+    // whose text is already a review of the pipeline's login on the PR is not posted again.
+    async reviewOnLines({ repo: repoIn, number, commit, comments, body, dropOutside = false, skipDiffCheck = false, outsideInBody = false }) {
       const repo = repoOf(repoIn);
       const n = needNumber(number);
       if (!bare(commit)) throw new CliError('reviewOnLines needs the commit the lines refer to (--commit)', { code: 2 });
-      if (!Array.isArray(comments) || !comments.length) throw new Refusal('empty', 'reviewOnLines needs at least one comment: [{ path, line, body }]');
+      const hasBody = Boolean(bare(plain(body)));
+      if (!Array.isArray(comments) || (!comments.length && !hasBody)) throw new Refusal('empty', 'reviewOnLines needs at least one comment: [{ path, line, body }], or a review text (--body)');
+      if (dropOutside && outsideInBody) throw new CliError('give --drop-outside or --outside-in-body, not both', { code: 2 });
       const list = comments.map((c, i) => {
         if (!c || typeof c.path !== 'string' || !c.path.trim()) throw new Refusal('empty', `comment ${i + 1} has no path`);
         const line = Number(c.line);
@@ -321,10 +336,13 @@ export function createForge({ adapter, forge, dryRun = false }) {
           else if (byPath.get(c.path) && !byPath.get(c.path).includes(c.line)) outside.push({ path: c.path, line: c.line, reason: 'the line is not in the diff' });
           else inside.push(c);
         }
-        if (outside.length && !dropOutside) {
+        if (outside.length && !dropOutside && !outsideInBody) {
           throw new Refusal('outsideDiff', `${outside.length} comment(s) are on lines outside the PR's diff, where the forge takes no line comment; nothing was posted`, { outside });
         }
       }
+      // A comment outside the diff, kept: under the review's text, as `path:line` and then its own text.
+      const moved = outsideInBody ? list.filter((c) => outside.some((o) => o.path === c.path && o.line === c.line)) : [];
+      const reviewText = [hasBody ? plain(body).trim() : null, ...moved.map((c) => `\`${c.path}:${c.line}\`\n${plain(c.body).trim()}`)].filter(Boolean).join('\n\n');
       const known = await adapter.reviewComments({ repo, number: n });
       const skipped = [];
       const toPost = [];
@@ -333,8 +351,15 @@ export function createForge({ adapter, forge, dryRun = false }) {
         if (dup) skipped.push({ path: c.path, line: c.line, reason: 'the same comment is already on the PR', existing: dup.id });
         else toPost.push({ ...c, body: posting(c.body) });
       }
-      if (!toPost.length) return { repo, number: n, commit: commit.trim(), reviewId: null, commentIds: [], comments: [], skipped, outside, posted: [] };
-      const made = await adapter.createReview({ repo, number: n, commit: commit.trim(), ...(bare(plain(body)) ? { body: posting(body) } : {}), comments: toPost });
+      const none = { repo, number: n, commit: commit.trim(), reviewId: null, commentIds: [], comments: [], skipped, outside, ...(moved.length ? { inBody: moved.map((c) => ({ path: c.path, line: c.line })) } : {}), posted: [] };
+      // Nothing new on a line: every line comment already there is the review posted before. A review with no line
+      // comment left (none given, or all kept in its text) is posted once for its text.
+      if (!toPost.length) {
+        if (!reviewText || inside.length) return none;
+        const same = (await adapter.reviews({ repo, number: n })).find((r) => (!forge.self || r.author === forge.self) && bare(plain(r.body)) === bare(reviewText));
+        if (same) return { ...none, existing: same.id, reason: 'a review with this text is already on the PR' };
+      }
+      const made = await adapter.createReview({ repo, number: n, commit: commit.trim(), ...(reviewText ? { body: posting(reviewText) } : {}), comments: toPost });
       // Each comment we sent is matched to the one the forge made, by path, line and text, so an id never lands on the wrong place.
       const left = [...made.comments];
       const placed = toPost.map((c) => {
@@ -352,6 +377,7 @@ export function createForge({ adapter, forge, dryRun = false }) {
         comments: placed,
         skipped,
         outside,
+        ...(moved.length ? { inBody: moved.map((c) => ({ path: c.path, line: c.line })) } : {}),
         posted: [{ kind: 'review', id: made.id }, ...ids.map((id) => ({ kind: 'review-comment', id }))],
       };
     },
@@ -426,6 +452,44 @@ export function createForge({ adapter, forge, dryRun = false }) {
       const others = STAGES.filter((s) => s !== stage).map((s) => t.labels[s]).filter((l) => l && !same(l, wanted));
       const r = await swapLabels(repo, n, [wanted], others);
       return { repo, number: n, target: t.id, stage, label: wanted, ...r, ...(r.changed ? {} : { reason: 'the PR already has exactly this stage label' }), posted: [] };
+    },
+
+    // Settles a review thread the pipeline opened: the thread whose first comment is `comment`, an id among the
+    // caller's own (`own`, its ledger's posted ids), written from `self` and starting with the comment header when the
+    // settings have one. Any other thread (a person's, or one the pipeline only replied in) is refused. A thread
+    // already settled is a no-op.
+    async resolveThread({ repo: repoIn, number, comment, own }) {
+      const repo = repoOf(repoIn);
+      const n = needNumber(number);
+      const id = needId(comment, 'a review comment id');
+      if (!ownIds(own).has(String(id))) throw new Refusal('notOwn', `comment ${id} is not among the ids the caller posted (--own): only the pipeline's own thread is settled`, { comment: id });
+      const threads = await adapter.threads({ repo, number: n });
+      const thread = threads.find((t) => String(t.comments[0]?.id) === String(id));
+      if (!thread) {
+        const inside = threads.find((t) => t.comments.some((c) => String(c.id) === String(id)));
+        throw new Refusal(inside ? 'notOwn' : 'unknown', inside ? `comment ${id} is a reply in a thread another comment opened: only a thread the pipeline opened is settled` : `no review thread on PR #${n} starts with comment ${id}`, { comment: id });
+      }
+      const first = thread.comments[0];
+      if (!ownedText(first)) throw new Refusal('notOwn', `the thread of comment ${id} was not opened from ${forge.self ?? 'the pipeline\'s login'} with the comment header: it is a person's`, { comment: id, author: first.author ?? null });
+      if (thread.resolved) return { repo, number: n, comment: id, thread: thread.id, resolved: false, reason: 'the thread is already resolved', posted: [] };
+      await adapter.resolveThread({ repo, thread: thread.id });
+      return { repo, number: n, comment: id, thread: thread.id, resolved: true, posted: [] };
+    },
+
+    // Removes a conversation comment the pipeline posted and a newer one replaces (an older summary, a duplicate):
+    // only an id among the caller's own (`own`), on this PR, written from `self` and starting with the comment header.
+    // A line comment or a review is never removed here. A comment already gone is the forge's 404 (the caller warns).
+    async deleteComment({ repo: repoIn, number, comment, own }) {
+      const repo = repoOf(repoIn);
+      const n = needNumber(number);
+      const id = needId(comment, 'a comment id');
+      if (!ownIds(own).has(String(id))) throw new Refusal('notOwn', `comment ${id} is not among the ids the caller posted (--own): only the pipeline's own comment is removed`, { comment: id });
+      if (!forge.self || !header) throw new Refusal('notOwn', 'removing a comment needs forge.self and the comment header in the settings: without them a comment of the pipeline\'s can\'t be told from a person\'s', { comment: id });
+      const found = await adapter.issueComment({ repo, id });
+      if (found.number !== n) throw new Refusal('unknown', `comment ${id} is on #${found.number}, not #${n}`, { comment: id, number: found.number });
+      if (!ownedText(found)) throw new Refusal('notOwn', `comment ${id} was not written from ${forge.self} with the comment header: it is a person's`, { comment: id, author: found.author ?? null });
+      await adapter.deleteComment({ repo, id });
+      return { repo, number: n, comment: id, deleted: true, posted: [] };
     },
   };
 

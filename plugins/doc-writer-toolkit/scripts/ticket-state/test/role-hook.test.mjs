@@ -597,10 +597,10 @@ test('settings validation: a skill job whose allow list opens all of git or all 
   assert.doesNotThrow(() => validateJobs(job(['Bash(git:*)'], { script: 'a.mjs' })), 'a script job has no session, and so no rules');
 });
 
-test('forge add-label and remove-label are refused only as the command, wherever the options put it; a label named so is no command', async () => {
+test('forge add-label, remove-label, resolve-thread and delete-comment are refused only as the command, wherever the options put it; a label named so is no command', async () => {
   const { cfg, root } = SHARED();
   const fg = `${R}/scripts/forge/forge.mjs`;
-  for (const sub of ['add-label', 'remove-label']) for (const cmd of [`node ${fg} --dry-run ${sub} --repo r --number 3 --label x`, `node ${fg} --repo=r ${sub} --number 3 --label x`, `node ${fg} --repo r --number 3 --label x -- ${sub}`, `node ${fg} -- ${sub} --repo r`]) assert.ok(refusalOf(cmd, cfg.writer, { cwd: root }), cmd);
+  for (const sub of ['add-label', 'remove-label', 'resolve-thread', 'delete-comment']) for (const cmd of [`node ${fg} --dry-run ${sub} --repo r --number 3 --label x`, `node ${fg} --repo=r ${sub} --number 3 --label x`, `node ${fg} --repo r --number 3 --label x -- ${sub}`, `node ${fg} -- ${sub} --repo r`]) assert.ok(refusalOf(cmd, cfg.writer, { cwd: root }), cmd);
   for (const cmd of [`node ${fg} comment --repo r --number 3 --body-file b --label remove-label`, `node ${fg} --label add-label set-stage-label --target t --number 3 --stage review`]) assert.equal(refusalOf(cmd, cfg.writer, { cwd: root }), null, cmd);
   const { OPTIONS } = await import('../../forge/forge.mjs');
   const booleans = Object.entries(OPTIONS).filter(([, o]) => o.type === 'boolean').flatMap(([k, o]) => [`--${k}`, ...(o.short ? [`-${o.short}`] : [])]);

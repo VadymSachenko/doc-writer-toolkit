@@ -13,7 +13,8 @@ const USAGE = `forge <command> [options]
 The forge of a docs pipeline: the pull requests of the repositories the host's ticket flow settings name, over the
 gh CLI (GitHub). Prints JSON on stdout. Reads change nothing. Every change is one call; with --dry-run it is printed
 and not sent. Every change says which ids it posted. The only review it posts is a comment; it has no command that
-gives a verdict, settles a conversation, joins a branch, closes a PR or deletes anything.
+gives a verdict, joins a branch or closes a PR. It settles a thread and removes a comment only when the pipeline posted it
+(its id among --own, from the pipeline's login, with the comment header); a person's is refused.
 
 Commands
   settings                       What the settings let the module touch: repos, targets, logins, labels it may add and remove.
@@ -25,13 +26,15 @@ Commands
   pr-activity --repo <r> --number <n> [--since <time>]         Reviews, review threads with comments, comments, review requests.
   events-since --repo <r> --since <time> [--types a,b]         The PR events of the repository since a time.
   request-reviewers --repo <r> --number <n> --reviewer <login>...
-  review-on-lines --repo <r> --number <n> --commit <sha> --comments-file <file|-> [--body <t>] [--drop-outside] [--skip-diff-check]
-                                 One review with event COMMENT; the file is a JSON list of { path, line, body }.
+  review-on-lines --repo <r> --number <n> --commit <sha> --comments-file <file|-> [--body <t>] [--drop-outside | --outside-in-body] [--skip-diff-check]
+                                 One review with event COMMENT; the file is a JSON list of { path, line, body } ([] with --body).
   reply --repo <r> --number <n> --comment <id> --body <t>      A reply in a review thread.
   suggest --repo <r> --number <n> --comment <id> --replacement <t> [--body <t>]   A reply with a suggestion block.
   comment --repo <r> --number <n> --body <t> [--unless-header <h> [--since <time>]]   A comment in the conversation.
   add-label --repo <r> --number <n> --label <name>, remove-label --repo <r> --number <n> --label <name>
   set-stage-label --target <id> --number <n> --stage inProgress|review|finalReview|translation [--repo <r>]
+  resolve-thread --repo <r> --number <n> --comment <id> --own <id>...   Settles the thread the pipeline's comment <id> opened.
+  delete-comment --repo <r> --number <n> --comment <id> --own <id>...   Removes a conversation comment the pipeline posted.
 
 Options
   --root <dir>            the host repo (default: cwd); the settings file is read from it
@@ -43,7 +46,8 @@ Options
   --title <t>, --body <t>, --body-file <file|->, --replacement <t>, --replacement-file <file|->   texts (a file, or - for stdin; sent exactly)
   --assignee <login>, --reviewer <login> (repeatable), --label <name> (repeatable for open-pr), --draft
   --since <time>, --types <a,b>
-  --comments-file <file|->, --drop-outside, --skip-diff-check
+  --comments-file <file|->, --drop-outside, --outside-in-body, --skip-diff-check
+  --own <id>              an id the caller posted (repeatable, or ids split by commas): resolve-thread, delete-comment
   --unless-header <h>
   --target <id>, --stage <stage>
   -h, --help              this text
@@ -74,6 +78,8 @@ export const OPTIONS = {
   'comments-file': { type: 'string' },
   'drop-outside': { type: 'boolean' },
   'skip-diff-check': { type: 'boolean' },
+  'outside-in-body': { type: 'boolean' },
+  own: { type: 'string', multiple: true },
   'unless-header': { type: 'string' },
   target: { type: 'string' },
   stage: { type: 'string' },
@@ -82,7 +88,8 @@ export const OPTIONS = {
 
 export const COMMANDS = [
   'settings', 'open-pr', 'edit-pr', 'pr-state', 'changed-prs-since', 'pr-activity', 'events-since', 'request-reviewers',
-  'review-on-lines', 'reply', 'suggest', 'comment', 'add-label', 'remove-label', 'set-stage-label',
+  'review-on-lines', 'reply', 'suggest', 'comment', 'add-label', 'remove-label', 'set-stage-label', 'resolve-thread',
+  'delete-comment',
 ];
 
 function readText(file, flag, io) {
@@ -171,7 +178,7 @@ export async function main(argv, io = {}) {
       result = await forge.requestReviewers({ repo, number, logins: values.reviewer ?? [] });
       break;
     case 'review-on-lines':
-      result = await forge.reviewOnLines({ repo, number, commit: values.commit, comments: commentsOf(values, io), body: textOf(values, 'body', io), dropOutside: values['drop-outside'], skipDiffCheck: values['skip-diff-check'] });
+      result = await forge.reviewOnLines({ repo, number, commit: values.commit, comments: commentsOf(values, io), body: textOf(values, 'body', io), dropOutside: values['drop-outside'], outsideInBody: values['outside-in-body'], skipDiffCheck: values['skip-diff-check'] });
       break;
     case 'reply':
       result = await forge.reply({ repo, number, comment: values.comment, body: textOf(values, 'body', io) });
@@ -190,6 +197,12 @@ export async function main(argv, io = {}) {
       break;
     case 'set-stage-label':
       result = await forge.setStageLabel({ repo, number, target: values.target, stage: values.stage });
+      break;
+    case 'resolve-thread':
+      result = await forge.resolveThread({ repo, number, comment: values.comment, own: (values.own ?? []).join(',') });
+      break;
+    case 'delete-comment':
+      result = await forge.deleteComment({ repo, number, comment: values.comment, own: (values.own ?? []).join(',') });
       break;
   }
   const out = { ok: true, command, ...result };

@@ -195,6 +195,16 @@ export function forgeAdapter({ prs = [], activity = {}, changed = {}, events = {
     reviewComment: async () => {
       throw new Error('not in these tests');
     },
+    // A conversation comment of the PR's activity, or the forge's 404 (one the owner deleted).
+    issueComment: async ({ repo, id }) => {
+      for (const [k, a] of Object.entries(activity)) {
+        const c = (a.comments ?? []).find((x) => String(x.id) === String(id));
+        if (c && k.startsWith(`${repo}#`)) return { ...c, number: Number(k.split('#')[1]) };
+      }
+      const e = new Error(`GET issues/comments/${id}: HTTP 404 Not Found`);
+      e.data = { status: 404 };
+      throw e;
+    },
     events: async ({ repo, since }) => {
       reads.push(['events', repo, since]);
       if (fail[repo]) throw new Error(fail[repo]);
@@ -204,7 +214,12 @@ export function forgeAdapter({ prs = [], activity = {}, changed = {}, events = {
     createPr: async () => {
       throw new Error('not in these tests');
     },
-    updatePr: async (a) => void log.push(['updatePr', a]),
+    updatePr: async (a) => {
+      log.push(['updatePr', a]);
+      const p = get(a);
+      if (a.body !== undefined) p.body = a.body;
+      if (a.title !== undefined) p.title = a.title;
+    },
     addAssignees: async (a) => void log.push(['addAssignees', a]),
     requestReviewers: async (a) => {
       log.push(['requestReviewers', a]);
@@ -219,6 +234,14 @@ export function forgeAdapter({ prs = [], activity = {}, changed = {}, events = {
     },
     comment: async (a) => (log.push(['comment', a]), { id: 900 + log.length }),
     createLabel: async (a) => void log.push(['createLabel', a.repo, a.name]),
+    resolveThread: async (a) => {
+      log.push(['resolveThread', a.repo, a.thread]);
+      for (const act of Object.values(activity)) for (const t of act.threads ?? []) if (t.id === a.thread) t.resolved = true;
+    },
+    deleteComment: async (a) => {
+      log.push(['deleteComment', a.repo, a.id]);
+      for (const act of Object.values(activity)) if (act.comments) act.comments = act.comments.filter((c) => String(c.id) !== String(a.id));
+    },
     changeLabels: async (a) => {
       log.push(['changeLabels', a.repo, a.number, a.add, a.remove]);
       const p = get(a);

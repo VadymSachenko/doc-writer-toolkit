@@ -273,6 +273,12 @@ export function createGithubAdapter(gh, { owner, pageSize = PAGE }) {
       return { ...restReviewComment(c), number: m ? Number(m[1]) : null };
     },
 
+    async issueComment({ repo, id }) {
+      const c = await gh.get(`${repoPath(repo)}/issues/comments/${id}`);
+      const m = /\/issues\/(\d+)$/.exec(c.issue_url ?? '');
+      return { id: c.id, nodeId: c.node_id, author: login(c.user), ...authorBot(c.user), body: c.body, createdAt: c.created_at, updatedAt: c.updated_at, number: m ? Number(m[1]) : null };
+    },
+
     // `issues/events` has no `since` parameter and lists the newest first: read pages until one holds an event older
     // than `since`. Only PRs are kept.
     async events({ repo, since }) {
@@ -353,6 +359,19 @@ export function createGithubAdapter(gh, { owner, pageSize = PAGE }) {
       } catch (e) {
         if (e?.data?.status !== 422) throw e;
       }
+    },
+
+    // One review thread settled, by its GraphQL id (a Thread's `id`).
+    async resolveThread({ thread }) {
+      await gh.write('POST', 'graphql', {
+        query: 'mutation ResolveThread($thread: ID!) { resolveReviewThread(input: { threadId: $thread }) { thread { id isResolved } } }',
+        variables: { thread },
+      });
+    },
+
+    // One conversation comment removed (GitHub answers 204, no body).
+    async deleteComment({ repo, id }) {
+      await gh.write('DELETE', `${repoPath(repo)}/issues/comments/${id}`);
     },
 
     // Labels by name, in one GraphQL request. A name the repository doesn't have is refused: it is not created here.

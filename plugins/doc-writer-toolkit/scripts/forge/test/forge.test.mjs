@@ -40,10 +40,11 @@ const settingsJson = (over = {}) => ({
   ],
   ...over,
 });
-const forgeSettings = (over) => {
+const forgeSettings = (over, header = null) => {
   const s = settingsJson(over);
-  return validateForge(s.forge, s.targets);
+  return validateForge(s.forge, s.targets, header);
 };
+const OWN_HEADER = '**[bot]**';
 const LABEL_IDS = Object.fromEntries(fixture('gql-label-targets').data.repository.labels.nodes.map((l) => [l.id, l.name]));
 
 // Routes every test starts from; a test adds or replaces what it needs.
@@ -580,6 +581,118 @@ test('reply: the same reply is not posted twice; a comment of another PR is refu
   await assert.rejects(forge.reply({ repo: 'guide-docs', number: 7, comment: 'abc', body: 'x' }), /not a review comment id/);
 });
 
+// ------------------------------------------------------------------ the pipeline's own threads and comments
+
+// A thread the pipeline opened (701, from `pat` with the header, a person's reply under it), a person's thread (601,
+// with the pipeline's reply 603), a thread of the owner's own (801, no header), and conversation comments: the
+// pipeline's (9300), a person's who copied the header (9301), the owner's own (9302), one on another PR (9303) and one
+// already gone (9304).
+const gqlComment = (databaseId, login, body, replyTo = null) => ({ id: `PRRC_${databaseId}`, databaseId, author: { login }, body, createdAt: '2026-11-04T09:00:00Z', updatedAt: '2026-11-04T09:00:00Z', path: 'docs/export.md', line: 12, replyTo: replyTo ? { databaseId: replyTo } : null, pullRequestReview: { databaseId: 880, state: 'COMMENTED' } });
+const thread = (id, resolved, line, nodes) => ({ id, isResolved: resolved, isOutdated: false, path: 'docs/export.md', line, comments: { pageInfo: { hasNextPage: false }, nodes } });
+const ownThreads = (resolved = false) => ({
+  data: { repository: { pullRequest: { reviewThreads: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [
+    thread('PRRT_9', resolved, 12, [gqlComment(701, 'pat', `${OWN_HEADER}\n\nA place to check.`), gqlComment(702, 'rev-one', 'Confirmed.', 701)]),
+    thread('PRRT_1', false, 30, [gqlComment(601, 'rev-one', 'Is this right?'), gqlComment(603, 'pat', `${OWN_HEADER}\n\nYes.`, 601)]),
+    thread('PRRT_3', false, 40, [gqlComment(801, 'pat', 'A note of my own, no header.')]),
+  ] } } } },
+});
+const restIssueComment = (id, login, body, number = 7) => ({ id, node_id: `IC_${id}`, user: { login }, body, created_at: '2026-11-04T09:00:00Z', updated_at: '2026-11-04T09:00:00Z', issue_url: `https://api.example/repos/acme-docs/guide-docs/issues/${number}` });
+const ownRoutes = ({ resolved = false } = {}) => ({
+  'graphql PrThreads': ownThreads(resolved),
+  'graphql ResolveThread': { data: { resolveReviewThread: { thread: { id: 'PRRT_9', isResolved: true } } } },
+  'GET repos/acme-docs/guide-docs/issues/comments/9300': restIssueComment(9300, 'pat', `${OWN_HEADER}\n\nAn older summary.`),
+  'GET repos/acme-docs/guide-docs/issues/comments/9301': restIssueComment(9301, 'rev-one', `${OWN_HEADER}\n\nA person who copied the header.`),
+  'GET repos/acme-docs/guide-docs/issues/comments/9302': restIssueComment(9302, 'pat', "The owner's own note."),
+  'GET repos/acme-docs/guide-docs/issues/comments/9303': restIssueComment(9303, 'pat', `${OWN_HEADER}\n\nOn another PR.`, 8),
+  'GET repos/acme-docs/guide-docs/issues/comments/9304': ghFail(404, 'Not Found'),
+  'DELETE repos/acme-docs/guide-docs/issues/comments/9300': {},
+});
+
+test('resolveThread: settles the thread its own comment opened, once; the mutation names that thread only', async () => {
+  const { forge, calls } = setup({ settings: forgeSettings(undefined, OWN_HEADER), routes: ownRoutes() });
+  const r = await forge.resolveThread({ repo: 'guide-docs', number: 7, comment: 701, own: '701, 702' });
+  assert.deepEqual([r.resolved, r.thread, r.posted], [true, 'PRRT_9', []]);
+  const [m] = writes(calls);
+  assert.equal(m.op, 'ResolveThread');
+  assert.deepEqual(m.variables, { thread: 'PRRT_9' });
+  const again = setup({ settings: forgeSettings(undefined, OWN_HEADER), routes: ownRoutes({ resolved: true }) });
+  const r2 = await again.forge.resolveThread({ repo: 'guide-docs', number: 7, comment: 701, own: [701] });
+  assert.deepEqual([r2.resolved, r2.reason], [false, 'the thread is already resolved']);
+  assert.equal(writes(again.calls).length, 0);
+});
+
+test("resolveThread: a person's thread, a reply of the pipeline's in it, an id not among its own and a comment with no header are refused before any change", async () => {
+  const { forge, calls } = setup({ settings: forgeSettings(undefined, OWN_HEADER), routes: ownRoutes() });
+  const at = { repo: 'guide-docs', number: 7 };
+  await rejects(forge.resolveThread({ ...at, comment: 601, own: [601, 603] }), 'notOwn');
+  await rejects(forge.resolveThread({ ...at, comment: 603, own: [603] }), 'notOwn');
+  await rejects(forge.resolveThread({ ...at, comment: 701, own: [702] }), 'notOwn');
+  await rejects(forge.resolveThread({ ...at, comment: 801, own: [801] }), 'notOwn');
+  await rejects(forge.resolveThread({ ...at, comment: 999, own: [999] }), 'unknown');
+  await rejects(forge.resolveThread({ ...at, comment: 701 }), 'notOwn');
+  assert.equal(writes(calls).length, 0);
+});
+
+test("deleteComment: removes the pipeline's own conversation comment; a person's, one with no header, one on another PR or not among its own is refused; a comment gone is the forge's 404", async () => {
+  const { forge, calls } = setup({ settings: forgeSettings(undefined, OWN_HEADER), routes: ownRoutes() });
+  const at = { repo: 'guide-docs', number: 7 };
+  const r = await forge.deleteComment({ ...at, comment: 9300, own: [9300] });
+  assert.deepEqual([r.deleted, r.posted], [true, []]);
+  assert.deepEqual(writes(calls).map((c) => [c.method, c.path]), [['DELETE', 'repos/acme-docs/guide-docs/issues/comments/9300']]);
+  await rejects(forge.deleteComment({ ...at, comment: 9301, own: [9301] }), 'notOwn');
+  await rejects(forge.deleteComment({ ...at, comment: 9302, own: [9302] }), 'notOwn');
+  await rejects(forge.deleteComment({ ...at, comment: 9303, own: [9303] }), 'unknown');
+  await rejects(forge.deleteComment({ ...at, comment: 9300, own: [1] }), 'notOwn');
+  await assert.rejects(forge.deleteComment({ ...at, comment: 9304, own: [9304] }), (e) => e instanceof ForgeError && e.data.status === 404);
+  assert.equal(writes(calls).length, 1);
+  // With no header in the settings, the pipeline's comment can't be told from the owner's: refused.
+  const plainSettings = setup({ routes: ownRoutes() });
+  await rejects(plainSettings.forge.deleteComment({ ...at, comment: 9300, own: [9300] }), 'notOwn');
+  assert.equal(writes(plainSettings.calls).length, 0);
+});
+
+test('resolveThread and deleteComment under --dry-run: read, checked, recorded and not sent', async () => {
+  const { forge, calls, gh } = setup({ dryRun: true, settings: forgeSettings(undefined, OWN_HEADER), routes: ownRoutes() });
+  await forge.resolveThread({ repo: 'guide-docs', number: 7, comment: 701, own: [701] });
+  await forge.deleteComment({ repo: 'guide-docs', number: 7, comment: 9300, own: [9300] });
+  assert.equal(writes(calls).length, 0);
+  assert.deepEqual(gh.calls.map((c) => [c.method, c.path]), [['POST', 'graphql'], ['DELETE', 'repos/acme-docs/guide-docs/issues/comments/9300']]);
+  await rejects(forge.deleteComment({ repo: 'guide-docs', number: 7, comment: 9301, own: [9301] }), 'notOwn');
+});
+
+test("reviewOnLines: --outside-in-body keeps the text of a comment outside the diff in the review's own text; a review with a text and no line comment is posted once", async () => {
+  const { forge, calls } = setup({ routes: { ...reviewRoutes(), 'graphql PrReviews': fixture('gql-reviews') } });
+  const comments = [
+    { path: 'docs/export.md', line: 12, body: 'in the diff' },
+    { path: 'docs/export.md', line: 30, body: 'Deleted section «Old export» (40 lines): not in the ticket.' },
+  ];
+  const r = await forge.reviewOnLines({ repo: 'guide-docs', number: 7, commit: HEAD7, comments, body: 'Round 2: two commits.', outsideInBody: true });
+  const [post] = writes(calls);
+  assert.equal(post.body.comments.length, 1);
+  assert.equal(post.body.body, 'Round 2: two commits.\n\n`docs/export.md:30`\nDeleted section «Old export» (40 lines): not in the ticket.');
+  assert.deepEqual(r.inBody, [{ path: 'docs/export.md', line: 30 }]);
+  assert.deepEqual(r.outside.map((o) => o.line), [30]);
+  await assert.rejects(forge.reviewOnLines({ repo: 'guide-docs', number: 7, commit: HEAD7, comments, dropOutside: true, outsideInBody: true }), /not both/);
+  // A text alone: a review with no line comment.
+  const only = setup({ routes: { ...reviewRoutes(), 'graphql PrReviews': fixture('gql-reviews') } });
+  const b = await only.forge.reviewOnLines({ repo: 'guide-docs', number: 7, commit: HEAD7, comments: [], body: 'Round 3: nothing to decide.' });
+  assert.equal(writes(only.calls).length, 1);
+  assert.deepEqual(writes(only.calls)[0].body.comments, []);
+  assert.equal(b.posted[0].kind, 'review');
+  await rejects(only.forge.reviewOnLines({ repo: 'guide-docs', number: 7, commit: HEAD7, comments: [] }), 'empty');
+});
+
+test("reviewOnLines: a review whose text is already a review of the pipeline's login is not posted again", async () => {
+  const reviews = fixture('gql-reviews');
+  const node = reviews.data.repository.pullRequest.reviews.nodes[0];
+  const conn = { ...reviews.data.repository.pullRequest.reviews, nodes: [{ ...node, author: { login: 'pat' }, body: 'Round 3: nothing to decide.' }] };
+  const { forge, calls } = setup({ routes: { ...reviewRoutes(), 'graphql PrReviews': { data: { repository: { pullRequest: { reviews: conn } } } } } });
+  const r = await forge.reviewOnLines({ repo: 'guide-docs', number: 7, commit: HEAD7, comments: [], body: 'Round 3: nothing to decide.' });
+  assert.equal(r.reviewId, null);
+  assert.equal(r.existing, node.databaseId);
+  assert.equal(writes(calls).length, 0);
+});
+
 test('suggestionBlock: a fence longer than any run of backticks in the replacement', () => {
   assert.equal(suggestionBlock('new line'), '```suggestion\nnew line\n```');
   assert.equal(suggestionBlock('a\nb\n'), '```suggestion\na\nb\n```');
@@ -891,8 +1004,10 @@ test('the module has these operations and no others (AC-3)', () => {
   assert.deepEqual(Object.keys(adapter).filter((k) => typeof adapter[k] === 'function').sort(), [...READS, ...WRITES].sort());
 });
 
+// `resolveReviewThread` is in the source once, behind the module's check that the thread is the pipeline's own (its own
+// test below); undoing a settle is never there.
 const FORBIDDEN = [
-  /resolveReviewThread/i, /unresolveReviewThread/i, /dismiss/i, /approve/i, /request_?changes/i, /\bAPPROVE\b/,
+  /unresolveReviewThread/i, /dismiss/i, /approve/i, /request_?changes/i, /\bAPPROVE\b/,
   /mergePullRequest/i, /\/merge\b/, /enablePullRequestAutoMerge/i, /closePullRequest/i, /deleteRef/i, /git\/refs/i,
   /pulls\/\d+\/reviews\/\d+\/(?:events|dismissals)/, /\bgh\s+pr\s+(?:merge|close|review)\b/,
 ];
@@ -903,7 +1018,7 @@ const sourceFiles = (dir) =>
     return e.name.endsWith('.mjs') ? [p] : [];
   });
 
-test('the source has no call that resolves a conversation, dismisses a review, gives a verdict, merges, closes or deletes (AC-3, grep)', () => {
+test('the source has no call that dismisses a review, gives a verdict, merges, closes or deletes a branch (AC-3, grep); one settle and one removal, of the pipeline\'s own only', () => {
   const files = sourceFiles(ROOT);
   assert.ok(files.length >= 8);
   for (const file of files) {
@@ -913,13 +1028,19 @@ test('the source has no call that resolves a conversation, dismisses a review, g
   // the one review event the source names is COMMENT
   const events = files.flatMap((f) => [...fs.readFileSync(f, 'utf8').matchAll(/\bevent:\s*'([A-Z_]+)'/g)].map((m) => m[1]));
   assert.deepEqual(events, ['COMMENT']);
-  // the only DELETE the source can send is none: gh.write allows it, no caller uses it
+  // the only DELETE the source sends removes one conversation comment; the only settle is one thread
   const methods = files.flatMap((f) => [...fs.readFileSync(f, 'utf8').matchAll(/gh\.write\('([A-Z]+)'/g)].map((m) => m[1]));
-  assert.ok(methods.length > 0 && !methods.includes('DELETE') && !methods.includes('PUT'));
+  assert.ok(methods.length > 0 && !methods.includes('PUT'));
+  assert.equal(methods.filter((m) => m === 'DELETE').length, 1);
+  const deletes = files.flatMap((f) => [...fs.readFileSync(f, 'utf8').matchAll(/gh\.write\('DELETE', `([^`]+)`/g)].map((m) => m[1]));
+  assert.deepEqual(deletes, ['${repoPath(repo)}/issues/comments/${id}']);
+  const settles = files.flatMap((f) => [...fs.readFileSync(f, 'utf8').matchAll(/resolveReviewThread/g)].map(() => path.relative(ROOT, f)));
+  assert.deepEqual(settles, [path.join('adapters', 'github', 'index.mjs')]);
 });
 
-test('every operation, run in full, sends no request that settles, withdraws, approves, merges, closes or deletes (AC-3, recorded calls)', async () => {
+test('every operation, run in full, sends no request that withdraws, approves, merges, closes or deletes a branch (AC-3, recorded calls); the one settle and the one removal are the pipeline\'s own', async () => {
   const { forge, calls } = setup({
+    settings: forgeSettings(undefined, OWN_HEADER),
     routes: {
       ...reviewRoutes(),
       'graphql PrsByHead': fixture('gql-prs-by-head-none'),
@@ -936,6 +1057,7 @@ test('every operation, run in full, sends no request that settles, withdraws, ap
       'POST repos/acme-docs/guide-docs/pulls/7/comments/601/replies': fixture('rest-reply-created'),
       'POST repos/acme-docs/guide-docs/issues/7/comments': fixture('rest-issue-comment-created'),
       'GET repos/acme-docs/guide-docs/issues/events': [],
+      ...ownRoutes(),
     },
   });
   const ok = { repo: 'guide-docs', number: 7 };
@@ -953,27 +1075,29 @@ test('every operation, run in full, sends no request that settles, withdraws, ap
   await forge.addLabel({ ...ok, label: 'Check me' });
   await forge.removeLabel({ ...ok, label: 'in SME review' });
   await forge.setStageLabel({ target: 'guide', ...ok, stage: 'finalReview' });
+  await forge.resolveThread({ ...ok, comment: 701, own: [701] });
+  await forge.deleteComment({ ...ok, comment: 9300, own: [9300] });
   const sent = writes(calls);
-  assert.ok(sent.length >= 10);
-  assert.ok(sent.every((c) => ['POST', 'PATCH'].includes(c.method ?? 'POST')), 'only POST and PATCH');
+  assert.ok(sent.length >= 12);
+  assert.ok(sent.every((c) => ['POST', 'PATCH'].includes(c.method ?? 'POST') || (c.method === 'DELETE' && /\/issues\/comments\/9300$/.test(c.path))), 'only POST and PATCH, and the one DELETE of the pipeline\'s own comment');
   const allowedPaths = [
     /\/pulls$/, /\/pulls\/\d+$/, /\/issues\/\d+\/assignees$/, /\/pulls\/\d+\/requested_reviewers$/, /\/pulls\/\d+\/reviews$/,
-    /\/pulls\/\d+\/comments\/\d+\/replies$/, /\/issues\/\d+\/comments$/,
+    /\/pulls\/\d+\/comments\/\d+\/replies$/, /\/issues\/\d+\/comments$/, /\/issues\/comments\/9300$/,
   ];
   for (const c of sent) {
-    if (c.kind === 'graphql') assert.equal(c.op, 'ChangeLabels');
+    if (c.kind === 'graphql') assert.ok(['ChangeLabels', 'ResolveThread'].includes(c.op), c.op);
     else assert.ok(allowedPaths.some((re) => re.test(c.path)), `unexpected write to ${c.path}`);
     for (const re of FORBIDDEN) assert.ok(!re.test(`${c.path ?? ''} ${c.query ?? ''} ${JSON.stringify(c.body ?? c.variables)}`), `${c.key} matches ${re}`);
   }
   assert.equal(sent.find((c) => c.path?.endsWith('/reviews')).body.event, 'COMMENT');
 });
 
-test('the CLI has no command to approve, dismiss, resolve, merge, close or delete', async () => {
+test('the CLI has no command to approve, dismiss, unresolve, merge, close or delete a branch or a review', async () => {
   const root = tmp();
   fs.mkdirSync(path.join(root, '.claude'));
   fs.writeFileSync(path.join(root, '.claude', 'ticket-flow.json'), JSON.stringify(settingsJson()));
   const out = { write() {} };
-  for (const word of ['approve', 'dismiss-review', 'resolve-thread', 'resolve', 'merge', 'close', 'delete-branch', 'request-changes']) {
+  for (const word of ['approve', 'dismiss-review', 'unresolve-thread', 'resolve', 'merge', 'close', 'delete-branch', 'delete-review', 'request-changes']) {
     assert.ok(!COMMANDS.includes(word), word);
     await assert.rejects(main([word, '--repo', 'guide-docs', '--number', '7', '--root', root], { stdout: out }), /unknown command/);
   }
