@@ -122,6 +122,27 @@ test('AC-5: the branch moved under the build: before it (the worktree is at anot
   assert.equal(buildLockState(u.w.settings.state).held, false);
 });
 
+test('AC-5: a build whose worktree could not fetch the branch is a failure, not a move: it is told and waits for a person', async () => {
+  // Offline, or a password asked: the worktree stays at the old head while the status (from the forge) has the new one.
+  // Read as a move, it would read `moved` at every check and record nothing.
+  const t = atBuild();
+  const old = 'd'.repeat(40);
+  const io = { ensureWorktree: (s, p) => ({ ...t.ensureWorktree(s, p), head: old, unfetched: true, notes: [`could not fetch ${p.branch}: origin/${p.branch} may be behind`] }), runBuild: () => assert.fail('no build at a head the chain did not see') };
+  const out = await run(t.w, io, { named: ['701'] });
+  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['build', 'failed']]);
+  const l = read(t.w, '701');
+  assert.equal(l.prs[0].chain.build.status, 'failed');
+  assert.match(l.prs[0].chain.build.note, /^could not fetch ticket-61 into the worktree: it is at ddddddd, not ccccccc, so nothing was built/);
+  const entry = l.runs.at(-1);
+  assert.deepEqual([entry.outcome, entry.failures, 'start' in entry, Boolean(entry.after)], ['failed', 1, false, true]);
+  const tk = await t.w.one('701');
+  assert.match(tk.next.waits, /a person acting on the ticket/);
+  // The next check tries nothing; the report lists the failure.
+  const again = await run(t.w, io, { named: ['701'] });
+  assert.deepEqual(again.ran, []);
+  assert.match(fs.readFileSync(path.join(t.w.settings.state, 'reports', `${localDate(NOW)}.md`), 'utf8'), /could not fetch ticket-61 into the worktree/);
+});
+
 test('AC-3: the dry run names the build command and starts nothing; the brief of a chain session never asks for the build', async () => {
   const t = atBuild();
   const out = await run(t.w, { ensureWorktree: t.ensureWorktree, runBuild: () => assert.fail('no build in a dry run') }, { named: ['701'], dryRun: true });

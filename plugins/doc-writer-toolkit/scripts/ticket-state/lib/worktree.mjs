@@ -124,7 +124,7 @@ function link(clone, worktree, names) {
 const hasRef = (cwd, ref) => tryRun(cwd, ['rev-parse', '--verify', '-q', `${ref}^{commit}`]) !== null;
 
 // Makes (or brings up to date) the worktree of one PR branch. Returns { repo, branch, path, head, push, linked,
-// missing, notes } or throws with git's reason. The worktree is detached at `origin/<branch>` (or the base, for a
+// missing, notes, stuck }, with `unfetched` when the branch could not be fetched, or throws with git's reason. The worktree is detached at `origin/<branch>` (or the base, for a
 // branch not pushed yet); the session pushes with `git -C <path> push origin HEAD:refs/heads/<branch>`.
 export function ensureWorktree(settings, pr) {
   const target = targetOf(settings, pr);
@@ -178,7 +178,7 @@ export function ensureWorktree(settings, pr) {
   const { linked, missing } = link(clone, wt, target?.links ?? DEFAULT_LINKS);
   exclude(wt, linked);
   for (const name of missing) notes.push(`${name}: not in the clone (${clone}), so not linked`);
-  return { repo: pr.repo, branch: pr.branch, base, path: wt, clone, head: tryRun(wt, ['rev-parse', 'HEAD']), push: `git -C ${wt} push origin HEAD:refs/heads/${pr.branch}`, linked, missing, notes, stuck };
+  return { repo: pr.repo, branch: pr.branch, base, path: wt, clone, head: tryRun(wt, ['rev-parse', 'HEAD']), push: `git -C ${wt} push origin HEAD:refs/heads/${pr.branch}`, linked, missing, notes, stuck, ...(branchFetched ? {} : { unfetched: true }) };
 }
 
 // A code repo a session reads as evidence (`appRepos`). The runner keeps its own clone of it, bare, under the state

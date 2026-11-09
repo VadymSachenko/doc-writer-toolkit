@@ -1245,7 +1245,10 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
       return failed(`the worktree: ${String(e.message).slice(0, 400)}`, { ran: false });
     }
     const head = tree.head ?? step.head ?? null;
-    // The branch moved since the status was read: the chain's stages saw another head, so the status is read again.
+    // The branch moved since the status was read: the chain's stages saw another head, so the status is read again. One
+    // the worktree couldn't fetch is not known to have moved: read again, it would read `moved` at every check and never
+    // be told. It fails, so the failed-step rules apply (it waits for a person, then holds) and the report shows it.
+    if (step.head && tree.head && tree.head !== step.head && tree.unfetched) return failed(`could not fetch ${pr.branch} into the worktree: it is at ${tree.head.slice(0, 7)}, not ${step.head.slice(0, 7)}, so nothing was built`, { ran: false });
     if (step.head && tree.head && tree.head !== step.head) return moved(`the branch is at ${tree.head.slice(0, 7)}, not ${step.head.slice(0, 7)}: the status is read again`);
     const mine = step.group ?? key;
     if (allLocks(settings.state, clock()).some((l) => l.group === mine && l.pid === process.pid)) renewLock(settings.state, mine, { leaseMinutes: settings.limits.lockLeaseMinutes, stage: step.stage, now: clock() });
