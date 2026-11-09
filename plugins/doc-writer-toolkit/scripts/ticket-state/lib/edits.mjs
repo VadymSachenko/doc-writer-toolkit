@@ -268,12 +268,17 @@ export function resyncItemLines(items) {
   ];
 }
 
+// A session that ran the style check as a skill took its report for the answer and ended there, with nothing
+// recorded or pushed, whenever the review found nothing to fix (TASK-096).
+const STYLE_GOES_ON = "The style check's report is a step of the stage, never its end, whatever it found (no finding, suggestions only, fixes): after it, record, commit, push and post the summary as the stage says.";
+
 // After the review comments are applied: the style check over the blocks they changed (D-081). A plain comment that
 // quotes a sentence of the page with words removed or changed is the reviewer's replacement for that sentence.
 export function styleAfterCommentsLines() {
   return [
     'A plain comment (no `suggestion` block, no reply by number) that quotes a sentence of the page with words removed or changed is the reviewer\'s replacement for that sentence: put it in as quoted, the words outside the quote being an instruction.',
     'Once the comments are applied, the style check runs over the UA blocks they changed (the writer role, "The style check"), and over no other block: a block an item of the reply restores or keeps stays as the owner chose it. Its fixes go on the summary\'s numbered list after your edits, each with its `rule`; a fix that would change what the edit meant is not applied and is a note after the list, never numbered.',
+    STYLE_GOES_ON,
   ];
 }
 
@@ -283,6 +288,7 @@ export function styleCheckLines(commits, fixes) {
   if (!commits?.length) return [];
   return [
     'Commits on this PR\'s branch the pipeline didn\'t make (hand edits) changed UA, and no style check has reviewed them. Run the style check (the writer role, "The style check") over the UA blocks each one changed (`git -C <worktree> show <sha> -- <page>`), and over no other block. Record every sha below in `reviewed`, fixed or not, with the reason its commit message gives, if any.',
+    STYLE_GOES_ON,
     ...commits.map((c) => `- ${c.sha}: ${c.pages.join(', ')}`),
     ...(fixes?.length ? ['Style fixes already on this PR\'s lists, on these pages: a block whose hand edit puts one\'s «було» back is the owner undoing that fix; leave the block out.', ...fixes.map((x) => `- ${x.n}: ${at(x)}: ${q(x.before)}`)] : []),
   ];
