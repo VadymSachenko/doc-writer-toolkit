@@ -20,6 +20,7 @@ import { removeClosedMarkdown } from './import.mjs';
 import { DOWNLOAD_DIRS_VARIABLE, ROLE_SESSION_VARIABLE, childEnv, sessionChildEnv } from './env.mjs';
 import { TREE_STAGES, adoptSources, checkClone, clonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureReadCheckout, ensureWorktree, prsForStep, worktreePath } from './worktree.mjs';
 import { BUSY_NAME, LOCK_NAME, busyEnded, freeBrowserLock } from './browser-lock.mjs';
+import { BUILD_LOCK_NAME } from './build-lock.mjs';
 import { HOOK_VARIABLE, commandsOfRules, hookSettings } from './role-hook.mjs';
 import { parseClaudeConfig } from '../../ui-labels/lib/config.mjs';
 import { liveProgress } from './progress.mjs';
@@ -128,8 +129,8 @@ const MCP_DENIED = ['mcp__claude_ai_Trello', 'mcp__trello', 'mcp__playwright'];
 // with `video-parts`, which runs them with fixed arguments on paths inside the ticket's work folder.
 const MEDIA_DENIED = ['Bash(ffmpeg:*)', 'Bash(ffprobe:*)'];
 // Moving or removing folders, which a broad host allow would reopen, and a browser lock made by hand (no holder, so
-// nothing frees it): a role takes and frees the lock only with browser-lock.mjs.
-const FOLDER_DENIED = ['Bash(mv:*)', 'Bash(rmdir:*)', 'Bash(mkdir *.playwright.lock*)', 'Bash(mkdir .playwright.lock*)'];
+// nothing frees it): a role takes and frees the lock only with browser-lock.mjs. The build lock is the runner's alone.
+const FOLDER_DENIED = ['Bash(mv:*)', 'Bash(rmdir:*)', 'Bash(mkdir *.playwright.lock*)', 'Bash(mkdir .playwright.lock*)', 'Bash(mkdir *.build.lock*)', 'Bash(mkdir .build.lock*)'];
 // Whole tools no stage needs that run or schedule work, or send something outside the session; the hook doesn't read them.
 // `ScheduleWakeup` a session has used (a pilot's `locales` orchestrator, 4 times), but it doesn't need it: a session with a
 // background worker that got no wakeup finished when the worker reported.
@@ -212,9 +213,10 @@ export function writeDeniedFor(settings, roots = []) {
     ...[...new Set(own)].map((f) => `Edit(${abs(f)})`),
     ...ENV_FILES.map((f) => `Read(//**/${f})`),
     ...roots.map((r) => `Edit(${abs(r)}/**)`),
-    ...['tickets', 'locks', 'roles', 'watch', 'jobs', 'runs', 'reports', 'code', LOCK_NAME, BUSY_NAME].map((d) => `Edit(${abs(path.join(state, d))}/**)`),
-    // The browser lock and the busy notes go only through browser-lock.mjs: no holder-less lock, no forged holder.
-    ...[LOCK_NAME, BUSY_NAME].map((d) => `Edit(${abs(path.join(state, d))})`),
+    ...['tickets', 'locks', 'roles', 'watch', 'jobs', 'runs', 'reports', 'code', LOCK_NAME, BUSY_NAME, BUILD_LOCK_NAME].map((d) => `Edit(${abs(path.join(state, d))}/**)`),
+    // The browser lock and the busy notes go only through browser-lock.mjs: no holder-less lock, no forged holder. The
+    // build lock only through the runner.
+    ...[LOCK_NAME, BUSY_NAME, BUILD_LOCK_NAME].map((d) => `Edit(${abs(path.join(state, d))})`),
     ...['rearmed.json', 'roles-proposal.json'].map((f) => `Edit(${abs(path.join(state, f))})`),
     // The Markdown ledgers from before the JSON ones: `import` reads them, and a state folder may sit under a `.sources/`.
     `Edit(${abs(state)}/*.md)`,
