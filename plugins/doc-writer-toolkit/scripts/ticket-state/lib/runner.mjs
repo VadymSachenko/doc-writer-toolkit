@@ -955,7 +955,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
   // instead of advancing it here, and end. Nothing is handed on in a dry run or in observe.
   const dispatch = typeof options.dispatch === 'function' && !planOnly ? options.dispatch : null;
   const date = localDate(clock());
-  const out = { mode: settings.mode, dryRun, observe, trigger, morning, ...(startPass ? { startPass } : {}), ...(startKeys ? { startKeys } : {}), named, planned: [], ran: [], triage: null, starts: [], ...(dispatch ? { handedOn: [] } : {}), guard: [], notes: [...(settings.settingsNotes ?? [])] };
+  const out = { mode: settings.mode, dryRun, observe, trigger, morning, ...(startPass ? { startPass } : {}), ...(startKeys ? { startKeys } : {}), named, planned: [], ran: [], triage: null, starts: [], ...(dispatch ? { handedOn: [] } : {}), ...(options.handOnId ? { waits: [] } : {}), guard: [], notes: [...(settings.settingsNotes ?? [])] };
   const log = [];
   const say = (e) => log.push({ at: new Date(clock()).toISOString(), ...e });
   // The live progress file (lib/progress.mjs): written at each step boundary, never fails a run, nothing in a dry run or observe.
@@ -1202,6 +1202,16 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
       say({ kind: 'lock', group, outcome: 'skipped', note: `locked by a ${h?.kind ?? 'run'} run at ${h?.stage ?? '?'}` });
       return { group, skipped: 'locked' };
     }
+    // A run a check handed on counts the runs again once it holds its lock: two checks that handed on at the same moment
+    // can pass `limits.parallel` by one. The runs that took their lock before this one count; past the limit, this one
+    // frees its lock and ends as waiting, and the next check hands it on again (lib/watch.mjs).
+    const over = options.handOnId ? overLimit(group, taken.lock) : null;
+    if (over) {
+      releaseLock(settings.state, group);
+      say({ kind: 'lock', group, outcome: 'skipped', note: `waits for a run slot: ${over}` });
+      out.waits.push({ group, keys: first.keys, stage: first.stage, waits: over });
+      return { group, skipped: 'waits', waits: over };
+    }
     own.add(group);
     const done = [];
     try {
@@ -1238,6 +1248,16 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
 
   function ran(r) {
     out.ran.push(r);
+  }
+
+  // Why this run's group is past `limits.parallel` (1 at the session bar), counting the other groups whose live lock is
+  // older than its own (the same time: the smaller group id first), or null.
+  function overLimit(group, mine) {
+    const limit = sessionNear() ? 1 : settings.limits.parallel;
+    if (typeof limit !== 'number') return null;
+    const at = Date.parse(mine.startedAt);
+    const before = allLocks(settings.state, clock()).filter((l) => l.live && l.group !== group && (Date.parse(l.startedAt) < at || (Date.parse(l.startedAt) === at && l.group < group)));
+    return before.length >= limit ? `${before.length} run(s) took their lock first, limits.parallel ${limit}` : null;
   }
 
   // A group handed to a process of its own (`dispatch`): its run, a step that waits for a run slot, or one a run of

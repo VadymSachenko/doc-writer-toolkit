@@ -283,9 +283,15 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
       } else if (!r) {
         out.notes.push(`the run of ${h.keys.join(', ')} (pid ${h.pid}) ended with no result: looked at again now`);
         requeued.push(...h.keys);
-      } else ended.push({ ...h, run: r.run });
-      // A start whose run failed or died before recording it: still ready, so no change would bring a start pass back.
-      if (h.stage === 'start' && (!r || r.error) && !startedSince(settings.state, h)) lostStart = `the start of ${h.keys.join(', ')} ended with no result`;
+      } else {
+        ended.push({ ...h, run: r.run });
+        // A finishing run that did nothing for a passing reason (`mode off` when it began, a run slot taken first): its
+        // tickets are looked at again.
+        if (h.stage !== 'start' && (r.run?.stopped || r.run?.waits?.length)) requeued.push(...h.keys);
+      }
+      // A start whose run ended without recording it (it died, failed, found `mode off`, its group locked, its status no
+      // longer letting it, a slot taken first): the card is still ready, and no change would bring a start pass back.
+      if (h.stage === 'start' && !startedSince(settings.state, h)) lostStart = `the start of ${h.keys.join(', ')} ended with no start recorded${r?.run?.stopped ? ` (${r.run.stopped})` : !r ? ' (no result)' : ''}`;
     }
     if (dryRun) next.handOns = feed.handOns ?? [];
     if (lostStart) next.starts = { ...(next.starts ?? {}), again: lostStart, retryAt: iso(checkStart + RETRY_MS) };
@@ -295,6 +301,26 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
     // A group the run didn't hand on waits for a later check: no run slot, a run of another process holds it, its
     // process couldn't start, or no usage reading. A guard stop for the allowance drops it, as a run of its own would.
     const notHanded = (r) => (r?.handedOn ?? []).filter((x) => !x.handedOn && !(x.guard && !/^no usage reading/.test(x.guard))).flatMap((x) => x.keys);
+    // A step held for no usage reading waits RETRY_MS before a check reads /usage for it again (`readingWait`).
+    const readingHeld = (r) => (r?.handedOn ?? []).filter((x) => x.guard && /^no usage reading/.test(x.guard)).flatMap((x) => x.keys);
+    const holdForReading = (r) => {
+      const keys = readingHeld(r);
+      if (keys.length) next.readingWait = { until: iso(clock() + RETRY_MS), keys: [...new Set([...(next.readingWait?.keys ?? []), ...keys])] };
+    };
+    const readingWaits = next.readingWait && checkStart < Date.parse(next.readingWait.until) ? next.readingWait.keys : [];
+    if (!readingWaits.length) next.readingWait = null;
+    // The last reading's session bar (`limits.sessionPercent`), as the dispatcher applies it: a check that would only
+    // find the runs full doesn't run the runner, nor read /usage, for it.
+    const noteSession = (r) => {
+      if (r?.usage?.session) next.lastSession = { at: iso(clock()), percent: r.usage.session.percent ?? 0 };
+    };
+    const slotsFull = () => {
+      const bar = next.lastSession && clock() - Date.parse(next.lastSession.at) < RETRY_MS && next.lastSession.percent >= (settings.limits.sessionPercent ?? 80);
+      const limit = bar ? 1 : settings.limits.parallel;
+      if (typeof limit !== 'number') return null;
+      const busy = runsGoingIn(settings.state, { locks: allLocks(settings.state, clock()), now: clock(), ...isAlive, groupOf: groupOfKey(settings.state) }).size;
+      return busy >= limit ? `${busy} run(s) going, limits.parallel ${limit}${bar ? ' (the session bar)' : ''}` : null;
+    };
     // Written now, not after the check's run: a full check that crashes part way isn't started again at every tick.
     if (!dryRun) writeFeed(settings.state, { ...feed, fullAt: next.fullAt });
     const afterMorning = localMinutes(checkStart) >= minutesOf(settings.schedule.morning);
@@ -416,6 +442,8 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
       try {
         out.morning = await run({ settings, clients, io: runnerIo, options: { dryRun, morning: true, trigger: 'schedule', claude, progress, dispatch: dispatchFor('morning') } });
         out.handed = wanted;
+        noteSession(out.morning);
+        holdForReading(out.morning);
         next.pending = notHanded(out.morning);
         const left = (out.morning.handedOn ?? []).filter((x) => !x.handedOn && x.retried).flatMap((x) => x.keys);
         next.owed = left.length ? { date: today, keys: left } : null;
@@ -451,17 +479,24 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
         out.handed = wanted;
         const handing = [];
         for (const key of runnable) {
-          if (forgeHeld.has(key)) next.pending.push(key);
+          if (forgeHeld.has(key) || readingWaits.includes(key)) next.pending.push(key);
           // Comments to answer go on once they are quiet (lib/quiet.mjs); until then the ticket waits in `pending`.
           else if (await waits(st.tickets.find((t) => t.key === key))) next.pending.push(key);
           else handing.push(key);
         }
-        if (handing.length) {
+        // The runs full: nothing could be handed on, so no runner and no /usage; the tickets wait in `pending`.
+        const full = handing.length && !dryRun ? slotsFull() : null;
+        if (full) {
+          out.notes.push(`${full}: ${handing.join(', ')} wait for a slot`);
+          next.pending = [...new Set([...next.pending, ...handing])];
+        } else if (handing.length) {
           say({ kind: 'watch', keys: handing, outcome: 'handed', note: `${fresh.length} new event(s); the runner hands on ${handing.join(', ')}, a process per group` });
           try {
             const retryWaiting = handing.some((k) => owed.includes(k));
             out.run = await run({ settings, clients, io: runnerIo, options: { dryRun, trigger: 'watcher', named: handing, claude, dispatch: dispatchFor('watcher'), ...(retryWaiting ? { retryWaiting } : {}) } });
             next.pending = [...new Set([...next.pending, ...notHanded(out.run)])];
+            noteSession(out.run);
+            holdForReading(out.run);
             if (next.owed) next.owed = { ...next.owed, keys: next.owed.keys.filter((k) => !(out.run.handedOn ?? []).some((x) => x.handedOn && x.keys.includes(k))) };
           } catch (e) {
             failed('the run', e);
@@ -589,9 +624,11 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
         return null;
       }
       // A pass that failed before its first step (or its status read) is tried again after RETRY_MS, not at every check.
-      if (last?.retryAt && clock() < Date.parse(last.retryAt)) return null;
+      // A pass held for a passing reason (`again`) waits that long for its retry only: a real change runs it at once.
+      const holding = Boolean(last?.retryAt) && clock() < Date.parse(last.retryAt);
+      if (holding && !last.again) return null;
       const retryLater = (why) => ({ ...(last ?? {}), deferred: last?.deferred ?? why, retryAt: iso(clock() + RETRY_MS) });
-      if (!seen && !last?.deferred && !last?.again && last?.date === today && !dueAgain && !cardMoved) return null;
+      if (!seen && !last?.deferred && (!last?.again || holding) && last?.date === today && !dueAgain && !cardMoved) return null;
       let view = seen;
       if (!view) {
         try {
@@ -609,10 +646,10 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
         return null;
       }
       // A pass whose last try ended for a passing reason (no usage reading, no run slot) runs again with no change.
-      const why = changeOf(last?.print ?? null, print) ?? (last?.again ? `again: ${last.again}` : null);
+      const why = changeOf(last?.print ?? null, print) ?? (last?.again && !holding ? `again: ${last.again}` : null);
       if (!why) {
         // Nothing that could let a start happen; what was seen is the view the next change is measured from.
-        if (last) next.starts = { ...last, print, nextDueAt, deferred: null, retryAt: null };
+        if (last) next.starts = { ...last, print, nextDueAt, deferred: null, retryAt: last.again ? last.retryAt ?? null : null };
         return null;
       }
       const base = { date: today, at: iso(checkStart), by: 'watcher', print, nextDueAt, deferred: null, retryAt: null };
@@ -626,9 +663,8 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
       }
       // Nothing to triage, and the runs at `limits.parallel`: no start could be handed on, so no runner and no /usage.
       // The pass runs again once a run ends.
-      const busy = triageKeys.length ? 0 : runsGoingIn(settings.state, { locks: allLocks(settings.state, clock()), now: clock(), ...isAlive, groupOf: groupOfKey(settings.state) }).size;
-      if (!triageKeys.length && typeof settings.limits.parallel === 'number' && busy >= settings.limits.parallel) {
-        const full = `${busy} run(s) going, limits.parallel ${settings.limits.parallel}`;
+      const full = triageKeys.length ? null : slotsFull();
+      if (full) {
         next.starts = { ...base, outcome: `not run: ${full}`, again: `a start waits for a run slot (${full})` };
         return { why, ran: false, skipped: full };
       }
@@ -643,6 +679,7 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
         const startUntil = startHoursEnd(clock(), settings.limits.startHours);
         const r = await run({ settings, clients, io: runnerIo, options: { dryRun, trigger: 'schedule', startPass: true, startUntil, triageKeys, claude, progress, dispatch: dispatchFor('startPass', why) } });
         const handed = (r.starts ?? []).filter((x) => x.handedOn);
+        noteSession(r);
         next.starts = { ...base, at: iso(clock()), print: printOfSummary(r.after, today) ?? print, nextDueAt: r.after?.intakeQuietAt ?? nextDueAt, outcome: handed.length ? `handed on the start of ${handed.map((x) => x.keys.join(', ')).join('; ')}` : 'started nothing', ...againOf(r, clock()) };
         return { why, ran: true, run: r };
       } catch (e) {

@@ -46,6 +46,7 @@ const summaryOf = (r) => ({
   ran: (r?.ran ?? []).map((s) => ({ group: s.group ?? null, stage: s.stage ?? null, keys: s.keys ?? [], outcome: s.outcome ?? null, note: s.note ?? null })),
   starts: (r?.starts ?? []).map((s) => ({ group: s.group ?? null, steps: (s.steps ?? []).slice(0, 1).map((x) => ({ stage: x.stage ?? null, keys: x.keys ?? [], outcome: x.outcome ?? null })) })),
   notes: r?.notes ?? [],
+  waits: r?.waits ?? [],
 });
 
 export { fullArgs, handOnArgs, spawnDetached } from './dispatch.mjs';

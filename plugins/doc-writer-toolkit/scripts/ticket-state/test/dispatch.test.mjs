@@ -4,7 +4,7 @@ import { BOARD, LISTS, NOW, card, noTree, quietGit } from './fakes.mjs';
 import { ledger, read, world } from './helpers.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
 import { emptyFeed, readFeed, sourcesOf, writeFeed } from '../lib/feed.mjs';
-import { takeLock } from '../lib/locks.mjs';
+import { allLocks, takeLock } from '../lib/locks.mjs';
 import { runRecord } from '../lib/record.mjs';
 import { runCheck, startPrint } from '../lib/watch.mjs';
 import { runHandOn } from '../lib/forge-watch.mjs';
@@ -312,9 +312,100 @@ test('a start whose run died before recording it: the start pass looks again aft
   h.live.delete(h.calls.spawns[0].pid);
   const out = await h.full(NOW + 5 * MIN);
   assert.match(out.notes.join(' '), /the run of 502 \(pid \d+\) ended with no result/);
-  assert.deepEqual([readFeed(w.settings.state).starts.again, readFeed(w.settings.state).starts.retryAt], ['the start of 502 ended with no result', iso(NOW + 35 * MIN)]);
+  assert.deepEqual([readFeed(w.settings.state).starts.again, readFeed(w.settings.state).starts.retryAt], ['the start of 502 ended with no start recorded (no result)', iso(NOW + 35 * MIN)]);
   assert.equal((await h.full(NOW + 10 * MIN)).startPass, undefined);
   const again = await h.full(NOW + 35 * MIN);
-  assert.equal(again.startPass.why, 'again: the start of 502 ended with no result');
+  assert.equal(again.startPass.why, 'again: the start of 502 ended with no start recorded (no result)');
   assert.deepEqual(h.spawned(), [[0, 'start', ['502']], [35, 'start', ['502']]]);
+});
+
+test('review 1: a start whose run came back having started nothing (mode off when it began) is looked at again; a finishing run that did is put back in pending', async () => {
+  const actions = { [BOARD]: [] };
+  const w = world({ actions, extra: { limits: { estimates: { edit: 4 }, startHours: '08-22' } } });
+  const cards = { 502: readyTicket(w, 502) };
+  const a = answered(w, 601);
+  seed(w, NOW - 5 * MIN, { morning: '2026-11-09' });
+  const h = harness(w, { cards });
+  await h.full(NOW);
+  assert.deepEqual(h.spawned(), [[0, 'answers', ['601']], [0, 'start', ['502']]]);
+  // Both runs begin after the owner set mode off, and back on: each ends at once, with a result.
+  w.settings.mode = 'off';
+  for (const s of h.calls.spawns) assert.equal((await h.finish(s, NOW + MIN)).run.stopped, 'mode off: nothing runs');
+  w.settings.mode = 'on';
+  const out = await h.full(NOW + 5 * MIN);
+  assert.deepEqual([h.spawned().slice(2), out.pending], [[[5, 'answers', ['601']]], []], 'the finishing ticket looked at again, and handed on');
+  assert.deepEqual([readFeed(w.settings.state).starts.again, readFeed(w.settings.state).starts.retryAt], ['the start of 502 ended with no start recorded (mode off: nothing runs)', iso(NOW + 35 * MIN)]);
+  void a;
+});
+
+test('review 3: the hold after a lost start holds its retry only: a new ready card meanwhile runs a pass at once', async () => {
+  const actions = { [BOARD]: [] };
+  const w = world({ actions, extra: { limits: { estimates: { edit: 4 }, startHours: '08-22' } } });
+  const cards = { 502: readyTicket(w, 502) };
+  seed(w, NOW - 5 * MIN, { morning: '2026-11-09' });
+  const h = harness(w, { cards });
+  await h.full(NOW);
+  h.live.delete(h.calls.spawns[0].pid);
+  await h.full(NOW + 5 * MIN);
+  assert.equal(readFeed(w.settings.state).starts.retryAt, iso(NOW + 35 * MIN));
+  // A new ready card 5 minutes later is a change: a pass now, which hands on both starts, not 30 minutes later.
+  cards[503] = readyTicket(w, 503);
+  actions[BOARD].push(act(cards[503], NOW + 9 * MIN, { to: LISTS.ready }));
+  const out = await h.full(NOW + 10 * MIN);
+  assert.match(out.startPass.why, /newly ready: 503/);
+  assert.deepEqual(h.spawned().slice(1).map((x) => x[2]), [['502'], ['503']]);
+});
+
+test('review 2a: a step held for no usage reading waits 30 minutes before a check reads /usage for it again', async () => {
+  const actions = { [BOARD]: [] };
+  const w = world({ actions });
+  const a = answered(w, 601);
+  seed(w, NOW - 5 * MIN);
+  let reading = null;
+  const h = harness(w, { week: () => reading });
+  actions[BOARD].push(moved(a, NOW - MIN));
+  let out = await h.full(NOW);
+  assert.deepEqual([h.spawned(), out.pending, h.calls.usage], [[], ['601'], 1]);
+  for (const at of [NOW + 5 * MIN, NOW + 25 * MIN]) assert.deepEqual((await h.full(at)).pending, ['601']);
+  assert.equal(h.calls.usage, 1, 'no /usage read while it waits');
+  reading = usageAt(5);
+  out = await h.full(NOW + 30 * MIN);
+  assert.deepEqual([h.spawned().map((x) => x[2]), out.pending, h.calls.usage], [[['601']], [], 2]);
+});
+
+test('review 2b: at the session bar a start pass that would only find the runs full runs no runner and reads no /usage', async () => {
+  const actions = { [BOARD]: [] };
+  const w = world({ actions, extra: { limits: { estimates: { edit: 4 }, startHours: '08-22' } } });
+  const cards = { 502: readyTicket(w, 502) };
+  const a = answered(w, 601);
+  seed(w, NOW - 5 * MIN, { morning: '2026-11-09' });
+  const h = harness(w, { week: () => usageAt(5, 90), cards });
+  await h.full(NOW);
+  // The bar (90% ≥ 80%) gives one run at a time: 601's goes, 502's start waits for a slot.
+  assert.deepEqual(h.spawned(), [[0, 'answers', ['601']]]);
+  assert.match(readFeed(w.settings.state).starts.again, /a start waits for a run slot/);
+  const reads = h.calls.usage;
+  for (const at of [NOW + 5 * MIN, NOW + 10 * MIN]) assert.equal((await h.full(at)).startPass?.ran ?? false, false);
+  assert.equal(h.calls.usage, reads, 'no /usage read while the bar keeps the one slot taken');
+  // 601's run ends: the slot frees and the start goes on.
+  await h.finish(h.calls.spawns[0], NOW + 12 * MIN);
+  await h.full(NOW + 15 * MIN);
+  assert.deepEqual(h.spawned().map((x) => x[2]), [['601'], ['502']]);
+  void a;
+});
+
+test('review 4: a run handed on counts the runs again under its lock; past limits.parallel it frees the lock and waits for the next check', async () => {
+  const actions = { [BOARD]: [] };
+  const w = world({ actions, extra: { limits: { parallel: 1 } } });
+  const a = answered(w, 601);
+  seed(w, NOW - 5 * MIN);
+  const h = harness(w);
+  actions[BOARD].push(moved(a, NOW - MIN));
+  await h.full(NOW);
+  // Another check handed a run on at the same moment, and that run took its lock first.
+  takeLock(w.settings.state, { group: '777', kind: 'schedule', stage: 'write', leaseMinutes: 60, now: NOW });
+  const r = await h.finish(h.calls.spawns[0], NOW + MIN);
+  assert.deepEqual([h.calls.sessions, r.run.waits.map((x) => x.keys), allLocks(w.settings.state, NOW + MIN).map((l) => l.group)], [[], [['601']], ['777']]);
+  const out = await h.full(NOW + 5 * MIN);
+  assert.deepEqual(out.pending, ['601']);
 });
