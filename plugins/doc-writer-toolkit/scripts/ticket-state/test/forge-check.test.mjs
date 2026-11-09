@@ -232,6 +232,26 @@ test('the full check holds a ticket whose forge run may not have taken its lock 
   assert.deepEqual([t.calls.runs, out.pending], [[], ['481']]);
 });
 
+test('TASK-092 AC-2: the forge check holds a ticket the full check handed on, and counts that run in limits.parallel', async () => {
+  const { w, say } = commented({ numbers: [81, 82], extra: { limits: { parallel: 2 } } });
+  seed(w, NOW - MIN);
+  const t = ticker(w);
+  say(81, NOW - 5 * MIN);
+  say(82, NOW - 5 * MIN);
+  // The full check handed 481 to a run of its own (lib/dispatch.mjs) that hasn't taken its lock yet; another holds a lock.
+  t.live.add(4343);
+  writeFeed(w.settings.state, { ...readFeed(w.settings.state), handOns: [{ id: 'full-1', pid: 4343, keys: ['481'], group: '481', stage: 'answerComments', at: iso(NOW - 10 * SEC), by: 'watcher' }] });
+  takeLock(w.settings.state, { group: 'other', kind: 'schedule', stage: 'write', leaseMinutes: 60, now: NOW });
+  let out = await t.forge(NOW);
+  assert.deepEqual([out.held, out.handed, t.handOns().length], [['481'], [], 0]);
+  assert.match(out.notes.join(' '), /2 run\(s\) going, limits.parallel 2: 482 wait/);
+  // That run ended: 481's comments go on at the next tick.
+  t.live.delete(4343);
+  releaseLock(w.settings.state, 'other');
+  out = await t.forge(NOW + MIN);
+  assert.deepEqual(out.handed.sort(), ['481', '482']);
+});
+
 test('AC-3: the forge check reads no tracker, runs no morning run, no start pass and no job, makes no /usage or model call, and leaves the full check\'s feed alone', async () => {
   const { w, say } = commented();
   seed(w, NOW - MIN, { morning: '2026-11-09', jobs: { notes: { armed: true, firstChange: iso(NOW - 5 * 3600000), lastChange: iso(NOW - 4 * 3600000) } } });

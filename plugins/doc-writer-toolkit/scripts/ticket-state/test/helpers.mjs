@@ -4,6 +4,7 @@ import { makeClients } from '../lib/world.mjs';
 import { computeStatus } from '../lib/status.mjs';
 import { newLedger, newPr, writeLedger, readLedger } from '../lib/ledger.mjs';
 import { LISTS, NOW, forgeAdapter, quietGit, settingsFor, tmp, trackerAdapter } from './fakes.mjs';
+import { runHandOn } from '../lib/forge-watch.mjs';
 
 // A world for one test: a host folder, its settings, the fake tracker and forge, and helpers to write ledgers the way
 // records would leave them.
@@ -58,4 +59,17 @@ export function snapshot(dir) {
   };
   walk(dir);
   return out;
+}
+
+// A stand-in for the process of its own a check hands a group to (lib/dispatch.mjs, `io.spawn`): the hand-on runs here
+// and now, with the test's runner stand-ins, and has no pid left when it returns, so the next check collects it. No
+// real process is ever started.
+export function inProcess(w, runner = {}, { spawns = [] } = {}) {
+  return async (args, { kind } = {}) => {
+    const id = args[args.indexOf('--hand-on') + 1];
+    const keys = args.flatMap((a, i) => (a === '--ticket' ? [args[i + 1]] : []));
+    spawns.push({ kind, id, keys });
+    await runHandOn({ settings: w.settings, clients: w.clients(), io: { ...(runner.now ? { now: runner.now } : {}), runner }, options: { id, keys } });
+    return { pid: null };
+  };
 }

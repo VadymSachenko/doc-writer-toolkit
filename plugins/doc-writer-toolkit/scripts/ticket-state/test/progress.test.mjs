@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LISTS, NOW, card, host, quietGit, rawSettings } from './fakes.mjs';
-import { ledger, world } from './helpers.mjs';
+import { inProcess, ledger, world } from './helpers.mjs';
 import { newLedger, newPr, writeLedger } from '../lib/ledger.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
 import { runRecord } from '../lib/record.mjs';
@@ -365,7 +365,7 @@ test('AC-4: the watcher\'s check refreshes the file and tells a gate once over t
   const { w, finalReview } = gateWorld();
   const sent = [];
   const usage = parseUsage('Current session: 10% used · resets 2pm (UTC)\nCurrent week (all models): 5% used · resets Nov 14 at 6am (UTC)\n');
-  const check = (n) => runCheck({ settings: w.settings, clients: w.clients(), io: { now: () => NOW + n * 5 * 60000, git: quietGit, runner: { now: () => NOW + n * 5 * 60000, readUsage: () => usage }, notify: (m) => (sent.push(m), { sent: true }) }, options: {} });
+  const check = (n) => runCheck({ settings: w.settings, clients: w.clients(), io: { now: () => NOW + n * 5 * 60000, git: quietGit, runner: { now: () => NOW + n * 5 * 60000, readUsage: () => usage }, spawn: inProcess(w, { now: () => NOW + n * 5 * 60000, readUsage: () => usage }), notify: (m) => (sent.push(m), { sent: true }) }, options: {} });
   await check(0);
   assert.ok(fs.existsSync(progressPath(w.settings.state)), 'a quiet check writes the file');
   finalReview('831', 1, ['c1']);
@@ -375,7 +375,7 @@ test('AC-4: the watcher\'s check refreshes the file and tells a gate once over t
   assert.match(fs.readFileSync(progressPath(w.settings.state), 'utf8'), /- 👉 831 · Change 831 — guide-docs#1: read the UA/);
   // A dry check writes nothing.
   const dry = world();
-  await runCheck({ settings: dry.settings, clients: dry.clients(), io: { now: () => NOW, git: quietGit, runner: { now: () => NOW, readUsage: () => usage }, notify: () => assert.fail('dry') }, options: { dryRun: true } });
+  await runCheck({ settings: dry.settings, clients: dry.clients(), io: { now: () => NOW, git: quietGit, runner: { now: () => NOW, readUsage: () => usage }, spawn: () => assert.fail('a dry run hands nothing on'), notify: () => assert.fail('dry') }, options: { dryRun: true } });
   assert.equal(fs.existsSync(memoryPath(dry.settings.state)), false);
 });
 
