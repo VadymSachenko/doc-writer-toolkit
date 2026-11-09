@@ -1,5 +1,5 @@
 import { prId, readLedger } from './ledger.mjs';
-import { renderSections, rewriteDescription } from './pr-description.mjs';
+import { appendSections, renderSections, rewriteDescription } from './pr-description.mjs';
 
 // What the runner does on a PR after each step, a session's or its own, when the host takes review rounds
 // (`forge.reviewRounds`, D-142), with no model and never a role (lib/role-hook.mjs denies the two forge commands):
@@ -58,7 +58,11 @@ export async function followRounds({ settings, clients, keys, before }) {
       const reviewed = (r) => r.review !== null && r.review !== undefined && r.stage !== 'pr';
       const fresh = rounds.slice(was.rounds).filter(reviewed);
       if (fresh.length) {
-        const since = rounds.slice(0, was.rounds).filter(reviewed).at(-1)?.at ?? '';
+        // Only what a round superseded after the rounds began: a summary posted before the PR's first round (a PR from
+        // before the switch: its numbered lists and open questions) is never removed.
+        const began = rounds[0]?.at ?? '';
+        const previous = rounds.slice(0, was.rounds).filter(reviewed).at(-1)?.at ?? '';
+        const since = previous > began ? previous : began;
         const until = fresh.at(-1).at ?? '';
         const old = (l.summaries ?? []).filter((s) => s.repo === p.repo && Number(s.pr) === p.number && s.id !== undefined && s.id !== null && own.includes(String(s.id)) && String(s.at ?? '') > since && String(s.at ?? '') <= until);
         for (const s of old) {
@@ -74,7 +78,14 @@ export async function followRounds({ settings, clients, keys, before }) {
       written.add(prId(p));
       try {
         const st = await clients.forge.prState({ ...at, withBody: true });
-        const r = rewriteDescription(st.body ?? '', renderSections(l, { ...p, url: p.url ?? st.url ?? null }, settings.reviewRounds.labels));
+        const sections = renderSections(l, { ...p, url: p.url ?? st.url ?? null }, settings.reviewRounds.labels);
+        const r = rewriteDescription(st.body ?? '', sections);
+        // A description with none of the markers (a PR opened before the switch) gets the three sections at its end, at
+        // the PR's first round, so its new questions show; later, a person who took them all out is not overruled.
+        if (r.missing.length === 3 && was.rounds === 0 && rounds.length) {
+          await clients.forge.editPr({ ...at, body: appendSections(st.body ?? '', sections, settings.reviewRounds.labels) });
+          continue;
+        }
         if (r.changed) await clients.forge.editPr({ ...at, body: r.body });
         if (r.kept.length) say(`the description's ${r.kept.join(', ')} section${r.kept.length > 1 ? 's were' : ' was'} edited by a person since the last round: left as it is`);
         if (r.missing.length && r.missing.length < 3) say(`the description has no markers for ${r.missing.join(', ')}: that section is not kept`);

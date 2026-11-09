@@ -455,14 +455,15 @@ export function createForge({ adapter, forge, dryRun = false }) {
     },
 
     // Settles a review thread the pipeline opened: the thread whose first comment is `comment`, an id among the
-    // caller's own (`own`, its ledger's posted ids), written from `self` and starting with the comment header when the
-    // settings have one. Any other thread (a person's, or one the pipeline only replied in) is refused. A thread
+    // caller's own (`own`, its ledger's posted ids), written from `self` and starting with the comment header (both
+    // required in the settings). Any other thread (a person's, or one the pipeline only replied in) is refused. A thread
     // already settled is a no-op.
     async resolveThread({ repo: repoIn, number, comment, own }) {
       const repo = repoOf(repoIn);
       const n = needNumber(number);
       const id = needId(comment, 'a review comment id');
       if (!ownIds(own).has(String(id))) throw new Refusal('notOwn', `comment ${id} is not among the ids the caller posted (--own): only the pipeline's own thread is settled`, { comment: id });
+      if (!forge.self || !header) throw new Refusal('notOwn', 'settling a thread needs forge.self and the comment header in the settings: without them a thread of the pipeline\'s can\'t be told from a person\'s', { comment: id });
       const threads = await adapter.threads({ repo, number: n });
       const thread = threads.find((t) => String(t.comments[0]?.id) === String(id));
       if (!thread) {

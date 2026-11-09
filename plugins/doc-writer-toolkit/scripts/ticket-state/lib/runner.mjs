@@ -27,7 +27,7 @@ import { parseClaudeConfig } from '../../ui-labels/lib/config.mjs';
 import { liveProgress } from './progress.mjs';
 import { transcriptDirs } from './trace.mjs';
 import { runsGoingIn } from './forge-state.mjs';
-import { openQuestionLines, placeReplyLines, replyLines, resyncItemLines, roundLines, styleAfterCommentsLines, styleCheckLines, suggestionLines, threadReplyLines } from './edits.mjs';
+import { openQuestionLines, placeReplyLines, replyLines, resyncItemLines, roundLines, styleAfterCommentsLines, styleCheckLines, suggestionLines, takeLines, threadReplyLines } from './edits.mjs';
 import { followLabels, labelSnapshot } from './pr-labels.mjs';
 import { followRounds, roundSnapshot } from './pr-rounds.mjs';
 import { withoutHeader } from '../../tracker/lib/comment-header.mjs';
@@ -380,6 +380,7 @@ export function briefFor(step, settings) {
     step.stage === 'resync' && step.since ? `UA changed since ready for merge at ${step.since}, and the owner moved the card to In translation: re-sync the blocks changed in ${step.since}..${step.head ?? 'HEAD'}, the whole range at once.` : null,
     ...resyncItemLines(step.items),
     step.nextEdit ? (rounds ? `Number the edits you record on this PR from ${step.nextEdit}: the numbers stay in the ledger (no posted text shows them), and the numbers already there keep their items.` : `A numbered list of edits you post on this PR starts at ${step.nextEdit}: the numbers already posted keep their items.`) : null,
+    ...takeLines(step.take),
     ...replyLines(step.replies),
     ...threadReplyLines(step.threadReplies),
     ...placeReplyLines(step.placeReplies),

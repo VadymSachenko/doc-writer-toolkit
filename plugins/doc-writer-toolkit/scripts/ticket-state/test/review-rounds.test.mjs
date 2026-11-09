@@ -109,9 +109,9 @@ test('a reply in a thread is read with the reply by number\'s words: a restore, 
 });
 
 const STYLE_ITEM = { n: 4, list: '6100', stage: 'answerComments', page: PAGE, block: 'Крок 2', before: 'Книжку обирає читач.', after: 'Читач обирає книжку.', rule: 'gdsg: word order', commentId: 7201, at: ago(5), seq: 4 };
-const roundLedger = (w, c, extra = {}) => ledger(w, c, {
+const roundLedger = (w, c, { prExtra = {}, ...extra } = {}) => ledger(w, c, {
   stages: BASE,
-  prs: [{ repo: 'guide-docs', number: 81, url: 'https://forge.example/acme/guide-docs/pull/81', targets: ['guide'], review: 'sme', stage: 'finalReview', edits: [{ n: 1, list: 'description', stage: 'pr', page: PAGE, block: 'Крок 1', before: 'а', after: 'б', at: ago(9), seq: 1 }, { ...STYLE_ITEM, n: 4, list: '6999', commentId: undefined, before: 'інше', after: 'інше2' }, STYLE_ITEM] }],
+  prs: [{ repo: 'guide-docs', number: 81, url: 'https://forge.example/acme/guide-docs/pull/81', targets: ['guide'], review: 'sme', stage: 'finalReview', edits: [{ n: 1, list: 'description', stage: 'pr', page: PAGE, block: 'Крок 1', before: 'а', after: 'б', at: ago(9), seq: 1 }, { ...STYLE_ITEM, n: 4, list: '6999', commentId: undefined, before: 'інше', after: 'інше2' }, STYLE_ITEM], ...prExtra }],
   posted: { pr: [6100, 7201, 7301], card: [] },
   places: [{ id: 'p1', repo: 'guide-docs', pr: 81, page: PAGE, line: 12, claim: 'The limit is 50 for every method', state: 'open', commentId: 7301 }],
   ...extra,
@@ -136,7 +136,7 @@ test('AC-3: «helper: поверни» in a style fix\'s thread restores that it
   assert.deepEqual((await w.one('981')).steps, []);
 });
 
-test('a reply in a place\'s thread is the answer to that place: the owner\'s with the word, an expert\'s with none; the owner\'s with no word and a colleague\'s are not', async () => {
+test('a reply in a place\'s thread is the answer to that place only when it is the owner\'s with the word (decision 3): the owner\'s with no word starts nothing, an expert\'s and a colleague\'s there are listed for the owner', async () => {
   const c = card({ number: 982, status: 'finalReview' });
   const replies = [
     comment(7304, 'owner-login', '@expert-one check this, please', { reviewId: 6299 }),
@@ -148,12 +148,55 @@ test('a reply in a place\'s thread is the answer to that place: the owner\'s wit
   roundLedger(w, c);
   const t = await w.one('982');
   const s = t.steps[0];
-  assert.deepEqual(s.placeReplies.map((r) => [r.id, r.place, r.by, r.text]), [[7302, 'p1', 'reviewer', 'Yes, for every method but one.'], [7303, 'p1', 'owner', 'the expert confirmed it, leave it.']]);
-  assert.deepEqual(t.prs[0].others.map((x) => x.id), [7305], 'the colleague\'s reply is listed for the owner');
+  assert.deepEqual(s.placeReplies.map((r) => [r.id, r.place, r.by, r.text]), [[7303, 'p1', 'owner', 'the expert confirmed it, leave it.']]);
+  assert.deepEqual(t.prs[0].others.map((x) => [x.id, x.author]), [[7302, 'expert-one'], [7305, 'colleague-two']], 'the expert the owner tagged and the colleague, listed for the owner');
   assert.equal(s.threadReplies, undefined, 'no item\'s thread');
+  assert.deepEqual(s.take.map((x) => x.id), [7303], 'the session takes the owner\'s worded reply only');
   const brief = briefFor({ ...s, role: 'writer', keys: ['982'] }, w.settings);
   assert.match(brief, /record that reply's id as the place's `replyId`: the runner then settles the thread\. Never settle a thread yourself\./);
-  assert.ok(brief.includes('- reply 7302 by the expert expert-one, place p1 (docs/x/a.md, line 12, now open): "Yes, for every method but one."'));
+  assert.ok(brief.includes('- reply 7303, place p1 (docs/x/a.md, line 12, now open): "the expert confirmed it, leave it."'));
+  assert.ok(!brief.includes('Yes, for every method but one.') && !brief.includes('an expert\'s need none'));
+  // Only the expert's reply, with no owner's word: nothing starts.
+  w.forge.activity['guide-docs#81'].threads[0].comments = w.forge.activity['guide-docs#81'].threads[0].comments.filter((x) => x.id === 7301 || x.id === 7302);
+  assert.deepEqual((await w.one('982')).steps, []);
+});
+
+test('the trigger word after a quote: a "Quote reply" starts with the quoted lines, and the word is read on the first line after them', () => {
+  assert.equal(afterTrigger('> «Книжку обирає читач.»\n> the line\n\nhelper: поверни', WORDS), '> «Книжку обирає читач.»\n> the line\n\nповерни');
+  assert.equal(parseThreadReply(afterTrigger('> quoted\nhelper: поверни', WORDS)).kind, 'restore');
+  assert.equal(afterTrigger('> helper: a quoted word is not the owner\'s', WORDS), null);
+  assert.equal(afterTrigger('> quoted\nno word here', WORDS), null);
+});
+
+test('with the trigger words, the brief lists the comments the step takes, word cut off, and says every other is for people', async () => {
+  const c = card({ number: 983, status: 'finalReview' });
+  const activity = { comments: [comment(5101, 'owner-login', 'helper: shorten step 2'), comment(5102, 'owner-login', 'A note for the expert.'), comment(5103, 'colleague-two', 'Step 3 reads oddly.'), comment(5104, 'expert-one', 'The limit is 50.')] };
+  const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 81, headCommit: HEAD })], activity: { 'guide-docs#81': activity }, extra: ROUNDS() });
+  roundLedger(w, c);
+  const s = (await w.one('983')).steps[0];
+  assert.deepEqual(s.take.map((x) => [x.id, x.by, x.text]), [[5101, 'owner', 'shorten step 2'], [5104, 'reviewer', 'The limit is 50.']]);
+  const brief = briefFor({ ...s, role: 'writer', keys: ['983'] }, w.settings);
+  assert.ok(brief.includes('- comment 5101 by the owner: "shorten step 2"'));
+  assert.ok(brief.includes('- comment 5104 by the expert expert-one: "The limit is 50."'));
+  assert.match(brief, /Every other new comment on the PR, the owner's without the word, a colleague's, a reply in your own threads by anyone but the owner, is for people: don't act on it, don't answer it, and don't record it in `handled`/);
+  assert.ok(!brief.includes('A note for the expert.') && !brief.includes('Step 3 reads oddly.'));
+  // No words set: no such list, the brief as before.
+  const plain = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 81, headCommit: HEAD })], activity: { 'guide-docs#81': activity } });
+  roundLedger(plain, c);
+  const s2 = (await plain.one('983')).steps[0];
+  assert.equal(s2.take, undefined);
+  assert.ok(!briefFor({ ...s2, role: 'writer', keys: ['983'] }, plain.settings).includes('The comments this step takes'));
+});
+
+test('a colleague\'s comment stays listed for the owner until a later worded comment of the owner\'s is handled', async () => {
+  const c = card({ number: 984, status: 'finalReview' });
+  const later = new Date(Date.parse(at) + 60000).toISOString();
+  const activity = { comments: [comment(5201, 'colleague-two', 'Step 3 reads oddly.'), { ...comment(5202, 'owner-login', 'helper: take the comment above into account'), createdAt: later, updatedAt: later }] };
+  const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 81, headCommit: HEAD })], activity: { 'guide-docs#81': activity }, extra: ROUNDS() });
+  roundLedger(w, c);
+  assert.deepEqual((await w.one('984')).prs[0].others.map((x) => x.id), [5201], 'listed while the owner\'s hand-on is not handled yet');
+  roundLedger(w, c, { reviewComments: [{ repo: 'guide-docs', pr: 81, id: 5202, updatedAt: later, at: later }] });
+  assert.equal((await w.one('984')).prs[0].others, undefined, 'handed on: no longer listed');
 });
 
 // ------------------------------------------------------------------ the round's record (scopes 1–3, AC-1)
@@ -350,10 +393,12 @@ test('AC-5: a person\'s edit inside the markers is kept with a warning; a descri
 
 // ------------------------------------------------------------------ the runner after a round (scopes 6–8, AC-4, AC-6)
 
-const roundWorld = (number, extra = {}) => {
+// The PR's first round (the `pr` stage's), before the two summaries below: they were posted once the rounds began.
+const FIRST_ROUND = { n: 1, stage: 'pr', at: ago(40), seq: 1, commits: [], review: 501, comments: 1 };
+const roundWorld = (number, extra = {}, { rounds = [FIRST_ROUND], body = TEMPLATE() } = {}) => {
   const c = card({ number, status: 'finalReview' });
   const forgePr = pr({ repo: 'guide-docs', number: 81, headCommit: HEAD });
-  forgePr.body = TEMPLATE();
+  forgePr.body = body;
   const activity = {
     'guide-docs#81': {
       threads: [thread(7301, 'A place to check', [comment(7303, 'owner-login', 'helper: the expert confirmed it.', { reviewId: 6301 })]), { id: 'T88', resolved: false, comments: [comment(88, 'expert-one', 'Is this right?')] }],
@@ -361,7 +406,7 @@ const roundWorld = (number, extra = {}) => {
     },
   };
   const w = world({ cards: [c], prs: [forgePr], activity, extra: ROUNDS(extra) });
-  roundLedger(w, c, { summaries: [{ repo: 'guide-docs', pr: 81, id: 6001, at: ago(30) }, { repo: 'guide-docs', pr: 81, id: 6002, at: ago(20) }], posted: { pr: [6100, 7201, 7301, 6001, 6002], card: [] }, ...extra.ledger });
+  roundLedger(w, c, { summaries: [{ repo: 'guide-docs', pr: 81, id: 6001, at: ago(30) }, { repo: 'guide-docs', pr: 81, id: 6002, at: ago(20) }], posted: { pr: [6100, 7201, 7301, 6001, 6002], card: [] }, prExtra: rounds.length ? { rounds } : {}, ...extra.ledger });
   w.forge.activity['guide-docs#81'].comments = w.forge.activity['guide-docs#81'].comments.filter((x) => x.id !== 6002);
   return { c, forgePr, w };
 };
@@ -386,7 +431,7 @@ test('AC-4, AC-6: after a round the runner settles the confirmed place\'s thread
   assert.ok(w.forge.activity['guide-docs#81'].comments.some((x) => x.id === 6003), "the owner's own comment stays");
   assert.ok(out.log.some((e) => e.kind === 'rounds' && /the older summary 6002 is already gone/.test(e.note)), 'a 404 is a warning');
   assert.match(forgePr.body, /- \*\*p1\*\* The limit is 50 for every method — confirmed · \[thread\]\(https:\/\/forge\.example\/acme\/guide-docs\/pull\/81#discussion_r7301\)/);
-  assert.match(forgePr.body, /- 1 · comments · \[review\]\(https:\/\/forge\.example\/acme\/guide-docs\/pull\/81#pullrequestreview-7800\)/);
+  assert.match(forgePr.body, /- 2 · comments · \[review\]\(https:\/\/forge\.example\/acme\/guide-docs\/pull\/81#pullrequestreview-7800\)/);
   assert.ok(forgePr.body.startsWith('## Description\n\nTwo sentences a person wrote.') && forgePr.body.endsWith('A line a person added at the end.'));
   // The next round: nothing to settle or remove again.
   const before = roundSnapshot(w.settings.state, ['990']);
@@ -438,4 +483,75 @@ test('the first version: the pr record keeps the description\'s questions and th
   const brief = briefFor({ stage: 'pr', role: 'writer', keys: ['993'] }, w.settings);
   assert.match(brief, /record each PR's questions in `prs\[\]\.questions`/);
   assert.match(brief, /The first version gets no line comment per style fix/);
+  // With review rounds the questions are required, `[]` when none: the runner's section never says "none" over the
+  // questions a session wrote and didn't record.
+  const c2 = card({ number: 995, status: 'finalReview' });
+  const w2 = world({ cards: [c2], prs: [pr({ repo: 'guide-docs', number: 82, head: 'ticket-995', headCommit: HEAD })], extra: ROUNDS() });
+  ledger(w2, c2, { stages: BASE, prs: [{ repo: 'guide-docs', branch: 'ticket-995', targets: ['guide'], review: 'sme', stage: 'writing' }] });
+  const prRec = (entry) => runRecord({ settings: w2.settings, clients: w2.clients(), key: '995', stage: 'pr', status: 'done', now: NOW, result: JSON.stringify({ prs: [{ repo: 'guide-docs', branch: 'ticket-995', number: 82, expertReview: { recommended: false, why: 'x' }, ...entry }], posted: [] }) });
+  await assert.rejects(prRec({}), (e) => e.exitCode === 2 && /"questions" is required with review rounds/.test(e.message));
+  await prRec({ questions: [] });
+  assert.deepEqual(read(w2, '995').prs[0].questions, []);
+});
+
+// ------------------------------------------------------------------ the gate and the fix round
+
+test('with neither forge.triggerWords nor forge.reviewRounds, a reply in a place\'s or an item\'s thread is an ordinary comment: today\'s step, brief and ledger', async () => {
+  const c = card({ number: 996, status: 'finalReview' });
+  const replies = [comment(7302, 'owner-login', 'Confirmed by the expert, leave it.', { reviewId: 6300 })];
+  const styleReply = [comment(7202, 'owner-login', 'поверни', { reviewId: 6200 })];
+  const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 81, headCommit: HEAD })], activity: { 'guide-docs#81': { threads: [thread(7301, 'A place to check', replies), thread(7201, 'A style fix', styleReply)] } } });
+  roundLedger(w, c);
+  const s = (await w.one('996')).steps[0];
+  assert.deepEqual(Object.keys(s).filter((k) => !['keys', 'cards', 'group', 'role', 'stage', 'pr', 'model', 'effort', 'estimate', 'worktrees', 'codeTrees', 'clones', 'reason', 'priority'].includes(k)).sort(), ['comments', 'nextEdit', 'owner', 'reviewer']);
+  assert.deepEqual([s.comments, s.owner, s.reviewer, s.nextEdit], [2, 2, 0, 5]);
+  const brief = briefFor({ ...s, role: 'writer', keys: ['996'] }, w.settings);
+  for (const text of ['places to check', 'settles the thread', 'threads of your line comments', 'review rounds', 'The comments this step takes', 'trigger word']) assert.ok(!brief.includes(text), text);
+  assert.match(brief, /A numbered list of edits you post on this PR starts at 5/);
+  // The `pr` record keeps no rounds and no questions, whatever the session sends.
+  const c2 = card({ number: 997, status: 'finalReview' });
+  const w2 = world({ cards: [c2], prs: [pr({ repo: 'guide-docs', number: 83, head: 'ticket-997', headCommit: HEAD })] });
+  ledger(w2, c2, { stages: { ...BASE, write: { status: 'done', result: { prs: [{ repo: 'guide-docs', branch: 'ticket-997', commits: ['3f1a2b0'] }] } } }, prs: [{ repo: 'guide-docs', branch: 'ticket-997', targets: ['guide'], review: 'sme', stage: 'writing' }] });
+  await runRecord({ settings: w2.settings, clients: w2.clients(), key: '997', stage: 'pr', status: 'done', now: NOW, result: JSON.stringify({ prs: [{ repo: 'guide-docs', branch: 'ticket-997', number: 83, expertReview: { recommended: false, why: 'x' }, review: { id: 501 }, questions: [{ text: 'Q?', reader: 'writer' }] }], posted: [501] }) });
+  const p = read(w2, '997').prs[0];
+  assert.deepEqual([p.rounds, p.questions], [undefined, undefined]);
+});
+
+test('a PR from before the switch: its summaries are never removed, and its description with no markers gets the three sections at its end at its first round', async () => {
+  const body = '## Description\n\nOld PR.\n\n## Open questions\n\n- An old question.';
+  const { forgePr, w } = roundWorld(994, {}, { rounds: [], body });
+  const before = roundSnapshot(w.settings.state, ['994']);
+  await runRecord({ settings: w.settings, clients: w.clients(), key: '994', stage: 'answerComments', pr: 'guide-docs#81', status: 'done', now: NOW, result: JSON.stringify({ review: { id: 7960, commits: [] }, asked: [{ text: 'Is 50 the limit?', reader: 'developer' }], questions: [], posted: [7960] }) });
+  assert.deepEqual(await followRounds({ settings: w.settings, clients: w.clients(), keys: ['994'], before }), []);
+  assert.deepEqual(w.forge.log.filter((x) => x[0] === 'deleteComment'), [], 'the summaries before the first round hold its lists and questions');
+  assert.ok(forgePr.body.startsWith(`${body}\n\n## Open questions\n\n<!-- ticket-flow:questions h=`), forgePr.body);
+  assert.match(forgePr.body, /\*\*1\.\*\* Is 50 the limit\?/);
+  assert.match(forgePr.body, /## Places to check\n\n<!-- ticket-flow:places h=[0-9a-f]{8} -->\n- \*\*p1\*\* The limit is 50/);
+  assert.match(forgePr.body, /<!-- ticket-flow:rounds h=[0-9a-f]{8} -->\n<details>/);
+  // The next round writes between the markers it added, once.
+  const next = roundSnapshot(w.settings.state, ['994']);
+  await runRecord({ settings: w.settings, clients: w.clients(), key: '994', stage: 'answerComments', pr: 'guide-docs#81', status: 'done', now: NOW, result: JSON.stringify({ review: { id: 7961, commits: [] }, answered: [{ n: 1, answer: 'yes, the expert', link: 'abc1234' }], questions: [], posted: [7961] }) });
+  assert.deepEqual(await followRounds({ settings: w.settings, clients: w.clients(), keys: ['994'], before: next }), []);
+  assert.equal(forgePr.body.match(/ticket-flow:questions h=/g).length, 1);
+  assert.match(forgePr.body, /pullrequestreview-7961/);
+  assert.deepEqual(w.forge.log.filter((x) => x[0] === 'deleteComment'), []);
+});
+
+test('a round changes only a place\'s state, its reply and its answer; the EN round names the translation commit the translation stage recorded', async () => {
+  const c = card({ number: 998, status: 'finalReview' });
+  const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 81, headCommit: HEAD })], extra: ROUNDS() });
+  roundLedger(w, c);
+  await runRecord({ settings: w.settings, clients: w.clients(), key: '998', stage: 'answerComments', pr: 'guide-docs#81', status: 'done', now: NOW, result: JSON.stringify({ review: { id: 7970, commits: [] }, places: [{ id: 'p1', state: 'confirmed', replyId: 7971, answer: 'yes', claim: 'rewritten', commentId: 1, repo: 'other', pr: 9 }], questions: [], posted: [7970, 7971] }) });
+  const place = read(w, '998').places[0];
+  assert.deepEqual([place.state, place.replyId, place.answer, place.claim, place.commentId, place.repo, place.pr], ['confirmed', 7971, 'yes', 'The limit is 50 for every method', 7301, 'guide-docs', 81]);
+
+  const c2 = card({ number: 999, status: 'translation' });
+  const w2 = world({ cards: [c2], prs: [pr({ repo: 'guide-docs', number: 81, headCommit: HEAD })], extra: ROUNDS() });
+  roundLedger(w2, c2, { prs: [{ repo: 'guide-docs', number: 81, targets: ['guide'], review: 'sme', stage: 'translation', chain: { translate: { status: 'done', head: HEAD } }, pipelineCommits: [C1], edits: [] }] });
+  const rec = (r) => runRecord({ settings: w2.settings, clients: w2.clients(), key: '999', stage: 'enReview', pr: 'guide-docs#81', status: 'done', head: HEAD, result: JSON.stringify(r), now: NOW });
+  await assert.rejects(rec({ commits: [C2], review: { id: 7980, commits: [{ sha: 'd'.repeat(7), role: 'translation' }, { sha: C2.slice(0, 7), role: 'style' }] }, posted: [7980] }), (e) => e.exitCode === 2 && /not among "commits" nor the PR's recorded commits/.test(e.message));
+  await rec({ commits: [C2], review: { id: 7980, commits: [{ sha: C1.slice(0, 7), role: 'translation' }, { sha: C2.slice(0, 7), role: 'style' }] }, posted: [7980] });
+  assert.deepEqual(read(w2, '999').prs[0].rounds[0].commits.map((x) => x.role), ['translation', 'style']);
+  const brief = briefFor({ stage: 'enReview', pr: 'guide-docs#81', role: 'reviewer', keys: ['999'] }, w2.settings);
+  assert.match(brief, /"role": "translation" \| "style"/);
 });

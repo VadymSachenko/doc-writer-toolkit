@@ -302,11 +302,14 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
           warnings.push(...addEdits(p, e.edits, { list: 'description', stage, at, seq: l.seq + 1 }).map((x) => `${prId(p)}: ${x}`));
           // The description's questions (D-142), numbered from 1, and the first round: the draft and the UA review's
           // commits, and the review of the places' line comments. The runner writes the description's sections from them.
-          if (e.questions !== undefined) {
+          // Only with review rounds (the host's `forge.reviewRounds`); there the questions are required (`[]` when none),
+          // so the runner's section never replaces questions the session wrote with "none".
+          if (settings.reviewRounds) {
+            if (!Array.isArray(e.questions)) throw new CliError(`pr: ${e.repo} ${e.branch}: "questions" is required with review rounds: the description's questions, [{ "text", "reader", "place"?, "why"?, "proposal"? }], or [] when there are none`, { code: 2 });
             p.questions = (p.questions ?? []).filter((q) => q.stage !== 'pr');
             addQuestions(p, e.questions);
+            firstRound(p, e);
           }
-          firstRound(p, e);
           const asked =(st.reviewRequests ?? []).map((r) => r.login ?? r.team ?? r).filter((r) => !p.reviewersRequested.map(String).includes(String(r)));
           if (asked.length) warnings.push(`${p.repo}#${p.number} has review requests (${asked.join(', ')}): every PR opens with no reviewer, and the expert is called by a person's move`);
         }
@@ -516,7 +519,7 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         // re-synced, so a restore later puts EN back too. In a review round (D-142) the EN review posts its own review
         // with line comments, as a UA round does: its items are that review's, and the description's list stays the UA's.
         if (stage === 'enReview' && result.review !== undefined) {
-          const round = roundOf(['style']);
+          const round = roundOf(['translation', 'style']);
           warnings.push(...addEdits(pr, result.edits, { list: String(result.review.id), stage, at, seq: l.seq + 1 }));
           descriptionOf();
           addRound(round);
@@ -589,7 +592,10 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
     if (!Array.isArray(commits) || commits.some((c) => !/^[0-9a-f]{7,40}$/.test(String(c?.sha ?? '')) || !roles.includes(c?.role))) throw new CliError(`${stage}: "review.commits" is [{ "sha", "role" }], each role one of ${roles.join(', ')}`, { code: 2 });
     for (const r of roles) if (commits.filter((c) => c.role === r).length > 1) throw new CliError(`${stage}: one "${r}" commit a round, not ${commits.filter((c) => c.role === r).length}`, { code: 2 });
     const shas = (result.commits ?? []).map(String);
-    for (const c of commits) if (!shas.some((s) => s.startsWith(c.sha) || c.sha.startsWith(s))) throw new CliError(`${stage}: the round's commit ${c.sha} is not among "commits"`, { code: 2 });
+    const same = (s, c) => s.startsWith(c.sha) || c.sha.startsWith(s);
+    // The EN round names the translation commit too, which the translation stage recorded (the PR's pipeline commits).
+    const earlier = (c) => c.role === 'translation' && (pr.pipelineCommits ?? []).map(String).some((s) => same(s, c));
+    for (const c of commits) if (!shas.some((s) => same(s, c)) && !earlier(c)) throw new CliError(`${stage}: the round's commit ${c.sha} is not among "commits"${c.role === 'translation' ? " nor the PR's recorded commits" : ''}`, { code: 2 });
     for (const e of result.edits ?? []) {
       const n = e?.n ?? '?';
       const has = e?.commentId !== undefined && e?.commentId !== null;
@@ -627,7 +633,9 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         warnings.push(`no place ${u.id} on ${prId(pr)}: not changed`);
         continue;
       }
-      Object.assign(place, u, { at });
+      // Only what a round may change: the place's id, page, claim and comment stay as the `pr` record wrote them.
+      for (const k of ['state', 'replyId', 'answer']) if (u[k] !== undefined) place[k] = u[k];
+      place.at = at;
     }
   }
 

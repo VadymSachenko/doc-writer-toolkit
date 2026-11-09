@@ -10,7 +10,8 @@ import crypto from 'node:crypto';
 //
 // The rest of the description, what a person wrote among it, is never touched. The opening marker keeps a short hash of
 // what the runner wrote (`h=…`): a section whose text no longer matches it was edited by a person since, and is left as
-// it is, with a warning. A section whose markers aren't there (a PR from before the template had them) is left out. The
+// it is, with a warning. A description with none of the markers (a PR from before the template had them) gets the three
+// sections at its end at the PR's first round (`appendSections`); one with only some of them, the rest left out. The
 // words around the ledger's texts are the host's (`forge.reviewRounds.labels`), in the team's language; the defaults are
 // English.
 
@@ -19,6 +20,9 @@ export const SECTIONS = ['questions', 'places', 'rounds'];
 export const DEFAULT_LABELS = {
   // The heading of each reader's group (the description questions' `reader`); a reader not named here is shown as is.
   readers: {},
+  // The headings over the questions and the places when the runner adds the sections to a description without markers.
+  questionsTitle: 'Open questions',
+  placesTitle: 'Places to check',
   resolved: 'Resolved',
   none: 'None.',
   place: 'Place',
@@ -142,7 +146,21 @@ export function rewriteDescription(body, sections) {
       continue;
     }
     const fresh = norm(sections[name]);
-    text = `${text.slice(0, from)}<!-- ticket-flow:${name} h=${sectionHash(fresh)} -->\n${fresh}\n<!-- /ticket-flow:${name} -->${text.slice(to)}`;
+    text = `${text.slice(0, from)}${marked(name, sections[name])}${text.slice(to)}`;
   }
   return { body: text, changed: text !== String(body ?? ''), kept, missing };
+}
+
+const marked = (name, section) => {
+  const fresh = norm(section);
+  return `<!-- ticket-flow:${name} h=${sectionHash(fresh)} -->\n${fresh}\n<!-- /ticket-flow:${name} -->`;
+};
+
+// A description with none of the markers (a PR opened before the host's template had them): the three sections at its
+// end, under the host's headings (`questionsTitle`, `placesTitle`; the rounds are folded under their own summary).
+// Everything above them stays byte for byte.
+export function appendSections(body, sections, labels) {
+  const text = String(body ?? '');
+  const tail = [`## ${labels.questionsTitle}`, marked('questions', sections.questions), `## ${labels.placesTitle}`, marked('places', sections.places), marked('rounds', sections.rounds)].join('\n\n');
+  return `${text}${text && !text.endsWith('\n') ? '\n' : ''}${text ? '\n' : ''}${tail}\n`;
 }

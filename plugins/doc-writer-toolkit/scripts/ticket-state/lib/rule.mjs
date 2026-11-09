@@ -629,8 +629,8 @@ const newReviewRequests = (pr, world) => (world.reviewRequests ?? []).map((r) =>
 //
 // A reply in a thread the pipeline opened is read against that thread: in the thread of an item's line comment
 // (`edits[].commentId`), the owner's reply is a reply by number with the number taken from the thread (lib/edits.mjs,
-// `parseThreadReply`); in a place's thread (`places[].commentId`), the owner's or an expert's reply is the answer to
-// that place. A suggestion block is a suggestion wherever it is.
+// `parseThreadReply`); in a place's thread (`places[].commentId`), the owner's reply is the answer to that place. Both
+// only with review rounds. A suggestion block is a suggestion wherever it is.
 function ownerForms(l, pr, comments, w) {
   const owner = comments.filter((c) => c.by === 'owner');
   const edits = mergedEdits(w.editsByPr?.get(prId(pr)) ?? [editsOf(pr)]);
@@ -640,16 +640,23 @@ function ownerForms(l, pr, comments, w) {
   const suggestions = owner.filter((c) => c.kind === 'review-comment').map((c) => ({ c, s: suggestionOf(c.body) })).filter((x) => x.s).map(({ c, s }) => ({ id: c.id, path: c.path ?? null, line: c.line ?? null, ...(s.several ? { several: s.several } : { text: s.text, note: s.note }) }));
   const suggested = new Set(suggestions.map((s) => String(s.id)));
   const inThread = (c) => c.kind === 'review-comment' && c.root !== null && c.root !== undefined && String(c.root) !== String(c.id) && !suggested.has(String(c.id));
-  const threadReplies = owner.filter(inThread).flatMap((c) => {
+  // Only with review rounds (the host's `forge.reviewRounds`): without them a reply in a thread is an ordinary comment,
+  // as before, and no runner settles a place's thread.
+  const rounds = Boolean(w.settings?.reviewRounds);
+  const threadReplies = !rounds ? [] : owner.filter(inThread).flatMap((c) => {
     const item = edits.find((e) => e.commentId !== undefined && e.commentId !== null && String(e.commentId) === String(c.root));
     return item ? [{ id: c.id, n: item.n, ...resolveThreadReply(item, parseThreadReply(c.body), edits) }] : [];
   });
   const places = (l.places ?? []).filter((p) => p.repo === pr.repo && Number(p.pr) === Number(pr.number) && p.commentId !== undefined && p.commentId !== null);
-  const placeReplies = comments.filter(inThread).flatMap((c) => {
+  // The owner's replies only (decision 3): an expert's in a place's thread is for people (lib/world.mjs).
+  const placeReplies = !rounds ? [] : owner.filter(inThread).flatMap((c) => {
     const place = places.find((p) => String(p.commentId) === String(c.root));
     return place ? [{ id: c.id, place: place.id, by: c.by, author: c.author ?? null, page: place.page ?? null, line: place.line ?? null, state: place.state ?? 'open', text: String(c.body ?? '').trim() }] : [];
   });
-  return { nextEdit: nextEditNumber({ edits }), ...(replies.length ? { replies } : {}), ...(suggestions.length ? { suggestions } : {}), ...(threadReplies.length ? { threadReplies } : {}), ...(placeReplies.length ? { placeReplies } : {}) };
+  // With the trigger words, the comments the step takes, each with the text the session reads (the word cut off): the
+  // session acts on these and on no other comment of the PR.
+  const take = w.settings?.triggerWords?.length ? comments.map((c) => ({ id: c.id, kind: c.kind, by: c.by, author: c.author ?? null, ...(c.path ? { path: c.path, line: c.line ?? null } : {}), text: String(c.body ?? '').trim() })) : [];
+  return { nextEdit: nextEditNumber({ edits }), ...(replies.length ? { replies } : {}), ...(suggestions.length ? { suggestions } : {}), ...(threadReplies.length ? { threadReplies } : {}), ...(placeReplies.length ? { placeReplies } : {}), ...(take.length ? { take } : {}) };
 }
 
 // After ready for merge, once the owner moved the card to In translation: the blocks changed since the ready head

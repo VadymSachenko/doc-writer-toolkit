@@ -631,6 +631,10 @@ test("resolveThread: a person's thread, a reply of the pipeline's in it, an id n
   await rejects(forge.resolveThread({ ...at, comment: 999, own: [999] }), 'unknown');
   await rejects(forge.resolveThread({ ...at, comment: 701 }), 'notOwn');
   assert.equal(writes(calls).length, 0);
+  // With no header in the settings, the pipeline's thread can't be told from the owner's: refused, as deleteComment.
+  const plainSettings = setup({ routes: ownRoutes() });
+  await rejects(plainSettings.forge.resolveThread({ ...at, comment: 701, own: [701] }), 'notOwn');
+  assert.equal(writes(plainSettings.calls).length, 0);
 });
 
 test("deleteComment: removes the pipeline's own conversation comment; a person's, one with no header, one on another PR or not among its own is refused; a comment gone is the forge's 404", async () => {
