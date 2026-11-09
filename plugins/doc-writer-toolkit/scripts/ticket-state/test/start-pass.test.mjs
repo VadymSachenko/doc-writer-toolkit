@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { BOARD, LISTS, NOW, card, pr, quietGit } from './fakes.mjs';
-import { ledger, read, world } from './helpers.mjs';
+import { inProcess, ledger, read, world } from './helpers.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
 import { emptyFeed, readFeed, sourcesOf, writeFeed } from '../lib/feed.mjs';
 import { changeOf, inStartHours, noRoomOf, runCheck, startPrint } from '../lib/watch.mjs';
@@ -72,7 +72,7 @@ const morningLeft = (date, open, ready, intakeDue = []) => ({ date, at: `${date}
 // watcher's own run and the morning run. No real notification: `notify` records.
 function checker(w, { cards = {}, week = 7, finishTakes = 0, passThrows = 0 } = {}) {
   let throws = passThrows;
-  const calls = { runs: [], sessions: [], notes: [], usage: 0 };
+  const calls = { runs: [], sessions: [], notes: [], usage: 0, spawns: [] };
   let clock = NOW;
   const spawnClaude = async (cmd) => {
     const [stage, key] = keyOfBrief(cmd);
@@ -82,6 +82,9 @@ function checker(w, { cards = {}, week = 7, finishTakes = 0, passThrows = 0 } = 
     await runRecord({ settings: w.settings, clients: w.clients(), key, stage: 'start', status: 'done', card: cards[key].shortLink, startedBy: originOf(cmd), result: { group: key }, now: clock });
     return { code: 0, stdout: RESULT };
   };
+  // The start pass's runner and the hand-on's it starts (a process of its own, here run at once): one /usage reading
+  // per pass, and the hand-on starts from it.
+  const runner = { now: () => clock, readUsage: () => (calls.usage++, usageAt(week)), spawnClaude, ensureWorktree: () => assert.fail('a start has no worktree') };
   const check = (at, options = {}) => {
     clock = at;
     return runCheck({
@@ -100,8 +103,9 @@ function checker(w, { cards = {}, week = 7, finishTakes = 0, passThrows = 0 } = 
             throws--;
             throw new Error('the runner crashed before its first step');
           }
-          return runDaily({ ...a, io: { ...a.io, now: () => clock, readUsage: () => (calls.usage++, usageAt(week)), spawnClaude, ensureWorktree: () => assert.fail('a start has no worktree') } });
+          return runDaily({ ...a, io: { ...a.io, ...runner } });
         },
+        spawn: inProcess(w, runner, { spawns: calls.spawns }),
         readUsage: () => assert.fail('the watcher reads no /usage of its own'),
         notify: (msg) => (calls.notes.push(msg), { sent: true }),
       },
@@ -130,18 +134,22 @@ test('AC-1: a merge that frees the only slot at 15:00 starts the ready ticket at
   assert.deepEqual(calls.sessions, ['start 502 schedule', 'plan 502 null']);
   assert.deepEqual([read(w, '502').startedBy, read(w, '502').stages.start.status], ['schedule', 'done']);
   assert.equal(out.startPass.why, 'a slot freed: 801 no longer open');
-  assert.match(oneLine(out), /start pass \(a slot freed: 801 no longer open\): started 502/);
-  assert.deepEqual(calls.notes.map((x) => [x.urgent, x.title, x.text]), [[false, 'Ticket flow: a ticket started', '502 started outside the morning run (a slot freed: 801 no longer open). /ticket-report']]);
+  // The start went to a process of its own (here run at once): the check hands it on and doesn't wait for it.
+  assert.match(oneLine(out), /start pass \(a slot freed: 801 no longer open\): handed on the start of 502 \(run [\w-]+\)/);
+  assert.deepEqual(calls.spawns.map((x) => x.keys), [['502']]);
+  assert.deepEqual(calls.notes, [], 'told once its card is in work, at the next check');
   const memory = readFeed(w.settings.state).starts;
-  assert.deepEqual([memory.by, memory.print.open, memory.print.ready, memory.outcome], ['watcher', ['502'], [], 'started 502']);
+  assert.deepEqual([memory.by, memory.print.open, memory.print.ready, memory.outcome], ['watcher', ['502'], [], 'handed on the start of 502']);
   // Counted like any scheduled start: the slot is taken, and the day's report says what the pass did.
   const st = await w.status({ usage: usageAt(7) });
   assert.deepEqual(st.wip.openKeys, ['502']);
-  assert.match(renderReport({ settings: w.settings, st, date: '2026-11-10', ledgers: [] }), /The last start pass when a slot freed: 2026-11-10T15:05:00\.000Z, started 502\./);
+  assert.match(renderReport({ settings: w.settings, st, date: '2026-11-10', ledgers: [] }), /The last start pass when a slot freed: 2026-11-10T15:05:00\.000Z, handed on the start of 502\./);
   assert.ok(readRunLog(w.settings.state, '2026-11-10').some((e) => e.kind === 'step' && e.stage === 'start' && e.outcome === 'done' && e.keys.includes('502')), "the start is in the day's run log");
 
-  // The next checks: no change, no pass.
-  await check(AT('15:10'));
+  // The next checks: no change, no pass. The first collects the start's run and tells the start, once.
+  out = await check(AT('15:10'));
+  assert.deepEqual(calls.notes.map((x) => [x.urgent, x.title, x.text]), [[false, 'Ticket flow: a ticket started', '502 started outside the morning run (a slot freed: 801 no longer open). /ticket-report']]);
+  assert.deepEqual([out.finished.map((f) => f.keys), readFeed(w.settings.state).handOns], [[['502']], []]);
   actions[BOARD].push(act(cards[502], AT('15:12')));
   await check(AT('15:15'));
   assert.equal(passes().length, 1);

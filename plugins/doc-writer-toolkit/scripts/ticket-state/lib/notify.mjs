@@ -26,6 +26,10 @@ export function startedOf(run) {
   return (run?.starts ?? []).filter((s) => s.steps?.[0]?.stage === 'start' && s.steps[0].outcome === 'done').map((s) => ({ group: s.group, keys: s.steps[0].keys ?? [s.group] }));
 }
 
+// A start the watcher's start pass handed to a process of its own, told once its card is in work (lib/watch.mjs): `h` is
+// the run's record ({ group, keys, why }).
+export const startedNote = (h, today) => ({ key: `started:${today}:${h.group ?? h.keys[0]}`, urgent: false, title: 'Ticket flow: a ticket started', text: `${h.keys.join(', ')} started outside the morning run (${h.why ?? 'a start pass'}). /ticket-report` });
+
 // What to tell the owner after a check: one urgent notification per reason a day, the morning counts once a day, and
 // each group the watcher's start pass started. `morning`, `run` and `startPass.run` are runner results; `jobs` the host
 // jobs' outcomes. Returns [{ key, title, text, urgent }].
@@ -59,10 +63,13 @@ export function notificationsOf({ morning, run, startPass = null, jobs = [], err
     const done = (morning.ran ?? []).filter((s) => s.outcome === 'done').length;
     const failed = (morning.ran ?? []).filter((s) => s.outcome === 'failed').length;
     const started = (morning.starts ?? []).filter((s) => !s.skipped).length;
+    // A morning run that hands its groups on (lib/dispatch.mjs) has done none of their steps yet: it says what it handed on.
+    const handed = (morning.handedOn ?? []).filter((s) => s.handedOn).length;
+    const starts = (morning.starts ?? []).filter((s) => s.handedOn).length;
     const a = morning.after?.allowance;
     const wip = morning.after?.wip;
     const parts = [
-      `${done} step(s) done, ${failed} failed, ${started} started`,
+      morning.handedOn ? `${handed} group(s) handed on, ${starts} start(s) handed on` : `${done} step(s) done, ${failed} failed, ${started} started`,
       wip ? `${wip.inProgress} in progress, ${wip.waiting} waiting` : null,
       a ? `week ${a.used}% of ${a.cap}% allowed` : 'no usage reading',
     ].filter(Boolean);

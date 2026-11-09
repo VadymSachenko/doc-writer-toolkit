@@ -262,6 +262,7 @@ function runSection(run, flights, now, live, { starts = null, startHours = null,
   }
   else if (run?.intakeDue) out.push(`- ⬜ Triaging: ${run.intakeDue} intake card(s) due`);
   for (const s of run?.steps ?? []) out.push(`- ${s.outcome === 'done' ? '✅' : s.outcome === 'failed' ? '❌' : '⏸'} ${labelOf(s.stage)} — ${(s.keys ?? []).join(', ')}${s.pr ? ` (${s.pr})` : ''}${s.outcome && s.outcome !== 'done' ? `: ${s.outcome}${s.note ? ` (${oneLine(s.note, 100)})` : ''}` : s.note ? ` — ${oneLine(s.note, 100)}` : ''}`);
+  for (const h of run?.handedOn ?? []) out.push(`- ${h.handed ? '↪️' : '⏸'} ${labelOf(h.stage)} — ${h.keys.join(', ')}${h.pr ? ` (${h.pr})` : ''}${h.handed ? ': handed to a run of its own' : `: not handed on (${oneLine(h.note ?? '', 100)})`}`);
   if (run?.picked?.length) out.push(`- ✅ Picked: ${run.picked.join(', ')}`);
   for (const n of run?.notStarted ?? []) out.push(`- ⬜ Not started: ${n.keys?.join(', ') ?? n.group} — ${(n.reasons ?? []).join('; ')}`);
   for (const g of run?.guard ?? []) out.push(`- ⏸ ${g.what ? `${g.what}: ` : ''}${g.reason}`);
@@ -372,6 +373,9 @@ function othersFrom(st, previous = {}) {
 // watcher pass can still show the last run.
 export function digestRun({ out = {}, st = null, log = [], trigger = null, startedAt = null, now = Date.now() } = {}) {
   const guard = [];
+  // Only a run that decides starts says why a group didn't start: the status of a run that only finishes (the watcher's,
+  // a run handed one group) still works out which groups could start, and its "starting now" would read as starts.
+  const decides = (trigger ?? out.trigger) !== 'watcher' && !out.startKeys;
   for (const e of log) if (e.kind === 'guard' && !guard.some((g) => g.what === e.what && g.reason === e.reason)) guard.push({ what: e.what ?? null, reason: e.reason });
   return {
     at: iso(now),
@@ -381,8 +385,9 @@ export function digestRun({ out = {}, st = null, log = [], trigger = null, start
     steps: (out.ran ?? []).map((s) => ({ stage: s.stage, keys: s.keys ?? [], pr: s.pr ?? null, outcome: s.outcome, note: s.note ?? null })),
     triage: out.triage?.stage ? { keys: out.triage.keys ?? [], outcome: out.triage.outcome ?? null } : null,
     intakeDue: out.triage ? 0 : (st?.intake?.due?.length ?? 0),
-    picked: (out.starts ?? []).filter((s) => !s.skipped).flatMap((s) => (s.steps?.[0]?.keys ?? (s.group ? [s.group] : []))),
-    notStarted: (st?.notStarted ?? []).map((n) => ({ group: n.group, keys: n.keys ?? [], reasons: n.reasons ?? [] })),
+    picked: (out.starts ?? []).filter((s) => !s.skipped && !s.waits && !s.held && !s.error).flatMap((s) => (s.steps?.[0]?.keys ?? (s.group ? [s.group] : []))),
+    handedOn: (out.handedOn ?? []).map((x) => ({ stage: x.stage, keys: x.keys ?? [], pr: x.pr ?? null, handed: Boolean(x.handedOn), note: x.handedOn ? null : x.waits ?? x.held ?? x.guard ?? x.error ?? null })),
+    notStarted: decides ? (st?.notStarted ?? []).map((n) => ({ group: n.group, keys: n.keys ?? [], reasons: n.reasons ?? [] })) : [],
     guard,
     wip: st?.wip ? { inProgress: st.wip.inProgress, waiting: st.wip.waiting, open: st.wip.open, limits: st.wip.limits } : null,
     allowance: st?.allowance ? { remaining: st.allowance.remaining, cap: st.allowance.cap, used: st.allowance.used } : null,
