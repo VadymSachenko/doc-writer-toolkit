@@ -281,6 +281,39 @@ test('AC-2: while a session that builds waits for the build lock, its group\'s l
   assert.equal(leases.at(-1), NOW + 10 * 60000 + lease, 'renewed at 5 and 10 minutes of the wait');
 });
 
+test('AC-2: a build lock the runner can\'t use is a recorded failure of the step, never an error out of the run; a session\'s busy wait keeps its time', async () => {
+  const denied = async () => {
+    throw Object.assign(new Error("EACCES: permission denied, mkdir '.build.lock'"), { code: 'EACCES' });
+  };
+  // The runner's build.
+  const t = atBuild();
+  const out = await run(t.w, { ensureWorktree: t.ensureWorktree, waitForBuildLock: denied, runBuild: () => assert.fail('no build without the lock') }, { named: ['701'] });
+  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['build', 'failed']]);
+  let l = read(t.w, '701');
+  assert.match(l.prs[0].chain.build.note, /^the build lock: EACCES: permission denied/);
+  assert.deepEqual([l.runs.at(-1).outcome, l.runs.at(-1).failures, 'start' in l.runs.at(-1)], ['failed', 1, false]);
+
+  // A session that builds: no session starts, and the step waits for a person as a failed one does.
+  const u = atBuild(1, { done: 6 });
+  const out2 = await run(u.w, { ensureWorktree: u.ensureWorktree, waitForBuildLock: denied, spawnClaude: noSession }, { named: ['701'] });
+  assert.deepEqual(out2.ran.map((r) => [r.stage, r.outcome]), [['visualPack', 'failed']]);
+  l = read(u.w, '701');
+  assert.match(l.prs[0].chain.visualPack.note, /^the build lock: EACCES/);
+  assert.deepEqual([l.runs.at(-1).outcome, l.runs.at(-1).failures, 'start' in l.runs.at(-1)], ['failed', 1, false]);
+  assert.match((await u.w.one('701')).next.waits, /a person acting on the ticket/);
+
+  // Held by someone else for the whole wait: busy, with the time it waited, and still no session counted.
+  const v = atBuild(1, { done: 6 });
+  v.w.settings.build.waitMinutes = 2;
+  takeBuildLock(v.w.settings.state, { ticket: '888', pid: process.pid, now: NOW });
+  let clock = NOW;
+  const out3 = await run(v.w, { now: () => clock, sleep: async (ms) => (clock += ms), ensureWorktree: v.ensureWorktree, spawnClaude: noSession }, { named: ['701'] });
+  assert.deepEqual(out3.ran.map((r) => [r.stage, r.outcome]), [['visualPack', 'busy']]);
+  const busy = read(v.w, '701').runs.at(-1);
+  assert.deepEqual([busy.outcome, busy.waitedMs, busy.wallMs, 'start' in busy], ['busy', v.w.settings.build.waitMinutes * 60000, v.w.settings.build.waitMinutes * 60000, false]);
+  assert.match(fs.readFileSync(path.join(v.w.settings.state, 'reports', `${localDate(NOW)}.md`), 'utf8'), /0 session\(s\) today/);
+});
+
 test('AC-1: the locales brief runs the locale-translator with --no-build; the re-sync\'s keeps its build, under the lock', () => {
   const w = world();
   const locales = briefFor({ stage: 'locales', role: 'translator', keys: ['701'], pr: 'guide-docs#61', head: HEAD }, w.settings);

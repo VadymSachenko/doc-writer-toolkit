@@ -1254,13 +1254,23 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
     if (allLocks(settings.state, clock()).some((l) => l.group === mine && l.pid === process.pid)) renewLock(settings.state, mine, { leaseMinutes: settings.limits.lockLeaseMinutes, stage: step.stage, now: clock() });
     const renew = setInterval(() => {
       if (step.group) renewLock(settings.state, step.group, { leaseMinutes: settings.limits.lockLeaseMinutes, now: clock() });
-      renewBuildLock(settings.state, { ticket: key, now: clock() });
+      try {
+        renewBuildLock(settings.state, { ticket: key, now: clock() });
+      } catch {
+        // a write that failed (the disk, the rights): the next renewal tries again, never an error out of the run
+      }
     }, 5 * 60000);
     let res;
     let waitedMs = 0;
     try {
       const waitFrom = clock();
-      const lock = await waitForBuildLock(settings.state, { ticket: key, stage: step.stage, waitMs: b.waitMinutes * 60000, now: clock, sleep: io.sleep ?? pause });
+      let lock;
+      try {
+        lock = await (io.waitForBuildLock ?? waitForBuildLock)(settings.state, { ticket: key, stage: step.stage, waitMs: b.waitMinutes * 60000, now: clock, sleep: io.sleep ?? pause });
+      } catch (e) {
+        // A lock folder the runner can't read or write (its rights, say): the stage failed, never an error out of the run.
+        return await failed(`the build lock: ${String(e.message ?? e).slice(0, 300)}`, { ran: false });
+      }
       waitedMs = clock() - waitFrom;
       if (lock.broken) return await failed(`the build lock: ${lock.broken}`, { ran: false });
       if (!lock.taken) {
@@ -1360,15 +1370,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         const buildDir = step.stage === 'visualPack' ? reusableBuild(step, trees) : null;
         step = { ...step, worktrees: trees, codeTrees, clones, ...(buildDir ? { buildDir } : {}) };
       } catch (e) {
-        const note = `the worktree: ${String(e.message).slice(0, 400)}`;
-        for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'failed', pr: step.pr, note, now: clock() }).catch(() => {});
-        // A failed step like a failed session, so the failed-step rules apply (it waits for a person, then holds), with
-        // no `start`: no session ran, so it counts toward no cap, cost or report of sessions.
-        const marks = await marksOf(step);
-        const failures = (step.prior ?? 0) + 1;
-        for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, run: JSON.stringify({ stage: step.stage, role: step.role, outcome: 'failed', session: null, note, failures, ...(marks[k] ? { after: marks[k] } : {}) }), pr: step.pr, now: clock() }).catch(() => {});
-        say({ kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, role: step.role, outcome: 'failed', note });
-        return { ...pick(step), outcome: 'failed', note };
+        return await failedBeforeSession(step, `the worktree: ${String(e.message).slice(0, 400)}`);
       }
       // A session that builds the site itself runs under the build lock, taken here and freed when the step ends.
       if (sessionBuilds(step)) {
@@ -1376,15 +1378,23 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         const waiting = setInterval(() => {
           for (const g of [step.group, ...held].filter(Boolean)) renewLock(settings.state, g, { leaseMinutes: settings.limits.lockLeaseMinutes, now: clock() });
         }, 5 * 60000);
+        const waitFrom = clock();
         let lock;
         try {
-          lock = await waitForBuildLock(settings.state, { ticket: step.keys[0], stage: step.stage, waitMs: settings.build.waitMinutes * 60000, now: clock, sleep: io.sleep ?? pause });
+          lock = await (io.waitForBuildLock ?? waitForBuildLock)(settings.state, { ticket: step.keys[0], stage: step.stage, waitMs: settings.build.waitMinutes * 60000, now: clock, sleep: io.sleep ?? pause });
+        } catch (e) {
+          // A lock folder the runner can't read or write: the step failed, never an error out of the run.
+          lock = { taken: false, error: String(e.message ?? e) };
         } finally {
           clearInterval(waiting);
         }
+        // A lock that isn't a folder, or one the runner can't use, stays so until a person acts: a failure, told.
+        if (lock.broken || lock.error) return await failedBeforeSession(step, `the build lock: ${lock.broken ?? lock.error}`.slice(0, 400));
         if (!lock.taken) {
-          const note = lock.broken ? `the build lock: ${lock.broken}` : `the build lock was held by ${lock.holder?.ticket ? `ticket ${lock.holder.ticket}` : 'someone else'} since ${lock.since} for the whole wait (${settings.build.waitMinutes} min): runs again at a later check`;
-          for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, run: JSON.stringify({ stage: step.stage, role: step.role, outcome: 'busy', session: null, note: note.slice(0, 300) }), pr: step.pr, now: clock() }).catch(() => {});
+          // No session ran, so no `start`: the wait counts toward no cap, cost or report of sessions; its time is kept.
+          const waitedMs = clock() - waitFrom;
+          const note = `the build lock was held by ${lock.holder?.ticket ? `ticket ${lock.holder.ticket}` : 'someone else'} since ${lock.since} for the whole wait (${settings.build.waitMinutes} min): runs again at a later check`;
+          for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, run: JSON.stringify({ stage: step.stage, role: step.role, outcome: 'busy', session: null, wallMs: waitedMs, waitedMs, note: note.slice(0, 300) }), pr: step.pr, now: clock() }).catch(() => {});
           say({ kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, role: step.role, outcome: 'busy', note: note.slice(0, 300) });
           return { ...pick(step), outcome: 'busy', note };
         }
@@ -1405,7 +1415,11 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         const start = new Date(began).toISOString();
         const renew = setInterval(() => {
           for (const g of [step.group, ...held].filter(Boolean)) renewLock(settings.state, g, { leaseMinutes: settings.limits.lockLeaseMinutes, now: clock() });
-          if (buildLocked) renewBuildLock(settings.state, { ticket: step.keys[0], now: clock() });
+          try {
+            if (buildLocked) renewBuildLock(settings.state, { ticket: step.keys[0], now: clock() });
+          } catch {
+            // the next renewal tries again
+          }
         }, 5 * 60000);
         let res;
         // The step's wall-clock time, from the session's start to its process's end: `duration_ms` is the CLI's own
@@ -1486,6 +1500,18 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         // a lock that isn't a folder is left alone
       }
     }
+  }
+
+  // A model step that failed before its session (its worktree, its build lock): recorded failed like a failed session, so
+  // the failed-step rules apply (it waits for a person, then holds), with no `start`: no session ran, so it counts
+  // toward no cap, cost or report of sessions.
+  async function failedBeforeSession(step, note) {
+    for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'failed', pr: step.pr, note, now: clock() }).catch(() => {});
+    const marks = await marksOf(step);
+    const failures = (step.prior ?? 0) + 1;
+    for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, run: JSON.stringify({ stage: step.stage, role: step.role, outcome: 'failed', session: null, note, failures, ...(marks[k] ? { after: marks[k] } : {}) }), pr: step.pr, now: clock() }).catch(() => {});
+    say({ kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, role: step.role, outcome: 'failed', note });
+    return { ...pick(step), outcome: 'failed', note };
   }
 
   // Whether a person moved the PR's branch while the session ran, by heads, never by an error's text: the forge's head
