@@ -45,9 +45,18 @@ const names = (value, where) => {
   return list;
 };
 
+// The line every pipeline comment starts with (`commentHeader`, at the top of the shared file, read by the tracker and
+// the forge alike; lib/comment-header.mjs): one line of text, or none.
+export function validateCommentHeader(v) {
+  if (v === undefined || v === null) return null;
+  if (typeof v !== 'string' || !v.trim() || /[\r\n]/.test(v.trim())) fail('commentHeader must be one line of text (the line every pipeline comment starts with), or absent');
+  return v.trim();
+}
+
 // Checks the `tracker` object of the settings and returns it in a fixed shape. Nothing here talks to the tracker.
-// `targets`: the settings' targets, for the people each one adds to a card (`cardMembers`).
-export function validateTracker(t, targets = []) {
+// `targets`: the settings' targets, for the people each one adds to a card (`cardMembers`). `header`: the shared file's
+// `commentHeader`.
+export function validateTracker(t, targets = [], header = null) {
   if (!isObject(t)) fail("the file has no 'tracker' object");
   if (typeof t.kind !== 'string' || !t.kind) fail("tracker.kind is required (for example 'trello')");
   if (typeof t.board !== 'string' || !t.board) fail('tracker.board is required (the board id)');
@@ -84,6 +93,7 @@ export function validateTracker(t, targets = []) {
     priority: validatePriority(t.priority),
     owner,
     members,
+    commentHeader: validateCommentHeader(header),
     credentials: { key: c.key, token: c.token, envFile: c.envFile ?? '.env' },
   };
 }
@@ -137,7 +147,7 @@ export async function loadSettings({ root, settings: flag }) {
   if (!shared) throw new CliError(`no settings file at ${file}. Declare 'Ticket flow settings:' in CLAUDE.md or pass --settings.`, { code: 2 });
   const local = readJsonFile(localSettingsPath(file), 'local settings file');
   const merged = deepMerge(shared, local ?? {});
-  return { root, file, local: Boolean(local), tracker: validateTracker(merged.tracker, merged.targets) };
+  return { root, file, local: Boolean(local), tracker: validateTracker(merged.tracker, merged.targets, merged.commentHeader) };
 }
 
 /** KEY=value lines, as in a .env file. Nothing is evaluated. */

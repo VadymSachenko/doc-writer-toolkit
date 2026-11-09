@@ -9,6 +9,7 @@ import { estimatesOf, groupsOf, related, startable } from './limits.mjs';
 import { allowanceOf } from './allowance.mjs';
 import { fileHash } from './record.mjs';
 import { readRearm, rearmedAt } from './setlocal.mjs';
+import { withoutHeader } from '../../tracker/lib/comment-header.mjs';
 
 // `status`: every ticket's state, next step, open gate and mismatches, the intake, the WIP counts and the groups a
 // scheduled run may start now. It reads the ledgers, the tracker, the forge and git, and writes nothing: the one change
@@ -64,7 +65,8 @@ export async function computeStatus({ settings, clients, now = Date.now(), only 
   );
 
   // Cards with no ledger: the intake, ready tickets the pipeline hasn't started, tickets whose ledger is missing, and
-  // cards that are not tickets at all (a plan, a report).
+  // cards that are not tickets at all (a plan, a report). The triage comment is found by its first words, read without
+  // the comment header, so one from before the header counts too.
   const marker = settings.intake.triageMarker;
   const notTickets = [];
   const ready = [];
@@ -73,7 +75,7 @@ export async function computeStatus({ settings, clients, now = Date.now(), only 
     for (const card of list) {
       if (ledgersByCard.has(card.id)) continue;
       const detail = await clients.tracker.readCard({ card: card.id });
-      const triaged = Boolean(marker) && detail.comments.some((c) => bare(c.text).startsWith(bare(marker)));
+      const triaged = Boolean(marker) && detail.comments.some((c) => bare(withoutHeader(c.text, settings.commentHeader)).startsWith(bare(marker)));
       const key = keyOf(card);
       const base = { key, priority: card.priority ?? 'medium', createdAt: card.createdAt ?? null, card: { id: card.id, shortLink: card.shortLink, url: card.url, name: card.name, status: card.status, list: card.list?.name ?? null } };
       if (status === 'ready') {

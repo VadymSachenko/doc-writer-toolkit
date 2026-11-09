@@ -515,7 +515,9 @@ function prStep(l, p, w, out, prs) {
     // Answering the expert in their review, not yet approved: the summary ends with the way to approve (D-082).
     const files = filesLink(pr, world);
     const ask = p.stage === 'smeReview' && reviewer && !approved && files ? { askApprove: files } : {};
-    return step('answerComments', { pr: id, comments: world.newComments.length, owner: owner.length, reviewer, ...ownerForms(pr, owner, w), ...ask });
+    // The questions to the owner still open from the PR's last summaries: the session says which are left (lib/pr-labels.mjs).
+    const asked = pr.openQuestions?.items?.length ? { openQuestions: pr.openQuestions.items } : {};
+    return step('answerComments', { pr: id, comments: world.newComments.length, owner: owner.length, reviewer, ...ownerForms(pr, owner, w), ...ask, ...asked });
   }
   // Row 11b, the style check: hand commits that changed UA and no style check read are reviewed while the PR is in the
   // owner's queue (D-081, D-082), each once, whatever the head (the check records the shas it read). A ready PR went

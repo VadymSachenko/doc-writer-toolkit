@@ -52,7 +52,7 @@ export async function commentWait({ settings, clients, ledger, prIds = null, now
     if (prIds && !prIds.includes(prId(p))) continue;
     const activity = await clients.forge.prActivity({ repo: p.repo, number: p.number });
     if (activity.pr?.state && activity.pr.state !== 'open') continue;
-    const items = unhandled(ledger, p, activity, settings.forge.self);
+    const items = unhandled(ledger, p, activity, settings.forge.self, settings.commentHeader);
     const r = startRule(items, activity, { now, quietMs });
     if (r) looks.push({ pr: prId(p), comments: items.length, ...r });
   }

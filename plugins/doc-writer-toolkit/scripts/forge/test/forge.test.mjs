@@ -422,6 +422,12 @@ test('openPr: refuses, before any call, a repo, login or label the settings do n
   assert.equal(calls.length, 0);
 });
 
+test('openPr: the check and ready labels are refused, before any call: the runner sets them on their own', async () => {
+  const { forge, calls } = setup({ settings: readySettings() });
+  for (const label of ['Check me', 'CHECK ME', READY]) await rejects(forge.openPr({ repo: 'guide-docs', head: 'docs/x', base: 'main', title: 'T', labels: ['in progress', label] }), 'notNamed');
+  assert.equal(calls.length, 0);
+});
+
 test('openPr: when a step after the PR was made fails, the error says which PR exists', async () => {
   const { forge } = setup({
     routes: { 'graphql PrsByHead': fixture('gql-prs-by-head-none'), 'POST repos/acme-docs/guide-docs/pulls': fixture('rest-create-pull'), 'POST repos/acme-docs/guide-docs/issues/8/assignees': ghFail(422, 'Validation Failed') },
@@ -653,6 +659,123 @@ test('labels: a label the repository does not have is reported, never created', 
   assert.equal(calls.filter((c) => c.mutation).length, 0);
 });
 
+// ------------------------------------------------------------------ the ready label
+
+const READY = 'Merge advised';
+const readySettings = () => forgeSettings({ forge: { ...settingsJson().forge, readyLabel: READY } });
+const withLabel = (name) => {
+  const f = structuredClone(fixture('gql-label-targets'));
+  f.data.repository.labels.nodes.push({ id: 'LA_9', name });
+  return f;
+};
+
+test('settings: the ready label may be added and removed, and must be a label of its own', () => {
+  const f = readySettings();
+  assert.equal(f.readyLabel, READY);
+  assert.equal(f.addable.get('merge advised'), READY);
+  assert.equal(f.removable.get('merge advised'), READY);
+  assert.equal(forgeSettings().readyLabel, null);
+  for (const taken of ['Check me', 'in progress', 'IN FINAL REVIEW']) {
+    const s = settingsJson({ forge: { ...settingsJson().forge, readyLabel: taken } });
+    assert.throws(() => validateForge(s.forge, s.targets), /forge\.readyLabel .* needs a label of its own/, taken);
+  }
+});
+
+test('addLabel: the ready label is created on a repository that lacks it, then added; any other missing label is still refused', async () => {
+  const created = { 'POST repos/acme-docs/guide-docs/labels': { id: 1, name: READY } };
+  const { forge, calls } = setup({ settings: readySettings(), routes: { 'graphql LabelTargets': seq(fixture('gql-label-targets'), withLabel(READY)), ...created } });
+  const r = await forge.addLabel({ repo: 'guide-docs', number: 7, label: READY });
+  assert.deepEqual([r.label, r.changed, r.created], [READY, true, true]);
+  const create = writes(calls).find((c) => c.path === 'repos/acme-docs/guide-docs/labels');
+  assert.deepEqual(create.body, { name: READY, color: 'ededed' });
+  assert.deepEqual(calls.find((c) => c.op === 'ChangeLabels').variables.add, ['LA_9']);
+  // one already made meanwhile (GitHub answers 422) is no error
+  const raced = setup({ settings: readySettings(), routes: { 'graphql LabelTargets': seq(fixture('gql-label-targets'), withLabel(READY)), 'POST repos/acme-docs/guide-docs/labels': ghFail(422, 'Validation Failed') } });
+  assert.equal((await raced.forge.addLabel({ repo: 'guide-docs', number: 7, label: READY })).changed, true);
+  // the stage labels are never created
+  const other = setup({ settings: readySettings(), routes: { 'graphql LabelTargets': fixture('gql-label-targets-no-final'), ...created } });
+  await rejects(other.forge.addLabel({ repo: 'guide-docs', number: 7, label: 'In final review' }), 'unknown');
+  assert.equal(writes(other.calls).length, 0);
+  // a dry run records the label it would create and the add
+  const dry = setup({ settings: readySettings(), dryRun: true, routes: { 'graphql LabelTargets': fixture('gql-label-targets') } });
+  const would = await dry.forge.addLabel({ repo: 'guide-docs', number: 7, label: READY });
+  assert.deepEqual([would.changed, would.created], [true, true]);
+  assert.deepEqual(dry.gh.calls.map((c) => c.path), ['repos/acme-docs/guide-docs/labels']);
+});
+
+// ------------------------------------------------------------------ the comment header
+
+const HEADER = '🤖 **[BOT]**';
+// The in-memory forge with the comments it was given and the ones it posted, so a check that reads them sees both.
+function talkingAdapter({ issue = [], review = [] } = {}) {
+  const adapter = memoryAdapter();
+  const issueComments = [...issue];
+  const reviewComments = [...review];
+  adapter.issueComments = async () => issueComments;
+  adapter.reviewComments = async () => reviewComments;
+  adapter.reviewComment = async ({ id }) => ({ ...reviewComments.find((c) => c.id === Number(id)), number: 1 });
+  adapter.comment = async (a) => (adapter.log.push(['comment', a.body]), issueComments.push({ id: 91, body: a.body, createdAt: '2026-11-05T00:00:00Z' }), { id: 91 });
+  adapter.reply = async (a) => (adapter.log.push(['reply', a.comment, a.body]), reviewComments.push({ id: 92, body: a.body, inReplyTo: a.comment, author: 'pat' }), { id: 92 });
+  const makeReview = adapter.createReview;
+  adapter.createReview = async (a) => (adapter.log.push(['review', a.body ?? null, a.comments.map((c) => c.body)]), makeReview(a));
+  return adapter;
+}
+const withHeaderSettings = () => {
+  const s = settingsJson();
+  return validateForge(s.forge, s.targets, HEADER);
+};
+
+test('the comment header: a comment, a reply, a suggestion and each line comment start with it; a PR description does not', async () => {
+  const adapter = talkingAdapter({ review: [{ id: 50, body: 'Why 50?', path: 'docs/a.md', line: 2, inReplyTo: null, author: 'rev-one' }] });
+  const forge = createForge({ adapter, forge: withHeaderSettings() });
+  await forge.comment({ repo: 'guide-docs', number: 1, body: 'Edits\n\n**1.** `docs/a.md`' });
+  assert.deepEqual(adapter.log.at(-1), ['comment', `${HEADER}\n\nEdits\n\n**1.** \`docs/a.md\``]);
+  await forge.reply({ repo: 'guide-docs', number: 1, comment: 50, body: 'Fixed.' });
+  assert.deepEqual(adapter.log.at(-1), ['reply', 50, `${HEADER}\n\nFixed.`]);
+  await forge.suggest({ repo: 'guide-docs', number: 1, comment: 50, replacement: 'The limit is 100.' });
+  assert.equal(adapter.log.at(-1)[2], `${HEADER}\n\n\`\`\`suggestion\nThe limit is 100.\n\`\`\``);
+  const r = await forge.reviewOnLines({ repo: 'guide-docs', number: 1, commit: 'c0ffee0', body: 'Places', comments: [{ path: 'docs/a.md', line: 2, body: 'Place to check' }, { path: 'docs/a.md', line: 3, body: `${HEADER}\n\nAnother` }] });
+  assert.deepEqual(adapter.log.find((x) => x[0] === 'review'), ['review', `${HEADER}\n\nPlaces`, [`${HEADER}\n\nPlace to check`, `${HEADER}\n\nAnother`]]);
+  // each id still comes back: the module matches the comment it sent, header and all
+  assert.deepEqual(r.commentIds, [780, 781]);
+  await forge.openPr({ repo: 'guide-docs', head: 'topic-c', base: 'main', title: 'T', body: 'Description' });
+  await forge.editPr({ repo: 'guide-docs', number: 1, body: 'New description' });
+  assert.deepEqual(adapter.log.at(-1), ['updatePr', 1, undefined, 'New description']);
+  // none set: the text as given
+  const plain = talkingAdapter();
+  await createForge({ adapter: plain, forge: forgeSettings() }).comment({ repo: 'guide-docs', number: 1, body: 'Edits' });
+  assert.deepEqual(plain.log.at(-1), ['comment', 'Edits']);
+  assert.equal(forgeSettings().commentHeader, null);
+  await rejects(forge.comment({ repo: 'guide-docs', number: 1, body: `${HEADER}\n\n` }), 'empty');
+});
+
+test('the comment header: --unless-header, a duplicate line comment and a duplicate reply are found with the header and without it', async () => {
+  for (const mark of ['', `${HEADER}\n\n`]) {
+    const adapter = talkingAdapter({
+      issue: [{ id: 70, body: `${mark}Ready for merge`, createdAt: '2026-11-04T00:00:00Z' }],
+      review: [{ id: 50, body: 'Why 50?', path: 'docs/a.md', line: 2, inReplyTo: null, author: 'rev-one' }, { id: 51, body: `${mark}Fixed.`, path: 'docs/a.md', line: 2, inReplyTo: 50, author: 'pat' }, { id: 52, body: `${mark}Place to check`, path: 'docs/a.md', line: 3, inReplyTo: null, author: 'pat' }],
+    });
+    const forge = createForge({ adapter, forge: withHeaderSettings() });
+    for (const unlessHeader of ['Ready for merge', `${HEADER}\n\nReady for merge`]) {
+      const c = await forge.comment({ repo: 'guide-docs', number: 1, body: 'Ready for merge', unlessHeader });
+      assert.deepEqual([c.commented, c.existing], [false, 70], JSON.stringify([mark, unlessHeader]));
+    }
+    await rejects(forge.comment({ repo: 'guide-docs', number: 1, body: 'x', unlessHeader: HEADER }), 'empty');
+    assert.equal((await forge.reply({ repo: 'guide-docs', number: 1, comment: 50, body: 'Fixed.' })).replied, false);
+    const r = await forge.reviewOnLines({ repo: 'guide-docs', number: 1, commit: 'c0ffee0', comments: [{ path: 'docs/a.md', line: 3, body: 'Place to check' }] });
+    assert.deepEqual(r.skipped.map((x) => x.existing), [52]);
+    assert.equal(adapter.log.filter((x) => ['comment', 'reply', 'review'].includes(x[0])).length, 0, JSON.stringify(mark));
+  }
+});
+
+test('settings: the comment header is read from the top of the shared file', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-'));
+  fs.mkdirSync(path.join(root, '.claude'));
+  fs.writeFileSync(path.join(root, '.claude', 'ticket-flow.json'), JSON.stringify(settingsJson({ commentHeader: HEADER })));
+  assert.equal((await loadSettings({ root })).forge.commentHeader, HEADER);
+  assert.throws(() => validateForge(settingsJson().forge, settingsJson().targets, 'two\nlines'), /commentHeader must be one line/);
+});
+
 test('setStageLabel: adds the new stage label and removes the previous one in one request, leaving the owner\'s labels alone', async () => {
   const { forge, calls } = setup({ routes: { 'graphql PrByNumber': fixture('gql-pr-7-finalreview') } });
   const r = await forge.setStageLabel({ target: 'guide', number: 7, stage: 'finalReview' });
@@ -816,7 +939,7 @@ test('every operation, run in full, sends no request that settles, withdraws, ap
     },
   });
   const ok = { repo: 'guide-docs', number: 7 };
-  await forge.openPr({ repo: 'guide-docs', head: 'docs/n', base: 'main', title: 'T', reviewers: ['rev-one'], labels: ['Check me'] });
+  await forge.openPr({ repo: 'guide-docs', head: 'docs/n', base: 'main', title: 'T', reviewers: ['rev-one'], labels: ['in progress'] });
   await forge.editPr({ ...ok, title: 'New title' });
   await forge.prState(ok);
   await forge.changedPrsSince({ repo: 'guide-docs', since: '2026-11-04T10:00:00Z' });
@@ -866,7 +989,7 @@ test('--dry-run: reads still run, every change is recorded and not sent, and the
     dryRun: true,
     routes: { ...reviewRoutes(), 'graphql PrsByHead': fixture('gql-prs-by-head-none') },
   });
-  const opened = await forge.openPr({ repo: 'guide-docs', head: 'docs/dry', base: 'main', title: 'T', body: 'B', reviewers: ['rev-one'], labels: ['Check me'] });
+  const opened = await forge.openPr({ repo: 'guide-docs', head: 'docs/dry', base: 'main', title: 'T', body: 'B', reviewers: ['rev-one'], labels: ['in progress'] });
   assert.equal(opened.created, true);
   assert.equal(opened.number, 0);
   assert.match(String(opened.posted[0].id), /^dry-run-/);
@@ -889,7 +1012,7 @@ test('the module runs over any adapter with the contract: an in-memory one stand
   const forge = createForge({ adapter, forge: forgeSettings() });
   const s = await forge.prState({ repo: 'guide-docs', number: 1 });
   assert.equal(s.headCommit, 'c0ffee0');
-  const opened = await forge.openPr({ repo: 'guide-docs', head: 'topic-b', base: 'main', title: 'Second', labels: ['check me'] });
+  const opened = await forge.openPr({ repo: 'guide-docs', head: 'topic-b', base: 'main', title: 'Second', labels: ['in progress'] });
   assert.equal(opened.created, true);
   assert.equal((await forge.openPr({ repo: 'guide-docs', head: 'topic-a', base: 'main', title: 'Again' })).created, false);
   await forge.setStageLabel({ target: 'guide', number: 1, stage: 'review' });

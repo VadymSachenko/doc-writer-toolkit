@@ -656,7 +656,7 @@ test('the numbered lists in the ledger: the description from 1, a reply going on
   // A malformed item is a usage error: nothing is written.
   await assert.rejects(rec({ stage: 'answerComments', status: 'done', pr: 'guide-docs#85', result: { summary: { id: 7101 }, edits: [{ n: 3, page: 'docs/x/a.md', after: 'x' }] } }), (e) => e.exitCode === 2 && /exact "before" and "after"/.test(e.message));
   await assert.rejects(rec({ stage: 'answerComments', status: 'done', pr: 'guide-docs#85', result: { edits: [] } }), (e) => e.exitCode === 2 && /give "summary"/.test(e.message));
-  const out = await rec({ stage: 'answerComments', status: 'done', pr: 'guide-docs#85', result: { summary: { id: 7101 }, edits: [{ n: 3, page: 'docs/x/a.md', block: 'Крок 3', before: 'стало 2', after: 'було 2' }, { n: 2, page: 'docs/x/b.md', before: 'b', after: 'c' }] } });
+  const out = await rec({ stage: 'answerComments', status: 'done', pr: 'guide-docs#85', result: { questions: [], summary: { id: 7101 }, edits: [{ n: 3, page: 'docs/x/a.md', block: 'Крок 3', before: 'стало 2', after: 'було 2' }, { n: 2, page: 'docs/x/b.md', before: 'b', after: 'c' }] } });
   assert.deepEqual(out.warnings, ['edit 2 is also item 2 of the PR description: a reply naming 2 will be asked back']);
   p = read(w, '575').prs[0];
   assert.deepEqual(p.edits.map((e) => [e.n, e.list]), [[1, 'description'], [2, 'description'], [3, '7101'], [2, '7101']]);

@@ -44,6 +44,7 @@ export function memoryAdapter() {
     createReview: async (a) => (log.push(['createReview', a.comments.length]), { id: 77, comments: a.comments.map((c, i) => ({ ...c, id: 780 + i })) }),
     reply: async (a) => (log.push(['reply', a.comment]), { id: 90 }),
     comment: async (a) => (log.push(['comment', a.body]), { id: 91 }),
+    createLabel: async (a) => void log.push(['createLabel', a.name]),
     changeLabels: async (a) => {
       log.push(['changeLabels', a.add, a.remove]);
       const p = get(a.number);
