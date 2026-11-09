@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { NOW, ago, card, tmp } from './fakes.mjs';
+import { NOW, ago, card, pr, tmp } from './fakes.mjs';
 import { ledger, read, world } from './helpers.mjs';
 import { runRecord } from '../lib/record.mjs';
 import { noteBusy, takeBrowserLock } from '../lib/browser-lock.mjs';
@@ -66,7 +66,7 @@ test('a refused record is seen in the transcript, whole; a transcript that is no
     { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', is_error: true, content: result }] } },
     { type: 'assistant', message: { stop_reason: 'end_turn', content: [{ type: 'text', text: 'The record was refused.' }] } },
   ].map((x) => JSON.stringify(x)).join('\n') + '\n');
-  write('refused', 'Exit code 1\nticket-state: nothing recorded: the branch head is 7aaad3063871, not 7aaad30a2b5e\n{ "refused": "stale" }');
+  write('refused', 'Exit code 1\nticket-state: nothing recorded: the branch head is aaaaaaaaaaaa, not bbbbbbbbbbbb\n{ "refused": "stale" }');
   write('other', 'Exit code 1\nsomething else went wrong');
   write('elsewhere', 'Exit code 1\nnothing recorded: a lock', 'node /x/scripts/ticket-state/ticket-state.mjs lock 502');
   assert.equal(recordRefused('refused', { root: dir, transcripts: dir }), true);
@@ -164,4 +164,43 @@ test('no resume after a kill, a failed exit, max turns, a CLI with no stop reaso
     const runs = read(w, '502').runs.filter((r) => r.stage === 'plan');
     assert.deepEqual(runs.map((r) => r.resumedSession ?? null), [null], name);
   }
+});
+
+test('a PR stage on a worktree, answering comments: resumed with the commit and the push to do, and recorded on the PR', async () => {
+  const c = card({ number: 902, status: 'smeReview' });
+  const activity = { 'guide-docs#7': { comments: [{ id: 9201, author: 'expert-one', body: 'One more thing: the limit is daily.', createdAt: ago(2), updatedAt: ago(2) }] } };
+  const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 7, headCommit: 'b'.repeat(40), labels: ['in expert review'] })], activity, extra: { limits: { stepsPerTicket: 1 } } });
+  ledger(w, c, { stages: { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' }, prs: [{ repo: 'guide-docs', number: 7, targets: ['guide'], review: 'sme', stage: 'smeReview', smeSince: ago(5) }] });
+  const tree = { repo: 'guide-docs', branch: 'ticket-902', path: tmp(), push: 'git push', linked: [], missing: [], notes: [], stuck: [] };
+  const calls = [];
+  const spawnClaude = async (cmd) => {
+    calls.push(cmd);
+    if (!flag(cmd, '--resume')) return { code: 0, stdout: ENDED() };
+    await runRecord({ settings: w.settings, clients: w.clients(), key: '902', stage: 'answerComments', pr: 'guide-docs#7', status: 'done', result: { handled: [{ id: 9201, updatedAt: ago(2) }] }, now: NOW });
+    return { code: 0, stdout: ENDED({ cost: 0.6 }) };
+  };
+  const out = await run(w, spawnClaude, { ensureWorktree: () => tree });
+  assert.deepEqual(calls.map((cmd) => flag(cmd, '--resume')), [null, 'sess-1']);
+  assert.match(briefOf(calls[0]), /^Stage `answerComments` of ticket 902 \(group 902\), PR guide-docs#7/);
+  assert.match(briefOf(calls[1]), /^The stage `answerComments` of ticket 902 is not finished/);
+  assert.match(briefOf(calls[1]), /commit and push your changes as the brief says, post what the stage posts, and record it/);
+  assert.deepEqual(out.ran.map((r) => [r.stage, r.pr, r.outcome]), [['answerComments', 'guide-docs#7', 'done']]);
+  const runs = read(w, '902').runs.filter((r) => r.stage === 'answerComments');
+  assert.deepEqual(runs.map((r) => [r.outcome, r.pr, r.session, r.resumedSession, r.costUsd]), [['done', 'guide-docs#7', 'sess-1', 'sess-1', 0.6]]);
+});
+
+test('a PR stage the session recorded failed on its PR is not resumed', async () => {
+  const c = card({ number: 903, status: 'smeReview' });
+  const activity = { 'guide-docs#8': { comments: [{ id: 9301, author: 'expert-one', body: 'And the weekly one?', createdAt: ago(2), updatedAt: ago(2) }] } };
+  const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 8, headCommit: 'b'.repeat(40), labels: ['in expert review'] })], activity, extra: { limits: { stepsPerTicket: 1 } } });
+  ledger(w, c, { stages: { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' }, prs: [{ repo: 'guide-docs', number: 8, targets: ['guide'], review: 'sme', stage: 'smeReview', smeSince: ago(5) }] });
+  const tree = { repo: 'guide-docs', branch: 'ticket-903', path: tmp(), push: 'git push', linked: [], missing: [], notes: [], stuck: [] };
+  const calls = [];
+  const out = await run(w, async (cmd) => {
+    calls.push(flag(cmd, '--resume'));
+    await runRecord({ settings: w.settings, clients: w.clients(), key: '903', stage: 'answerComments', pr: 'guide-docs#8', status: 'failed', note: 'the comment asks about a page outside the PR', now: NOW });
+    return { code: 0, stdout: ENDED() };
+  }, { ensureWorktree: () => tree });
+  assert.deepEqual(calls, [null]);
+  assert.equal(out.ran[0].outcome, 'failed');
 });
