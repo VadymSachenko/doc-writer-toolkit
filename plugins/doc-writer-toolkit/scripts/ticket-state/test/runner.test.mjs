@@ -954,3 +954,25 @@ test('the start recorded before its session puts each ticket under its group loc
   assert.deepEqual([t.ledger, t.state, t.failed.sessions], ['present', 'ready', 1]);
   assert.deepEqual(st.groups.find((g) => g.keys.includes('603')).repoCount, 1, 'still grouped by its target');
 });
+
+test('AC-4: a step\'s wall-clock time is recorded next to the session\'s own count, and the progress file and the report show it', async () => {
+  const { w, ready } = busyWorld({ ...estimates, limits: { ...estimates.limits, stepsPerTicket: 1 } });
+  fs.rmSync(path.join(w.settings.state, 'tickets', '502.json'));
+  w.tracker.cards.splice(1, 1);
+  let clock = NOW;
+  // The session's CLI counts a minute (`duration_ms`), and the process ends 34 minutes after it started: it waited for a
+  // background job after its last turn.
+  const spawnClaude = async () => {
+    clock += 34 * 60000;
+    ready.placeId = LISTS.inProgress.id;
+    await runRecord({ settings: w.settings, clients: w.clients(), key: '501', stage: 'start', status: 'done', card: ready.shortLink, result: { group: '501' }, now: clock });
+    return { code: 0, stdout: RESULT() };
+  };
+  await runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: () => usageAt(5), now: () => clock, spawnClaude }, options: {} });
+  const run = read(w, '501').runs.find((r) => r.stage === 'start');
+  assert.deepEqual([run.durationMs, run.wallMs], [60000, 34 * 60000]);
+  const progress = fs.readFileSync(path.join(w.settings.state, 'watch', 'progress.md'), 'utf8');
+  assert.match(progress, /✅ .*— \$0\.50, 34m 00s \(session 1m 00s\)/);
+  const report = fs.readFileSync(path.join(w.settings.state, 'reports', `${localDate(clock)}.md`), 'utf8');
+  assert.match(report, /## Today's steps by wall-clock time\n\n34m 00s in all\.\n\n- \d\d:\d\d 501 start: 34m 00s \(session 1m 00s\), done/);
+});
