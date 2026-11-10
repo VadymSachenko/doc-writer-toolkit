@@ -8,10 +8,11 @@ import { withHeader, withoutHeader } from '../../tracker/lib/comment-header.mjs'
 //
 // The rules held here, whatever the adapter:
 //   - it works only on the repositories the settings' targets name, and asks only the logins the settings name;
-//   - it adds only labels the settings name (the targets' stage labels, `checkLabel`, `expertLabel` and `readyLabel`)
-//     and removes only the stage labels, `checkLabel` and `readyLabel`, so a label the settings don't name (the owner's
+//   - it adds only labels the settings name (the targets' stage labels, `checkLabel`, `expertLabel`, `readyLabel` and
+//     `translatedLabel`) and removes only the stage labels, `checkLabel`, `readyLabel` and `translatedLabel`, so a label
+//     the settings don't name (the owner's
 //     merge label) can't be set and `expertLabel` is never removed;
-//   - it creates no label, but `readyLabel` on a repository that lacks it;
+//   - it creates no label, but `readyLabel` and `translatedLabel` on a repository that lacks them;
 //   - a review on lines only comments, and a line outside the PR's diff is refused before anything is sent (or, asked,
 //     its text goes into the review's own text);
 //   - the texts it is given are sent exactly, but for the settings' `commentHeader` in front of every comment, line
@@ -163,9 +164,10 @@ export function createForge({ adapter, forge, dryRun = false }) {
       const assignees = who ? loginsOf([who], 'assignee') : [];
       const asked = loginsOf(reviewers, 'reviewer');
       const wanted = labelsToAdd(labels);
-      // The check and ready labels follow the ticket flow's records (its runner adds and removes them), never a PR's opening.
-      const runners = wanted.filter((l) => [forge.checkLabel, forge.readyLabel].some((x) => x && same(x, l)));
-      if (runners.length) throw new Refusal('notNamed', `open-pr does not set ${runners.map((l) => `'${l}'`).join(', ')}: the check and ready labels are added on their own (add-label)`, { labels: runners });
+      // The check, ready and translated labels follow the ticket flow's records (its runner adds and removes them), never
+      // a PR's opening.
+      const runners = wanted.filter((l) => [forge.checkLabel, forge.readyLabel, forge.translatedLabel].some((x) => x && same(x, l)));
+      if (runners.length) throw new Refusal('notNamed', `open-pr does not set ${runners.map((l) => `'${l}'`).join(', ')}: the check, ready and translated labels are added on their own (add-label)`, { labels: runners });
       const existing = await adapter.openPrByHead({ repo, head: branch });
       if (existing) {
         return { repo, created: false, ...brief(existing), reason: 'an open PR for this head already exists', posted: [] };
@@ -410,8 +412,8 @@ export function createForge({ adapter, forge, dryRun = false }) {
       return { repo, number: n, commented: true, id: made.id, posted: [{ kind: 'comment', id: made.id }] };
     },
 
-    // The ready label is created on a repository that lacks it, then added; any other label the repository lacks is
-    // refused, as before.
+    // The ready and translated labels are created on a repository that lacks them, then added; any other label the
+    // repository lacks is refused, as before.
     async addLabel({ repo: repoIn, number, label }) {
       const repo = repoOf(repoIn);
       const n = needNumber(number);
@@ -421,7 +423,8 @@ export function createForge({ adapter, forge, dryRun = false }) {
       try {
         r = await swapLabels(repo, n, [name], []);
       } catch (e) {
-        if (!(e instanceof Refusal && e.refused === 'unknown' && forge.readyLabel && same(name, forge.readyLabel) && same(e.data?.label, name))) throw e;
+        const made = [forge.readyLabel, forge.translatedLabel].some((x) => x && same(name, x));
+        if (!(e instanceof Refusal && e.refused === 'unknown' && made && same(e.data?.label, name))) throw e;
         await adapter.createLabel({ repo, name });
         created = true;
         // A dry run created nothing, so the repository still lacks it: the add it would make is reported.

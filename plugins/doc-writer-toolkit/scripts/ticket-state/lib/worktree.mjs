@@ -12,8 +12,8 @@ import { prId } from './ledger.mjs';
 // gets a read checkout instead (`ensureReadCheckout`): one per target, beside the ticket worktrees, detached at
 // `origin/<base>`, kept across tickets and never removed by the close step.
 
-// The stages that work on a PR branch, so their session gets the worktree.
-export const TREE_STAGES = ['write', 'uaReview', 'pr', 'answerComments', 'styleCheck', 'translate', 'enReview', 'locales', 'align', 'labelSync', 'build', 'visualPack', 'resync'];
+// The stages that work on a PR branch, so their session gets the worktree (`build` and `idSync` are the runner's own).
+export const TREE_STAGES = ['write', 'uaReview', 'pr', 'answerComments', 'styleCheck', 'translate', 'enReview', 'locales', 'align', 'labelSync', 'build', 'visualPack', 'resync', 'idSync'];
 export const DEFAULT_LINKS = ['node_modules'];
 
 const run = (cwd, args) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 }).trim();
@@ -288,6 +288,14 @@ export function writtenIn(settings, pr) {
   if (!pushed) return { error: `${pr.branch} is not on origin: push it with git -C ${wt} push origin HEAD:refs/heads/${pr.branch}` };
   if (pushed !== head) return { error: `origin has ${pr.branch} at ${pushed.slice(0, 7)}, the worktree is at ${head.slice(0, 7)}: push the worktree's head` };
   return { head, ahead };
+}
+
+// The branch's head on origin, read from the PR's worktree (`ls-remote`), or null when it can't be read: what a push of
+// the runner's own landed on, before the forge shows it.
+export function originHead(settings, pr) {
+  const wt = worktreePath(settings, pr);
+  if (!wt || !fs.existsSync(wt) || !pr.branch) return null;
+  return tryRun(wt, ['ls-remote', 'origin', `refs/heads/${pr.branch}`])?.split(/\s/)[0] || null;
 }
 
 // A target clone as a step with no worktree finds it (the plan, the answers). The base is fetched into its

@@ -8,13 +8,13 @@ import { CARD_STATUS_OF, CHAIN, LABEL_OF, PR_ORDER, PR_STAGE_OF_STATUS, PR_STAGE
 import { labelCheck } from './intake.mjs';
 import { KINDS, recordedSize } from './cleanup.mjs';
 import { imagePairsAt } from './pairs.mjs';
-import { writtenIn } from './worktree.mjs';
+import { originHead, writtenIn } from './worktree.mjs';
 import { addEdits, addEnSides } from './edits.mjs';
 
 // `record <key> --stage <s> --status running|done|failed`: one stage result, written only when the tracker, the forge
 // and the files support it (context/ticket-flow.md, "When a record is accepted"). On any problem nothing is written.
 
-const PR_ONLY = new Set([...CHAIN, 'answerComments', 'styleCheck', 'readyForMerge', 'resync']);
+const PR_ONLY = new Set([...CHAIN, 'answerComments', 'styleCheck', 'readyForMerge', 'resync', 'untranslated', 'idSync']);
 // Never `translation`: only `follow`, a person's move of the card, takes a PR there.
 const PR_TARGET_STAGES = ['writing', 'reworkWait', 'smeReview', 'finalReview', 'questions'];
 const VERDICTS = ['docs-required', 'needs-info', 'out-of-scope', 'already-documented', 'duplicate', 'manual-out-of-scope', 'owner-card'];
@@ -41,6 +41,7 @@ function json(value, flag) {
   }
 }
 
+const sameLabel = (a, b) => String(a ?? '').trim().toLowerCase() === String(b ?? '').trim().toLowerCase();
 const brief = (card) => ({ status: card.status, list: { id: card.list?.id ?? null, name: card.list?.name ?? null } });
 const addAll = (list, items) => {
   for (const x of items ?? []) if (x !== null && x !== undefined && !list.map(String).includes(String(x))) list.push(x);
@@ -118,6 +119,11 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
     addAll(l.posted.pr, (posted.pr ?? []).map((p) => (typeof p === 'object' ? p.id : p)));
   }
   if (pr && Array.isArray(result.commits)) addAll(pr.pipelineCommits, result.commits);
+  // The id step's pushed commit, on a record that isn't done too (the branch moved after the push, a refused record):
+  // still the runner's, ids only, so never a hand commit nor a UA change (`done` adds it above).
+  if (pr && stage === 'idSync' && status !== 'done' && Array.isArray(result.commits)) {
+    for (const c of result.commits) if (/^[0-9a-f]{7,40}$/.test(String(c)) && !(pr.idCommits ??= []).some((x) => x.sha === String(c))) pr.idCommits.push({ sha: String(c), at });
+  }
   for (const f of result.files ?? []) addFile(f.path, f.kind, stage, f.bytes);
   if (startedBy && stage === 'start') l.startedBy = startedBy;
   // The group a start runs with, whatever its status: the runner's record before the session puts the ticket under the
@@ -511,6 +517,53 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         }
         return;
       }
+      case 'untranslated': {
+        // The translated label comes off (`forge.translatedLabel`): the rule saw UA change in words since the head it was
+        // put on for. Only an open PR; the label follows the ledger (lib/pr-labels.mjs).
+        const st = await forgeHead(pr);
+        if (st.state !== 'open') throw new Refused('notOpen', `${prId(pr)} is ${st.state}`);
+        record.head = st.headCommit;
+        if (pr.translated?.head) record.since = pr.translated.head;
+        delete pr.translated;
+        return;
+      }
+      case 'idSync': {
+        // The runner's id step after a person's edit of an EN heading (`forge.translatedLabel`): the hand commits it
+        // checked (`idChecked`, each once), its commit kept apart (`idCommits`: ids only, so the rule reads the PR's
+        // ranges around it), its line comments (`idComments`) and the owner's replies it took (a rename asked for). The
+        // head is the forge's, or origin's while the forge doesn't show the runner's push yet.
+        const st = await forgeHead(pr);
+        if (st.state !== 'open') throw new Refused('notOpen', `${prId(pr)} is ${st.state}`);
+        const given = head ?? result.head ?? null;
+        if (!given) throw new CliError('idSync done needs --head: the branch head after its own push', { code: 2 });
+        const shas = (x) => Array.isArray(x) && x.every((v) => /^[0-9a-f]{7,40}$/.test(String(v)));
+        if (!shas(result.checked ?? []) || !shas(result.commits ?? [])) throw new CliError('idSync: "checked" and "commits" are lists of shas', { code: 2 });
+        const pushed = st.headCommit.startsWith(given) ? st.headCommit : originHead(settings, pr);
+        if (!pushed || !pushed.startsWith(given)) throw new Refused('stale', `the branch head is ${st.headCommit.slice(0, 12)}, not ${String(given).slice(0, 12)}`, { head: st.headCommit });
+        record.head = pushed;
+        pr.lastSeenHead = st.headCommit;
+        addAll((pr.idChecked ??= []), (result.checked ?? []).map(String));
+        // A hand commit with a page whose ids can't be kept in step (`blocked`): read, so not read again, and holding a
+        // ready PR until a later check of that page passes (`clear`, the pages checked with nothing blocked).
+        const clear = new Set((Array.isArray(result.clear) ? result.clear : []).map(String));
+        if (pr.idBlocked?.length && clear.size) {
+          const gone = pr.idBlocked.filter((b) => (b.pages ?? []).every((p) => clear.has(p)));
+          addAll(pr.idChecked, gone.map((b) => b.sha));
+          pr.idBlocked = pr.idBlocked.filter((b) => !gone.includes(b));
+        }
+        for (const b of Array.isArray(result.blocked) ? result.blocked : []) {
+          if (!/^[0-9a-f]{7,40}$/.test(String(b?.sha)) || !Array.isArray(b.pages)) throw new CliError('idSync: "blocked" is a list of { sha, pages }', { code: 2 });
+          if (!(pr.idBlocked ??= []).some((x) => x.sha === String(b.sha))) pr.idBlocked.push({ sha: String(b.sha), pages: b.pages.map(String), at });
+        }
+        for (const c of result.commits ?? []) if (!(pr.idCommits ??= []).some((x) => x.sha === String(c))) pr.idCommits.push({ sha: String(c), at });
+        for (const c of result.comments ?? []) if (!(pr.idComments ??= []).some((x) => c.commentId !== null && String(x.commentId) === String(c.commentId))) pr.idComments.push({ ...c, at });
+        for (const id of result.renamed ?? []) {
+          const c = (pr.idComments ?? []).find((x) => String(x.commentId) === String(id));
+          if (c) c.renamed = at;
+        }
+        for (const c of result.handled ?? []) l.reviewComments.push({ repo: pr.repo, pr: pr.number, at, ...c });
+        return;
+      }
       case 'readyForMerge':
       case 'resync':
       default: {
@@ -524,7 +577,9 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
             }
             const st = await clients.forge.prState({ repo: p.repo, number: p.number });
             if (st.state !== 'merged') open.push(prId(p));
-            else p.merged = { at: st.mergedAt, commit: st.mergeCommit };
+            // With the translated label, whether the PR carried it when it was merged: a merge without it may have left
+            // its translations behind the base (the report and the progress file say so).
+            else p.merged = { at: st.mergedAt, commit: st.mergeCommit, ...(settings.forge.translatedLabel ? { translated: (st.labels ?? []).some((x) => sameLabel(x, settings.forge.translatedLabel)) } : {}) };
           }
           if (open.length) throw new Refused('notMerged', `not every PR is merged: ${open.join(', ')}`, { open });
           const card = await needCard('done');
@@ -565,6 +620,13 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
           pr.readyForMerge.push({ head: st.headCommit, at, seq: l.seq + 1 });
           pr.stage = 'readyForMerge';
           pr.label = targetOf(pr)?.labels?.[stageLabelOf(pr.stage, targetOf(pr))] ?? pr.label;
+        }
+        // The translations match this head (the chain done, or the re-sync of what UA changed): the translated label goes
+        // on, for this head (lib/pr-labels.mjs). A UA change since takes it off (`untranslated`).
+        if ((stage === 'readyForMerge' || stage === 'resync') && settings.forge.translatedLabel) {
+          pr.translated = { head: st.headCommit, at, seq: l.seq + 1 };
+          // A translation for this head: the ids blocked before it are read again from here, not held.
+          delete pr.idBlocked;
         }
         // The re-sync no longer makes the PR ready by itself: the rule checks the images, then `readyForMerge` does. A
         // chain stage finished after a person moved the card back changes no PR stage: the move stands.

@@ -205,7 +205,7 @@ function startedSince(state, h) {
 // A run with no reading stops at its first start (the guard), or decides none at all (with no allowance known,
 // `startable` gives no group): both are the same passing reason.
 export function againOf(r, now = Date.now()) {
-  const noReading = (r?.guard ?? []).find((g) => /^no usage reading/.test(g.reason ?? ''))?.reason ?? (r && 'usage' in r && !r.usage && !r.dryRun && !r.observe ? noUsageReading(null) : null);
+  const noReading = (r?.guard ?? []).find((g) => /^no usage reading/.test(g.reason ?? ''))?.reason ?? (r && 'usage' in r && !r.usage && !r.usageOff && !r.dryRun && !r.observe ? noUsageReading(null) : null);
   if (noReading) return { again: noReading, retryAt: new Date(now + RETRY_MS).toISOString() };
   const slot = (r?.starts ?? []).find((x) => x.waits);
   return slot ? { again: `a start waits for a run slot (${slot.waits})` } : {};
@@ -732,7 +732,7 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
         return { name: job.name, due: true, planned: true, command: shown };
       }
       if (cmd.model) {
-        const read = io.readUsage ? { usage: await io.readUsage(), tries: null } : await readUsageTried(claude, io.claudeEnv, io.sleep ? { sleep: io.sleep } : {});
+        const read = settings.limits.usageGuard === false ? { usage: null, tries: null } : io.readUsage ? { usage: await io.readUsage(), tries: null } : await readUsageTried(claude, io.claudeEnv, io.sleep ? { sleep: io.sleep } : {});
         const usage = read.usage;
         const a = allowanceOf(usage, settings.limits, new Date(clock()));
         const held = !a ? noUsageReading(usage ? null : read.tries) : a.remaining <= 0 ? `the week is at ${a.used}%, the allowance by now is ${a.cap}%` : null;
