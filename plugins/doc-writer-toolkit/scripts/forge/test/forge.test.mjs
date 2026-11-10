@@ -1164,6 +1164,35 @@ test('normalizePr: a PR in GraphQL\'s shape to the module\'s', () => {
   assert.equal(normalizePr(null), null);
 });
 
+test('normalizePr: a read by number gives the base tip and the head\'s CI checks; other reads leave both out', () => {
+  const base = fixture('gql-pr-9-merged').data.repository.pullRequest;
+  assert.equal('checks' in normalizePr(base), false);
+  assert.equal('baseCommit' in normalizePr(base), false);
+  const run = (name, status, conclusion = null) => ({ __typename: 'CheckRun', name, status, conclusion });
+  const ctx = (context, state) => ({ __typename: 'StatusContext', context, state });
+  const withChecks = (state, nodes) => normalizePr({ ...base, baseRef: { target: { oid: 'b'.repeat(40) } }, commits: { nodes: [{ commit: { oid: 'c'.repeat(40), statusCheckRollup: state ? { state, contexts: { nodes } } : null } }] } });
+  const red = withChecks('FAILURE', [run('build', 'COMPLETED', 'SUCCESS'), run('links', 'COMPLETED', 'FAILURE'), ctx('preview', 'ERROR'), run('lint', 'COMPLETED', 'SKIPPED')]);
+  assert.equal(red.baseCommit, 'b'.repeat(40));
+  assert.deepEqual(red.checks, { commit: 'c'.repeat(40), state: 'failure', failing: ['links', 'preview'], pending: [] });
+  assert.deepEqual(withChecks('PENDING', [run('build', 'IN_PROGRESS'), ctx('preview', 'SUCCESS')]).checks, { commit: 'c'.repeat(40), state: 'pending', failing: [], pending: ['build'] });
+  assert.deepEqual(withChecks('SUCCESS', [run('build', 'COMPLETED', 'SUCCESS'), run('lint', 'COMPLETED', 'NEUTRAL')]).checks.state, 'success');
+  // No check reported on the head yet (a push the forge hasn't started CI for, or a repository with none).
+  assert.deepEqual(withChecks(null, []).checks, { commit: 'c'.repeat(40), state: null, failing: [], pending: [] });
+});
+
+test('prState asks GitHub for the base tip and the CI checks only with forge.keepFresh; the read is as before without it', async () => {
+  const asked = async (settingsExtra) => {
+    const calls = [];
+    const forge = validateForge({ ...settingsJson().forge, ...settingsExtra }, settingsJson().targets);
+    const { adapter } = createAdapter(forge, { runner: replayer(baseRoutes(), { onCall: (c) => calls.push(c) }), sleep: async () => {} });
+    await createForge({ adapter, forge }).prState({ repo: 'guide-docs', number: 7 });
+    return calls.find((c) => c.op === 'PrByNumber').query;
+  };
+  assert.doesNotMatch(await asked({}), /statusCheckRollup|baseRef \{/);
+  assert.match(await asked({ keepFresh: true }), /baseRef \{ target \{ oid \} \}[\s\S]*statusCheckRollup/);
+  assert.equal('keepFresh' in validateForge(settingsJson().forge, settingsJson().targets), false);
+});
+
 // ------------------------------------------------------------------ the CLI, through a stand-in `gh` on PATH
 
 async function cli(args, { routes = {}, env = {}, files = {} } = {}) {
