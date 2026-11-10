@@ -109,13 +109,15 @@ All print JSON on stdout: `{ "ok": true, "command": …, … }`. `<card>` is a c
 
 A refusal has `refused` in the JSON: `neverRead` (a read of a status the settings never read), `transition` (a move the settings do not list), `intake` (a card created outside intake), `empty` (an empty comment, description or name), `outsideFlow` (a card in a list no status owns, or on another board), `archived`, `notAllowed` (a board the settings don't name, a file that exists, a person the settings don't name), `ambiguous`, `unknown` (a status, label, attachment or card reference that is not one).
 
+**Status marks** (`markComment({ card, comment, mark })`, a module call with no CLI command: the ticket flow's runner calls it, a role never does; `scripts/ticket-state/README.md`, "Reactions as status"). It puts the credentials' own reaction for `mark` on one comment of the card, `seen` (👀, picked up), `applied` (✅) or `asked` (❓, asked back or not done), when there is none yet, and takes off the credentials' own reactions for the other two marks. Another person's reaction, and one of its own that stands for no mark, stay. Who the credentials act as is read once a run (`/1/members/me`). A card in a `neverRead` status is refused. Returns `card`, `comment`, `mark`, `added[]`, `removed[]`, `changed`.
+
 ## Rules the module holds
 
 - **Back-off.** HTTP 429 is retried after 2, 4 and 8 s, three times, as the hub does; the fourth answer is reported (exit 1). No other failure is retried. Trello's limit is 100 requests per 10 s per token.
 - **Order of writes on one card** is the caller's: comment, then labels, then move. If the comment fails, nothing else happens for that card.
 - **Idempotent writes.** A move to the list the card is in, a label already there (or already gone), a person already on the card, the same description, and a comment with a header already posted (`--unless-header`) change nothing and say so.
 - **U+200C** (the zero-width non-joiner the hub uses as an empty-line filler) is kept in everything sent and stripped only to compare or to find a text empty.
-- **Never archive, delete or rename, never remove anyone.** There is no operation for it: the adapter interface has none, and a test lists every write the module can make.
+- **Never archive, delete or rename, never remove anyone.** There is no operation for it: the adapter interface has none, and a test lists every write the module can make. The one thing it takes off is a reaction of its own (`markComment`).
 - **One write function.** Every change goes through `write` in `adapters/trello/client.mjs`, which `--dry-run` stops. The credentials go in an `Authorization` header (and, on POST and PUT, in the form body, as the hub's copy script does), never in a URL, and every message is cleaned of them before it leaves. An attachment download sends them only to Trello's own hosts.
 - **The watcher keeps the cursor**, not this module: `actions-since` takes the time and gives the actions; a window that overlaps the last check is the caller's to drop duplicates from (by `id`).
 

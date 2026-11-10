@@ -5,9 +5,10 @@
 // With a names table (--names), Check 12 also compares the names of organizations against it.
 
 import { parse } from './parse.mjs';
-import { detectUa, enHeadingIds, headingComments, headingText, uaHeadingId } from './headings.mjs';
+import { detectUa, headingComments, headingText, uaHeadingId } from './headings.mjs';
 import { findNames, searchable } from './names.mjs';
 import { codeDiff, cyrillicText, fenceParts } from './fences.mjs';
+import { headingIdMismatches } from './ids.mjs';
 
 const trunc = (s, n = 80) => (s.length <= n ? s : `${s.slice(0, n - 1)}…`);
 const hLabel = (h) => `${'#'.repeat(h.level)} ${trunc(headingText(h.raw))}`;
@@ -104,17 +105,12 @@ function checkHeadingIds(r, m, s) {
   });
 
   r.sub(2, 'EN heading ids match the UA ids', () => {
-    if (ua.headings.length !== en.headings.length) return false; // positions don't line up
-    const enIds = enHeadingIds(en.headings);
-    ua.headings.forEach((h, i) => {
-      const u = uaIds[i];
-      if (!u || u.problem) return;
-      const e = enIds[i];
-      if (e.id !== u.id) {
-        const how = e.explicit ? `explicit id '${e.id}'` : `generated id '${e.id}'`;
-        r.warn(2, 'HEADING-ID-MISMATCH', `heading ${i + 1}: EN '${hLabel(en.headings[i])}' has ${how}, the UA heading's id is '${u.id}'`, en.headings[i].line, enFile);
-      }
-    });
+    const found = headingIdMismatches(ua, en);
+    if (found === null) return false; // positions don't line up
+    for (const x of found) {
+      const how = x.explicit ? `explicit id '${x.enId}'` : `generated id '${x.enId}'`;
+      r.warn(2, 'HEADING-ID-MISMATCH', `heading ${x.index + 1}: EN '${hLabel(en.headings[x.index])}' has ${how}, the UA heading's id is '${x.uaId}'`, x.enLine, enFile);
+    }
   });
 }
 

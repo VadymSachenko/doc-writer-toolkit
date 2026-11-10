@@ -14,7 +14,7 @@ import { CliError, Refusal, TrackerError } from '../lib/errors.mjs';
 import { createAdapter, kinds } from '../adapters/index.mjs';
 import { createTrelloClient } from '../adapters/trello/client.mjs';
 import { action, createTrelloAdapter, createdAt, namePrefixes } from '../adapters/trello/index.mjs';
-import { BOARD, C, KEY, L, TOKEN, WATCH, fixture, startFake, trackerSettings } from './fake-trello.mjs';
+import { BOARD, C, KEY, L, M, TOKEN, WATCH, fixture, startFake, trackerSettings } from './fake-trello.mjs';
 import { memoryAdapter } from './memory-adapter.mjs';
 
 const run = promisify(execFile);
@@ -794,9 +794,9 @@ test('the interface: an adapter that lacks a method is rejected; the Trello adap
 });
 
 test('no operation archives, deletes or renames a card, or removes anyone; every write the module made is one of the allowed shapes', withFake({ settings: withPeople() }, async (s) => {
-  assert.deepEqual(Object.keys(s.tracker).sort(), ['actionsSince', 'addLabel', 'addMember', 'comment', 'createCard', 'downloadAttachment', 'dryRun', 'findCards', 'hasMember', 'listCards', 'listCardsOn', 'move', 'readCard', 'removeLabel', 'setDescription', 'statuses']);
-  assert.deepEqual([...WRITES].sort(), ['addLabel', 'addMember', 'comment', 'createCard', 'moveCard', 'removeLabel', 'setDescription']);
-  assert.equal(READS.length, 12);
+  assert.deepEqual(Object.keys(s.tracker).sort(), ['actionsSince', 'addLabel', 'addMember', 'comment', 'createCard', 'downloadAttachment', 'dryRun', 'findCards', 'hasMember', 'listCards', 'listCardsOn', 'markComment', 'move', 'readCard', 'removeLabel', 'setDescription', 'statuses']);
+  assert.deepEqual([...WRITES].sort(), ['addLabel', 'addMember', 'addReaction', 'comment', 'createCard', 'moveCard', 'removeLabel', 'removeReaction', 'setDescription']);
+  assert.equal(READS.length, 14);
   await s.tracker.addMember({ card: 'Inbx0002', member: 'owner' });
   await s.tracker.comment({ card: 'Doin0003', text: 'a' });
   await s.tracker.move({ card: 'Inbx0001', to: 'ready' });
@@ -804,12 +804,47 @@ test('no operation archives, deletes or renames a card, or removes anyone; every
   await s.tracker.removeLabel({ card: 'Doin0003', label: 'needs answer' });
   await s.tracker.setDescription({ card: 'Inbx0002', text: 'd' });
   await s.tracker.createCard({ status: 'intake', name: 'n' });
+  await s.tracker.markComment({ card: 'Doin0003', comment: COMMENT, mark: 'seen' });
+  await s.tracker.markComment({ card: 'Doin0003', comment: COMMENT, mark: 'applied' });
   for (const w of s.fake.writes()) {
     const shape = `${w.method} ${w.path.replace(/\/[0-9a-f]{24}/g, '/:id')}`;
-    assert.ok(['POST /1/cards/:id/actions/comments', 'PUT /1/cards/:id', 'POST /1/cards/:id/idLabels', 'DELETE /1/cards/:id/idLabels/:id', 'POST /1/cards/:id/idMembers', 'POST /1/cards'].includes(shape), shape);
-    for (const field of Object.keys(w.form)) assert.ok(['text', 'idList', 'pos', 'value', 'desc', 'name', 'idLabels', 'key', 'token'].includes(field), `${shape} sends ${field}`);
+    assert.ok(['POST /1/cards/:id/actions/comments', 'PUT /1/cards/:id', 'POST /1/cards/:id/idLabels', 'DELETE /1/cards/:id/idLabels/:id', 'POST /1/cards/:id/idMembers', 'POST /1/cards', 'POST /1/actions/:id/reactions', 'DELETE /1/actions/:id/reactions/:id'].includes(shape), shape);
+    for (const field of Object.keys(w.form)) assert.ok(['text', 'idList', 'pos', 'value', 'desc', 'name', 'idLabels', 'shortName', 'key', 'token'].includes(field), `${shape} sends ${field}`);
   }
 }));
+
+// ------------------------------------------------------------------ the status marks (the ticket flow's reactions)
+
+const COMMENT = '5f0000000000000000100003';
+
+test("markComment: puts the pipeline's mark and takes off only its own other marks; another person's reaction and one that is no mark stay", withFake({}, async (s) => {
+  s.fake.state.reactions[COMMENT] = [
+    { id: '5f0000000000000000e00901', idMember: M.owner, emoji: { shortName: 'white_check_mark' } },
+    { id: '5f0000000000000000e00902', idMember: M.expertOne, emoji: { shortName: 'question' } },
+    { id: '5f0000000000000000e00903', idMember: M.owner, emoji: { shortName: 'heart' } },
+  ];
+  const r = await s.tracker.markComment({ card: 'Doin0003', comment: COMMENT, mark: 'seen' });
+  assert.deepEqual([r.added, r.removed, r.changed], [['seen'], ['applied'], true]);
+  assert.deepEqual(s.fake.writes().map((w) => [w.method, w.path, w.form.shortName ?? null]), [
+    ['POST', `/1/actions/${COMMENT}/reactions`, 'eyes'],
+    ['DELETE', `/1/actions/${COMMENT}/reactions/5f0000000000000000e00901`, null],
+  ]);
+  assert.deepEqual(s.fake.state.reactions[COMMENT].map((x) => x.emoji.shortName).sort(), ['eyes', 'heart', 'question']);
+  // The same mark again: no write. The person is read once a run.
+  const again = await s.tracker.markComment({ card: 'Doin0003', comment: COMMENT, mark: 'seen' });
+  assert.equal(again.changed, false);
+  assert.equal(s.fake.writes().length, 2);
+  assert.equal(s.fake.requests.filter((q) => q.path === '/1/members/me').length, 1);
+  await rejects(s.tracker.markComment({ card: 'Doin0003', comment: COMMENT, mark: 'heart' }), 'unknown');
+  await rejects(s.tracker.markComment({ card: 'Drft0005', comment: COMMENT, mark: 'seen' }), 'neverRead');
+}));
+
+test('markComment over the in-memory adapter: the marks follow one another on a comment', async () => {
+  const adapter = memoryAdapter();
+  const tracker = createTracker({ adapter, tracker: validateTracker(trackerSettings({ statuses: { intake: ['Inbox'], drafts: ['Drafts'], ready: ['Ready'], inProgress: ['Doing'] }, transitions: [] })) });
+  for (const mark of ['seen', 'applied', 'seen', 'asked']) await tracker.markComment({ card: 'PROJ-1', comment: 'c9', mark });
+  assert.deepEqual(adapter.reactionsOn.c9.map((r) => r.mark), ['asked']);
+});
 
 // ------------------------------------------------------------------ the CLI
 

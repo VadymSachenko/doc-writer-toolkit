@@ -10,6 +10,9 @@ export function memoryAdapter() {
     { id: 'PROJ-2', shortLink: 'PROJ-2', url: 'tracker://PROJ-2', name: 'Secret', numbers: [], number: null, desc: 'draft text', labels: [], placeId: 'p2', boardId: 'main', lastActivity: '2026-11-01T00:00:00.000Z', closed: false },
   ];
   const log = [];
+  // Reactions by comment: [{ id, mark, memberId }]. The caller is `u1`.
+  const reactions = {};
+  let nextReaction = 1;
   const get = (ref) => {
     const c = cards.find((x) => x.id === ref);
     if (!c) throw new Refusal('unknown', `no card ${ref}`);
@@ -36,6 +39,11 @@ export function memoryAdapter() {
     removeLabel: async (ref, id) => log.push(['removeLabel', ref, id]),
     addMember: async (ref, id) => (log.push(['addMember', ref, id]), (get(ref).memberIds = [...(get(ref).memberIds ?? []), id])),
     setDescription: async (ref, text) => (log.push(['setDescription', ref, text]), (get(ref).desc = text)),
+    me: async () => ({ id: 'u1', username: 'someone' }),
+    reactions: async (comment) => [...(reactions[comment] ?? [])],
+    addReaction: async (comment, mark) => (log.push(['addReaction', comment, mark]), (reactions[comment] = [...(reactions[comment] ?? []), { id: `r${nextReaction++}`, mark, memberId: 'u1' }])),
+    removeReaction: async (comment, id) => (log.push(['removeReaction', comment, id]), (reactions[comment] = (reactions[comment] ?? []).filter((r) => r.id !== id))),
+    reactionsOn: reactions,
     createCard: async ({ placeId, name }) => (log.push(['createCard', placeId, name]), { id: 'PROJ-3', shortLink: 'PROJ-3', url: 'tracker://PROJ-3' }),
   };
 }

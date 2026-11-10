@@ -65,8 +65,11 @@ export function parseReset(text, now = new Date()) {
 }
 
 // The allowance at `now`: the day of the week window, the share of the week usable by now (`cap`), what is used, and
-// what remains today. Null when there is no week bar or its reset can't be read.
+// what remains today. Null when there is no week bar or its reset can't be read. With `limits.usageGuard` off, the
+// allowance is unlimited whatever the reading (`unlimited`).
+export const UNLIMITED = { day: null, allowance: 100, cap: 100, used: 0, remaining: 100, resets: null, session: null, unlimited: true };
 export function allowanceOf(usage, limits, now = new Date()) {
+  if (limits?.usageGuard === false) return UNLIMITED;
   if (!usage?.week) return null;
   const reset = parseReset(usage.week.resets, now);
   if (reset === null) return null;

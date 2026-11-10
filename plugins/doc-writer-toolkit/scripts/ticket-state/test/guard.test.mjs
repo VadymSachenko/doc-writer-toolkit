@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { NOW, card, forgeAdapter, host, tmp, trackerAdapter } from './fakes.mjs';
+import { NOW, card, forgeAdapter, host, settingsFor, tmp, trackerAdapter } from './fakes.mjs';
 import { ledger, read, world } from './helpers.mjs';
 import { runRecord } from '../lib/record.mjs';
 import { allowanceOf, parseUsage } from '../lib/allowance.mjs';
@@ -10,6 +10,7 @@ import { runDaily, spawnClaude, readUsageFromClaude } from '../lib/runner.mjs';
 import { childEnv, prepareEnv, readTokenFile, TOKEN_VARIABLE } from '../lib/env.mjs';
 import { notify, notificationsOf } from '../lib/notify.mjs';
 import { main as watcherMain } from '../watcher.mjs';
+import { againOf } from '../lib/watch.mjs';
 
 // AC-2: the guard stops scheduled work at the day's allowance of the week (D-066), capped by maxWeekPercent (D-085),
 // for the morning run, the watcher's runs and the skill jobs alike; a manual run is not guarded. Parallel steps only
@@ -217,4 +218,22 @@ test('the notification: the text goes to osascript as an argument, never into th
   assert.deepEqual(triage.filter((n) => n.urgent).map((n) => n.text), ['triage of 5, 6 failed twice. See /ticket-report.'], 'a triage that failed twice is urgent too');
   const noReading = notificationsOf({ run: { ran: [], guard: [{ kind: 'guard', reason: 'no usage reading: no scheduled start' }] }, jobs: [{ name: 'notes', held: 'no usage reading: no scheduled start' }], today });
   assert.deepEqual(noReading.map((n) => n.title), ['Ticket flow: no usage reading'], 'not a limit reached, and once a day');
+});
+
+test('limits.usageGuard off: /usage is never run, no step waits for a reading, and the allowance is unlimited', async () => {
+  const w = answeredWorld({ limits: { usageGuard: false } });
+  const { fake, runs } = flakyUsage(99);
+  const seen = [];
+  const out = await runDaily({ settings: w.settings, clients: w.clients(), io: { now: () => NOW, spawnClaude: recorder(w, seen), sleep: async () => assert.fail('no reading to wait for') }, options: { trigger: 'watcher', named: ['11'], claude: fake } });
+  assert.equal(runs(), 0, 'claude -p /usage never ran');
+  assert.deepEqual(out.guard, []);
+  assert.equal(out.usageOff, true);
+  assert.ok(seen.some(([stage]) => stage === 'answers'), 'a scheduled model step ran with no reading');
+  assert.deepEqual(againOf(out), {}, 'no reading is no passing reason to hold the next start pass');
+  assert.deepEqual(allowanceOf(null, { dailyPercent: 10, usageGuard: false }).remaining, 100);
+  assert.equal(allowanceOf(usageAt(99), { dailyPercent: 10, usageGuard: false }).unlimited, true, 'a high week holds nothing');
+});
+
+test('limits.usageGuard must be true or false', () => {
+  assert.throws(() => settingsFor(tmp(), { limits: { usageGuard: 'off' } }), /limits\.usageGuard must be true or false/);
 });

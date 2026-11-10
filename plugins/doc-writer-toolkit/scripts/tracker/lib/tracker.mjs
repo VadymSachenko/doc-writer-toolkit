@@ -18,7 +18,8 @@ import { withHeader, withoutHeader } from './comment-header.mjs';
 //     first words without it (lib/comment-header.mjs);
 //   - only the people the settings name (`tracker.owner`, the targets' `cardMembers`) are added to a card, and each
 //     must be a member of the board, resolved with the statuses: a name that matches no member stops the run;
-//   - no operation archives, deletes or renames a card, or removes anyone from it.
+//   - no operation archives, deletes or renames a card, or removes anyone from it;
+//   - `markComment` takes off only the reactions the credentials' own person put, and only those of the marks.
 
 const ZWNJ = /‌/g;
 // U+200C is kept in stored text and stripped only to compare (or to see that a text is empty).
@@ -82,6 +83,10 @@ export function resolveMembers(spec, boardMembers) {
 
 export const PRIORITIES = ['high', 'medium', 'low'];
 
+// The status marks the ticket flow puts on a comment it took (its reactions): picked up, applied, asked back or not
+// done. The adapter says which reaction stands for each on its tracker.
+export const MARKS = ['seen', 'applied', 'asked'];
+
 // A card's priority: the tracker's own field when the adapter gives one (Jira), else the labels the settings name
 // (`priority: { high, low }`). Neither is medium; a card with both labels is high.
 export function priorityOf(card, names = { high: 'high', low: 'low' }) {
@@ -121,6 +126,9 @@ export function createTracker({ adapter, tracker, dryRun = false, now = () => Da
     }
     return resolution;
   };
+  // The person the credentials act as, once per run: the pipeline's own reactions are theirs.
+  let self = null;
+  const me = async () => (self ??= await adapter.me());
   const statusOf = (res, placeId) => res.statusOfPlace.get(placeId) ?? null;
   const placeName = (res, placeId) => res.places.find((p) => p.id === placeId)?.name ?? null;
 
@@ -397,6 +405,23 @@ export function createTracker({ adapter, tracker, dryRun = false, now = () => Da
       if (card.desc === text) return { card: card.id, changed: false, reason: 'the description is already this text' };
       await adapter.setDescription(ref, text);
       return { card: card.id, changed: true };
+    },
+
+    // The pipeline's mark on one comment of the card: its reaction for `mark` put on (one there already is no change),
+    // and its own reactions for the other marks taken off. Anyone else's reactions, and its own that stand for no mark,
+    // stay. The ticket flow's runner calls it; the CLI has no command for it.
+    async markComment({ card: input, comment, mark }) {
+      if (!MARKS.includes(mark)) throw new Refusal('unknown', `'${mark}' is not a mark. Known: ${MARKS.join(', ')}.`, { mark: mark ?? null });
+      if (!bare(comment)) throw new CliError('markComment needs the comment (its id)', { code: 2 });
+      const { card, res } = await need(input);
+      refuseIfNeverRead(res, card, 'markComment');
+      const who = await me();
+      const mine = (await adapter.reactions(String(comment))).filter((r) => r.memberId === who.id);
+      const added = mine.some((r) => r.mark === mark) ? [] : [mark];
+      const others = mine.filter((r) => r.mark !== mark);
+      if (added.length) await adapter.addReaction(String(comment), mark);
+      for (const r of others) await adapter.removeReaction(String(comment), r.id);
+      return { card: card.id, comment: String(comment), mark, added, removed: others.map((r) => r.mark), changed: Boolean(added.length || others.length) };
     },
 
     // Only the `intake` status: a card that people made lands there and the triage reads it.

@@ -116,44 +116,14 @@ export async function proposeIds(uaText, enText, { uaPath, enPath, roots = [], w
   }
 
   // Links that use an old fragment: on the UA page and the EN page themselves (EN copies UA link targets verbatim),
-  // and in every page under the given roots. A link reaches the page when it reaches either file, or its route.
+  // and in every page under the given roots.
   const good = report.proposals.filter((p) => !p.problem);
-  const byFragment = new Map(report.proposals.map((p) => [p.oldFragment, p]));
-  const resolvedRoots = roots.map((r) => ({ ...r, abs: path.resolve(r.dir) }));
+  const found = await linksTo({ uaPath, uaText, enPath, enText, roots, byFragment: new Map(report.proposals.map((p) => [p.oldFragment, { id: p.id, line: p.line, problem: p.problem }])) });
+  report.links.push(...found.links);
+  report.unresolved.push(...found.unresolved);
+  report.warnings.push(...found.warnings);
+  const edits = found.edits;
   const uaAbs = path.resolve(uaPath);
-  const enAbs = path.resolve(enPath);
-  const self = new Set([uaAbs, enAbs]);
-  const reach = pageRoutes(uaAbs, uaText, resolvedRoots);
-  if (roots.length && !reach) report.warnings.push(`${uaPath} is under none of the given roots: only links on the two pages and relative .md links are found`);
-  if (!roots.length) report.warnings.push('no --root given: only links on the UA and EN pages themselves are found');
-  const files = [uaAbs, enAbs];
-  for (const r of resolvedRoots) await walk(r.abs, files);
-  const edits = new Map(); // abs file -> [{ line, start, end, id }]
-  for (const file of [...new Set(files)]) {
-    const text = file === uaAbs ? uaText : file === enAbs ? enText : await fs.readFile(file, 'utf8');
-    const display = file === uaAbs ? uaPath : file === enAbs ? enPath : toPosix(path.relative(process.cwd(), file));
-    parse(text).prose.forEach((line, n) => {
-      for (const l of fragmentLinks(line)) {
-        const p = byFragment.get(l.fragment);
-        if (!p) continue;
-        let hit = null;
-        if (l.path === '') hit = self.has(file);
-        else if (/^[a-z][a-z0-9+.-]*:/i.test(l.path)) hit = false;
-        else if (l.path.startsWith('/')) hit = reach ? reach.routes.has(normRoute(l.path)) : null;
-        else if (/\.mdx?$/.test(decode(l.path))) hit = self.has(path.resolve(path.dirname(file), decode(l.path)));
-        if (hit === false) continue;
-        const row = { file: display, line: n + 1, url: l.url, heading: p.line };
-        if (hit === null) {
-          report.unresolved.push({ ...row, reason: l.path.startsWith('/') ? 'a site-root link, and the UA page is under none of the given roots' : 'a relative link that is not a .md/.mdx file path' });
-          continue;
-        }
-        if (p.problem) continue;
-        report.links.push({ ...row, newUrl: `${l.path}#${p.id}` });
-        if (!edits.has(file)) edits.set(file, { display, text, list: [] });
-        edits.get(file).list.push({ line: n, start: l.start, end: l.end, id: p.id });
-      }
-    });
-  }
 
   if (write && good.length) {
     const lines = (edits.get(uaAbs)?.text ?? uaText).split('\n');
@@ -171,6 +141,141 @@ export async function proposeIds(uaText, enText, { uaPath, enPath, roots = [], w
       applyLinkEdits(l, e.list);
       await fs.writeFile(file, l.join('\n'));
       report.written.push(e.display);
+    }
+  }
+  return finish(report);
+}
+
+// The links that reach the UA page through one of the fragments of `byFragment` (fragment -> { id, line, problem }:
+// the id it becomes, the UA heading's line, and why it can't, if so): on the UA page, the EN page and the other pages
+// of the same page (`selves`, the further locales'), and in every page under the roots. A link reaches the page when it
+// reaches one of those files, or the UA page's route. Returns { links, unresolved, warnings, edits }: `edits` maps a
+// file to its text and the fragments to replace, for a link of a fragment with no problem.
+export async function linksTo({ uaPath, uaText, enPath, enText, selves = [], roots = [], byFragment }) {
+  const out = { links: [], unresolved: [], warnings: [], edits: new Map() };
+  const resolvedRoots = roots.map((r) => ({ ...r, abs: path.resolve(r.dir) }));
+  const uaAbs = path.resolve(uaPath);
+  const enAbs = path.resolve(enPath);
+  const others = new Map(selves.map((x) => [path.resolve(x.path), x]));
+  const self = new Set([uaAbs, enAbs, ...others.keys()]);
+  const reach = pageRoutes(uaAbs, uaText, resolvedRoots);
+  if (roots.length && !reach) out.warnings.push(`${uaPath} is under none of the given roots: only links on the two pages and relative .md links are found`);
+  if (!roots.length) out.warnings.push('no --root given: only links on the UA and EN pages themselves are found');
+  const files = [uaAbs, enAbs, ...others.keys()];
+  for (const r of resolvedRoots) await walk(r.abs, files);
+  for (const file of [...new Set(files)]) {
+    const text = file === uaAbs ? uaText : file === enAbs ? enText : others.has(file) ? others.get(file).text : await fs.readFile(file, 'utf8');
+    const display = file === uaAbs ? uaPath : file === enAbs ? enPath : others.has(file) ? others.get(file).path : toPosix(path.relative(process.cwd(), file));
+    parse(text).prose.forEach((line, n) => {
+      for (const l of fragmentLinks(line)) {
+        const p = byFragment.get(l.fragment);
+        if (!p) continue;
+        let hit = null;
+        if (l.path === '') hit = self.has(file);
+        else if (/^[a-z][a-z0-9+.-]*:/i.test(l.path)) hit = false;
+        else if (l.path.startsWith('/')) hit = reach ? reach.routes.has(normRoute(l.path)) : null;
+        else if (/\.mdx?$/.test(decode(l.path))) hit = self.has(path.resolve(path.dirname(file), decode(l.path)));
+        if (hit === false) continue;
+        const row = { file: display, line: n + 1, url: l.url, heading: p.line };
+        if (hit === null) {
+          out.unresolved.push({ ...row, reason: l.path.startsWith('/') ? 'a site-root link, and the UA page is under none of the given roots' : 'a relative link that is not a .md/.mdx file path' });
+          continue;
+        }
+        if (p.problem) continue;
+        out.links.push({ ...row, newUrl: `${l.path}#${p.id}` });
+        if (!out.edits.has(file)) out.edits.set(file, { display, text, list: [] });
+        out.edits.get(file).list.push({ line: n, start: l.start, end: l.end, id: p.id });
+      }
+    });
+  }
+  return out;
+}
+
+// The UA and EN headings at the same position whose ids differ (`HEADING-ID-MISMATCH`, Check 2), from two parsed pages:
+// { index, level, uaLine, uaHeading, uaId, enLine, enHeading, enId, explicit }. A UA heading without a well-formed id
+// has none to compare. Null when the heading counts differ, so the positions don't line up.
+export function headingIdMismatches(ua, en) {
+  if (ua.headings.length !== en.headings.length) return null;
+  const enIds = enHeadingIds(en.headings);
+  const out = [];
+  ua.headings.forEach((h, i) => {
+    const u = h.level >= 2 ? uaHeadingId(h.raw) : null;
+    if (!u || u.problem) return;
+    const e = enIds[i];
+    if (e.id !== u.id) out.push({ index: i, level: h.level, uaLine: h.line, uaHeading: label(h), uaId: u.id, enLine: en.headings[i].line, enHeading: label(en.headings[i]), enId: e.id, explicit: e.explicit });
+  });
+  return out;
+}
+
+// An EN heading line given its id explicitly (rule 6): `\{#id}` at its end, in place of an explicit id it had. Only
+// the id changes, never a word.
+export function withExplicitId(line, id) {
+  const [, body, cr] = line.match(/^(.*?)[ \t]*(\r?)$/);
+  return `${body.replace(EXPLICIT_ID, '')} \\{#${id}}${cr}`;
+}
+
+// Renames heading ids of a UA page, each `{ from, to }`: its `{/* #from */}` comment on the UA page and on the further
+// locales' pages of the same page (`locales`: [{ path, text }]; they carry the comment verbatim, rule 7) becomes
+// `{/* #to */}`, and every link to `#from` that reaches the page, under the roots, gets `#to`. For a heading new in the
+// change, or a published one a person asked to rename (rule 4 otherwise keeps it). No other byte changes, and no line
+// is added or removed. Returns { renamed: [{ from, to, line, locales }], links, unresolved, skipped, written }.
+export async function renameIds(uaText, enText, { uaPath, enPath, locales = [], roots = [], renames = [], write = false }) {
+  const report = { ua: uaPath, en: enPath, renamed: [], links: [], unresolved: [], skipped: [], warnings: [] };
+  const ua = parse(uaText);
+  const ids = new Map();
+  for (const h of ua.headings) {
+    const u = h.level >= 2 ? uaHeadingId(h.raw) : null;
+    if (u?.id && !u.problem) ids.set(u.id, h.line);
+  }
+  const comment = (id) => new RegExp(`\\{\\/\\*[ \\t]*#${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[ \\t]*\\*\\/\\}`);
+  // A target is checked against the ids the page has once every rename is made, so a chain (`example` → `sample`,
+  // `example-1` → `example`) is made whole: a target is free when no heading keeps it and no other rename takes it.
+  const todo = [];
+  const formed = [];
+  for (const r of renames) {
+    if (!ids.has(r.from)) report.skipped.push({ from: r.from, to: r.to, reason: `no UA heading has the id '${r.from}'` });
+    else if (!ID_FORM.test(r.to)) report.skipped.push({ from: r.from, to: r.to, reason: `'${r.to}' is not lowercase ASCII kebab-case` });
+    else if (formed.some((x) => x.from === r.from)) report.skipped.push({ from: r.from, to: r.to, reason: `the id '${r.from}' is renamed twice` });
+    else formed.push(r);
+  }
+  const moving = new Set(formed.map((r) => r.from));
+  for (const r of formed) {
+    if (ids.has(r.to) && !moving.has(r.to)) report.skipped.push({ from: r.from, to: r.to, reason: `'${r.to}' is already the id of the UA heading on line ${ids.get(r.to)}` });
+    else if (formed.some((x) => x !== r && x.to === r.to)) report.skipped.push({ from: r.from, to: r.to, reason: `another heading is renamed to '${r.to}' too` });
+    else todo.push({ ...r, line: ids.get(r.from) });
+  }
+  const pages = locales.map((x) => ({ ...x, lines: x.text.split('\n'), heads: new Set(parse(x.text).headings.map((h) => h.line - 1)) }));
+  for (const r of todo) {
+    const hits = [];
+    for (const pg of pages) for (const i of pg.heads) if (comment(r.from).test(pg.lines[i])) hits.push({ page: pg, i });
+    report.renamed.push({ from: r.from, to: r.to, line: r.line, locales: hits.map((x) => ({ file: x.page.path, line: x.i + 1 })) });
+    r.hits = hits;
+  }
+  if (!todo.length) return finish(report);
+  const found = await linksTo({ uaPath, uaText, enPath, enText, selves: locales, roots, byFragment: new Map(todo.map((r) => [r.from, { id: r.to, line: r.line }])) });
+  report.links.push(...found.links);
+  report.unresolved.push(...found.unresolved);
+  report.warnings.push(...found.warnings);
+  if (write) {
+    const uaAbs = path.resolve(uaPath);
+    const texts = new Map([[uaAbs, { display: uaPath, lines: uaText.split('\n') }]]);
+    for (const pg of pages) texts.set(path.resolve(pg.path), { display: pg.path, lines: pg.lines });
+    for (const r of todo) {
+      const ul = texts.get(uaAbs).lines;
+      ul[r.line - 1] = ul[r.line - 1].replace(comment(r.from), `{/* #${r.to} */}`);
+      for (const x of r.hits) x.page.lines[x.i] = x.page.lines[x.i].replace(comment(r.from), `{/* #${r.to} */}`);
+    }
+    for (const [file, e] of found.edits) {
+      if (!texts.has(file)) texts.set(file, { display: e.display, lines: e.text.split('\n') });
+      applyLinkEdits(texts.get(file).lines, e.list);
+    }
+    report.written = [];
+    for (const [file, t] of texts) {
+      const before = file === uaAbs ? uaText : pages.find((pg) => path.resolve(pg.path) === file)?.text ?? found.edits.get(file)?.text;
+      const after = t.lines.join('\n');
+      if (after === before) continue;
+      await fs.writeFile(file, after);
+      report.written.push(t.display);
     }
   }
   return finish(report);

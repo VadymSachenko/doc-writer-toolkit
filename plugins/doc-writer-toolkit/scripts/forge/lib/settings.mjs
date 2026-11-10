@@ -25,11 +25,12 @@ export const labelKey = (name) => String(name ?? '').trim().toLowerCase();
 // Checks the `forge` object and the `targets` of the settings and returns them in a fixed shape. Nothing here talks to
 // the forge. The sets that follow from them are what the module is allowed to touch:
 //   repos          the repositories named by a target; a call on any other is refused;
-//   addable        the labels the module may add: every target's stage labels, `checkLabel`, `expertLabel` and
-//                  `readyLabel`;
+//   addable        the labels the module may add: every target's stage labels, `checkLabel`, `expertLabel`,
+//                  `readyLabel` and `translatedLabel`;
 //   removable      the labels it may remove: the stage labels, `checkLabel` (the ticket flow sets it from the open
-//                  questions and takes it off at a person's forward move) and `readyLabel` (off when the PR leaves
-//                  ready for merge); `expertLabel` is never removed;
+//                  questions and takes it off at a person's forward move), `readyLabel` (off when the PR leaves
+//                  ready for merge) and `translatedLabel` (off when UA changes after the translation); `expertLabel`
+//                  is never removed;
 //   logins         the users it may assign or ask for a review: `self`, `assignee`, every target's reviewers.
 // `header` is the shared file's `commentHeader`, the line every comment the module posts starts with.
 export function validateForge(forge, targets, header = null) {
@@ -44,6 +45,9 @@ export function validateForge(forge, targets, header = null) {
   // The label on a PR the ticket flow marked ready for merge, the pipeline's recommendation: never the owner's own
   // merge label, which the settings don't name.
   const readyLabel = str(forge.readyLabel, 'forge.readyLabel', { optional: true });
+  // The label on a PR whose translations match its UA (the ticket flow puts it on after the chain or a re-sync, and
+  // takes it off at a UA change): a fact of its own, next to the stage label.
+  const translatedLabel = str(forge.translatedLabel, 'forge.translatedLabel', { optional: true });
   if (!Array.isArray(targets) || !targets.length) fail("the file has no 'targets' list (the forge works only on the repos the targets name)");
   const list = targets.map((t, i) => {
     if (!isObject(t)) fail(`targets[${i}] must be an object`);
@@ -75,10 +79,11 @@ export function validateForge(forge, targets, header = null) {
     }
   }
   if (readyLabel && [...addable.keys(), labelKey(checkLabel), labelKey(expertLabel)].includes(labelKey(readyLabel))) fail(`forge.readyLabel '${readyLabel}' is also a stage, check or expert label: it needs a label of its own`);
-  for (const extra of [checkLabel, expertLabel, readyLabel]) if (extra && !addable.has(labelKey(extra))) addable.set(labelKey(extra), extra);
-  for (const extra of [checkLabel, readyLabel]) if (extra && !removable.has(labelKey(extra))) removable.set(labelKey(extra), extra);
+  if (translatedLabel && [...addable.keys(), labelKey(checkLabel), labelKey(expertLabel), labelKey(readyLabel)].includes(labelKey(translatedLabel))) fail(`forge.translatedLabel '${translatedLabel}' is also a stage, check, expert or ready label: it needs a label of its own`);
+  for (const extra of [checkLabel, expertLabel, readyLabel, translatedLabel]) if (extra && !addable.has(labelKey(extra))) addable.set(labelKey(extra), extra);
+  for (const extra of [checkLabel, readyLabel, translatedLabel]) if (extra && !removable.has(labelKey(extra))) removable.set(labelKey(extra), extra);
   const logins = new Set([self, assignee, ...list.flatMap((t) => t.reviewers)].filter(Boolean));
-  return { kind, owner, self, assignee, checkLabel, expertLabel, readyLabel, commentHeader: validateCommentHeader(header), targets: list, repos: [...new Set(list.map((t) => t.repo))], addable, removable, logins };
+  return { kind, owner, self, assignee, checkLabel, expertLabel, readyLabel, translatedLabel, commentHeader: validateCommentHeader(header), targets: list, repos: [...new Set(list.map((t) => t.repo))], addable, removable, logins };
 }
 
 export async function loadSettings({ root, settings: flag }) {

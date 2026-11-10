@@ -30,6 +30,9 @@
 //   members(board)               -> [{ id, username, name }], the board's members
 //   actions(board, { since, types? }) -> [Action], oldest first, paged
 //   download(url, dest)          -> { bytes }; sends credentials only to the tracker's own hosts
+//   me()                         -> { id, username }, the person the credentials act as
+//   reactions(commentId)         -> [{ id, mark, memberId }], the reactions on one comment that stand for a mark
+//                                   (`MARKS` in lib/tracker.mjs: 'seen', 'applied', 'asked'), each with who put it
 // Writes (each goes through the client's one `write`, which `--dry-run` stops)
 //   comment(ref, text)           -> { id, time }
 //   moveCard(ref, placeId)
@@ -37,13 +40,15 @@
 //   addMember(ref, memberId)     adds a board member to the card
 //   setDescription(ref, text)
 //   createCard({ placeId, name, desc, labelIds }) -> { id, shortLink, url }
+//   addReaction(commentId, mark) puts the caller's reaction for a mark on a comment
+//   removeReaction(commentId, reactionId)  takes one reaction off; the module calls it only for the caller's own
 //
 // An adapter has no operation that archives, deletes or renames a card, or removes a person from it, and none that a
 // caller could add: that is the rule "never archive, delete, rename, remove anyone" held by what the interface does not
 // contain.
 
-export const READS = ['cardRef', 'places', 'cardsIn', 'card', 'allCards', 'cardDetail', 'comments', 'attachments', 'labels', 'members', 'actions', 'download'];
-export const WRITES = ['comment', 'moveCard', 'addLabel', 'removeLabel', 'addMember', 'setDescription', 'createCard'];
+export const READS = ['cardRef', 'places', 'cardsIn', 'card', 'allCards', 'cardDetail', 'comments', 'attachments', 'labels', 'members', 'actions', 'download', 'me', 'reactions'];
+export const WRITES = ['comment', 'moveCard', 'addLabel', 'removeLabel', 'addMember', 'setDescription', 'createCard', 'addReaction', 'removeReaction'];
 
 export function assertAdapter(adapter) {
   const missing = [...READS, ...WRITES].filter((m) => typeof adapter?.[m] !== 'function');
