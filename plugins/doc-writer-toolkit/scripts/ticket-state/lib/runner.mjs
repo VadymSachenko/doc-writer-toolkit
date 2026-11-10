@@ -168,7 +168,7 @@ const STATE_SCRIPTS = ['ticket-state/ticket-state.mjs record', 'ticket-state/tic
 export const ROLE_SCRIPTS = {
   triage: [...STATE_SCRIPTS, 'tracker/tracker.mjs'],
   writer: [...STATE_SCRIPTS, 'ticket-state/browser-lock.mjs', 'tracker/tracker.mjs', 'forge/forge.mjs', 'ui-labels/ui-labels.mjs', 'screenshot-locales/screenshot-locales.mjs', 'video-parts/video-parts.mjs'],
-  reviewer: [...STATE_SCRIPTS, 'visual-pack/visual-pack.mjs', 'forge/forge.mjs pr-state', 'forge/forge.mjs edit-pr'],
+  reviewer: [...STATE_SCRIPTS, 'visual-pack/visual-pack.mjs', 'forge/forge.mjs pr-state', 'forge/forge.mjs edit-pr', 'forge/forge.mjs review-on-lines'],
   translator: [...STATE_SCRIPTS, 'locale-sync/locale-sync.mjs', 'ui-labels/ui-labels.mjs', 'doc-align/doc-align.mjs', 'screenshot-locales/screenshot-locales.mjs', 'forge/forge.mjs pr-state'],
 };
 export const scriptRulesFor = (roots = [], role = null) => [...new Set(roots.flatMap((r) => (role ? ROLE_SCRIPTS[role] : NODE_SCRIPTS).map((s) => `Bash(node ${path.join(r, 'scripts', s)}:*)`)))];
