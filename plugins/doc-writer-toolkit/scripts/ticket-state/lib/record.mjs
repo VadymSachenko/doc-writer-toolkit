@@ -10,7 +10,7 @@ import { KINDS, recordedSize } from './cleanup.mjs';
 import { imagePairsAt } from './pairs.mjs';
 import { writtenIn } from './worktree.mjs';
 import { addEdits, addEnSides } from './edits.mjs';
-import { commentsMissing, markersAt, markersMessage, placeProblems, placesNotListed, questionProblems } from './gates.mjs';
+import { changedLines, commentProblems, markersAt, markersMessage, placeProblems, placesNotListed, questionProblems } from './gates.mjs';
 
 // `record <key> --stage <s> --status running|done|failed`: one stage result, written only when the tracker, the forge
 // and the files support it (context/ticket-flow.md, "When a record is accepted"). On any problem nothing is written.
@@ -178,13 +178,13 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
       }
       case 'questions': {
         const card = await needCard('blocked');
-        // The questions-first gate (D-044, `checks.questionSources`): no question without the sources it checked, and
-        // each asked in a comment the card has. The comment's words are the host's: only its id is checked.
+        // The questions-first gate (D-044, `checks.questionSources`): no question without the sources it checked, each
+        // asked in a comment the card has, posted after the ticket's last record, that names it or its sources' refs.
         if (settings.checks?.questionSources) {
           const problems = questionProblems(result.questions);
           if (problems.length) throw new Refused('sources', `${problems.join('; ')}. A question is asked only once every source was checked: check them, then record what each gave`);
-          const missing = commentsMissing(result.questions, (await tracker.readCard({ card: card.id })).comments);
-          if (missing.length) throw new Refused('comment', `the card has no comment ${missing.join(', ')}: ask the questions on the card, then record that comment's id`, { missing });
+          const off = commentProblems(result.questions, (await tracker.readCard({ card: card.id })).comments, ledger.updatedAt);
+          if (off.length) throw new Refused('comment', `${off.join('; ')}: ask the questions on the card, naming what was checked, then record that comment's id`, { problems: off });
         }
         for (const q of result.questions ?? []) l.questions.push({ ...q, askedAt: q.askedAt ?? at, ...(pr ? { repo: pr.repo, pr: pr.number } : {}) });
         if (pr) {
@@ -337,11 +337,19 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         // description the session wrote lists it. The comments are posted already: the cause is fixed where it is (the
         // description, the place's source or why), and the record given again posts nothing twice.
         if (settings.checks?.places) {
-          const problems = placeProblems(result.places);
-          if (problems.length) throw new Refused('places', `${problems.join('; ')}: a place names its page, its claim, its source and why it isn't confirmed`);
+          const prs = entries.map((e) => l.prs.find((x) => x.branch === e.branch && (!e.repo || x.repo === e.repo)));
+          const problems = placeProblems(result.places, prs);
+          if (problems.length) throw new Refused('places', `${problems.join('; ')}: a place names its PR, its page, its claim, its source and why it isn't confirmed`);
+          // A place on a line the PR changed has its line comment; only one on an unchanged line stays in the description.
+          for (const place of (result.places ?? []).filter((x) => x.commentId === undefined || x.commentId === null)) {
+            const p = prs.find((x) => x.repo === place.repo && x.number === Number(place.pr));
+            const c = changedLines(settings, p, p.lastSeenHead, place.page);
+            if (c.error) throw new Refused('places', `the places check can't run on ${prId(p)}: ${c.error}`);
+            if (c.lines.has(Number(place.line))) throw new Refused('places', `place ${place.id} is on a line ${prId(p)} changed (${place.page}:${place.line}): give the "commentId" of its line comment`, { places: [place.id] });
+          }
           for (const [p, body] of bodies) {
             const missing = placesNotListed((result.places ?? []).filter((x) => x.repo === p.repo && Number(x.pr) === p.number), body);
-            if (missing.length) throw new Refused('places', `${prId(p)}'s description doesn't list place${missing.length > 1 ? 's' : ''} ${missing.map((x) => x.id).join(', ')} (by the link to its line comment, or its page): write it there with its source and why`, { places: missing.map((x) => x.id) });
+            if (missing.length) throw new Refused('places', `${prId(p)}'s description doesn't list place${missing.length > 1 ? 's' : ''} ${missing.map((x) => x.id).join(', ')} (by the link to its line comment, or, on an unchanged line, its why): write it there with its source and why`, { places: missing.map((x) => x.id) });
           }
         }
         // The places' comments are posted before this record, so a place from the code with no reference at a commit is
