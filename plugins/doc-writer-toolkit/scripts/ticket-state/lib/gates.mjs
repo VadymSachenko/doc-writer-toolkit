@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { parse } from '../../doc-align/lib/parse.mjs';
 import { worktreePath } from './worktree.mjs';
@@ -86,6 +87,89 @@ export function placesNotListed(places, body) {
   const b = String(body ?? '');
   return (places ?? []).filter((p) => (p.commentId !== undefined && p.commentId !== null ? !new RegExp(`discussion_r${String(p.commentId).replace(/\D/g, '')}(?!\\d)`).test(b) : !plain(b).includes(plain(p.why))));
 }
+
+// The language of a place (a correctness rule, on whatever `checks` say): its `claim` and `why` are the words of its line
+// comment, so they are in the language of the page it is on. A language is told by its script: the page's dominant one
+// is counted in its prose, with code, link targets, tags, MDX comments and import lines left out, and the names and
+// values a page writes bare too: a table cell of one word (a field, a type, yes or no) and a word shaped like code
+// (with a digit, `_`, `/`, `.`, `:`, `@`, `#`, `=`, two capitals in a row or a capital after a small letter). The
+// place's text has at least one letter of that script once its code spans are left out. A page that can't be read, has
+// too few letters, or has no script clearly ahead of the others is no check.
+const SCRIPTS = ['Latin', 'Cyrillic', 'Greek', 'Armenian', 'Georgian', 'Hebrew', 'Arabic', 'Devanagari', 'Bengali', 'Thai', 'Hangul', ['Han', 'Hiragana', 'Katakana']].map((s) => {
+  const names = [s].flat();
+  return { name: names.join('/'), re: new RegExp(names.map((n) => `\\p{Script=${n}}`).join('|'), 'gu') };
+});
+const MIN_LETTERS = 20;
+// The page's top script counts at least twice the letters of the next one, or the page is mixed and gets no check.
+const AHEAD = 2;
+const noCode = (s) => String(s ?? '').replace(/(`{3,}|~{3,})[\s\S]*?(\1|$)/g, ' ').replace(/(`+)[\s\S]*?\1/g, ' ');
+const CODE_WORD = /\d|[_/.:@#=]\S|\p{Lu}{2}|\p{Ll}\p{Lu}/u;
+const lettersOf = (s, script) => (String(s).match(script.re) ?? []).length;
+
+// The dominant script of a page's prose (`{ name, re }`), or null when it has none clearly ahead.
+export function pageScript(page) {
+  const prose = parse(String(page ?? '')).prose.join('\n')
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ')
+    .replace(/^\s*(import|export)\b.*$/gm, ' ')
+    .replace(/\]\([^)]*\)/g, ']')
+    .replace(/<\/?[A-Za-z][^>]*>/g, ' ')
+    .replace(/https?:\/\/\S+/g, ' ')
+    .split('\n')
+    .map((line) => (/^\s*\|/.test(line) ? line.split(/(?<!\\)\|/).filter((c) => /\S\s+\S/.test(c.trim())).join(' ') : line))
+    .join('\n')
+    .split(/\s+/)
+    .filter((w) => !CODE_WORD.test(w))
+    .join(' ');
+  const counts = SCRIPTS.map((s) => ({ s, n: lettersOf(prose, s) })).sort((a, b) => b.n - a.n);
+  if (counts[0].n < MIN_LETTERS || counts[0].n < AHEAD * counts[1].n) return null;
+  return counts[0].s;
+}
+
+// Whether a place's text has a letter of the script, its code spans and fenced blocks left out.
+export const inScript = (s, script) => lettersOf(noCode(s), script) > 0;
+
+// A page as the PR's worktree has it at `head` (`git show`), or as its file there; null when neither can be read.
+function pageAt(settings, pr, head, page) {
+  const wt = pr ? worktreePath(settings, pr) : null;
+  if (!wt || !fs.existsSync(wt) || !text(page)) return null;
+  if (head) {
+    try {
+      return git(wt, ['show', `${head}:${page}`]);
+    } catch {
+      /* the file in the worktree */
+    }
+  }
+  try {
+    return fs.readFileSync(path.join(wt, page), 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+// The places whose `claim` or `why` has no letter of their page's script: `[{ id, page, script, fields }]`. Each place
+// is read on its PR (`prs`: the ledger's entries, `{ repo, number, branch, lastSeenHead }`); one off the record's PRs,
+// with no page, or on a page that can't be read is not checked. Only the fields a place gives are judged: whether it
+// has them is `placeProblems`'s.
+export function placeLanguageProblems(settings, places, prs) {
+  const pages = new Map();
+  const out = [];
+  for (const place of places ?? []) {
+    const p = (prs ?? []).find((x) => x && x.repo === place?.repo && Number(x.number) === Number(place?.pr));
+    if (!p || !text(place?.page)) continue;
+    const k = `${p.repo}\0${p.number}\0${place.page}`;
+    if (!pages.has(k)) {
+      const body = pageAt(settings, p, p.lastSeenHead, place.page);
+      pages.set(k, body === null ? null : pageScript(body));
+    }
+    const script = pages.get(k);
+    if (!script) continue;
+    const fields = ['claim', 'why'].filter((f) => text(place[f]) && !inScript(place[f], script));
+    if (fields.length) out.push({ id: place.id ?? '?', page: place.page, script: script.name, fields });
+  }
+  return out;
+}
+
+export const languageMessage = (found) => found.map((x) => `place ${x.id}'s ${x.fields.join(' and ')} ${x.fields.length > 1 ? 'are' : 'is'} not in the language of ${x.page} (${x.script} script)`).join('; ');
 
 const git = (dir, args) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 << 20 });
 const PAGE = /\.mdx?$/i;

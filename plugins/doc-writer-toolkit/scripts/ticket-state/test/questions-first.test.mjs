@@ -12,7 +12,7 @@ import { ensureWorktree } from '../lib/worktree.mjs';
 import { DEFAULT_LABELS, renderPlaces } from '../lib/pr-description.mjs';
 import { followRounds } from '../lib/pr-rounds.mjs';
 import { loadSettings, validateSettings } from '../lib/settings.mjs';
-import { markersIn, placesNotListed } from '../lib/gates.mjs';
+import { inScript, markersIn, pageScript, placesNotListed } from '../lib/gates.mjs';
 
 // The questions-first gates (TASK-048, D-044, D-052; lib/gates.mjs), each on with the shared file's `checks`: no
 // question without the sources it checked and its comment on the card (AC-1); no new marker in a PR's UA pages at the
@@ -266,8 +266,8 @@ test('the briefs: with the checks off they carry no gate line; each check on add
 
 // ------------------------------------------------------------------ AC-5: places
 
-const WHY = 'inferred from the code, not seen on the test environment';
-const place = (id, more = {}) => ({ id, repo: 'api-docs', pr: 6, page: 'docs/a.md', line: 1, claim: 'The error comes when the configuration check fails', why: WHY, source: 'code', ...more });
+const WHY = 'виведено з коду, на тестовому середовищі не перевірено';
+const place = (id, more = {}) => ({ id, repo: 'api-docs', pr: 6, page: 'docs/a.md', line: 1, claim: 'Помилка виникає, коли перевірка налаштувань не пройдена', why: WHY, source: 'code', ...more });
 
 function placesWorld(extra = {}) {
   const t = apiWorld({ key: '1620', checks: { places: true }, branches: [['ticket-1', 6]], extra });
@@ -288,13 +288,13 @@ test('AC-5: each place names its PR, page, claim, a source of the known kinds an
 
 test('AC-5: without review rounds the description lists each place: by the link to its line comment, a longer id being another, or, on an unchanged line, by its why', async () => {
   const t = placesWorld();
-  const both = [place('p1', { line: 5, commentId: 901 }), place('p2', { line: 1, why: 'the case can\'t be triggered on the test environment' })];
+  const both = [place('p1', { line: 5, commentId: 901 }), place('p2', { line: 1, why: 'цей випадок не відтворити на тестовому середовищі' })];
   t.forgePrs[0].body = '## Що перевірити\n\n- the error row — [line](https://forge.example/acme/api-docs/pull/6#discussion_r9012)';
   await refused(t.w, t.args(both), 'places', /api-docs#6's description doesn't list places p1, p2/);
   // The page path alone names no place.
   t.forgePrs[0].body = '## Що перевірити\n\n- `docs/a.md`: [line](https://forge.example/acme/api-docs/pull/6#discussion_r901)';
   await refused(t.w, t.args(both), 'places', /doesn't list place p2 /);
-  t.forgePrs[0].body += '\n- `docs/a.md`, line 1: the case **can\'t be triggered** on the test environment';
+  t.forgePrs[0].body += '\n- `docs/a.md`, рядок 1: цей випадок **не відтворити** на тестовому середовищі';
   await rec(t.w, t.args(both));
   assert.deepEqual(read(t.w, '1620').places.map((p) => [p.id, p.source]), [['p1', 'code'], ['p2', 'code']]);
   assert.deepEqual(placesNotListed([{ commentId: 90 }], 'x#discussion_r901').length, 1);
@@ -306,7 +306,7 @@ test('AC-5: with review rounds the runner writes the places from the record: the
   const args = t.args([place('p1', { line: 5, commentId: 901 })]);
   args.result.prs[0].questions = [];
   await rec(t.w, args);
-  const line = `- **p1** \`docs/a.md\`: The error comes when the configuration check fails (**not confirmed:** ${WHY}; **source:** code) — [open thread ↗](https://forge.example/acme/api-docs/pull/6#discussion_r901)`;
+  const line = `- **p1** \`docs/a.md\`: Помилка виникає, коли перевірка налаштувань не пройдена (**not confirmed:** ${WHY}; **source:** code) — [open thread ↗](https://forge.example/acme/api-docs/pull/6#discussion_r901)`;
   assert.equal(renderPlaces(read(t.w, '1620').places, DEFAULT_LABELS, 'https://forge.example/acme/api-docs/pull/6', { facts: true }), line);
   // The runner's rewrite after the step puts that line in the description.
   assert.deepEqual(await followRounds({ settings: t.w.settings, clients: t.w.clients(), keys: ['1620'], before: new Map() }), []);
@@ -316,8 +316,57 @@ test('AC-5: with review rounds the runner writes the places from the record: the
 test('AC-5: with the check off (the default), a place with no source or why records as before', async () => {
   const t = placesWorld();
   t.w.settings.checks.places = false;
-  await rec(t.w, t.args([{ id: 'p1', repo: 'api-docs', pr: 6, page: 'docs/a.md', line: 4, claim: 'c' }]));
+  await rec(t.w, t.args([{ id: 'p1', repo: 'api-docs', pr: 6, page: 'docs/a.md', line: 4, claim: 'в' }]));
   assert.equal(read(t.w, '1620').places.length, 1);
   // And the description's places stay as before: the id, the claim, the state.
-  assert.equal(renderPlaces(read(t.w, '1620').places, DEFAULT_LABELS, null), '- **p1** c — open thread');
+  assert.equal(renderPlaces(read(t.w, '1620').places, DEFAULT_LABELS, null), '- **p1** в — open thread');
+});
+
+// ------------------------------------------------------------------ the places' language
+
+// The description's places section is written from each place's claim and why: they are in the page's language, the
+// words of its line comment, whatever `checks` say. Code names in backticks count for no language.
+function languageWorld(checks = {}) {
+  const t = apiWorld({ key: '1630', checks, branches: [['ticket-1', 6]] });
+  t.at(t.fx.push({
+    'docs/a.md': '# Оновлення даних\n\nЗапит оновлює дані замовлення, коли перевірка налаштувань пройдена.\n\n| Назва | Тип | Опис |\n|---|---|---|\n| orderId | string | Ідентифікатор замовлення |\n| amount | integer | Сума замовлення |\n',
+    'docs/en.md': '# Update the data\n\nThe request updates the order data once the settings check passes.\n',
+  }, 'Draft'));
+  const args = (places) => t.prRec({ places });
+  return { ...t, args };
+}
+const langPlace = (more) => ({ id: 'p1', repo: 'api-docs', pr: 6, page: 'docs/a.md', line: 3, source: 'code', ...more });
+
+test('the places\' language: an English claim or why on a Cyrillic page is refused, naming the place, with the check off too', async () => {
+  const t = languageWorld();
+  await refused(t.w, t.args([langPlace({ claim: '`PUT /orders/:id` of the `shop` module needs the `ApiKey` header (else HTTP 403)', why: 'виведено з коду, не перевірено' })]), 'places', /place p1's claim is not in the language of docs\/a\.md \(Cyrillic script\): write each place's "claim" and "why" in the language of its page, in the words of its line comment/);
+  await refused(t.w, t.args([langPlace({ claim: 'Запит `PUT /orders/:id` вимагає заголовок `ApiKey`', why: 'inferred from the code' })]), 'places', /place p1's why is not in the language/);
+  // With the places gate on it refuses the same, after the gate's own checks.
+  const on = languageWorld({ places: true });
+  on.forgePrs[0].body = '- [line](https://forge.example/acme/api-docs/pull/6#discussion_r901)';
+  await assert.rejects(rec(on.w, on.args([langPlace({ claim: 'The order is found by its id', why: 'inferred from the code', commentId: 901 })])), (e) => e.refused === 'places' && /claim and why are not in the language/.test(e.message) && e.data.places[0] === 'p1');
+});
+
+test('the places\' language: a Ukrainian claim full of code names passes; an English claim on a Latin-script page passes; a page that can\'t be read is no check', async () => {
+  const t = languageWorld();
+  await rec(t.w, t.args([
+    langPlace({ claim: '`PUT /orders/:id/details` модуля `shop` вимагає `ApiKey` (`HTTP 403`), шукає `orderId`', why: 'виведено з `OrderService.update`, не перевірено' }),
+    langPlace({ id: 'p2', page: 'docs/en.md', claim: 'The order is found by its `orderId`', why: 'inferred from the code' }),
+    langPlace({ id: 'p3', page: 'docs/missing.md', claim: 'The order is found by its id', why: 'inferred from the code' }),
+  ]));
+  assert.deepEqual(read(t.w, '1630').places.map((p) => p.id), ['p1', 'p2', 'p3']);
+  // A reply that rewrites a place's claim keeps its page's language.
+  const answer = (claim) => ({ key: '1630', stage: 'answerComments', pr: 'api-docs#6', status: 'done', result: { handled: [], questions: [], places: [{ id: 'p1', claim }] } });
+  await refused(t.w, answer('The order is found by its id'), 'places', /place p1's claim is not in the language of docs\/a\.md/);
+  await rec(t.w, answer('Замовлення шукається за `orderId`'));
+  assert.equal(read(t.w, '1630').places[0].claim, 'Замовлення шукається за `orderId`');
+});
+
+test('the places\' language: the page\'s script is counted without its code, bare names, one-word cells and link targets; a mixed or short page is none', () => {
+  const api = '---\ntitle: Дані\n---\nimport Tabs from \'@theme/Tabs\';\n\n# Оновлення даних картки\n\n| Назва | Тип | Обов\'язковий | Опис |\n|---|---|---|---|\n| ApiKey | string | так | Ключ модуля |\n| cardNumber | string | так | Номер картки |\n| expiryMonth | integer | так | Місяць |\n| holderName | string | ні | Ім\'я власника |\n\nДив. [Помилки](https://example.com/errors). <Tabs groupId="lang" />\n\n```json\n{ "cardNumber": "string", "expiryMonth": "integer" }\n```\n';
+  assert.equal(pageScript(api).name, 'Cyrillic');
+  assert.equal(inScript('PUT /t/:id of the module needs the ApiKey', pageScript(api)), false);
+  assert.equal(inScript('`PUT /t/:id` вимагає `ApiKey`', pageScript(api)), true);
+  assert.equal(pageScript('# Сторінка\n\nShort'), null);
+  assert.equal(pageScript('Абзац сторінки українською мовою тут. A paragraph of the page in English here.'), null);
 });
