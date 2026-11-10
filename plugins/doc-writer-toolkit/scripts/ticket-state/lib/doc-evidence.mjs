@@ -75,6 +75,13 @@ export function endpointOf(raw) {
 }
 
 const tidy = (s) => s.replace(/\s+/g, ' ').trim();
+// Whether a term names a ticket key: a key of four characters or more anywhere in it (`QUASI:tw4242x`), a shorter one
+// only as a whole word, so the key `d2` leaves `grid2Layout` alone.
+const namesKey = (t, k) => {
+  if (!k) return false;
+  if (k.length >= 4) return t.includes(k);
+  return new RegExp(`(^|[^A-Za-z0-9])${k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^A-Za-z0-9])`, 'i').test(t);
+};
 // A term worth a search: long enough, not a number, a URL, a file path or a generic word, and not a ticket key.
 function keep(term, keys) {
   const t = tidy(term).replace(/^[\s.,;:!?«»"'(]+|[\s.,;:!?«»"')]+$/g, '');
@@ -82,7 +89,7 @@ function keep(term, keys) {
   if (!/[A-Za-zЀ-ӿ]/.test(t)) return null;
   if (/:\/\//.test(t) || /^www\./i.test(t)) return null;
   if (GENERIC.has(t.toLowerCase())) return null;
-  if (keys.some((k) => k && (t === k || t.includes(k)))) return null;
+  if (keys.some((k) => namesKey(t, k))) return null;
   // A file path from the code (`services/x/y.go`) or a file name: the docs don't name them.
   if (/^[\w./-]+\.[A-Za-z0-9]{1,5}$/.test(t) && NOT_IDENT.has(t.split('.').pop().toLowerCase())) return null;
   return t;
