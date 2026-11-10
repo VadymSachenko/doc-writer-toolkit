@@ -118,7 +118,7 @@ A pure function of the ledger and the world. First match wins:
 
 ## When a record is accepted
 
-`record` writes a stage `done` only when the world supports it: the card in the status the stage leaves it in, each PR on the forge with its branch and stage label, the head the stage names being the branch's head, every chain stage done before `readyForMerge`, every PR merged before `close`. Otherwise nothing is written and the reason is named (`scripts/ticket-state/README.md`, "`record`: what each stage checks"). A session fixes the cause, never the record. `running` and `failed` (with a note) are always accepted.
+`record` writes a stage `done` only when the world supports it: the card in the status the stage leaves it in, each PR on the forge with its branch and stage label, the head the stage names being the branch's head, every chain stage done before `readyForMerge`, every PR merged before `close`; and, with the host's `checks` on (D-044, D-052), every question naming the sources it checked and asked in a comment the card has, no marker a PR's UA pages gained at its `pr` record (the gate before any review: under D-114 every PR then goes to the owner, and a person's move to the review is never refused), every place naming its page, claim, source and why it isn't confirmed, listed in the description. Otherwise nothing is written and the reason is named (`scripts/ticket-state/README.md`, "`record`: what each stage checks"). A session fixes the cause, never the record. `running` and `failed` (with a note) are always accepted.
 
 ## Locks
 
