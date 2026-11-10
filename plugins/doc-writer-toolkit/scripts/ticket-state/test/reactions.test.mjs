@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { MEMBERS, NOW, ago, card, pr, rawSettings, settingsFor, tmp } from './fakes.mjs';
+import { LISTS, MEMBERS, NOW, ago, card, pr, rawSettings, settingsFor, tmp } from './fakes.mjs';
 import { ledger, world } from './helpers.mjs';
 import { runDaily } from '../lib/runner.mjs';
 import { runRecord } from '../lib/record.mjs';
@@ -100,7 +100,39 @@ test('AC-4: a mark the owner took off with no edit starts nothing; an edit is a 
   let seen = null;
   await run(w, key, session(w, key, { handled: [{ id: 5401, updatedAt: later }], summary: { id: 9922 }, questions: [{ text: 'Step 3 is a table: shorten its rows?' }], posted: [9922] }, { during: () => (seen = marks(w, 5401)) }));
   assert.deepEqual(seen, ['seen@owner-login'], '👀 back on and the earlier 🚀 off at the pickup');
-  assert.deepEqual(reacts(w).slice(reactsBefore), [['comment:5401', ['seen'], ['applied']], ['comment:5401', ['applied'], ['seen']]]);
+  assert.deepEqual(reacts(w).slice(reactsBefore), [['comment:5401', ['seen'], ['applied']], ['comment:5401', ['asked'], ['seen']]], 'answered only with a question that names no item, no commit: asked back');
+});
+
+test('the session\'s own word wins: `handled[].result` says applied or asked, in a review round too, where a line comment, a note or a thread ask-back says nothing the runner reads; a bad value is refused', async () => {
+  const comments = [comment(5701, 'owner-login', 'helper: shorten step 2'), comment(5702, 'owner-login', 'helper: drop step 4'), comment(5703, 'owner-login', 'helper: add a note'), comment(5704, 'owner-login', 'helper: rename the heading')];
+  const { w, key } = prWorld(909, comments, { extra: { ...MARKED(), forge: { ...MARKED().forge, reviewRounds: true } } });
+  const result = {
+    handled: [{ id: 5701, updatedAt: at, result: 'applied' }, { id: 5702, updatedAt: at, commit: C1, result: 'asked' }, { id: 5703, updatedAt: at }, { id: 5704, updatedAt: at, commit: C1 }],
+    review: { id: 9961, commits: [{ sha: C1.slice(0, 7), role: 'comments' }] },
+    commits: [C1],
+    edits: [{ n: 2, page: 'docs/x/a.md', block: 'Крок 2', before: 'довгий', after: 'короткий', commentId: 9962 }],
+    asked: [{ text: 'Should the note go under step 3?', reader: 'writer' }],
+    questions: [],
+    posted: [9961, 9962],
+  };
+  await assert.rejects(runRecord({ settings: w.settings, clients: w.clients(), key, stage: 'answerComments', pr: 'guide-docs#81', status: 'done', now: NOW, result: JSON.stringify({ ...result, handled: [{ id: 5701, updatedAt: at, result: 'done' }] }) }), (e) => e.exitCode === 2 && /"handled\[\]\.result" is one of applied, asked/.test(e.message));
+  await run(w, key, session(w, key, result));
+  assert.deepEqual(marks(w, 5701), ['applied@owner-login'], 'its own word, with no commit');
+  assert.deepEqual(marks(w, 5702), ['asked@owner-login'], 'its own word, though a commit came with it');
+  assert.deepEqual(marks(w, 5703), ['asked@owner-login'], 'no word, no commit, and the round asked a description question');
+  assert.deepEqual(marks(w, 5704), ['applied@owner-login'], 'no word, committed');
+});
+
+test('a question on the card for the PR during the session marks only the comments it left undone: a committed one keeps 🚀', async () => {
+  const { c, w, key } = prWorld(910, [comment(5801, 'owner-login', 'helper: shorten step 2'), comment(5802, 'owner-login', 'helper: which currency here?')]);
+  await run(w, key, async () => {
+    await runRecord({ settings: w.settings, clients: w.clients(), key, stage: 'answerComments', pr: 'guide-docs#81', status: 'done', now: NOW, result: JSON.stringify({ handled: [{ id: 5801, updatedAt: at, commit: C1 }, { id: 5802, updatedAt: at }], summary: { id: 9971 }, questions: [], commits: [C1], posted: [9971] }) });
+    w.tracker.cards.find((x) => x.id === c.id).placeId = LISTS.blocked.id;
+    await runRecord({ settings: w.settings, clients: w.clients(), key, stage: 'questions', pr: 'guide-docs#81', status: 'done', now: NOW, result: JSON.stringify({ questions: [{ id: 'q1', kind: 'fact', text: 'Which currency?', sources: [], commentId: 'cm-1' }] }) });
+    return { code: 0, stdout: RESULT, stderr: '' };
+  });
+  assert.deepEqual(marks(w, 5801), ['applied@owner-login']);
+  assert.deepEqual(marks(w, 5802), ['asked@owner-login']);
 });
 
 test('AC-4: a review\'s text and its line comment are marked by their own kinds', async () => {
@@ -126,6 +158,7 @@ test('a reaction that fails is a warning in the run log, never a failed step; wi
   assert.deepEqual(notes.length, 2, notes.join('; '));
   assert.match(notes[0], /guide-docs#81: the 👀 on comment 5501 was not set: HTTP 502/);
   assert.match(notes[1], /the 🚀 on comment 5501 was not set/);
+  assert.ok(out.log.filter((e) => e.kind === 'reactions').every((e) => e.outcome === 'warning'), 'a warning, never listed with the failures');
 
   const off = prWorld(907, [comment(5601, 'owner-login', 'helper: shorten step 2')], { extra: MARKED(false) });
   off.w.forge.reacted.fail = 'a reaction was read';
@@ -163,7 +196,11 @@ test('AC-4, the tracker: the owner\'s answers after the question get 👀 at the
 
 test('the settings: forge.reactions and tracker.reactions are off by default, and take true or false only', () => {
   assert.deepEqual(settingsFor(tmp()).reactions, { forge: false, tracker: false });
-  assert.deepEqual(settingsFor(tmp(), { forge: { ...rawSettings().forge, reactions: true } }).reactions, { forge: true, tracker: false });
+  assert.deepEqual(settingsFor(tmp(), { forge: { ...rawSettings().forge, triggerWords: WORDS, reactions: true } }).reactions, { forge: true, tracker: false });
+  assert.throws(() => settingsFor(tmp(), { forge: { ...rawSettings().forge, reactions: true } }), /forge\.reactions needs forge\.triggerWords/);
+  const { self, ...noSelf } = rawSettings().forge;
+  assert.throws(() => settingsFor(tmp(), { forge: { ...noSelf, triggerWords: WORDS, reactions: true } }), /forge\.reactions needs forge\.self/);
+  assert.deepEqual(settingsFor(tmp(), { tracker: { ...rawSettings().tracker, reactions: true } }).reactions, { forge: false, tracker: true });
   assert.throws(() => settingsFor(tmp(), { forge: { ...rawSettings().forge, reactions: 'yes' } }), /forge\.reactions must be true or false/);
   assert.throws(() => settingsFor(tmp(), { tracker: { ...rawSettings().tracker, reactions: 1 } }), /tracker\.reactions must be true or false/);
 });

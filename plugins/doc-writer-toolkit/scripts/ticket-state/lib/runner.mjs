@@ -1345,9 +1345,11 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         const before = labelSnapshot(settings.state, step.keys);
         const roundsBefore = roundSnapshot(settings.state, step.keys);
         // The comments a session takes get the pipeline's marks around it (lib/reactions.mjs): 👀 now, the result after.
-        const picked = step.role ? await pickMarks({ settings, clients, step }) : null;
+        // Neither call stops the step or what follows it: a throw is a warning.
+        const marked = (note) => say({ kind: 'reactions', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, outcome: 'warning', note });
+        const picked = step.role ? await pickMarks({ settings, clients, step }).catch((e) => (marked(`no marks: ${e.message}`), null)) : null;
         const r = await live.tracked(step, () => (step.role ? runModelStep(step) : step.stage === 'build' ? runBuildStep(step) : runScriptedStep(step)));
-        for (const note of await settleMarks({ settings, clients, step, picked, outcome: r.outcome })) say({ kind: 'reactions', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, outcome: 'failed', note });
+        for (const note of await settleMarks({ settings, clients, step, picked, outcome: r.outcome }).catch((e) => [`the marks were not set: ${e.message}`])) marked(note);
         // The ready and check labels follow what the step recorded (lib/pr-labels.mjs), whoever recorded it.
         for (const note of await followLabels({ settings, clients, keys: step.keys, before })) say({ kind: 'label', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, outcome: 'failed', note });
         // So do the description's sections, the place threads and the older summaries, with review rounds (lib/pr-rounds.mjs).

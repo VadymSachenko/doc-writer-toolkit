@@ -16,11 +16,13 @@ import { withoutHeader } from '../../tracker/lib/comment-header.mjs';
 // on the tracker (`tracker.reactions`), the answers the `answers` step reads: the card's comments after its open
 // question that the pipeline didn't post, the owner's (`tracker.owner`) when the settings name one.
 //
-// How a forge comment ended, from the record alone: `asked` when the record left it out of `handled`; when an item of
-// its reply by number (or of its reply in an item's thread) is one the rule asks back, or one a question of the
-// record's names (`questions[].n`, a question the brief didn't already carry); when the session recorded a question
-// on the card for the PR (`questions --pr`); or, for a reviewer's comment, when its handling has no `commit` (a
-// suggestion or a note for the owner). Every other handled comment is `applied`.
+// How a forge comment ended, from the record alone: `asked` when the record left it out of `handled`; else the
+// session's own word, its `handled` entry's `result` (`applied` or `asked`). An entry with none (a record from before
+// the field) is read from the rest of the record: `asked` when an item of its reply by number (or of its reply in an
+// item's thread) is one the rule asks back, or one a new question of the record's names (`questions[].n`); when the
+// entry has no `commit` and the record asked something (a new question, a description question in `asked`, a question
+// on the card for the PR); or, for a reviewer's comment, when it has no `commit` (a suggestion or a note for the
+// owner). Every other handled comment is `applied`.
 
 const EMOJI = { forge: { seen: '👀', applied: '🚀', asked: '😕' }, tracker: { seen: '👀', applied: '✅', asked: '❓' } };
 const same = (a, b) => String(a) === String(b);
@@ -33,13 +35,18 @@ export async function pickMarks({ settings, clients, step }) {
   const onForge = settings.reactions?.forge && step.stage === 'answerComments' && step.take?.length && step.pr;
   const onCard = settings.reactions?.tracker && step.stage === 'answers';
   if (!key || (!onForge && !onCard)) return null;
-  const l = readLedger(settings.state, key);
+  let l;
+  try {
+    l = readLedger(settings.state, key);
+  } catch (e) {
+    return { key, warnings: [`no marks: the ledger can't be read: ${e.message}`], forge: null, card: null };
+  }
   if (!l) return null;
   const picked = { key, warnings: [], seq: l.seq, handled: (l.reviewComments ?? []).length, questions: (l.questions ?? []).length, forge: null, card: null };
   if (onForge) {
     try {
       const pr = findPr(l, step.pr);
-      picked.forge = { repo: pr.repo, number: pr.number, items: step.take.map((c) => ({ id: c.id, kind: c.kind, by: c.by })) };
+      picked.forge = { repo: pr.repo, number: pr.number, asked: (pr.questions ?? []).length, items: step.take.map((c) => ({ id: c.id, kind: c.kind, by: c.by })) };
     } catch (e) {
       picked.warnings.push(`no marks on ${step.pr}: ${e.message}`);
     }
@@ -59,7 +66,12 @@ export async function pickMarks({ settings, clients, step }) {
 export async function settleMarks({ settings, clients, step, picked, outcome }) {
   if (!picked) return [];
   if (outcome !== 'done' && outcome !== 'failed') return picked.warnings;
-  const l = readLedger(settings.state, picked.key);
+  let l = null;
+  try {
+    l = readLedger(settings.state, picked.key);
+  } catch (e) {
+    picked.warnings.push(`the ledger can't be read, so each comment is marked as not done: ${e.message}`);
+  }
   const forgeEnd = outcome === 'failed' || !l || !picked.forge ? () => 'asked' : forgeEnds(step, picked, l);
   const cardAsked = outcome === 'failed' || !l || (l.questions ?? []).length > picked.questions;
   await markAll(settings, clients, picked, (where, item) => (where === 'forge' ? forgeEnd(item) : cardAsked ? 'asked' : 'applied'));
@@ -95,14 +107,17 @@ function forgeEnds(step, picked, l) {
   const handled = (l.reviewComments ?? []).slice(picked.handled).filter((c) => c.repo === pr.repo && Number(c.pr) === Number(pr.number));
   const known = new Set((step.openQuestions ?? []).map((q) => q.text));
   const fresh = (pr.openQuestions?.seq ?? 0) > picked.seq ? pr.openQuestions.items ?? [] : [];
-  const asked = new Set(fresh.filter((q) => !known.has(q.text) && q.n !== undefined && q.n !== null).map((q) => Number(q.n)));
+  const newQuestions = fresh.filter((q) => !known.has(q.text));
+  const asked = new Set(newQuestions.filter((q) => q.n !== undefined && q.n !== null).map((q) => Number(q.n)));
   const onCard = (l.questions ?? []).slice(picked.questions).some((q) => q.repo === pr.repo && Number(q.pr) === Number(pr.number));
+  const askedSomething = newQuestions.length > 0 || (pr.questions ?? []).length > (picked.forge.asked ?? 0) || onCard;
   const items = (id) => [...(step.replies ?? []).filter((r) => same(r.id, id)).flatMap((r) => r.items ?? []), ...(step.threadReplies ?? []).filter((r) => same(r.id, id))];
   return (item) => {
-    const h = handled.find((c) => same(c.id, item.id));
-    if (!h || onCard) return 'asked';
+    const h = handled.findLast((c) => same(c.id, item.id));
+    if (!h) return 'asked';
+    if (h.result === 'applied' || h.result === 'asked') return h.result;
     if (items(item.id).some((x) => x.do === 'ask' || asked.has(Number(x.n)))) return 'asked';
-    if (item.by === 'reviewer' && !h.commit) return 'asked';
+    if (!h.commit && (askedSomething || item.by === 'reviewer')) return 'asked';
     return 'applied';
   };
 }

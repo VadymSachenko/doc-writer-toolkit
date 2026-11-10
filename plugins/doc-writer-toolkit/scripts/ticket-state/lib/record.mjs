@@ -17,6 +17,8 @@ import { addEdits, addEnSides } from './edits.mjs';
 const PR_ONLY = new Set([...CHAIN, 'answerComments', 'styleCheck', 'readyForMerge', 'resync']);
 // Never `translation`: only `follow`, a person's move of the card, takes a PR there.
 const PR_TARGET_STAGES = ['writing', 'reworkWait', 'smeReview', 'finalReview', 'questions'];
+// How a comment `answerComments` handled ended (`handled[].result`): done as asked, or asked back / not done.
+export const HANDLED_RESULTS = ['applied', 'asked'];
 const VERDICTS = ['docs-required', 'needs-info', 'out-of-scope', 'already-documented', 'duplicate', 'manual-out-of-scope', 'owner-card'];
 
 export const blobHash = (buf) => crypto.createHash('sha1').update(`blob ${buf.length}\0`).update(buf).digest('hex');
@@ -408,6 +410,10 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         return;
       }
       case 'answerComments': {
+        // How each handled comment ended, when the session says it (`result`): the runner's status mark reads it
+        // (lib/reactions.mjs).
+        const ends = (result.handled ?? []).filter((c) => c?.result !== undefined && !HANDLED_RESULTS.includes(c.result));
+        if (ends.length) throw new CliError(`answerComments: "handled[].result" is one of ${HANDLED_RESULTS.join(', ')} (comment ${ends[0].id}: "${ends[0].result}")`, { code: 2 });
         // A review round (D-142): two commits and one review with line comments instead of the summary.
         if (result.review !== undefined) {
           const round = roundOf(['comments', 'style']);
