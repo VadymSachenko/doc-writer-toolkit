@@ -3,6 +3,7 @@ import path from 'node:path';
 import { computeStatus } from './status.mjs';
 import { makeGit } from './world.mjs';
 import { readLedger, readLedgersApart } from './ledger.mjs';
+import { CHAIN } from './stages.mjs';
 import { runDaily, readUsageTried, noUsageReading, parseResult, readyGroupsOf } from './runner.mjs';
 import { parseStartHours } from './settings.mjs';
 import { allowanceOf } from './allowance.mjs';
@@ -435,6 +436,10 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
       unmapped = mapped.unmapped;
       out.unmapped = mapped.unmapped.length;
       for (const k of keys.keys()) want(k);
+      // With `forge.keepFresh`, every ticket with a PR at ready for merge, or at In translation with its chain done, is
+      // looked at in each full check, whatever the events: a merge into its base (another PR's, which maps to no ticket)
+      // and a CI that finished on its head are seen within `schedule.watchMinutes`.
+      if (settings.keepFresh) for (const l of ledgers) if (l.mode === 'pipeline' && l.stages?.close?.status !== 'done' && (l.prs ?? []).some((p) => p.number && !p.merged && (p.stage === 'readyForMerge' || (p.stage === 'translation' && CHAIN.every((c) => p.chain?.[c]?.status === 'done'))))) want(l.key);
       // A `set retry` since the last check: the tickets whose last session failed, or that hit the cap, are looked at.
       const rearmed = latestRearm(readRearm(settings.state));
       if (rearmed && rearmed > (feed.rearmSeen ? Date.parse(feed.rearmSeen) : 0)) {

@@ -7,7 +7,7 @@ import { CliError } from '../lib/errors.mjs';
 const ADAPTERS = {
   github: {
     client: (opts) => createGh(opts),
-    adapter: (client, forge) => createGithubAdapter(client, { owner: forge.owner }),
+    adapter: (client, forge) => createGithubAdapter(client, { owner: forge.owner, fresh: forge.keepFresh === true }),
   },
 };
 

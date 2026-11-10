@@ -22,9 +22,22 @@ const PR_FIELDS = `
   reviewRequests(first: 50) { nodes { requestedReviewer { __typename ... on User { login } ... on Team { slug } ... on Bot { login } } } }
 `;
 
+// With `forge.keepFresh` (`fresh`), one PR read by number also gives its base branch's tip now (`baseRef`, not
+// `baseRefOid`, which GitHub keeps from the PR's last update) and the CI checks of the head branch's own tip
+// (`headRef`, not the PR's last listed commit, which can lag a push): what keeping the branch up to date with its base
+// reads. The caller compares the checks' commit with `headCommit`. Without it the read is as before, so a token that
+// can't read checks reads PRs.
+const PR_FRESH_FIELDS = `
+  baseRef { target { oid } }
+  headRef { target { ... on Commit { oid statusCheckRollup { state contexts(first: 100) { nodes { __typename ... on CheckRun { name status conclusion } ... on StatusContext { context state } } } } } } }
+`;
+
 const Q = {
   prByNumber: `query PrByNumber($owner: String!, $name: String!, $number: Int!) {
     repository(owner: $owner, name: $name) { pullRequest(number: $number) { ${PR_FIELDS} } }
+  }`,
+  prByNumberFresh: `query PrByNumber($owner: String!, $name: String!, $number: Int!) {
+    repository(owner: $owner, name: $name) { pullRequest(number: $number) { ${PR_FIELDS} ${PR_FRESH_FIELDS} } }
   }`,
   prsByHead: `query PrsByHead($owner: String!, $name: String!, $head: String!) {
     repository(owner: $owner, name: $name) {
@@ -110,6 +123,26 @@ function reviewRequestOf(node) {
   return r.__typename === 'Team' ? { team: r.slug } : { login: r.login };
 }
 
+// The CI checks of a commit, from GitHub's status check rollup: `state` `success`, `failure` or `pending`, or null when
+// no check reported on it; the names of the failing ones and of those still running. A check run that ended neutral or
+// skipped neither fails nor waits.
+const FAILED_RUN = new Set(['FAILURE', 'TIMED_OUT', 'CANCELLED', 'ACTION_REQUIRED', 'STARTUP_FAILURE']);
+export function checksOf(commit) {
+  const rollup = commit?.statusCheckRollup ?? null;
+  const contexts = rollup?.contexts?.nodes ?? [];
+  const failing = [];
+  const pending = [];
+  for (const c of contexts) {
+    if (c.__typename === 'StatusContext') {
+      if (['FAILURE', 'ERROR'].includes(c.state)) failing.push(c.context);
+      else if (['PENDING', 'EXPECTED'].includes(c.state)) pending.push(c.context);
+    } else if (c.status && c.status !== 'COMPLETED') pending.push(c.name);
+    else if (FAILED_RUN.has(c.conclusion)) failing.push(c.name);
+  }
+  const state = !rollup ? null : failing.length || ['FAILURE', 'ERROR'].includes(rollup.state) ? 'failure' : pending.length || ['PENDING', 'EXPECTED'].includes(rollup.state) ? 'pending' : 'success';
+  return { commit: commit?.oid ?? null, state, failing, pending };
+}
+
 export function normalizePr(n) {
   if (!n) return null;
   return {
@@ -136,6 +169,9 @@ export function normalizePr(n) {
     labels: (n.labels?.nodes ?? []).map((l) => l.name),
     assignees: (n.assignees?.nodes ?? []).map((a) => a.login),
     headRepository: n.headRepository?.nameWithOwner ?? null,
+    // Only from a read by number, which asks for them.
+    ...(n.baseRef !== undefined ? { baseCommit: n.baseRef?.target?.oid ?? null } : {}),
+    ...(n.headRef !== undefined ? { checks: checksOf(n.headRef?.target) } : {}),
   };
 }
 
@@ -149,7 +185,7 @@ const commentOf = (n) => ({
   updatedAt: n.updatedAt,
 });
 
-export function createGithubAdapter(gh, { owner, pageSize = PAGE }) {
+export function createGithubAdapter(gh, { owner, pageSize = PAGE, fresh = false }) {
   const repoPath = (repo) => `repos/${owner}/${repo}`;
   const vars = (repo, extra = {}) => ({ owner, name: repo, ...extra });
   const must = (value, what) => {
@@ -189,7 +225,7 @@ export function createGithubAdapter(gh, { owner, pageSize = PAGE }) {
   }
 
   const getPr = async (repo, number) => {
-    const data = await gh.query('PrByNumber', Q.prByNumber, vars(repo, { number }));
+    const data = await gh.query('PrByNumber', fresh ? Q.prByNumberFresh : Q.prByNumber, vars(repo, { number }));
     return normalizePr(must(data.repository?.pullRequest, `PR #${number} in ${repo}`));
   };
   const byHead = async (repo, head) => {
