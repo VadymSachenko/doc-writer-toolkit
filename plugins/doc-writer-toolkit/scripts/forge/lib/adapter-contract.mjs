@@ -45,7 +45,7 @@
 //        one request; a name the repository doesn't have is a Refusal('unknown', …, { label }): it is not created here.
 //   createLabel({repo, name})
 //        a label on the repository; one already there (in any case) is no error. The module calls it only for the
-//        settings' `readyLabel`.
+//        settings' `readyLabel` and `translatedLabel`.
 //   resolveThread({repo, thread})                 settles one review thread (`thread`: a Thread's `id`). The module
 //        calls it only for a thread whose first comment the pipeline posted.
 //   deleteComment({repo, id})                     removes one conversation comment. The module calls it only for a

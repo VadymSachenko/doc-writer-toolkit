@@ -26,6 +26,21 @@ export const START_ORDERS = ['priority', 'easiest'];
 // that sets none gets no comment and no text to send.
 export const DEFAULT_REVIEW_COMMENT = null;
 
+// The runner's line comments after a person's edit of an EN heading on a translated PR (`forge.idComments`, with the
+// translated label only), which no model writes: `renamed`, a heading new in the PR whose UA id took the EN anchor;
+// `kept`, a published heading whose id the EN heading keeps explicitly, with how to ask for the rename; `rename`, the
+// reply in that thread that asks for it; `blocked`, a page whose ids the runner left as they are because a rename on it
+// can't be made; `notRenamed`, the reply when a rename the owner asked for changes nothing. `<old>`, `<new>`, `<links>`,
+// `<why>` and `<rename>` (the reply as the owner writes it, after the trigger word when the host has one) are filled in.
+// A host writes them in the team's language.
+export const DEFAULT_ID_COMMENTS = {
+  renamed: 'This heading is new in this PR, so its id follows the EN heading: `#<old>` is now `#<new>` on the UA page and on every locale page, and <links> link(s) to it now use it.',
+  kept: 'This heading is published with the id `#<old>`, so its links keep working: the EN heading keeps that id explicitly (`\\{#<old>}`). To rename it to `#<new>` instead, with every link to it rewritten, reply `<rename>`.',
+  rename: 'rename id',
+  blocked: 'The heading ids on this page are not changed: `#<old>` can\'t become `#<new>` (<why>). Change the EN heading so its anchor is free, or give it `\\{#<old>}`.',
+  notRenamed: 'The id `#<old>` is not renamed: <why>.',
+};
+
 export const LOCAL_DEFAULTS = {
   mode: 'observe',
   limits: {
@@ -219,6 +234,9 @@ export function validateSettings(merged, { root, stateRootDefault }) {
   if (rawReview !== undefined && rawReview !== null && (typeof rawReview !== 'string' || !rawReview.includes('<files>'))) fail('forge.reviewComment must be a text with <files> in it (the PR\'s Files changed link)');
   const reviewComment = rawReview ?? DEFAULT_REVIEW_COMMENT;
   const triggerWords = validateTriggerWords(merged.forge?.triggerWords);
+  const rawIds = merged.forge?.idComments;
+  if (rawIds !== undefined && rawIds !== null && (!isObject(rawIds) || Object.entries(rawIds).some(([k, v]) => !(k in DEFAULT_ID_COMMENTS) || typeof v !== 'string' || !v.trim()))) fail(`forge.idComments must be { ${Object.keys(DEFAULT_ID_COMMENTS).join(', ')} }, each a text`);
+  const idComments = { ...DEFAULT_ID_COMMENTS, ...(rawIds ?? {}) };
   const reviewRounds = validateReviewRounds(merged.forge?.reviewRounds);
 
   const mode = merged.mode ?? LOCAL_DEFAULTS.mode;
@@ -296,6 +314,7 @@ export function validateSettings(merged, { root, stateRootDefault }) {
     appRepos: validateAppRepos(merged.appRepos ?? []),
     readyComment,
     reviewComment,
+    idComments,
     triggerWords,
     reviewRounds,
     hostRules: merged.hostRules ?? {},
@@ -375,6 +394,6 @@ export function printable(s) {
   return {
     ...rest,
     tracker: { ...tracker, credentials: { ...tracker.credentials } },
-    forge: { kind: forge.kind, owner: forge.owner, self: forge.self, assignee: forge.assignee, checkLabel: forge.checkLabel, expertLabel: forge.expertLabel ?? null, readyLabel: forge.readyLabel ?? null, repos: forge.repos, triggerWords: s.triggerWords ?? [], reviewRounds: s.reviewRounds ? true : false },
+    forge: { kind: forge.kind, owner: forge.owner, self: forge.self, assignee: forge.assignee, checkLabel: forge.checkLabel, expertLabel: forge.expertLabel ?? null, readyLabel: forge.readyLabel ?? null, translatedLabel: forge.translatedLabel ?? null, repos: forge.repos, triggerWords: s.triggerWords ?? [], reviewRounds: s.reviewRounds ? true : false },
   };
 }

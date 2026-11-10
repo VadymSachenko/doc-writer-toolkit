@@ -150,8 +150,10 @@ export async function main(argv, io = {}) {
     return 0;
   }
   if (!COMMANDS.includes(command)) throw new CliError(`unknown command '${command}'.\n\n${USAGE}`, { code: 2 });
-  // A role session runs `record` here, so only `trace` refuses: it reads other sessions' transcripts, which a role has no reason to.
+  // A role session runs `record` here, so `trace` refuses: it reads other sessions' transcripts, which a role has no reason to.
   if (command === 'trace' && env[ROLE_SESSION_VARIABLE] !== undefined) throw new CliError(`trace is for people: it is refused in a role session (${ROLE_SESSION_VARIABLE} is set)`, { code: 2 });
+  // And the records of the runner's own scripted steps that keep commits apart or take the translated label off.
+  if (command === 'record' && env[ROLE_SESSION_VARIABLE] !== undefined && ['idSync', 'untranslated'].includes(values.stage)) throw new CliError(`record --stage ${values.stage} is the runner's alone: it is refused in a role session (${ROLE_SESSION_VARIABLE} is set)`, { code: 2 });
   for (const [option, commands] of Object.entries(ONLY)) {
     if (values[option] !== undefined && !commands.includes(command)) throw new CliError(`--${option} is an option of ${commands.join(', ')} only, not of ${command}`, { code: 2 });
   }
