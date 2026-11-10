@@ -29,6 +29,9 @@ export const DEFAULT_LABELS = {
   why: 'Why a question',
   proposal: 'Proposal',
   answer: 'answer',
+  // A place's source and why it isn't confirmed (D-052), each shown when the place gives it.
+  placeSource: 'source',
+  placeWhy: 'not confirmed',
   placeOpen: 'open thread',
   placeConfirmed: 'confirmed',
   placeDeleted: 'block deleted',
@@ -81,16 +84,18 @@ export function renderQuestions(questions, labels) {
 }
 
 // Each place of the PR and its state: open, with a link to its thread; confirmed; or its block deleted, the thread
-// settled by the pipeline.
-export function renderPlaces(places, labels, prUrl) {
+// settled by the pipeline. With `facts` (the host's `checks.places`): the page, the source and why it isn't confirmed,
+// when the place gives them (D-052).
+export function renderPlaces(places, labels, prUrl, { facts = false } = {}) {
   if (!places?.length) return labels.none;
   const link = (p) => (p.commentId && prUrl ? `${base(prUrl)}#discussion_r${p.commentId}` : null);
   return places
     .map((p) => {
-      const what = oneLine(p.claim ?? p.page ?? '');
+      const what = facts && p.claim && p.page ? `\`${oneLine(p.page)}\`: ${oneLine(p.claim)}` : oneLine(p.claim ?? p.page ?? '');
+      const shown = !facts ? [] : [p.why ? `**${labels.placeWhy}:** ${oneLine(p.why)}` : null, p.source ? `**${labels.placeSource}:** ${oneLine(p.source)}` : null].filter(Boolean);
       const url = link(p);
       const state = p.state === 'confirmed' ? `${labels.placeConfirmed}${url ? ` · [${labels.thread}](${url})` : ''}` : p.state === 'deleted' ? `${labels.placeDeleted} · ${labels.threadClosed}` : url ? `[${labels.placeOpen} ↗](${url})` : labels.placeOpen;
-      return `- **${p.id}** ${what} — ${state}`;
+      return `- **${p.id}** ${what}${shown.length ? ` (${shown.join('; ')})` : ''} — ${state}`;
     })
     .join('\n');
 }
@@ -108,12 +113,12 @@ export function renderRounds(rounds, labels, prUrl) {
   return `<details>\n<summary>${labels.rounds} (${rounds.length})</summary>\n\n${lines.join('\n')}\n\n</details>`;
 }
 
-// The three sections of one PR, from its ledger.
-export function renderSections(ledger, pr, labels) {
+// The three sections of one PR, from its ledger. `placeFacts`: the places with their page, source and why.
+export function renderSections(ledger, pr, labels, { placeFacts = false } = {}) {
   const places = (ledger.places ?? []).filter((p) => p.repo === pr.repo && Number(p.pr) === Number(pr.number));
   return {
     questions: renderQuestions(pr.questions ?? [], labels),
-    places: renderPlaces(places, labels, pr.url),
+    places: renderPlaces(places, labels, pr.url, { facts: placeFacts }),
     rounds: renderRounds(pr.rounds ?? [], labels, pr.url),
   };
 }
