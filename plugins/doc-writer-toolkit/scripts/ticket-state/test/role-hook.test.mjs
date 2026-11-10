@@ -266,11 +266,13 @@ test('per-role scripts: triage gets ticket-state and the tracker only; each role
       assert.equal(refusalOf(line, cfg[role], { cwd: root }) === null, names.includes(s), `${role}: the hook on ${s}`);
     }
   }
-  // The reviewer and the translator read a PR's base with `forge pr-state`, and do nothing else with the forge.
+  // The reviewer and the translator read a PR's base with `forge pr-state`; the reviewer also edits the description and
+  // posts its round's review. Nothing else with the forge.
   for (const role of ['reviewer', 'translator']) {
     assert.equal(refusalOf(`node ${R}/scripts/forge/forge.mjs pr-state --repo guide-docs --number 7`, cfg[role], { cwd: root }), null, role);
-    for (const c of ['open-pr --repo x', 'comment --repo x', 'add-label --label y', '--repo x pr-state']) assert.ok(refusalOf(`node ${R}/scripts/forge/forge.mjs ${c}`, cfg[role], { cwd: root }), `${role}: ${c}`);
+    for (const c of ['open-pr --repo x', 'comment --repo x', 'add-label --label y', '--repo x pr-state', 'reply --repo x', 'suggest --repo x', 'request-reviewers --repo x']) assert.ok(refusalOf(`node ${R}/scripts/forge/forge.mjs ${c}`, cfg[role], { cwd: root }), `${role}: ${c}`);
   }
+  assert.ok(refusalOf(`node ${R}/scripts/forge/forge.mjs review-on-lines --repo x`, cfg.translator, { cwd: root }), 'translator: review-on-lines');
 });
 
 test('a host\'s tracked rule opens a command it names in the hook too, unless a role never runs it', () => {
