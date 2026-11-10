@@ -165,7 +165,7 @@ test('each stage\'s own commands pass in their real forms: the brief\'s, the rol
       `git -C ${WT} add -A`, `git -C ${WT} add -- docs/a.md docs/.assets/b.png`, `git -C ${WT} status --short`, `git -C ${WT} diff origin/main`, `git -C ${WT} log -3`, `git -C ${WT} show HEAD`, `git -C ${WT} worktree list`, `git -C ${WT} commit -m "Write the page"`, `git -C ${WT} commit -m "Say why git push --force is denied" -m "Second paragraph: --output and .env are only words here"`, `git -C ${WT} commit -m .env`,
       TREE.push, `git -C ${WT} fetch origin`, `git -C ${WT} fetch origin ticket-71`, `git -C ${WT} fetch origin main`, `mkdir -p ${WT}/docs/a/.assets`, `mkdir -p ${state}/tmp/run-1`, `mkdir ${root}/work/tickets/502`, 'npx playwright test screenshot-tests/a.spec.ts',
     ],
-    reviewer: [`${toolkit('visual-pack/visual-pack.mjs')} --root ${WT} --range origin/main...HEAD`, `git -C ${WT} diff origin/main...HEAD -- docs/a.md`, `git -C ${WT} add -- docs/a.md`, `git -C ${WT} commit -m "Fix the style"`, TREE.push],
+    reviewer: [`${toolkit('forge/forge.mjs')} review-on-lines --repo guide-docs --number 3 --commit abc --comments-file ${state}/tmp/c.json --body-file ${state}/tmp/b.md --outside-in-body`, `${toolkit('visual-pack/visual-pack.mjs')} --root ${WT} --range origin/main...HEAD`, `git -C ${WT} diff origin/main...HEAD -- docs/a.md`, `git -C ${WT} add -- docs/a.md`, `git -C ${WT} commit -m "Fix the style"`, TREE.push],
     translator: [
       `${toolkit('locale-sync/locale-sync.mjs')} status --root ${WT}`, `${toolkit('locale-sync/locale-sync.mjs')} record --root ${WT} --locale tr docs/a.md`, `${toolkit('screenshot-locales/screenshot-locales.mjs')} pairs --root ${WT} --base origin/main`, `${toolkit('doc-align/doc-align.mjs')} ${WT}/docs/a.md ${WT}/i18n/en/a.md --names ${WT}/doc-kit/names.md`, `${toolkit('ui-labels/ui-labels.mjs')} check --root ${WT}`, `${toolkit('ui-labels/ui-labels.mjs')} sync --root ${WT}`, 'npm run build', 'npx docusaurus build', `git -C ${WT} add -A`, `git -C ${WT} commit -m "Translate the page"`, TREE.push,
     ],
@@ -266,11 +266,13 @@ test('per-role scripts: triage gets ticket-state and the tracker only; each role
       assert.equal(refusalOf(line, cfg[role], { cwd: root }) === null, names.includes(s), `${role}: the hook on ${s}`);
     }
   }
-  // The reviewer and the translator read a PR's base with `forge pr-state`, and do nothing else with the forge.
+  // The reviewer and the translator read a PR's base with `forge pr-state`; the reviewer also edits the description and
+  // posts its round's review. Nothing else with the forge.
   for (const role of ['reviewer', 'translator']) {
     assert.equal(refusalOf(`node ${R}/scripts/forge/forge.mjs pr-state --repo guide-docs --number 7`, cfg[role], { cwd: root }), null, role);
-    for (const c of ['open-pr --repo x', 'comment --repo x', 'add-label --label y', '--repo x pr-state']) assert.ok(refusalOf(`node ${R}/scripts/forge/forge.mjs ${c}`, cfg[role], { cwd: root }), `${role}: ${c}`);
+    for (const c of ['open-pr --repo x', 'comment --repo x', 'add-label --label y', '--repo x pr-state', 'reply --repo x', 'suggest --repo x', 'request-reviewers --repo x']) assert.ok(refusalOf(`node ${R}/scripts/forge/forge.mjs ${c}`, cfg[role], { cwd: root }), `${role}: ${c}`);
   }
+  assert.ok(refusalOf(`node ${R}/scripts/forge/forge.mjs review-on-lines --repo x`, cfg.translator, { cwd: root }), 'translator: review-on-lines');
 });
 
 test('a host\'s tracked rule opens a command it names in the hook too, unless a role never runs it', () => {
@@ -625,5 +627,17 @@ test('ticket-state record refuses idSync and untranslated in a role session, bef
   for (const stage of ['idSync', 'untranslated']) {
     await assert.rejects(main(['record', '502', '--root', '/nonexistent', '--stage', stage, '--status', 'done'], { stdout: { write() {} }, env: { DOC_TOOLKIT_ROLE_SESSION: 'writer' } }), (e) => e.exitCode === 2 && /the runner's alone/.test(e.message));
     await assert.rejects(main(['record', '502', '--root', '/nonexistent', '--stage', stage, '--status', 'done'], { stdout: { write() {} }, env: {} }), (e) => !/the runner's alone/.test(e.message));
+  }
+});
+
+test('every forge command a round\'s brief asks of a stage is one its role may run (the EN review posts its round, 1241)', async () => {
+  const { roundLines } = await import('../lib/edits.mjs');
+  const { ROLE_OF } = await import('../lib/stages.mjs');
+  for (const stage of ['answerComments', 'styleCheck', 'enReview']) {
+    const role = ROLE_OF[stage];
+    const asked = [...new Set([...roundLines({ stage }).join('\n').matchAll(/forge\.mjs ([a-z-]+)/g)].map((m) => m[1]))];
+    assert.ok(stage !== 'enReview' || asked.includes('review-on-lines'), stage);
+    const may = ROLE_SCRIPTS[role].filter((s) => s.startsWith('forge/forge.mjs'));
+    for (const c of asked) assert.ok(may.includes('forge/forge.mjs') || may.includes(`forge/forge.mjs ${c}`), `${stage} (${role}): forge.mjs ${c}`);
   }
 });

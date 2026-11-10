@@ -162,13 +162,13 @@ export const NODE_SCRIPTS = ['ticket-state/ticket-state.mjs record', 'ticket-sta
 // Each role's own, from what its stages and the skills it runs call. Triage reads and answers cards and writes nothing else;
 // the writer's skills run the UI label check and the screenshot paths; the translator's run the locale pipeline and the
 // alignment check; the reviewer builds the visual pack, and adds what the EN review left open to the PR's description
-// (`forge edit-pr`). The last two read a PR's base with `forge pr-state`, which neither `status` nor the brief gives. A role's list narrows only: a script not in it has no rule, and
+// (`forge edit-pr`), or posts its round's review with review rounds (`forge review-on-lines`). The last two read a PR's base with `forge pr-state`, which neither `status` nor the brief gives. A role's list narrows only: a script not in it has no rule, and
 // the role's hook refuses it however it is spelled.
 const STATE_SCRIPTS = ['ticket-state/ticket-state.mjs record', 'ticket-state/ticket-state.mjs status', 'ticket-state/ticket-state.mjs config'];
 export const ROLE_SCRIPTS = {
   triage: [...STATE_SCRIPTS, 'tracker/tracker.mjs'],
   writer: [...STATE_SCRIPTS, 'ticket-state/browser-lock.mjs', 'tracker/tracker.mjs', 'forge/forge.mjs', 'ui-labels/ui-labels.mjs', 'screenshot-locales/screenshot-locales.mjs', 'video-parts/video-parts.mjs'],
-  reviewer: [...STATE_SCRIPTS, 'visual-pack/visual-pack.mjs', 'forge/forge.mjs pr-state', 'forge/forge.mjs edit-pr'],
+  reviewer: [...STATE_SCRIPTS, 'visual-pack/visual-pack.mjs', 'forge/forge.mjs pr-state', 'forge/forge.mjs edit-pr', 'forge/forge.mjs review-on-lines'],
   translator: [...STATE_SCRIPTS, 'locale-sync/locale-sync.mjs', 'ui-labels/ui-labels.mjs', 'doc-align/doc-align.mjs', 'screenshot-locales/screenshot-locales.mjs', 'forge/forge.mjs pr-state'],
 };
 export const scriptRulesFor = (roots = [], role = null) => [...new Set(roots.flatMap((r) => (role ? ROLE_SCRIPTS[role] : NODE_SCRIPTS).map((s) => `Bash(node ${path.join(r, 'scripts', s)}:*)`)))];
