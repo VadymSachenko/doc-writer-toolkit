@@ -1068,8 +1068,11 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
 
   // The runs the last reading took when it gave none (the runner's own reading only; a reading `io` gives is one).
   let usageTries = null;
-  const readUsage =
-    io.readUsage ??
+  // With `limits.usageGuard` off, no reading is ever made: the allowance is unlimited (lib/allowance.mjs).
+  const guarded = settings.limits.usageGuard !== false;
+  const readUsage = !guarded
+    ? async () => null
+    : io.readUsage ??
     (async () => {
       const r = await readUsageTried(claude, io.claudeEnv, io.sleep ? { sleep: io.sleep } : {});
       usageTries = r.usage ? null : r.tries;
@@ -1079,6 +1082,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
   // each read /usage at once; every reading after a session is the run's own.
   let usage = options.usage ?? (await readUsage());
   out.usage = usage;
+  if (!guarded) out.usageOff = true;
   // Why a scheduled model step may not start now, or null.
   const guardReason = () => {
     if (manual) return null;

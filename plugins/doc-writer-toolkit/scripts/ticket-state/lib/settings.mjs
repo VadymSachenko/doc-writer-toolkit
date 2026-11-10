@@ -49,6 +49,9 @@ export const LOCAL_DEFAULTS = {
     // `startHours`: the local hours in which the watcher may triage and start between morning runs, when a slot frees
     // (`HH-HH` or `HH:MM-HH:MM`, the end not included). Outside them it triages nothing and starts nothing.
     startHours: '10-22',
+    // `usageGuard`: whether the runner reads `claude -p /usage` and holds scheduled model steps to the day's allowance.
+    // Off (`false`): no reading at all, and no step waits for one; the allowance counts as unlimited.
+    usageGuard: true,
   },
   // `tokenFile`: a file (mode 600) with the long-lived sign-in token the watcher's runs use; none: the CLI's own sign-in.
   // `forgeSeconds`: how often the forge check looks for comments on the pipeline's PRs between full checks (none: only
@@ -226,6 +229,7 @@ export function validateSettings(merged, { root, stateRootDefault }) {
   num(limits.dailyPercent, 'limits.dailyPercent');
   if (limits.maxWeekPercent !== null) num(limits.maxWeekPercent, 'limits.maxWeekPercent');
   if (limits.open !== null) num(limits.open, 'limits.open', { min: 1 });
+  if (typeof limits.usageGuard !== 'boolean') fail('limits.usageGuard must be true or false');
   if (!parseStartHours(limits.startHours)) fail('limits.startHours must be local hours such as 10-22 or 09:30-21:00, the start before the end');
   if (!START_ORDERS.includes(limits.startOrder)) fail(`limits.startOrder must be one of ${START_ORDERS.join(', ')}`);
   if (!isObject(limits.estimates)) fail('limits.estimates must be { size: percent of the week }');
