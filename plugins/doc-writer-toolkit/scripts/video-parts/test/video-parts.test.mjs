@@ -370,3 +370,23 @@ test('real sound files in the other plain containers are cut with their own demu
   // The encoders every ffmpeg has: matroska, wav and m4a are always among them.
   assert.ok(['talk.mkv', 'talk.wav', 'talk.m4a'].every((n) => cut.includes(n)), cut.join(' '));
 });
+
+// AC-1 across the two scripts: the starts this plan gives are the offsets the import reads (`--transcript
+// <file>@<start>`, whole seconds), so each part's timestamps land on the original's time. Bare python3 is enough here:
+// the plan from a transcript needs no image library.
+const SME = path.join(HERE, '..', '..', 'sme-video-context', 'sme_video_context.py');
+const hasPython = spawnSync('python3', ['--version'], { stdio: 'ignore' }).status === 0;
+test("the parts' starts are the import's offsets: a part's timestamps map onto the original's", { skip: !hasPython && 'python3 is not installed' }, () => {
+  const dir = tmp();
+  const parts = planParts(3725.4, 30 * 60);
+  assert.deepEqual(parts.map((p) => p.start), [0, 1800, 3600]);
+  assert.ok(parts.every((p) => Number.isInteger(p.start)), 'whole seconds: the import takes no other offset');
+  const said = ['(29:58 - 29:59)\nthe end of the first part\n', '(0:01 - 0:02)\nthe start of the second part\n', '(2:04 - 2:05)\nthe last words\n'];
+  const args = parts.flatMap((p, i) => {
+    const file = path.join(dir, `call.mp4-part-0${i + 1}-transcript-turboscribe.txt`);
+    fs.writeFileSync(file, said[i]);
+    return ['--transcript', `${file}@${p.start}`];
+  });
+  const plan = JSON.parse(execFileSync('python3', ['-I', SME, '--plan-from-transcript', ...args], { encoding: 'utf8' }));
+  assert.deepEqual(plan.map((x) => [x.seconds, x.text]), [[1798.5, 'the end of the first part'], [1801.5, 'the start of the second part'], [3724.5, 'the last words']]);
+});

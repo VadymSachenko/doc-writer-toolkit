@@ -7,6 +7,7 @@ import { CliError } from './errors.mjs';
 import { DEFAULT_KEEP } from './cleanup.mjs';
 import { validateJobs } from './jobs.mjs';
 import { DEFAULT_LABELS } from './pr-description.mjs';
+import { TRANSCRIBERS } from '../../transcriber/lib/index.mjs';
 
 // The ticket flow settings: the shared file the host commits (`.claude/ticket-flow.json`, or the `Ticket flow
 // settings:` field of CLAUDE.md, or --settings), read at HEAD (`trustedShared`), and the owner's local file next to it
@@ -64,8 +65,13 @@ export const LOCAL_DEFAULTS = {
   },
   // The order a step that failed its gate climbs: one retry with the next model up, never down.
   modelLadder: ['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5'],
-  // `transcriber`: the name of the host's transcription adapter (none by default). The automatic try needs `browserProfile`.
-  video: { transcriber: null, fallback: 'person', partMinutes: 30, partsPerDay: 3, browserProfile: null, transcriptHours: 2 },
+  // `transcriber`: the transcription adapter (`turboscribe`; none by default) and `browserProfile`, the folder of its
+  // persistent browser profile, outside every repo: the automatic try needs both, and with either unset the gate goes
+  // straight to the person. `headless`: the browser with no window (a visible one by default: a sign-in and a bot check
+  // pass more often there). `channel`: an installed browser instead of Playwright's Chromium (`chrome`). `fetchMinutes`:
+  // how often an uploaded part's transcript is looked for; `transcriptHours`: how long after its upload it may take.
+  // `extractMinutes`: the longest the frame sweep of one video may run (`videoExtract`).
+  video: { transcriber: null, fallback: 'person', partMinutes: 30, partsPerDay: 3, browserProfile: null, transcriptHours: 2, headless: false, channel: null, fetchMinutes: 15, extractMinutes: 120 },
   // What the close step does with a merged ticket's recorded work files (D-074).
   cleanup: { mode: 'trash', keep: DEFAULT_KEEP, trashDir: null },
   // `stepsFile`: a file of the owner's own planned steps, shown as is at the end of the progress file (none: no block).
@@ -108,6 +114,32 @@ const num = (v, where, { min = 0 } = {}) => {
   if (typeof v !== 'number' || !Number.isFinite(v) || v < min) fail(`${where} must be a number ≥ ${min}`);
   return v;
 };
+
+// The video gate's settings. A part's start is the offset of its transcript, which the import reads in whole seconds
+// only (`--transcript <file>@<seconds>`), so a part is a whole number of seconds long. The browser profile holds the
+// owner's sign-in: an absolute folder outside the host repo, the state folder and every clone, so no session's rules
+// reach it and no close step's cleanup removes it.
+function validateVideo(video, { root, state, targets, appRepos }) {
+  num(video.partsPerDay, 'video.partsPerDay', { min: 1 });
+  num(video.partMinutes, 'video.partMinutes', { min: 1 });
+  if (!Number.isInteger(Math.round(video.partMinutes * 60 * 1000) / 1000)) fail('video.partMinutes must make a whole number of seconds (30, or 0.5 of a minute)');
+  num(video.transcriptHours, 'video.transcriptHours');
+  num(video.fetchMinutes, 'video.fetchMinutes', { min: 1 });
+  num(video.extractMinutes, 'video.extractMinutes', { min: 1 });
+  if (video.transcriber !== null && !TRANSCRIBERS.includes(video.transcriber)) fail(`video.transcriber must be one of ${TRANSCRIBERS.join(', ')}, or null`);
+  if (typeof video.headless !== 'boolean') fail('video.headless must be true or false');
+  if (video.channel !== null && !['chrome', 'chrome-beta', 'msedge'].includes(video.channel)) fail('video.channel must be chrome, chrome-beta, msedge or null');
+  if (video.browserProfile !== null) {
+    if (typeof video.browserProfile !== 'string' || !video.browserProfile.trim()) fail('video.browserProfile must be a folder');
+    const profile = path.resolve(video.browserProfile.replace(/^~(?=\/|$)/, process.env.HOME ?? '~'));
+    if (!path.isAbsolute(video.browserProfile.replace(/^~(?=\/|$)/, '/'))) fail('video.browserProfile must be an absolute folder (or start with ~/)');
+    const inside = (dir) => dir && (profile === dir || profile.startsWith(dir + path.sep) || dir.startsWith(profile + path.sep));
+    const clones = [...targets, ...appRepos].map((t) => (typeof t?.path === 'string' ? path.resolve(root, t.path) : null));
+    if ([root, state, ...clones].some(inside)) fail('video.browserProfile must be outside the host repo, the state folder and every clone: it holds the sign-in');
+    video.browserProfile = profile;
+  }
+  return video;
+}
 
 // The code repos a session may read as evidence: { repo, url (its https address), base, path (the owner's clone, from
 // the host root, optional: denied to every session) }. The runner clones each from `url` into the state folder once,
@@ -253,9 +285,7 @@ export function validateSettings(merged, { root, stateRootDefault }) {
   num(schedule.commentQuietMinutes, 'schedule.commentQuietMinutes');
   num(schedule.expertQuietDays, 'schedule.expertQuietDays', { min: 1 });
   if (schedule.tokenFile !== null && (typeof schedule.tokenFile !== 'string' || !schedule.tokenFile.trim())) fail('schedule.tokenFile must be a file path');
-  const video = deepMerge(LOCAL_DEFAULTS.video, merged.video ?? {});
-  num(video.partsPerDay, 'video.partsPerDay', { min: 1 });
-  num(video.partMinutes, 'video.partMinutes', { min: 1 });
+  const video = validateVideo(deepMerge(LOCAL_DEFAULTS.video, merged.video ?? {}), { root, state: path.resolve(root, typeof merged.state === 'string' && merged.state.trim() ? merged.state : stateRootDefault), targets: merged.targets ?? [], appRepos: merged.appRepos ?? [] });
 
   const cleanup = { ...LOCAL_DEFAULTS.cleanup, ...(merged.cleanup ?? {}) };
   if (!['trash', 'delete'].includes(cleanup.mode)) fail('cleanup.mode must be "trash" or "delete"');

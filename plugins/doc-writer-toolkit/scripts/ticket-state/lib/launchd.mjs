@@ -21,9 +21,9 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const WATCHER = path.resolve(HERE, '..', 'watcher.mjs');
 export const LABEL_PREFIX = 'dev.doc-toolkit.ticket-flow';
 export const NEEDED = ['claude', 'git', 'gh'];
-// On the PATH when found, not needed to install: the video gate's cut (`video-parts`) runs them; without them, a stage
-// that cuts a video fails and says so.
-export const OPTIONAL = ['ffmpeg', 'ffprobe'];
+// On the PATH when found, not needed to install: the video gate's cut (`video-parts`) runs ffmpeg and ffprobe, and its
+// frame sweep (`videoExtract`) ffmpeg and tesseract; without them, the stage that needs one fails and says so.
+export const OPTIONAL = ['ffmpeg', 'ffprobe', 'tesseract'];
 
 // The label: the host folder's name (ASCII) and a short hash of its absolute path, so two hosts with the same folder
 // name never share an agent, and the label is known from the path alone (an uninstall needs no settings).

@@ -90,6 +90,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: npm run test:offline
         working-directory: plugins/doc-writer-toolkit/scripts/visual-pack
+      - name: Test transcriber (offline)
+        if: ${{ !cancelled() }}
+        run: npm run test:offline
+        working-directory: plugins/doc-writer-toolkit/scripts/transcriber
 
   # The visual-pack tests with the browser test, which needs Playwright and Chromium. The script has no dependency of
   # its own and loads Playwright from the folder VISUAL_PACK_PLAYWRIGHT_FROM names, so it is installed there, outside
@@ -110,6 +114,11 @@ jobs:
       - name: Test visual-pack
         run: npm test
         working-directory: plugins/doc-writer-toolkit/scripts/visual-pack
+      # The transcriber's browser test reads the same folder (VISUAL_PACK_PLAYWRIGHT_FROM).
+      - name: Test transcriber
+        if: ${{ !cancelled() }}
+        run: npm test
+        working-directory: plugins/doc-writer-toolkit/scripts/transcriber
 
   # The unit tests of the Python script behind extract-sme-screenshots. They install only the two image packages in
   # tests/requirements.txt, pinned as in sme-video-requirements.txt: no ffmpeg, no tesseract, no faster-whisper.
