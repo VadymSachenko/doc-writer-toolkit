@@ -21,12 +21,21 @@ import { withHeader, withoutHeader } from '../../tracker/lib/comment-header.mjs'
 //     close a PR or delete a branch. Two touch what was posted, each only on the pipeline's own: `resolveThread`
 //     settles a thread whose first comment the caller posted (its id among the caller's own), and `deleteComment`
 //     removes a conversation comment the caller posted, written from `self` and starting with the comment header. A
-//     person's thread or comment is refused, and a submitted review can't be removed at all.
+//     person's thread or comment is refused, and a submitted review can't be removed at all;
+//   - `markComment` puts the pipeline's status mark (a reaction) on a comment, a line comment or a review and takes off
+//     only `self`'s reactions of the other marks: never a person's, and nothing but the marks in `MARKS`.
 
 export const OPERATIONS = [
   'openPr', 'editPr', 'prState', 'changedPrsSince', 'prActivity', 'eventsSince', 'requestReviewers',
   'reviewOnLines', 'reply', 'suggest', 'comment', 'addLabel', 'removeLabel', 'setStageLabel', 'resolveThread', 'deleteComment',
+  'markComment',
 ];
+
+// The status marks the ticket flow puts on a comment it took (its reactions): picked up, applied, asked back or not
+// done. The adapter says which reaction stands for each on its forge.
+export const MARKS = ['seen', 'applied', 'asked'];
+// What a mark goes on: a conversation comment, a line comment, a submitted review.
+export const MARKED_KINDS = ['comment', 'review-comment', 'review'];
 
 // What the event feed reads by default (`eventsSince`): the events that move a ticket.
 export const FEED_EVENTS = ['review_requested', 'review_request_removed', 'labeled', 'unlabeled', 'merged', 'closed', 'reopened'];
@@ -491,6 +500,27 @@ export function createForge({ adapter, forge, dryRun = false }) {
       if (!ownedText(found)) throw new Refusal('notOwn', `comment ${id} was not written from ${forge.self} with the comment header: it is a person's`, { comment: id, author: found.author ?? null });
       await adapter.deleteComment({ repo, id });
       return { repo, number: n, comment: id, deleted: true, posted: [] };
+    },
+
+    // The pipeline's mark on one comment, line comment or review of the PR: `self`'s reaction for `mark` put on it (one
+    // there already is no change), and `self`'s reactions for the other marks taken off. Reactions of anyone else, and
+    // `self`'s that stand for no mark, stay. Needs `self` in the settings: without it the pipeline's reactions can't be
+    // told from a person's. The ticket flow's runner calls it; the CLI has no command for it.
+    async markComment({ repo: repoIn, number, kind, id: idIn, mark }) {
+      const repo = repoOf(repoIn);
+      const n = needNumber(number);
+      if (!MARKED_KINDS.includes(kind)) throw new Refusal('unknown', `'${kind}' is not what a mark goes on. Known: ${MARKED_KINDS.join(', ')}.`, { kind: kind ?? null });
+      const id = needId(idIn, `a ${kind} id`);
+      if (!MARKS.includes(mark)) throw new Refusal('unknown', `'${mark}' is not a mark. Known: ${MARKS.join(', ')}.`, { mark: mark ?? null });
+      if (!forge.self) throw new Refusal('notOwn', "marking a comment needs forge.self in the settings: without it the pipeline's reactions can't be told from a person's", { comment: id });
+      const found = await adapter.reactions({ repo, number: n, kind, id });
+      if (found.number !== n) throw new Refusal('unknown', `${kind} ${id} is on #${found.number}, not #${n}`, { comment: id, number: found.number });
+      const low = (x) => String(x ?? '').toLowerCase();
+      const mine = new Set(found.reactions.filter((r) => low(r.login) === low(forge.self)).map((r) => r.mark));
+      const add = mine.has(mark) ? [] : [mark];
+      const remove = MARKS.filter((m) => m !== mark && mine.has(m));
+      if (add.length || remove.length) await adapter.react({ repo, subject: found.subject, add, remove });
+      return { repo, number: n, kind, id, mark, added: add, removed: remove, changed: Boolean(add.length || remove.length), posted: [] };
     },
   };
 

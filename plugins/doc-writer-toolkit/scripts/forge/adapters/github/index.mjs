@@ -7,6 +7,9 @@ import { Refusal } from '../../lib/errors.mjs';
 const PAGE = 100;
 const MAX_PAGES = 100;
 const PR_STATE = { OPEN: 'open', CLOSED: 'closed', MERGED: 'merged' };
+// The reaction that stands for each of the module's marks (lib/forge.mjs, `MARKS`): 👀, 🚀, 😕.
+const REACTION = { seen: 'EYES', applied: 'ROCKET', asked: 'CONFUSED' };
+const MARK_OF = Object.fromEntries(Object.entries(REACTION).map(([m, c]) => [c, m]));
 
 const PR_FIELDS = `
   id number url title body state isDraft merged mergedAt closedAt createdAt updatedAt
@@ -65,6 +68,10 @@ const Q = {
         nodes { id databaseId author { __typename login } body createdAt updatedAt }
       }
     } }
+  }`,
+  // The reactions of a comment, a line comment or a review (each a Reactable), by its GraphQL id.
+  reactions: `query Reactions($id: ID!, $after: String) {
+    node(id: $id) { ... on Reactable { reactions(first: 100, after: $after) { pageInfo { hasNextPage endCursor } nodes { content user { login } } } } }
   }`,
   labelTargets: `query LabelTargets($owner: String!, $name: String!, $number: Int!, $after: String) {
     repository(owner: $owner, name: $name) {
@@ -372,6 +379,36 @@ export function createGithubAdapter(gh, { owner, pageSize = PAGE }) {
     // One conversation comment removed (GitHub answers 204, no body).
     async deleteComment({ repo, id }) {
       await gh.write('DELETE', `${repoPath(repo)}/issues/comments/${id}`);
+    },
+
+    // The reactions on one comment, line comment or review, read by its GraphQL id: REST has none for a review, and
+    // GraphQL's `removeReaction` takes off only the caller's own. A comment's id comes from its REST record, a review's
+    // from the PR's reviews.
+    async reactions({ repo, number, kind, id }) {
+      let subject;
+      let on = number;
+      if (kind === 'review') {
+        const nodes = await pages('PrReviews', Q.reviews, vars(repo, { number }), (d) => must(d.repository?.pullRequest, `PR #${number}`).reviews);
+        subject = must(nodes.find((r) => String(r.databaseId) === String(id)), `review ${id} on PR #${number}`).id;
+      } else {
+        const review = kind === 'review-comment';
+        const c = await gh.get(`${repoPath(repo)}/${review ? 'pulls' : 'issues'}/comments/${id}`);
+        const m = (review ? /\/pulls\/(\d+)$/ : /\/issues\/(\d+)$/).exec((review ? c.pull_request_url : c.issue_url) ?? '');
+        subject = c.node_id;
+        on = m ? Number(m[1]) : null;
+      }
+      const nodes = await pages('Reactions', Q.reactions, { id: subject }, (d) => must(d.node, `the reactions of ${kind} ${id}`).reactions);
+      return { subject, number: on, reactions: nodes.filter((r) => MARK_OF[r.content]).map((r) => ({ mark: MARK_OF[r.content], login: login(r.user) })) };
+    },
+
+    // The caller's own reactions put on and taken off one subject, in one GraphQL request.
+    async react({ subject, add, remove }) {
+      if (!add.length && !remove.length) return;
+      const parts = [
+        ...add.map((m, i) => `add${i}: addReaction(input: { subjectId: $subject, content: ${REACTION[m]} }) { clientMutationId }`),
+        ...remove.map((m, i) => `remove${i}: removeReaction(input: { subjectId: $subject, content: ${REACTION[m]} }) { clientMutationId }`),
+      ];
+      await gh.write('POST', 'graphql', { query: `mutation SetReactions($subject: ID!) { ${parts.join(' ')} }`, variables: { subject } });
     },
 
     // Labels by name, in one GraphQL request. A name the repository doesn't have is refused: it is not created here.

@@ -151,6 +151,17 @@ function validateReviewRounds(raw) {
   return { labels };
 }
 
+// The status marks on the comments a step takes (`forge.reactions`, `tracker.reactions`, TASK-095): the runner's own
+// reactions around the session (lib/reactions.mjs). Absent or false: none, as before.
+function validateReactions(merged) {
+  const flag = (v, where) => {
+    if (v === undefined || v === null) return false;
+    if (typeof v !== 'boolean') fail(`${where} must be true or false`);
+    return v;
+  };
+  return { forge: flag(merged.forge?.reactions, 'forge.reactions'), tracker: flag(merged.tracker?.reactions, 'tracker.reactions') };
+}
+
 function validateBuild(raw) {
   if (raw === undefined || raw === null) return { ...BUILD_DEFAULTS, command: [...BUILD_DEFAULTS.command] };
   if (!isObject(raw)) fail('build must be { command, outDir, timeoutMinutes, waitMinutes }');
@@ -217,6 +228,7 @@ export function validateSettings(merged, { root, stateRootDefault }) {
   const reviewComment = rawReview ?? DEFAULT_REVIEW_COMMENT;
   const triggerWords = validateTriggerWords(merged.forge?.triggerWords);
   const reviewRounds = validateReviewRounds(merged.forge?.reviewRounds);
+  const reactions = validateReactions(merged);
 
   const mode = merged.mode ?? LOCAL_DEFAULTS.mode;
   if (!MODES.includes(mode)) fail(`mode must be one of ${MODES.join(', ')}`);
@@ -294,6 +306,7 @@ export function validateSettings(merged, { root, stateRootDefault }) {
     reviewComment,
     triggerWords,
     reviewRounds,
+    reactions,
     hostRules: merged.hostRules ?? {},
     hostJobs: validateJobs(merged.hostJobs ?? [], root),
     styleCheck,
