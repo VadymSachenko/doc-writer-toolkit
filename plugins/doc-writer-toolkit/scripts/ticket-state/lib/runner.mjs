@@ -412,6 +412,8 @@ export function briefFor(step, settings) {
     ...buildLines(step),
     ...videoImportLines(step),
     ...gateLines(step, settings),
+    // The places' language, on whatever `checks` say: the description's places section is written from the record.
+    step.role === 'writer' && ['pr', 'answerComments'].includes(step.stage) ? "A place's `claim`, `why` and `reason` are in the language of the page the place is on, in the words of its line comment: the description's places are written from them. Code names (endpoints, functions, fields) stay as they are, in backticks. `record` refuses a `claim` or `why` with no letter of the page's script outside code. Missing test data is no place by itself: make the setup the host's rules allow first, on the owner's test accounts, and run the check; a place left after it names in `why` the requests tried and the setup made." : null,
     step.cards ? `Cards, highest priority first:\n${step.cards.map((c) => `- ${c.key}: ${c.url ?? c.shortLink} (${c.priority})`).join('\n')}` : null,
     step.worktrees?.length ? worktreeLines(step.worktrees) : null,
     step.codeTrees?.length ? codeLines(step.codeTrees) : null,
