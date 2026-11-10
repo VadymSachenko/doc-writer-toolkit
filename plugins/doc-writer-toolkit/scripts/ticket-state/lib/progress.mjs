@@ -269,7 +269,8 @@ function runSection(run, flights, now, live, { starts = null, startHours = null,
   const w = run?.wip;
   if (w) out.push(`- Slots: ${w.inProgress} in progress${w.limits?.inProgress != null ? ` of ${w.limits.inProgress}` : ''}, ${w.waiting} waiting${w.limits?.waiting != null ? ` of ${w.limits.waiting}` : ''}${w.limits?.open != null ? `, ${w.open} open of ${w.limits.open}` : ''}`);
   const a = run?.allowance;
-  if (a) out.push(`- Today's allowance: ${a.remaining}% left of ${a.cap}% (the week is at ${a.used}%)`);
+  if (a?.unlimited) out.push('- Usage guard off (`limits.usageGuard`): no allowance is read or kept');
+  else if (a) out.push(`- Today's allowance: ${a.remaining}% left of ${a.cap}% (the week is at ${a.used}%)`);
   if (start) out.push(start);
   return out;
 }
@@ -390,7 +391,7 @@ export function digestRun({ out = {}, st = null, log = [], trigger = null, start
     notStarted: decides ? (st?.notStarted ?? []).map((n) => ({ group: n.group, keys: n.keys ?? [], reasons: n.reasons ?? [] })) : [],
     guard,
     wip: st?.wip ? { inProgress: st.wip.inProgress, waiting: st.wip.waiting, open: st.wip.open, limits: st.wip.limits } : null,
-    allowance: st?.allowance ? { remaining: st.allowance.remaining, cap: st.allowance.cap, used: st.allowance.used } : null,
+    allowance: st?.allowance ? { remaining: st.allowance.remaining, cap: st.allowance.cap, used: st.allowance.used, ...(st.allowance.unlimited ? { unlimited: true } : {}) } : null,
   };
 }
 

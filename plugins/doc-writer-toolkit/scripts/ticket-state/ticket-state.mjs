@@ -184,7 +184,7 @@ export async function main(argv, io = {}) {
       result = { file: path.relative(root, settings.file), localFile: settings.localFile ? path.relative(root, settings.localFile) : null, settings: printable(settings) };
       break;
     case 'status': {
-      const st = await computeStatus({ settings, clients, now, only: values.ticket ?? null, usage: await usageOf(values, io), git: io.git ?? makeGit(settings) });
+      const st = await computeStatus({ settings, clients, now, only: values.ticket ?? null, usage: settings.limits.usageGuard === false ? null : await usageOf(values, io), git: io.git ?? makeGit(settings) });
       result = { ...st, requests: clients.requests() };
       break;
     }
@@ -239,7 +239,7 @@ export async function main(argv, io = {}) {
     case 'report': {
       const date = values.date ?? localDate(now);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new CliError('--date must be yyyy-mm-dd', { code: 2 });
-      const st = await computeStatus({ settings, clients, now, usage: await usageOf(values, io), git: io.git ?? makeGit(settings) });
+      const st = await computeStatus({ settings, clients, now, usage: settings.limits.usageGuard === false ? null : await usageOf(values, io), git: io.git ?? makeGit(settings) });
       const text = renderReport({ settings, st, date, runLog: readRunLog(settings.state, date), ledgers: readAllLedgers(settings.state) });
       if (values.print) {
         stdout.write(text + '\n');
