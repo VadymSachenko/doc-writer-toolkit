@@ -12,6 +12,9 @@ export function memoryAdapter() {
     },
   ];
   const log = [];
+  // Reactions by subject: `kind:id` -> [{ mark, login }]. The caller is `viewer`.
+  const reactions = {};
+  const viewer = 'docs-writer';
   const get = (n) => {
     const p = prs.find((x) => x.number === n);
     if (!p) throw new Refusal('unknown', `no PR ${n}`);
@@ -50,6 +53,13 @@ export function memoryAdapter() {
     createLabel: async (a) => void log.push(['createLabel', a.name]),
     resolveThread: async (a) => void log.push(['resolveThread', a.thread]),
     deleteComment: async (a) => void log.push(['deleteComment', a.id]),
+    reactions: async ({ number, kind, id }) => ({ subject: `${kind}:${id}`, number, reactions: [...(reactions[`${kind}:${id}`] ?? [])] }),
+    react: async (a) => {
+      log.push(['react', a.subject, a.add, a.remove]);
+      const list = (reactions[a.subject] ?? []).filter((r) => !(r.login === viewer && a.remove.includes(r.mark)));
+      reactions[a.subject] = [...list, ...a.add.map((mark) => ({ mark, login: viewer }))];
+    },
+    reactionsOn: reactions,
     changeLabels: async (a) => {
       log.push(['changeLabels', a.add, a.remove]);
       const p = get(a.number);

@@ -65,6 +65,9 @@ export const MEMBERS = [
 export function trackerAdapter({ cards = [], comments = {}, release = [], actions = {} } = {}) {
   const log = [];
   const reads = [];
+  // The comments' reactions, by comment id: [{ id, mark, memberId }]. The credentials act as the owner.
+  const reactions = {};
+  const reacted = { fail: null, next: 1 };
   const all = () => [...cards, ...release];
   const get = (ref) => {
     const c = all().find((x) => x.id === ref || x.shortLink === ref);
@@ -128,6 +131,21 @@ export function trackerAdapter({ cards = [], comments = {}, release = [], action
     createCard: async () => {
       throw new Error('not in these tests');
     },
+    me: async () => ({ id: MEMBERS[0].id, username: MEMBERS[0].username }),
+    reactions: async (comment) => {
+      if (reacted.fail) throw new Error(reacted.fail);
+      return [...(reactions[comment] ?? [])];
+    },
+    addReaction: async (comment, mark) => {
+      log.push(['addReaction', comment, mark]);
+      reactions[comment] = [...(reactions[comment] ?? []), { id: `rx-${reacted.next++}`, mark, memberId: MEMBERS[0].id }];
+    },
+    removeReaction: async (comment, id) => {
+      log.push(['removeReaction', comment, id]);
+      reactions[comment] = (reactions[comment] ?? []).filter((r) => r.id !== id);
+    },
+    reactionsOn: reactions,
+    reacted,
   };
 }
 
@@ -174,6 +192,10 @@ export function forgeAdapter({ prs = [], activity = {}, changed = {}, events = {
     return p;
   };
   const act = (a) => activity[`${a.repo}#${a.number}`] ?? {};
+  // The reactions, by `<kind>:<id>`: [{ mark, login }]. The pipeline acts as `owner-login`. `reacted.fail`: a message
+  // every reaction read fails with.
+  const reactions = {};
+  const reacted = { fail: null };
   return {
     kind: 'memory',
     log,
@@ -242,6 +264,16 @@ export function forgeAdapter({ prs = [], activity = {}, changed = {}, events = {
       log.push(['deleteComment', a.repo, a.id]);
       for (const act of Object.values(activity)) if (act.comments) act.comments = act.comments.filter((c) => String(c.id) !== String(a.id));
     },
+    reactions: async ({ number, kind, id }) => {
+      if (reacted.fail) throw new Error(reacted.fail);
+      return { subject: `${kind}:${id}`, number: Number(number), reactions: [...(reactions[`${kind}:${id}`] ?? [])] };
+    },
+    react: async (a) => {
+      log.push(['react', a.subject, a.add, a.remove]);
+      reactions[a.subject] = [...(reactions[a.subject] ?? []).filter((r) => !(r.login === 'owner-login' && a.remove.includes(r.mark))), ...a.add.map((mark) => ({ mark, login: 'owner-login' }))];
+    },
+    reactionsOn: reactions,
+    reacted,
     changeLabels: async (a) => {
       log.push(['changeLabels', a.repo, a.number, a.add, a.remove]);
       const p = get(a);

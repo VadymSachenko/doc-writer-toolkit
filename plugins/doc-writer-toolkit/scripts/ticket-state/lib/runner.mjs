@@ -32,6 +32,7 @@ import { openQuestionLines, placeReplyLines, replyLines, resyncItemLines, roundL
 import { followLabels, labelSnapshot } from './pr-labels.mjs';
 import { idCommentText, syncIds } from './id-sync.mjs';
 import { followRounds, roundSnapshot } from './pr-rounds.mjs';
+import { pickMarks, settleMarks } from './reactions.mjs';
 import { withoutHeader } from '../../tracker/lib/comment-header.mjs';
 
 // The daily run (design §7): finish first, then triage the quiet intake cards (mornings, and the watcher's start pass
@@ -1532,7 +1533,12 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         if (step.role && !guard(step.stage, step.group)) break;
         const before = labelSnapshot(settings.state, step.keys);
         const roundsBefore = roundSnapshot(settings.state, step.keys);
+        // The comments a session takes get the pipeline's marks around it (lib/reactions.mjs): 👀 now, the result after.
+        // Neither call stops the step or what follows it: a throw is a warning.
+        const marked = (note) => say({ kind: 'reactions', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, outcome: 'warning', note });
+        const picked = step.role ? await pickMarks({ settings, clients, step }).catch((e) => (marked(`no marks: ${e.message}`), null)) : null;
         const r = await live.tracked(step, () => (step.role ? runModelStep(step) : step.stage === 'build' ? runBuildStep(step) : step.stage === 'idSync' ? runIdSyncStep(step) : step.stage === 'videoExtract' ? runExtractStep(step) : runScriptedStep(step)));
+        for (const note of await settleMarks({ settings, clients, step, picked, outcome: r.outcome }).catch((e) => [`the marks were not set: ${e.message}`])) marked(note);
         // The ready, check and translated labels follow what the step recorded (lib/pr-labels.mjs), whoever recorded it.
         for (const note of await followLabels({ settings, clients, keys: step.keys, before })) say({ kind: 'label', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, outcome: 'failed', note });
         // So do the description's sections, the place threads and the older summaries, with review rounds (lib/pr-rounds.mjs).
