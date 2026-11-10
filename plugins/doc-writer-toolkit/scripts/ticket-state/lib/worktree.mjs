@@ -379,25 +379,38 @@ export function pushMerge(wt, { branch, head }) {
 export const codeTreesRoot = (settings) => path.join(path.resolve(settings.state), 'code');
 export const codeClonePath = (settings, app) => path.join(codeTreesRoot(settings), `${app.repo}.git`);
 export const codeTreePath = (settings, app, commit) => path.join(codeTreesRoot(settings), app.repo, String(commit).slice(0, 12));
-// A clone or a fetch never waits for a password: one that needs it fails, and the brief says so.
-const quiet = (args) => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }).trim();
-export function ensureCodeTree(settings, app, { remote = app.url, othersRunning = false } = {}) {
+// A clone or a fetch never waits for a password: one that needs it fails, and the brief says so. Each git call of a
+// code checkout has its time (`CODE_TIMEOUTS`): one that runs out is killed and said like any other failure, so a
+// hung remote never holds the step. A related repo (`relatedRepos`) is cloned with `--filter=blob:none`: its history and
+// trees come at once, the files of a commit when it is checked out (or shown: a session's `git show` of an older commit
+// fetches what it lacks from the remote).
+export const CODE_TIMEOUTS = { cloneMs: 10 * 60 * 1000, fetchMs: 2 * 60 * 1000, checkoutMs: 5 * 60 * 1000 };
+const quiet = (args, timeout) => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout, maxBuffer: 64 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }).trim();
+const timedOut = (e) => e?.code === 'ETIMEDOUT' || (e?.signal === 'SIGTERM' && e?.status === null);
+const failure = (e, ms) => (timedOut(e) ? `timed out after ${Math.round(ms / 1000)} s` : gitError(e));
+export function ensureCodeTree(settings, app, { remote = app.url, othersRunning = false, timeouts = {} } = {}) {
+  const t = { ...CODE_TIMEOUTS, ...timeouts };
   const clone = codeClonePath(settings, app);
   const out = { repo: app.repo, base: app.base, clone, path: null, url: app.url, commit: null, notes: [], removed: [], kept: [] };
   if (!fs.existsSync(path.join(clone, 'HEAD'))) {
     if (!remote) return { ...out, error: `no url for ${app.repo} in appRepos or relatedRepos: the runner clones the repo from it` };
     if (fs.existsSync(clone) && fs.readdirSync(clone).length) return { ...out, error: `${clone} exists and is not a clone of ${app.repo}` };
+    // Cloned beside its place and moved there whole, so a clone cut short never leaves a folder that blocks the next.
+    const partial = `${clone}.partial`;
     try {
       fs.mkdirSync(path.dirname(clone), { recursive: true });
-      quiet(['clone', '-q', '--bare', '--', remote, clone]);
+      fs.rmSync(partial, { recursive: true, force: true });
+      quiet(['clone', '-q', '--bare', ...(app.related ? ['--filter=blob:none'] : []), '--', remote, partial], t.cloneMs);
+      fs.renameSync(partial, clone);
     } catch (e) {
-      return { ...out, error: `could not clone ${app.repo}: ${gitError(e)}` };
+      fs.rmSync(partial, { recursive: true, force: true });
+      return { ...out, error: `could not clone ${app.repo}: ${failure(e, t.cloneMs)}` };
     }
   }
   try {
-    quiet(['-C', clone, 'fetch', '-q', 'origin', `+refs/heads/${app.base}:refs/remotes/origin/${app.base}`]);
-  } catch {
-    out.notes.push(`could not fetch ${app.base} from origin: this commit may be old, so say so next to each fact read from it`);
+    quiet(['-C', clone, 'fetch', '-q', 'origin', `+refs/heads/${app.base}:refs/remotes/origin/${app.base}`], t.fetchMs);
+  } catch (e) {
+    out.notes.push(`could not fetch ${app.base} from origin${timedOut(e) ? ` (timed out after ${Math.round(t.fetchMs / 1000)} s)` : ''}: this commit may be old, so say so next to each fact read from it`);
   }
   const commit = tryRun(clone, ['rev-parse', '--verify', '-q', `refs/remotes/origin/${app.base}^{commit}`]);
   if (!commit) return { ...out, error: `no ${app.base} fetched into the runner's clone of ${app.repo}` };
@@ -409,7 +422,15 @@ export function ensureCodeTree(settings, app, { remote = app.url, othersRunning 
       tryRun(clone, ['worktree', 'prune']);
       if (!registered || registered.prunable || !fs.existsSync(wt)) {
         fs.mkdirSync(path.dirname(wt), { recursive: true });
-        run(clone, ['worktree', 'add', '-q', '--detach', wt, commit]);
+        try {
+          quiet(['-C', clone, 'worktree', 'add', '-q', '--detach', wt, commit], t.checkoutMs);
+        } catch (e) {
+          // A checkout cut short is removed, so the next step makes it whole instead of reading half of it.
+          tryRun(clone, ['worktree', 'remove', '--force', wt]);
+          tryRun(clone, ['worktree', 'prune']);
+          if (fs.existsSync(wt) && !listWorktrees(clone).some((x) => canon(x.path) === canon(wt))) fs.rmSync(wt, { recursive: true, force: true });
+          throw Object.assign(new Error(failure(e, t.checkoutMs)), { stderr: failure(e, t.checkoutMs) });
+        }
       } else return { ...out, path: wt, error: `${wt} is not at ${commit.slice(0, 12)}` };
     }
   } catch (e) {
