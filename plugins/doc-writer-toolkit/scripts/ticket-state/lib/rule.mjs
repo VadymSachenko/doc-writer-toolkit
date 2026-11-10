@@ -562,7 +562,11 @@ function prStep(l, p, w, out, prs) {
   if (p.stage === 'translation') return chainStep(l, p, w, out, target, head);
   // Row 12b, with `forge.keepFresh`: a PR ready for merge whose base moved gets the base merged in, after every row
   // above, so no merge pushes under an answer. In the owner's queue and before, never (D-127): the owner edits there.
-  if (p.stage === 'readyForMerge' && w.settings.keepFresh) return freshStep(pr, world, w, target, head, out)?.step ?? null;
+  if (p.stage === 'readyForMerge' && w.settings.keepFresh) {
+    const s = freshStep(pr, world, w, target, head, out)?.step ?? null;
+    if (s) notReady(out, id, stepWhy(s));
+    return s;
+  }
   return null;
 }
 
@@ -739,6 +743,14 @@ export const CI_GRACE_MS = 10 * 60000;
 
 const short = (sha) => String(sha ?? '').slice(0, 7);
 
+// Why a PR the rule keeps from ready for merge for its head is not ready yet (`forge.keepFresh`), on its view
+// (`prs[].notReady`): the report and the progress file never call it ready for the merge meanwhile.
+function notReady(out, id, why) {
+  const v = out.prs.find((x) => x.id === id);
+  if (v) v.notReady = why;
+}
+const stepWhy = (s) => (s.stage === 'baseFix' ? `the merge of the base conflicted in ${(s.files ?? []).join(', ')}: a session resolves it` : `${s.behind} commit(s) behind its base: the runner merges it in first`);
+
 // The runner's last base merge of a PR, when it made this head (a merge pushed, not a conflict aborted).
 function mergedAt(pr, head) {
   const m = pr.steps?.baseMerge;
@@ -752,16 +764,21 @@ function readyStep(pr, w, target, head, out, world) {
   const id = prId(pr);
   if (w.settings.keepFresh) {
     const fresh = freshStep(pr, world, w, target, head, out);
-    if (fresh?.step) return fresh.step;
+    if (fresh?.step) {
+      notReady(out, id, stepWhy(fresh.step));
+      return fresh.step;
+    }
     if (fresh?.wait) return null;
     const ci = ciOf(pr, world, w, head);
     if (ci?.wait) {
       out.notes.push(`${id}: ${ci.wait}: ready for merge once it passes`);
+      notReady(out, id, `${ci.wait}: ready for merge once it passes`);
       return null;
     }
     if (ci?.red) {
       out.mismatch.push(`${id}: CI failed on ${short(head)}: ${ci.red.join(', ')}; not ready for merge until a later head passes`);
       out.gate = { who: 'owner', why: `CI failed on ${id} (${ci.red.join(', ')}): a commit that fixes it, and the PR is ready for merge once CI passes on it` };
+      notReady(out, id, `CI failed on ${short(head)}: ${ci.red.join(', ')}`);
       return null;
     }
   }

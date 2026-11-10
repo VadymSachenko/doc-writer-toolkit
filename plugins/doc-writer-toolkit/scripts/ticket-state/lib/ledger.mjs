@@ -156,3 +156,15 @@ export function findPr(ledger, ref) {
   if (!hit) throw new CliError(`ticket ${ledger.key} has no PR '${r}'. Known: ${ledger.prs.map(prId).join(', ') || 'none'}.`, { code: 2 });
   return hit;
 }
+
+// Why a PR at ready for merge isn't ready for its head yet, from the ledger alone (`forge.keepFresh`; the progress file
+// and the report read it): its merge of the base conflicted at its ready head, or was pushed since it was marked ready
+// (CI runs on it). Null otherwise, and with no such merge.
+export function notReadyYet(pr) {
+  const m = pr?.steps?.baseMerge;
+  const ready = pr?.readyForMerge?.at(-1);
+  if (pr?.stage !== 'readyForMerge' || m?.status !== 'done' || !ready?.head) return null;
+  if (m.result?.conflict) return m.head === ready.head ? `the merge of the base conflicted in ${(m.result.conflict.files ?? []).join(', ')}: a session resolves it` : null;
+  const later = ready.seq !== undefined && m.seq !== undefined ? m.seq > ready.seq : String(m.at ?? '') > String(ready.at ?? '');
+  return later && m.head !== ready.head ? `the base was merged in as ${String(m.head).slice(0, 7)}: ready again once CI passes on it` : null;
+}

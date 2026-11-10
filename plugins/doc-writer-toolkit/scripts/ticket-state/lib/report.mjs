@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { readAllLedgers } from './ledger.mjs';
+import { notReadyYet, prId, readAllLedgers } from './ledger.mjs';
 import { readFeed } from './feed.mjs';
 import { reviewCommentFor } from './experts.mjs';
 import { duration as spell } from './progress.mjs';
@@ -120,7 +120,10 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
       const open = (l?.places ?? []).filter((x) => x.repo === p.repo && Number(x.pr) === Number(p.number) && (x.state ?? 'open') === 'open').length;
       if (open && p.state !== 'merged') places.push(`${p.url ? `[${p.id}](${p.url})` : p.id} (${link(t)}): ${open} open place(s)`);
       if (checkLabel && (p.labels ?? []).some((x) => x.toLowerCase() === checkLabel)) check.push(`${p.url ? `[${p.id}](${p.url})` : p.id} (${link(t)})`);
-      if (p.stage === 'readyForMerge') ready.push(`${p.url ? `[${p.id}](${p.url})` : p.id} (${link(t)}): ready for your final edit and the merge`);
+      // With `forge.keepFresh`, not while the base is merged in: a PR behind its base, with a conflict, or whose CI runs
+      // or failed says why instead.
+      const hold = settings.keepFresh ? p.notReady ?? notReadyYet((l?.prs ?? []).find((x) => prId(x) === p.id)) : null;
+      if (p.stage === 'readyForMerge') ready.push(`${p.url ? `[${p.id}](${p.url})` : p.id} (${link(t)}): ${hold ? `not ready for merge yet: ${hold}` : 'ready for your final edit and the merge'}`);
       else if (p.stage === 'finalReview' && t.state !== 'finalReview' && t.prs.length > 1) ready.push(`${p.id} (${link(t)}): in the owner's queue; it waits for the card, which stands where the slower PR is`);
     }
   }

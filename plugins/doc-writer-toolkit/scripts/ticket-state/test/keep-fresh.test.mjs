@@ -8,10 +8,12 @@ import { ledger, read, world } from './helpers.mjs';
 import { commandFor, runDaily, scriptedCalls } from '../lib/runner.mjs';
 import { runRecord } from '../lib/record.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
-import { pushMerge, worktreePath } from '../lib/worktree.mjs';
+import { ensureWorktree, pushMerge, worktreePath } from '../lib/worktree.mjs';
 import { makeGit } from '../lib/world.mjs';
 import { HOOK_VARIABLE, refusalOf } from '../lib/role-hook.mjs';
 import { CI_GRACE_MS } from '../lib/rule.mjs';
+import { notReadyYet } from '../lib/ledger.mjs';
+import { gatesOf } from '../lib/progress.mjs';
 import { emptyFeed, sourcesOf, writeFeed } from '../lib/feed.mjs';
 import { runCheck } from '../lib/watch.mjs';
 import { localDate, renderReport } from '../lib/report.mjs';
@@ -85,7 +87,7 @@ function freshTicket({ stage = 'readyForMerge', keepFresh = true, labels } = {})
   const fx = withClone(w);
   forgePr.headCommit = fx.h1;
   const chain = Object.fromEntries(CHAIN.map((s, i) => [s, { status: 'done', head: fx.h1, seq: 10 + i }]));
-  ledger(w, c, { stages: { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' }, prs: [{ repo: 'guide-docs', number: 71, targets: ['guide'], review: 'sme', branch: 'ticket-71', base: 'main', stage, pipelineCommits: [fx.h1], chain, approval: { head: fx.h1, at: ago(3), by: 'person' }, ...(stage === 'readyForMerge' ? { readyForMerge: [{ head: fx.h1, at: ago(2), seq: 17 }] } : {}) }] });
+  ledger(w, c, { stages: { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' }, prs: [{ repo: 'guide-docs', number: 71, targets: ['guide'], review: 'sme', branch: 'ticket-71', base: 'main', stage, pipelineCommits: [fx.h1], chain, approval: { head: fx.h1, at: ago(3), by: 'person' }, ...(stage === 'readyForMerge' ? { readyForMerge: [{ head: fx.h1, at: ago(2), seq: 5 }] } : {}) }] });
   // The forge's view follows the runner's push, as GitHub's does.
   const io = { readUsage: usage, now: () => NOW, spawnClaude: noSession, pushMerge: (wt, a) => {
     const r = pushMerge(wt, a);
@@ -216,7 +218,12 @@ test('AC-4: CI red on the head the merge made sends the PR back with the check n
   assert.equal(t.forgePr.labels.includes(READY), false);
   const out = await t.run();
   assert.deepEqual(out.ran, [], 'nothing runs on a red head');
-  assert.match(renderReport({ settings: t.w.settings, st: await t.w.status({ git: makeGit(t.w.settings) }), date: localDate(NOW) }), /CI failed on .*: links/);
+  const report = renderReport({ settings: t.w.settings, st: await t.w.status({ git: makeGit(t.w.settings) }), date: localDate(NOW) });
+  assert.match(report, /CI failed on .*: links/);
+  // Never called ready for the merge meanwhile, in the report or the progress file.
+  assert.match(report, /## Ready for merge\n\n- \[guide-docs#71\]\(.*\) \(.*\): not ready for merge yet: CI failed on [0-9a-f]{7}: links\n/);
+  assert.equal(gatesOf(read(t.w, '1501')).some((g) => g.kind === 'readyForMerge'), false);
+  assert.match(notReadyYet(read(t.w, '1501').prs[0]), /^the base was merged in as [0-9a-f]{7}: ready again once CI passes on it$/);
 });
 
 test('the CI grace: a head the merge pushed with no check after CI_GRACE_MS is one the repository runs no CI for', async () => {
@@ -244,6 +251,9 @@ test('AC-2: a conflicting base leaves the branch untouched (no push, the worktre
   const tk = await t.status();
   assert.deepEqual([tk.next.stage, tk.next.role, tk.next.files, tk.next.base], ['baseFix', 'writer', [PAGE], 'main']);
   assert.match(out.log.find((e) => e.stage === 'baseMerge').note, /conflicted in docs\/x\/index\.md: aborted, nothing pushed/);
+  // Not ready for the merge meanwhile: the report says why, and the progress file asks nothing of the owner.
+  assert.match(renderReport({ settings: t.w.settings, st: await t.w.status({ git: makeGit(t.w.settings) }), date: localDate(NOW) }), /\): not ready for merge yet: the merge of the base conflicted in docs\/x\/index\.md: a session resolves it/);
+  assert.equal(gatesOf(read(t.w, '1501')).some((g) => g.kind === 'readyForMerge'), false);
   // A conflict in EN files only is the translator's.
   await runRecord({ settings: t.w.settings, clients: t.w.clients(), key: '1501', stage: 'baseMerge', status: 'done', pr: 'guide-docs#71', head: t.h1, result: { conflict: { base: t.forgePr.baseCommit, files: [EN_PAGE] } }, now: NOW });
   const en = await t.status();
@@ -400,4 +410,18 @@ test('a push of the merge that fails leaves the worktree at its head and a faile
   const rejected = await r.run({ pushMerge: reject });
   assert.deepEqual(rejected.ran.map((x) => x.outcome), ['moved', 'moved'], 'no failure counted; read again, twice at most');
   assert.equal(read(r.w, '1501').runs.some((x) => x.outcome === 'failed'), false);
+});
+
+test('a merge left in progress in the worktree (a run that stopped during baseFix) is aborted, not a stuck worktree', async () => {
+  const t = freshTicket();
+  t.forgePr.baseCommit = t.baseMoves({ [PAGE]: PAGE_V0.replace('Перший абзац.', 'Перший абзац, з основи.') });
+  // The worktree as a stopped run left it: the conflicting merge in progress.
+  ensureWorktree(t.w.settings, read(t.w, '1501').prs[0]);
+  assert.throws(() => git(t.wt, 'merge', '--no-edit', 'origin/main'));
+  assert.ok(git(t.wt, 'rev-parse', '-q', '--verify', 'MERGE_HEAD'));
+  t.w.settings.limits.stepsPerTicket = 1;
+  const out = await t.run();
+  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['baseMerge', 'done']], 'the merge tried again, and recorded its conflict');
+  assert.equal(git(t.wt, 'status', '--porcelain', '--untracked-files=no'), '');
+  assert.deepEqual(read(t.w, '1501').prs[0].steps.baseMerge.result.conflict.files, [PAGE]);
 });

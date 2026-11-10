@@ -157,7 +157,12 @@ export function ensureWorktree(settings, pr) {
   } else if (remoteBranch) {
     // Up to date with the branch: a fast-forward only, never over the session's own unpushed commits or changes to
     // tracked files. Untracked files (a session's notes, a pack's output) don't stop it; one git would overwrite does,
-    // and the brief says so.
+    // and the brief says so. A merge of the base left in progress (only the runner merges here: a run that stopped
+    // during a `baseFix`) is aborted first, so it doesn't leave the worktree stuck.
+    if (mergeInProgress(wt)) {
+      abortMerge(wt);
+      notes.push('a merge of the base left in progress by a run that stopped was aborted');
+    }
     const dirty = tryRun(wt, ['status', '--porcelain', '--untracked-files=no']);
     const head = tryRun(wt, ['rev-parse', 'HEAD']);
     // The branch moved on (a fast-forward), or was rewritten (the owner rebased and force-pushed it): a clean worktree
