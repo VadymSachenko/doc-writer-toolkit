@@ -664,6 +664,66 @@ test('resolveThread and deleteComment under --dry-run: read, checked, recorded a
   await rejects(forge.deleteComment({ repo: 'guide-docs', number: 7, comment: 9301, own: [9301] }), 'notOwn');
 });
 
+// ------------------------------------------------------------------ the status marks (the ticket flow's reactions)
+
+// The reactions of a subject in GraphQL's shape: `[content, login]` pairs.
+const reactionNodes = (pairs) => ({ data: { node: { reactions: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: pairs.map(([content, login]) => ({ content, user: { login } })) } } } });
+const restReviewCommentOn = (id, number = 7) => ({ id, node_id: `PRRC_${id}`, user: { login: 'rev-one' }, body: 'x', created_at: '2026-11-04T09:00:00Z', updated_at: '2026-11-04T09:00:00Z', path: 'docs/export.md', line: 12, pull_request_url: `https://api.example/repos/acme-docs/guide-docs/pulls/${number}` });
+
+test("markComment: puts the pipeline's mark and takes off only its own other marks, in one request; another login's reaction and a reaction that is no mark stay", async () => {
+  const subjects = [];
+  const { forge, calls } = setup({
+    routes: {
+      'GET repos/acme-docs/guide-docs/issues/comments/9302': restIssueComment(9302, 'pat', 'helper: shorten it'),
+      'graphql Reactions': (call) => (subjects.push(call.variables.id), reactionNodes([['ROCKET', 'pat'], ['ROCKET', 'rev-one'], ['CONFUSED', 'rev-one'], ['HEART', 'pat']])),
+      'graphql SetReactions': { data: {} },
+    },
+  });
+  const r = await forge.markComment({ repo: 'guide-docs', number: 7, kind: 'comment', id: 9302, mark: 'seen' });
+  assert.deepEqual([r.added, r.removed, r.changed, r.posted], [['seen'], ['applied'], true, []]);
+  assert.deepEqual(subjects, ['IC_9302']);
+  const [m] = writes(calls);
+  assert.equal(m.op, 'SetReactions');
+  assert.deepEqual(m.variables, { subject: 'IC_9302' });
+  assert.match(m.query, /addReaction\(input: \{ subjectId: \$subject, content: EYES \}\)/);
+  assert.match(m.query, /removeReaction\(input: \{ subjectId: \$subject, content: ROCKET \}\)/);
+  assert.doesNotMatch(m.query, /CONFUSED|HEART/, "the other login's 😕 and the pipeline's own ❤ are not touched");
+  assert.equal(writes(calls).length, 1);
+});
+
+test('markComment: a mark already there is no request; a line comment and a review are read by their own ids; a comment on another PR, an unknown kind or mark, and no forge.self are refused', async () => {
+  const { forge, calls } = setup({
+    routes: {
+      'GET repos/acme-docs/guide-docs/pulls/comments/601': restReviewCommentOn(601),
+      'GET repos/acme-docs/guide-docs/pulls/comments/602': restReviewCommentOn(602, 8),
+      'graphql PrReviews': fixture('gql-reviews'),
+      'graphql Reactions': (call) => reactionNodes(call.variables.id === 'PRR_502' ? [['ROCKET', 'pat']] : [['EYES', 'Pat']]),
+      'graphql SetReactions': { data: {} },
+    },
+  });
+  const line = await forge.markComment({ repo: 'guide-docs', number: 7, kind: 'review-comment', id: 601, mark: 'seen' });
+  assert.deepEqual([line.changed, line.added, line.removed], [false, [], []], 'logins compare case-blind');
+  const review = await forge.markComment({ repo: 'guide-docs', number: 7, kind: 'review', id: 502, mark: 'asked' });
+  assert.deepEqual([review.added, review.removed], [['asked'], ['applied']]);
+  assert.deepEqual(writes(calls).map((c) => c.variables.subject), ['PRR_502']);
+  await rejects(forge.markComment({ repo: 'guide-docs', number: 7, kind: 'review-comment', id: 602, mark: 'seen' }), 'unknown');
+  await rejects(forge.markComment({ repo: 'guide-docs', number: 7, kind: 'commit', id: 1, mark: 'seen' }), 'unknown');
+  await rejects(forge.markComment({ repo: 'guide-docs', number: 7, kind: 'comment', id: 1, mark: 'heart' }), 'unknown');
+  const noSelf = setup({ settings: forgeSettings({ forge: { kind: 'github', owner: OWNER } }) });
+  await rejects(noSelf.forge.markComment({ repo: 'guide-docs', number: 7, kind: 'comment', id: 1, mark: 'seen' }), 'notOwn');
+  assert.equal(noSelf.calls.length, 0);
+  assert.equal(writes(calls).length, 1);
+});
+
+test('markComment over the in-memory adapter: the marks follow one another on a subject', async () => {
+  const adapter = memoryAdapter();
+  const forge = createForge({ adapter, forge: forgeSettings({ forge: { kind: 'github', owner: OWNER, self: 'docs-writer' } }) });
+  const at = { repo: 'guide-docs', number: 1, kind: 'comment', id: 5 };
+  for (const mark of ['seen', 'applied', 'seen', 'asked']) await forge.markComment({ ...at, mark });
+  assert.deepEqual(adapter.reactionsOn['comment:5'], [{ mark: 'asked', login: 'docs-writer' }]);
+  assert.deepEqual(adapter.log.filter((x) => x[0] === 'react').map((x) => [x[2], x[3]]), [[['seen'], []], [['applied'], ['seen']], [['seen'], ['applied']], [['asked'], ['seen']]]);
+});
+
 test("reviewOnLines: --outside-in-body keeps the text of a comment outside the diff in the review's own text; a review with a text and no line comment is posted once", async () => {
   const { forge, calls } = setup({ routes: { ...reviewRoutes(), 'graphql PrReviews': fixture('gql-reviews') } });
   const comments = [
@@ -1090,6 +1150,8 @@ test('every operation, run in full, sends no request that withdraws, approves, m
       'POST repos/acme-docs/guide-docs/issues/7/comments': fixture('rest-issue-comment-created'),
       'GET repos/acme-docs/guide-docs/issues/events': [],
       ...ownRoutes(),
+      'graphql Reactions': reactionNodes([['ROCKET', 'pat'], ['ROCKET', 'rev-one']]),
+      'graphql SetReactions': { data: {} },
     },
   });
   const ok = { repo: 'guide-docs', number: 7 };
@@ -1109,6 +1171,7 @@ test('every operation, run in full, sends no request that withdraws, approves, m
   await forge.setStageLabel({ target: 'guide', ...ok, stage: 'finalReview' });
   await forge.resolveThread({ ...ok, comment: 701, own: [701] });
   await forge.deleteComment({ ...ok, comment: 9300, own: [9300] });
+  await forge.markComment({ ...ok, kind: 'comment', id: 9302, mark: 'seen' });
   const sent = writes(calls);
   assert.ok(sent.length >= 12);
   assert.ok(sent.every((c) => ['POST', 'PATCH'].includes(c.method ?? 'POST') || (c.method === 'DELETE' && /\/issues\/comments\/9300$/.test(c.path))), 'only POST and PATCH, and the one DELETE of the pipeline\'s own comment');
@@ -1117,7 +1180,7 @@ test('every operation, run in full, sends no request that withdraws, approves, m
     /\/pulls\/\d+\/comments\/\d+\/replies$/, /\/issues\/\d+\/comments$/, /\/issues\/comments\/9300$/,
   ];
   for (const c of sent) {
-    if (c.kind === 'graphql') assert.ok(['ChangeLabels', 'ResolveThread'].includes(c.op), c.op);
+    if (c.kind === 'graphql') assert.ok(['ChangeLabels', 'ResolveThread', 'SetReactions'].includes(c.op), c.op);
     else assert.ok(allowedPaths.some((re) => re.test(c.path)), `unexpected write to ${c.path}`);
     for (const re of FORBIDDEN) assert.ok(!re.test(`${c.path ?? ''} ${c.query ?? ''} ${JSON.stringify(c.body ?? c.variables)}`), `${c.key} matches ${re}`);
   }

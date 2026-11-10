@@ -9,6 +9,9 @@ const MAX_PAGES = 200;
 const LINK = /trello\.com\/c\/([A-Za-z0-9]{8})\b/g;
 
 const cardUrl = (shortLink) => `https://trello.com/c/${shortLink}`;
+// The reaction that stands for each of the module's marks (lib/tracker.mjs, `MARKS`): 👀, ✅, ❓, by Trello's short names.
+const REACTION = { seen: 'eyes', applied: 'white_check_mark', asked: 'question' };
+const MARK_OF = Object.fromEntries(Object.entries(REACTION).map(([m, n]) => [n, m]));
 
 // The leading `#NNNN - ` prefixes of a card name, in order, and the name without them. Copies carry two.
 export function namePrefixes(name) {
@@ -213,6 +216,17 @@ export function createTrelloAdapter(client, { pageSize = 1000 } = {}) {
 
     download: (url, dest) => client.download(url, dest),
 
+    async me() {
+      const m = await client.get('/1/members/me', { fields: 'username' });
+      return { id: m.id, username: m.username ?? null };
+    },
+
+    // A comment is a `commentCard` action; its reactions hang on the action.
+    async reactions(commentId) {
+      const rows = await client.get(`/1/actions/${commentId}/reactions`, { emoji: 'true' });
+      return rows.filter((r) => MARK_OF[r.emoji?.shortName]).map((r) => ({ id: r.id, mark: MARK_OF[r.emoji.shortName], memberId: r.idMember ?? r.member?.id ?? null }));
+    },
+
     // Writes. Each goes through client.write, so a dry run stops them all.
     async comment(ref, text) {
       const a = await client.write('POST', `/1/cards/${ref}/actions/comments`, { text }, { data: { text } });
@@ -232,6 +246,12 @@ export function createTrelloAdapter(client, { pageSize = 1000 } = {}) {
     },
     async setDescription(ref, text) {
       await client.write('PUT', `/1/cards/${ref}`, { desc: text });
+    },
+    async addReaction(commentId, mark) {
+      await client.write('POST', `/1/actions/${commentId}/reactions`, { shortName: REACTION[mark] });
+    },
+    async removeReaction(commentId, reactionId) {
+      await client.write('DELETE', `/1/actions/${commentId}/reactions/${reactionId}`);
     },
     async createCard({ placeId, name, desc, labelIds }) {
       const c = await client.write(

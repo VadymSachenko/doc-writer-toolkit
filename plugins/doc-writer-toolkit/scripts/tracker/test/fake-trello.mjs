@@ -52,7 +52,7 @@ const json = (res, status, body) => {
 
 export async function startFake({ onRequest } = {}) {
   const requests = [];
-  const state = { cardList: { [C.inbox1]: L.inbox, [C.inbox2]: L.inbox, [C.doing]: L.doing }, labels: { [C.doing]: ['5f00000000000000000b0002'] }, members: { [C.doing]: [M.owner] }, desc: {}, nextId: 1 };
+  const state = { cardList: { [C.inbox1]: L.inbox, [C.inbox2]: L.inbox, [C.doing]: L.doing }, labels: { [C.doing]: ['5f00000000000000000b0002'] }, members: { [C.doing]: [M.owner] }, desc: {}, nextId: 1, reactions: {} };
   const behaviour = { throttle: 0, throttleStatus: 429 }; // answer this many requests with 429 first
   let origin = '';
 
@@ -113,6 +113,9 @@ export async function startFake({ onRequest } = {}) {
           const rows = fixture(q.get('filter') === 'commentCard' ? 'card-comments' : 'card-moves');
           return json(res, 200, page(rows, q));
         }
+        // The credentials act as the owner; a comment's reactions are kept per action id.
+        if (p === '/1/members/me') return json(res, 200, { id: M.owner, username: 'owner-one' });
+        if ((m = /^\/1\/actions\/([^/]+)\/reactions$/.exec(p))) return json(res, 200, state.reactions[m[1]] ?? []);
         if ((m = /^\/1\/cards\/([^/]+)\/attachments$/.exec(p))) return json(res, 200, fixture('card-detail').attachments.map((a) => ({ ...a, url: a.url.replace('https://trello.com', origin) })));
         if ((m = /^\/1\/cards\/([^/]+)\/attachments\/([^/]+)\/download\/(.+)$/.exec(p))) {
           res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
@@ -140,6 +143,15 @@ export async function startFake({ onRequest } = {}) {
           if ((state.members[c.id] ?? []).includes(record.form.value)) return json(res, 400, 'member is already on the card');
           state.members[c.id] = [...(state.members[c.id] ?? []), record.form.value];
           return json(res, 200, MEMBERS.filter((x) => state.members[c.id].includes(x.id)));
+        }
+        if ((m = /^\/1\/actions\/([^/]+)\/reactions$/.exec(p)) && req.method === 'POST') {
+          const r = { id: `5f0000000000000000e0${String(state.nextId++).padStart(4, '0')}`, idMember: M.owner, idModel: m[1], emoji: { shortName: record.form.shortName } };
+          state.reactions[m[1]] = [...(state.reactions[m[1]] ?? []), r];
+          return json(res, 200, r);
+        }
+        if ((m = /^\/1\/actions\/([^/]+)\/reactions\/([^/]+)$/.exec(p)) && req.method === 'DELETE') {
+          state.reactions[m[1]] = (state.reactions[m[1]] ?? []).filter((r) => r.id !== m[2]);
+          return json(res, 200, {});
         }
         if ((m = /^\/1\/cards\/([^/]+)\/idLabels\/([^/]+)$/.exec(p)) && req.method === 'DELETE') {
           const c = findCard(m[1]);

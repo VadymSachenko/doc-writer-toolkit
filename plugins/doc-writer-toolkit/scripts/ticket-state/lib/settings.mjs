@@ -169,6 +169,22 @@ function validateReviewRounds(raw) {
   return { labels };
 }
 
+// The status marks on the comments a step takes (`forge.reactions`, `tracker.reactions`, TASK-095): the runner's own
+// reactions around the session (lib/reactions.mjs). Absent or false: none, as before. On the forge the comments come
+// from `take`, which only the trigger words give, and the pipeline's own reactions are `forge.self`'s: without either,
+// `forge.reactions` would mark nothing, so it is refused. The tracker's own are its credentials' person's.
+function validateReactions(merged, { triggerWords, self }) {
+  const flag = (v, where) => {
+    if (v === undefined || v === null) return false;
+    if (typeof v !== 'boolean') fail(`${where} must be true or false`);
+    return v;
+  };
+  const forge = flag(merged.forge?.reactions, 'forge.reactions');
+  if (forge && !triggerWords.length) fail('forge.reactions needs forge.triggerWords: the marked comments are the ones a step takes, and only the trigger words give those');
+  if (forge && !self) fail("forge.reactions needs forge.self: the pipeline's own reactions are that login's");
+  return { forge, tracker: flag(merged.tracker?.reactions, 'tracker.reactions') };
+}
+
 function validateBuild(raw) {
   if (raw === undefined || raw === null) return { ...BUILD_DEFAULTS, command: [...BUILD_DEFAULTS.command] };
   if (!isObject(raw)) fail('build must be { command, outDir, timeoutMinutes, waitMinutes }');
@@ -238,6 +254,7 @@ export function validateSettings(merged, { root, stateRootDefault }) {
   if (rawIds !== undefined && rawIds !== null && (!isObject(rawIds) || Object.entries(rawIds).some(([k, v]) => !(k in DEFAULT_ID_COMMENTS) || typeof v !== 'string' || !v.trim()))) fail(`forge.idComments must be { ${Object.keys(DEFAULT_ID_COMMENTS).join(', ')} }, each a text`);
   const idComments = { ...DEFAULT_ID_COMMENTS, ...(rawIds ?? {}) };
   const reviewRounds = validateReviewRounds(merged.forge?.reviewRounds);
+  const reactions = validateReactions(merged, { triggerWords, self: forge.self });
 
   const mode = merged.mode ?? LOCAL_DEFAULTS.mode;
   if (!MODES.includes(mode)) fail(`mode must be one of ${MODES.join(', ')}`);
@@ -317,6 +334,7 @@ export function validateSettings(merged, { root, stateRootDefault }) {
     idComments,
     triggerWords,
     reviewRounds,
+    reactions,
     hostRules: merged.hostRules ?? {},
     hostJobs: validateJobs(merged.hostJobs ?? [], root),
     styleCheck,
