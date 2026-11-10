@@ -880,6 +880,34 @@ test('addLabel: the ready label is created on a repository that lacks it, then a
   assert.deepEqual(dry.gh.calls.map((c) => c.path), ['repos/acme-docs/guide-docs/labels']);
 });
 
+// ------------------------------------------------------------------ the translated label
+
+const TRANSLATED = 'Translations match';
+const translatedSettings = () => forgeSettings({ forge: { ...settingsJson().forge, readyLabel: READY, translatedLabel: TRANSLATED } });
+
+test('settings: the translated label may be added and removed, must be a label of its own, and is refused at a PR\'s opening', async () => {
+  const f = translatedSettings();
+  assert.equal(f.translatedLabel, TRANSLATED);
+  assert.equal(f.addable.get('translations match'), TRANSLATED);
+  assert.equal(f.removable.get('translations match'), TRANSLATED);
+  assert.equal(forgeSettings().translatedLabel, null);
+  for (const taken of ['Check me', 'in progress', READY.toUpperCase()]) {
+    const s = settingsJson({ forge: { ...settingsJson().forge, readyLabel: READY, translatedLabel: taken } });
+    assert.throws(() => validateForge(s.forge, s.targets), /forge\.translatedLabel .* needs a label of its own/, taken);
+  }
+  const { forge, calls } = setup({ settings: translatedSettings() });
+  await rejects(forge.openPr({ repo: 'guide-docs', head: 'docs/x', base: 'main', title: 'T', labels: ['in progress', TRANSLATED] }), 'notNamed');
+  assert.equal(calls.length, 0);
+});
+
+test('addLabel: the translated label is created on a repository that lacks it, then added', async () => {
+  const created = { 'POST repos/acme-docs/guide-docs/labels': { id: 1, name: TRANSLATED } };
+  const { forge, calls } = setup({ settings: translatedSettings(), routes: { 'graphql LabelTargets': seq(fixture('gql-label-targets'), withLabel(TRANSLATED)), ...created } });
+  const r = await forge.addLabel({ repo: 'guide-docs', number: 7, label: TRANSLATED });
+  assert.deepEqual([r.label, r.changed, r.created], [TRANSLATED, true, true]);
+  assert.deepEqual(writes(calls).find((c) => c.path === 'repos/acme-docs/guide-docs/labels').body, { name: TRANSLATED, color: 'ededed' });
+});
+
 // ------------------------------------------------------------------ the comment header
 
 const HEADER = '🤖 **[BOT]**';

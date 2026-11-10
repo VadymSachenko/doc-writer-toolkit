@@ -606,3 +606,24 @@ test('forge add-label, remove-label, resolve-thread and delete-comment are refus
   const booleans = Object.entries(OPTIONS).filter(([, o]) => o.type === 'boolean').flatMap(([k, o]) => [`--${k}`, ...(o.short ? [`-${o.short}`] : [])]);
   assert.deepEqual([...SCRIPT_COMMANDS['forge/forge.mjs'].booleans].sort(), booleans.sort(), "the hook's list of forge's options with no value");
 });
+
+test('a role never records the runner\'s own idSync or untranslated, in any form; its own stages and a note naming them still pass', () => {
+  const { cfg, root } = SHARED();
+  const ts = `node ${R}/scripts/ticket-state/ticket-state.mjs`;
+  for (const role of ['triage', 'writer', 'reviewer', 'translator']) {
+    for (const stage of ['idSync', 'untranslated']) {
+      for (const cmd of [`${ts} record 502 --root ${root} --stage ${stage} --status done --pr guide-docs#3`, `${ts} record 502 --stage=${stage} --status failed --note x`, `${ts} record 502 --root ${root} --status done --stage '${stage}' --result '{"commits":["abc1234"]}'`]) {
+        assert.match(refusalOf(cmd, cfg[role], { cwd: root }) ?? '', /the runner's alone/, `${role}: ${cmd}`);
+      }
+    }
+    assert.equal(refusalOf(`${ts} record 502 --root ${root} --stage write --status failed --note 'idSync and untranslated are not mine'`, cfg[role], { cwd: root }), null, role);
+  }
+});
+
+test('ticket-state record refuses idSync and untranslated in a role session, before it reads anything; outside one it goes on', async () => {
+  const { main } = await import('../ticket-state.mjs');
+  for (const stage of ['idSync', 'untranslated']) {
+    await assert.rejects(main(['record', '502', '--root', '/nonexistent', '--stage', stage, '--status', 'done'], { stdout: { write() {} }, env: { DOC_TOOLKIT_ROLE_SESSION: 'writer' } }), (e) => e.exitCode === 2 && /the runner's alone/.test(e.message));
+    await assert.rejects(main(['record', '502', '--root', '/nonexistent', '--stage', stage, '--status', 'done'], { stdout: { write() {} }, env: {} }), (e) => !/the runner's alone/.test(e.message));
+  }
+});
