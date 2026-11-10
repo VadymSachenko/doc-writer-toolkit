@@ -199,7 +199,7 @@ export function ensureWorktree(settings, pr) {
   return { repo: pr.repo, branch: pr.branch, base, path: wt, clone, head: tryRun(wt, ['rev-parse', 'HEAD']), push: `git -C ${wt} push origin HEAD:refs/heads/${pr.branch}`, linked, missing, notes, stuck, ...(branchFetched ? {} : { unfetched: true }) };
 }
 
-// A code repo a session reads as evidence (`appRepos`). The runner keeps its own clone of it, bare, under the state
+// A code repo a session reads as evidence (`appRepos`, `relatedRepos`). The runner keeps its own clone of it, bare, under the state
 // folder (`<state>/code/<repo>.git`), made once from the repo's https address (`url`) and fetched before each session,
 // and makes a read-only checkout of the base as fetched, one per commit (`<state>/code/<repo>/<commit, 12 characters>`)
 // and never moved, so two sessions that started at different commits each read their own. The owner's clone (`path`)
@@ -385,7 +385,7 @@ export function ensureCodeTree(settings, app, { remote = app.url, othersRunning 
   const clone = codeClonePath(settings, app);
   const out = { repo: app.repo, base: app.base, clone, path: null, url: app.url, commit: null, notes: [], removed: [], kept: [] };
   if (!fs.existsSync(path.join(clone, 'HEAD'))) {
-    if (!remote) return { ...out, error: `no url for ${app.repo} in appRepos: the runner clones the repo from it` };
+    if (!remote) return { ...out, error: `no url for ${app.repo} in appRepos or relatedRepos: the runner clones the repo from it` };
     if (fs.existsSync(clone) && fs.readdirSync(clone).length) return { ...out, error: `${clone} exists and is not a clone of ${app.repo}` };
     try {
       fs.mkdirSync(path.dirname(clone), { recursive: true });

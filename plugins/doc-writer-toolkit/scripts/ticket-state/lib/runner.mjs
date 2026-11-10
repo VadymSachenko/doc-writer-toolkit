@@ -34,6 +34,7 @@ import { idCommentText, syncIds } from './id-sync.mjs';
 import { followRounds, roundSnapshot } from './pr-rounds.mjs';
 import { pickMarks, settleMarks } from './reactions.mjs';
 import { PLACE_SOURCES } from './gates.mjs';
+import { FILES_SHOWN, ticketCommits, ticketCommitsFor } from './ticket-commits.mjs';
 import { withoutHeader } from '../../tracker/lib/comment-header.mjs';
 
 // The daily run (design §7): finish first, then triage the quiet intake cards (mornings, and the watcher's start pass
@@ -511,20 +512,62 @@ function cloneLines(clones) {
   return out.length ? out.join('\n') : null;
 }
 
-// What the brief says about the code the session may read: the checkout at the commit the runner just fetched.
-function codeLines(trees) {
+// What the brief says about the code the session may read: the checkout at the commit the runner just fetched, of each
+// code repo (`appRepos`) and each related repo (`relatedRepos`), and the ticket's commits found in them. With no related
+// repo and no commit lookup (a reviewer's step), the lines are the code repos' alone.
+export function codeLines(trees) {
+  const code = trees.filter((t) => !t.related);
+  const related = trees.filter((t) => t.related);
+  const at = (t) => `${t.path}, commit ${t.commit}${t.url ? `; a link to lines: ${t.url}/blob/${t.commit}/<path>#L<from>-L<to>` : ''}.${t.notes?.length ? ` Note: ${t.notes.join('; ')}.` : ''}`;
+  const out = [];
+  if (code.length) {
+    out.push(
+      'Code repos, each a read-only checkout at the commit the runner fetched for this session. Read code only here, with Read and Grep, never in a clone, whose files may be weeks old (Read and Grep are denied there). A fact from the code carries its reference when you read it: repo, path, lines and the commit below.',
+      ...code.map((t) => (t.error ? `- ${t.repo}: not available (${t.error}). A fact only this code could answer stays a marker.` : `- ${t.repo}: ${at(t)}`)),
+    );
+  }
+  if (related.length) {
+    out.push(
+      `Related repos (the host's \`relatedRepos\`: the org's other repos, such as frontends, widgets and proxies), each a read-only checkout at the commit the runner fetched for this session, read like the code repos: with Read and Grep, never in a clone. When a claim names an endpoint, a field, a status or a component whose caller or implementation ${code.length ? 'the code repos above don\'t show' : 'you can\'t see'}, search these for it (its path, its name, its field names) before you mark a place or ask a question, and cite what you find like any code reference: repo, path, lines and the commit below.`,
+      ...related.map((t) => (t.error ? `- ${t.repo}: not available (${t.error}). Say so in a place's \`why\` when it was a source to try.` : `- ${t.repo}: ${at(t)}`)),
+    );
+  }
+  const looked = trees.filter((t) => t.ticket);
+  if (looked.length) out.push(...ticketCommitLines(looked));
+  return out.join('\n');
+}
+
+// What the brief says about the ticket's commits (lib/ticket-commits.mjs), per checkout and key: each commit on a line of
+// its own, with its files, or that none names the key, or why the search couldn't run.
+function ticketCommitLines(trees) {
+  const commit = (c) => {
+    const files = c.files ?? [];
+    const shown = files.slice(0, FILES_SHOWN).join(', ');
+    return `  - ${c.sha.slice(0, 12)} ${c.date} ${c.author}: ${c.subject}${files.length ? ` (${shown}${files.length > FILES_SHOWN ? `, and ${files.length - FILES_SHOWN} more` : ''})` : ''}`;
+  };
+  const lines = trees.flatMap((t) => t.ticket.map((k) => {
+    const head = `- ${t.repo}, ${k.key}:`;
+    if (k.error && !k.commits.length) return [`${head} not searched (${k.error}). Say so in a place's \`why\` when these commits were a source to try.`];
+    if (!k.commits.length) return [`${head} no commit's message names it.`];
+    return [`${head} ${k.commits.length}${k.more ? ' (the newest; more name it)' : ''}${k.error ? ` (${k.error})` : ''}`, ...k.commits.map(commit)];
+  }));
   return [
-    'Code repos, each a read-only checkout at the commit the runner fetched for this session. Read code only here, with Read and Grep, never in a clone, whose files may be weeks old (Read and Grep are denied there). A fact from the code carries its reference when you read it: repo, path, lines and the commit below.',
-    ...trees.map((t) => (t.error ? `- ${t.repo}: not available (${t.error}). A fact only this code could answer stays a marker.` : `- ${t.repo}: ${t.path}, commit ${t.commit}${t.url ? `; a link to lines: ${t.url}/blob/${t.commit}/<path>#L<from>-L<to>` : ''}.${t.notes?.length ? ` Note: ${t.notes.join('; ')}.` : ''}`)),
-  ].join('\n');
+    "The ticket's commits: in each checkout above, the commits whose message names the ticket key, newest first, found by the runner's `git log` from the commit above (a branch not merged there isn't searched), each with the files it changed. Read one with `git -C <the checkout> show <sha>`. A `#<key>` can also be a PR number of that repo: read the commit before you cite it. Check these commits before you mark a place: a place's `why` names the sources tried (the code repos, the related repos, these commits, the app or the API) and why none confirmed the claim. A question to the developer about what the code means to do cites the commit that shows the behaviour (its short sha and subject), as in «the code has no condition here (commit <sha>): is that on purpose?».",
+    ...lines.flat(),
+  ];
 }
 
 // The roles that read code as evidence.
 const CODE_ROLES = new Set(['writer', 'reviewer']);
-// Every role is denied the owner's clones of the code repos (`path`), whose working tree may be weeks old, and writing
-// in the runner's own clones and checkouts.
+// The writer's stages that get the ticket's commits: the ones that gather the evidence (the start goes on to the plan,
+// the answers to the plan or the write) and the answers to review comments.
+const COMMIT_STAGES = new Set(['start', 'plan', 'answers', 'write', 'answerComments']);
+// The repos a session reads code in: the code repos, then the related repos, each marked.
+const codeReposOf = (settings) => [...(settings.appRepos ?? []), ...(settings.relatedRepos ?? []).map((r) => ({ ...r, related: true }))];
+// Every role is denied the owner's clones of the code repos and the related repos (`path`), whose working tree may be
+// weeks old, and writing in the runner's own clones and checkouts.
 const codeDenied = (settings) => {
-  const apps = settings.appRepos ?? [];
+  const apps = codeReposOf(settings);
   const owners = apps.filter((a) => a.path).map((a) => abs(path.resolve(settings.root, a.path)));
   return [...new Set([...owners.flatMap((c) => [`Read(${c}/**)`, `Edit(${c}/**)`]), ...(apps.length ? [`Edit(${abs(codeTreesRoot(settings))}/**)`] : [])])];
 };
@@ -1360,7 +1403,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
     }
     // The worktrees a live run would make or bring up to date: named, nothing made.
     const trees = prsForStep(step, step.keys.map((k) => readLedger(settings.state, k))).map((p) => ({ repo: p.repo, branch: p.branch, path: worktreePath(settings, p), push: `git -C ${worktreePath(settings, p)} push origin HEAD:refs/heads/${p.branch}` }));
-    const codeTrees = CODE_ROLES.has(step.role) ? (settings.appRepos ?? []).map((a) => ({ repo: a.repo, path: codeTreePath(settings, a, '<commit>'), commit: '<fetched at the run>', url: a.url })) : [];
+    const codeTrees = CODE_ROLES.has(step.role) ? codeReposOf(settings).map((a) => ({ repo: a.repo, path: codeTreePath(settings, a, '<commit>'), commit: '<fetched at the run>', url: a.url, ...(a.related ? { related: true } : {}) })) : [];
     const cmd = commandFor({ ...step, worktrees: trees, codeTrees }, settings, { model: settings.roles[step.role].model, agentsPath: path.join(settings.state, 'roles', 'agents.json'), claude });
     const held = guardReason();
     return { ...pick(step), runs: `claude -p as ${agentName(step.role)}`, model: cmd.model, effort: cmd.effort, ...(trees.length ? { worktrees: trees.map((t) => t.path) } : {}), ...(held ? { guard: `a live run would not start it: ${held}` } : {}), command: [cmd.bin, ...cmd.args] };
@@ -2221,7 +2264,16 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
           say({ kind: 'readCheckout', group: step.group, keys: step.keys, stage: step.stage, repo: c.repo, outcome: 'failed', note: `no read checkout of ${c.repo}, so the session reads its clone: ${r.error}`.slice(0, 400) });
           return { ...c, readError: r.error };
         }).filter(Boolean);
-        const codeTrees = CODE_ROLES.has(step.role) ? (settings.appRepos ?? []).map((a) => (io.ensureCodeTree ?? ensureCodeTree)(settings, a, { othersRunning })) : [];
+        let codeTrees = CODE_ROLES.has(step.role) ? codeReposOf(settings).map((a) => ({ ...(io.ensureCodeTree ?? ensureCodeTree)(settings, a, { othersRunning }), ...(a.related ? { related: true } : {}) })) : [];
+        // The ticket's commits in each checkout made, scripted (lib/ticket-commits.mjs): a git error is a note in the
+        // brief, never the step's failure.
+        if (step.role === 'writer' && COMMIT_STAGES.has(step.stage) && codeTrees.some((t) => !t.error)) {
+          const found = ticketCommitsFor(codeTrees, step.keys, { pattern: settings.ticketCommits?.pattern ?? null, limit: settings.ticketCommits?.limit ?? 20, lookup: io.ticketCommits ?? ticketCommits });
+          codeTrees = codeTrees.map((t) => {
+            const f = found.find((x) => x.path === t.path && x.repo === t.repo);
+            return f ? { ...t, ticket: f.keys } : t;
+          });
+        }
         const buildDir = step.stage === 'visualPack' ? reusableBuild(step, trees) : null;
         step = { ...step, worktrees: trees, codeTrees, clones, ...(buildDir ? { buildDir } : {}) };
       } catch (e) {

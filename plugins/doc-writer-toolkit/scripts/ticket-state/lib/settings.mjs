@@ -15,7 +15,7 @@ import { CHECKS } from './gates.mjs';
 // (`<name>.local.json`), merged key by key at any depth (a local key wins), for the local file's keys only (`localOnly`).
 // The tracker and forge scripts read the same files, as they stand and with no such limit.
 //
-// The shared file holds `state`, `workFolder`, `commentHeader`, `tracker`, `forge`, `targets`, `noReviewLabel`, `appRepos`, `hostRules`, `hostJobs`,
+// The shared file holds `state`, `workFolder`, `commentHeader`, `tracker`, `forge`, `targets`, `noReviewLabel`, `appRepos`, `relatedRepos`, `ticketCommits`, `hostRules`, `hostJobs`,
 // `build`, `checks`, and each role's tool rules (`roles.<role>.allowedTools`, `disallowedTools`).
 // The local file holds `mode`, `limits`, `schedule`, `roles` (no tool rules), `modelLadder`, `video`, `cleanup` and `progress`. Defaults below.
 
@@ -168,16 +168,53 @@ function validateVideo(video, { root, state, targets, appRepos }) {
 // The code repos a session may read as evidence: { repo, url (its https address), base, path (the owner's clone, from
 // the host root, optional: denied to every session) }. The runner clones each from `url` into the state folder once,
 // fetches it before a writer's or a reviewer's session, and gives the session a read-only checkout at the fetched commit
-// (`ensureCodeTree`, lib/worktree.mjs). The owner's clone is never touched.
-function validateAppRepos(raw) {
-  if (!Array.isArray(raw)) fail('appRepos must be a list of { repo, url, base, path }');
+// (`ensureCodeTree`, lib/worktree.mjs). The owner's clone is never touched. `relatedRepos` has the same shape and gets
+// the same checkouts: the org's other repos a ticket may read for evidence (frontends, widgets, proxies), where the
+// caller or the implementation of what a claim names may be.
+function validateAppRepos(raw, key = 'appRepos') {
+  if (!Array.isArray(raw)) fail(`${key} must be a list of { repo, url, base, path }`);
   return raw.map((r, i) => {
-    if (!isObject(r)) fail(`appRepos[${i}] must be { repo, url, base, path }`);
-    if (typeof r.repo !== 'string' || !/^[^/\\\s]+$/.test(r.repo) || r.repo === '.' || r.repo === '..') fail(`appRepos[${i}].repo must be the repo's plain name`);
-    if (r.path !== undefined && (typeof r.path !== 'string' || !r.path.trim())) fail(`appRepos[${i}].path must be the owner's clone, from the host root`);
-    if (typeof r.url !== 'string' || !/^https:\/\//.test(r.url)) fail(`appRepos[${i}].url is required: the repo's https address, which the runner clones it from`);
+    if (!isObject(r)) fail(`${key}[${i}] must be { repo, url, base, path }`);
+    if (typeof r.repo !== 'string' || !/^[^/\\\s]+$/.test(r.repo) || r.repo === '.' || r.repo === '..') fail(`${key}[${i}].repo must be the repo's plain name`);
+    if (r.path !== undefined && (typeof r.path !== 'string' || !r.path.trim())) fail(`${key}[${i}].path must be the owner's clone, from the host root`);
+    if (typeof r.url !== 'string' || !/^https:\/\//.test(r.url)) fail(`${key}[${i}].url is required: the repo's https address, which the runner clones it from`);
     return { repo: r.repo, path: r.path ?? null, base: typeof r.base === 'string' && r.base.trim() ? r.base : 'main', url: r.url.replace(/\/+$/, '') };
   });
+}
+
+// The code repos and the related repos share the runner's clones by name (`<state>/code/<repo>.git`), so a name is in
+// one list only, once.
+function validateCodeRepos(merged) {
+  const appRepos = validateAppRepos(merged.appRepos ?? []);
+  const relatedRepos = validateAppRepos(merged.relatedRepos ?? [], 'relatedRepos');
+  const seen = new Set();
+  for (const r of [...appRepos, ...relatedRepos]) {
+    if (seen.has(r.repo)) fail(`'${r.repo}' is named twice in appRepos and relatedRepos: a repo is in one list, once (the runner keeps one clone of it)`);
+    seen.add(r.repo);
+  }
+  return { appRepos, relatedRepos };
+}
+
+// The ticket's commits (`ticketCommits`, lib/ticket-commits.mjs): the commits whose message names the ticket key, in
+// each code repo's and related repo's history at the commit fetched for the session. `pattern` is a regular expression
+// with `<key>` in it (the key goes in escaped), matched against the whole message, any case; none (the default) is the
+// key as a whole word, which `feat-<key>`, `fix-<key>` and `#<key>` match too. `limit` is how many a repo gives, newest
+// first.
+export const TICKET_COMMITS_DEFAULTS = { pattern: null, limit: 20 };
+function validateTicketCommits(raw) {
+  if (raw === undefined || raw === null) return { ...TICKET_COMMITS_DEFAULTS };
+  if (!isObject(raw)) fail('ticketCommits must be { "pattern", "limit" }');
+  const t = { ...TICKET_COMMITS_DEFAULTS, ...raw };
+  if (t.pattern !== null) {
+    if (typeof t.pattern !== 'string' || !t.pattern.includes('<key>')) fail('ticketCommits.pattern must be a regular expression with <key> in it, such as "\\\\b(feat|fix)-<key>\\\\b"');
+    try {
+      new RegExp(t.pattern.split('<key>').join('1'), 'i');
+    } catch (e) {
+      fail(`ticketCommits.pattern is not a regular expression: ${e.message}`);
+    }
+  }
+  if (!Number.isInteger(t.limit) || t.limit < 1 || t.limit > 100) fail('ticketCommits.limit must be a whole number from 1 to 100');
+  return { pattern: t.pattern, limit: t.limit };
 }
 
 // The words an owner's PR comment starts with when it is for the pipeline (`forge.triggerWords`, D-142): `word:` at the
@@ -340,7 +377,7 @@ export function validateSettings(merged, { root, stateRootDefault }) {
   num(schedule.commentQuietMinutes, 'schedule.commentQuietMinutes');
   num(schedule.expertQuietDays, 'schedule.expertQuietDays', { min: 1 });
   if (schedule.tokenFile !== null && (typeof schedule.tokenFile !== 'string' || !schedule.tokenFile.trim())) fail('schedule.tokenFile must be a file path');
-  const video = validateVideo(deepMerge(LOCAL_DEFAULTS.video, merged.video ?? {}), { root, state: path.resolve(root, typeof merged.state === 'string' && merged.state.trim() ? merged.state : stateRootDefault), targets: merged.targets ?? [], appRepos: merged.appRepos ?? [] });
+  const video = validateVideo(deepMerge(LOCAL_DEFAULTS.video, merged.video ?? {}), { root, state: path.resolve(root, typeof merged.state === 'string' && merged.state.trim() ? merged.state : stateRootDefault), targets: merged.targets ?? [], appRepos: [merged.appRepos, merged.relatedRepos].flatMap((l) => (Array.isArray(l) ? l : [])) });
 
   const cleanup = { ...LOCAL_DEFAULTS.cleanup, ...(merged.cleanup ?? {}) };
   if (!['trash', 'delete'].includes(cleanup.mode)) fail('cleanup.mode must be "trash" or "delete"');
@@ -382,7 +419,8 @@ export function validateSettings(merged, { root, stateRootDefault }) {
     forge,
     targets,
     noReviewLabel: merged.noReviewLabel ?? null,
-    appRepos: validateAppRepos(merged.appRepos ?? []),
+    ...validateCodeRepos(merged),
+    ticketCommits: validateTicketCommits(merged.ticketCommits),
     readyComment,
     reviewComment,
     idComments,
