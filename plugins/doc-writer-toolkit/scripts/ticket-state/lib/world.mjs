@@ -302,10 +302,13 @@ export async function readPrs({ settings, forge, ledgers }) {
 //     rule reads. A submitted review whose text starts with it covers its line comments. Without it the owner's
 //     comment is a note for people and starts nothing;
 //   - the PR's experts (`opts.experts`: the targets' `reviewers` and the reviewers requested on it) are reviewers as
-//     before, with no word, in their own comments, reviews and threads;
-//   - a reply in a thread the pipeline opened, anyone's but the owner's (an expert the owner tagged there too), and
-//     anyone else's comment, start nothing: they are in `others`, for the owner to hand on with the word. One older than
-//     the owner's latest worded comment a record handled is no longer listed: it was handed on, or left.
+//     before, with no word, in their own comments and reviews and in the threads an expert opened;
+//   - a reply in anyone else's thread, the pipeline's or the owner's (an expert the owner tagged there too), and anyone
+//     else's comment, start nothing: they are in `others`, for the owner to hand on with the word. One goes off the list
+//     only when it was handed on: its id recorded in `handled` (a session took it with the owner's worded comment that
+//     pointed at it), or a worded reply of the owner's under it in its thread was handled.
+//   A comment in a thread carries the thread's earlier comments (`context`): the owner's worded reply under an
+//   expert's answer may only point at it ("do as the expert says").
 // With no words set, every comment that isn't the owner's is a reviewer's, as before.
 export function unhandled(ledger, pr, activity, self, header = null, opts = {}) {
   return sortComments(ledger, pr, activity, self, header, opts).items;
@@ -342,14 +345,12 @@ export function sortComments(ledger, pr, activity, self, header = null, { words 
   const when = (c) => String(c.createdAt ?? c.updatedAt ?? c.submittedAt ?? '');
   // A thread the pipeline opened (its first comment in `posted`, with the header, or of a review it posted).
   const ours = (c) => Boolean(c) && (posted.has(String(c.id)) || headed(c) || ownReview(c));
-  // The latest of the owner's worded comments a record handled: a colleague's comment before it was handed on, or
-  // left, and is no longer listed for the owner.
-  const all = [...(activity.threads ?? []).flatMap((t) => t.comments ?? []), ...(activity.comments ?? []), ...(activity.reviews ?? [])];
-  const handedOn = gated ? all.filter((c) => handled.has(String(c.id)) && worded(c)).map(when).sort().at(-1) ?? '' : '';
   const items = [];
   const others = [];
   // Where a fresh comment goes: the items (with the text the rule reads), the others, or nowhere (the owner's note).
-  const place = (c, item, inOurs = false) => {
+  // `thread`: the thread it is in, whether an expert opened it, and when the owner's latest handled worded reply in it
+  // was written (a comment before that one was handed on).
+  const place = (c, item, thread = null) => {
     if (!gated) return items.push(item);
     if (isOwner(c.author)) {
       const rest = afterTrigger(c.body, words);
@@ -357,17 +358,26 @@ export function sortComments(ledger, pr, activity, self, header = null, { words 
       if (worded(c)) return items.push({ ...item, worded: true });
       return null;
     }
-    // An expert's own comment needs no word; a reply in the pipeline's thread, anyone's but the owner's, is for people
-    // (decision 3: the owner may tag the expert there, and hands an answer on with the word).
-    if (c.author && expert.has(low(c.author)) && !inOurs) return items.push(item);
-    if (handedOn && when(c) <= handedOn) return null;
-    const { body, ...seen } = item;
+    // An expert's own comment needs no word, and neither does a reply in a thread an expert opened; a reply in anyone
+    // else's thread, the pipeline's or the owner's, is for people (decision 3: the owner may tag the expert there, and
+    // hands an answer on with the word).
+    if (c.author && expert.has(low(c.author)) && (!thread || thread.byExpert)) return items.push(item);
+    if (thread?.handedAt && when(c) <= thread.handedAt) return null;
+    const { body, context, ...seen } = item;
     return others.push(seen);
   };
+  // The thread's comments before one, for the session to read the owner's reply against: the pipeline's as `pipeline`,
+  // the owner's as `owner`.
+  const contextOf = (t, i) => (t.comments ?? []).slice(Math.max(0, i - 8), i).map((x) => ({ author: ours(x) ? 'pipeline' : isOwner(x.author) ? 'owner' : x.author ?? null, text: oneText(header ? withoutHeader(x.body, header) : x.body) }));
   for (const t of activity.threads ?? []) {
-    const root = t.comments?.[0]?.id ?? null;
-    const inOurs = ours(t.comments?.[0]);
-    for (const c of t.comments ?? []) if (fresh(c) && !ownReview(c)) place(c, { id: c.id, kind: 'review-comment', thread: t.id, root, author: c.author, by: who(c.author), path: c.path ?? t.path ?? null, line: c.line ?? t.line ?? null, updatedAt: c.updatedAt, body: c.body ?? '' }, inOurs);
+    const first = t.comments?.[0];
+    const root = first?.id ?? null;
+    const thread = { byExpert: !ours(first) && Boolean(first?.author) && expert.has(low(first.author)), handedAt: gated ? (t.comments ?? []).filter((c) => handled.has(String(c.id)) && worded(c)).map(when).sort().at(-1) ?? '' : '' };
+    (t.comments ?? []).forEach((c, i) => {
+      if (!fresh(c) || ownReview(c)) return;
+      const item = { id: c.id, kind: 'review-comment', thread: t.id, root, author: c.author, by: who(c.author), path: c.path ?? t.path ?? null, line: c.line ?? t.line ?? null, updatedAt: c.updatedAt, body: c.body ?? '' };
+      place(c, gated && i > 0 ? { ...item, context: contextOf(t, i) } : item, thread);
+    });
   }
   for (const c of activity.comments ?? []) if (fresh(c)) place(c, { id: c.id, kind: 'comment', author: c.author, by: who(c.author), updatedAt: c.updatedAt, body: c.body ?? '' });
   for (const r of activity.reviews ?? []) {
@@ -376,6 +386,12 @@ export function sortComments(ledger, pr, activity, self, header = null, { words 
     if (fresh(c)) place(c, { id: r.id, kind: 'review', state: r.state, author: r.author, by: who(r.author), updatedAt: r.submittedAt, body: r.body ?? '' });
   }
   return { items, others };
+}
+
+// One comment's text for a brief: trimmed, on one line, cut at 400 characters.
+function oneText(body) {
+  const t = String(body ?? '').trim().replace(/\s+/g, ' ');
+  return t.length > 400 ? `${t.slice(0, 399)}…` : t;
 }
 
 // What the PR's experts did on it: only the logins in `experts` (the targets' `reviewers` and the reviewers requested on

@@ -155,7 +155,8 @@ test('a reply in a place\'s thread is the answer to that place only when it is t
   const brief = briefFor({ ...s, role: 'writer', keys: ['982'] }, w.settings);
   assert.match(brief, /record that reply's id as the place's `replyId`: the runner then settles the thread\. Never settle a thread yourself\./);
   assert.ok(brief.includes('- reply 7303, place p1 (docs/x/a.md, line 12, now open): "the expert confirmed it, leave it."'));
-  assert.ok(!brief.includes('Yes, for every method but one.') && !brief.includes('an expert\'s need none'));
+  assert.ok(!brief.includes('- review-comment 7302') && !brief.includes('an expert\'s need none'), 'the expert\'s reply is not a comment the step takes');
+  assert.ok(brief.includes('- review-comment 7303 by the owner: "the expert confirmed it, leave it."\n  - earlier in its thread, your line comment: "A place to check"\n  - earlier in its thread, the owner: "@expert-one check this, please"\n  - earlier in its thread, expert-one: "Yes, for every method but one."'), 'it is read as the thread the owner\'s reply points at');
   // Only the expert's reply, with no owner's word: nothing starts.
   w.forge.activity['guide-docs#81'].threads[0].comments = w.forge.activity['guide-docs#81'].threads[0].comments.filter((x) => x.id === 7301 || x.id === 7302);
   assert.deepEqual((await w.one('982')).steps, []);
@@ -178,7 +179,8 @@ test('with the trigger words, the brief lists the comments the step takes, word 
   const brief = briefFor({ ...s, role: 'writer', keys: ['983'] }, w.settings);
   assert.ok(brief.includes('- comment 5101 by the owner: "shorten step 2"'));
   assert.ok(brief.includes('- comment 5104 by the expert expert-one: "The limit is 50."'));
-  assert.match(brief, /Every other new comment on the PR, the owner's without the word, a colleague's, a reply in your own threads by anyone but the owner, is for people: don't act on it, don't answer it, and don't record it in `handled`/);
+  assert.match(brief, /Every other new comment on the PR, the owner's without the word, a colleague's, a reply in a thread an expert didn't open by anyone but the owner \(an expert's answer in your own or the owner's thread too\), is for people: don't act on it, don't answer it, and don't record it in `handled`/);
+  assert.match(brief, /One exception: a comment the owner's worded comment hands on .* record its id in `handled` too, so it leaves the owner's list\./);
   assert.ok(!brief.includes('A note for the expert.') && !brief.includes('Step 3 reads oddly.'));
   // No words set: no such list, the brief as before.
   const plain = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 81, headCommit: HEAD })], activity: { 'guide-docs#81': activity } });
@@ -188,15 +190,57 @@ test('with the trigger words, the brief lists the comments the step takes, word 
   assert.ok(!briefFor({ ...s2, role: 'writer', keys: ['983'] }, plain.settings).includes('The comments this step takes'));
 });
 
-test('a colleague\'s comment stays listed for the owner until a later worded comment of the owner\'s is handled', async () => {
+test('a colleague\'s comment stays listed for the owner until it is handed on: its own id handled, not any later worded comment of the owner\'s', async () => {
   const c = card({ number: 984, status: 'finalReview' });
   const later = new Date(Date.parse(at) + 60000).toISOString();
-  const activity = { comments: [comment(5201, 'colleague-two', 'Step 3 reads oddly.'), { ...comment(5202, 'owner-login', 'helper: take the comment above into account'), createdAt: later, updatedAt: later }] };
+  const activity = { comments: [comment(5201, 'colleague-two', 'Step 3 reads oddly.'), comment(5203, 'colleague-two', 'And step 4.'), { ...comment(5202, 'owner-login', 'helper: take the comment about step 3 into account'), createdAt: later, updatedAt: later }] };
   const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 81, headCommit: HEAD })], activity: { 'guide-docs#81': activity }, extra: ROUNDS() });
   roundLedger(w, c);
-  assert.deepEqual((await w.one('984')).prs[0].others.map((x) => x.id), [5201], 'listed while the owner\'s hand-on is not handled yet');
+  assert.deepEqual((await w.one('984')).prs[0].others.map((x) => x.id), [5201, 5203], 'listed while the owner\'s hand-on is not handled yet');
   roundLedger(w, c, { reviewComments: [{ repo: 'guide-docs', pr: 81, id: 5202, updatedAt: later, at: later }] });
-  assert.equal((await w.one('984')).prs[0].others, undefined, 'handed on: no longer listed');
+  assert.deepEqual((await w.one('984')).prs[0].others.map((x) => x.id), [5201, 5203], 'a later worded comment alone hands nothing on');
+  roundLedger(w, c, { reviewComments: [{ repo: 'guide-docs', pr: 81, id: 5202, updatedAt: later, at: later }, { repo: 'guide-docs', pr: 81, id: 5201, updatedAt: at, at: later }] });
+  assert.deepEqual((await w.one('984')).prs[0].others.map((x) => x.id), [5203], 'the one the session took with it is off the list; the other stays');
+});
+
+test('an expert\'s reply in the owner\'s own thread starts nothing; the owner\'s worded reply under it does, with the thread for the session to read, and hands the expert\'s answer on', async () => {
+  const c = card({ number: 985, status: 'finalReview' });
+  const t1 = (n) => new Date(Date.parse(at) + n * 60000).toISOString();
+  const own = { id: 'T8001', resolved: false, path: PAGE, line: 20, comments: [
+    comment(8001, 'owner-login', '@expert-one is the limit right here?', { reviewId: 6400, path: PAGE, line: 20, createdAt: t1(0), updatedAt: t1(0) }),
+    comment(8002, 'expert-one', 'No, it is 50 for cards.', { reviewId: 6401, inReplyTo: 8001, createdAt: t1(1), updatedAt: t1(1) }),
+  ] };
+  const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 81, headCommit: HEAD })], activity: { 'guide-docs#81': { threads: [own] } }, extra: ROUNDS() });
+  roundLedger(w, c);
+  let t = await w.one('985');
+  assert.deepEqual(t.steps, [], 'the expert\'s answer in the owner\'s thread starts no session');
+  assert.deepEqual(t.prs[0].others.map((x) => [x.id, x.author]), [[8002, 'expert-one']], 'listed for the owner');
+  own.comments.push(comment(8003, 'owner-login', 'helper: зроби, як каже експерт', { reviewId: 6402, inReplyTo: 8001, createdAt: t1(2), updatedAt: t1(2) }));
+  t = await w.one('985');
+  const s = t.steps[0];
+  assert.equal(s.stage, 'answerComments');
+  assert.deepEqual(s.take.map((x) => [x.id, x.text]), [[8003, 'зроби, як каже експерт']], 'the session takes the owner\'s worded reply only');
+  assert.deepEqual(s.take[0].context, [{ author: 'owner', text: '@expert-one is the limit right here?' }, { author: 'expert-one', text: 'No, it is 50 for cards.' }]);
+  const brief = briefFor({ ...s, role: 'writer', keys: ['985'] }, w.settings);
+  assert.ok(brief.includes('- review-comment 8003 by the owner on docs/x/a.md:20: "зроби, як каже експерт"\n  - earlier in its thread, the owner: "@expert-one is the limit right here?"\n  - earlier in its thread, expert-one: "No, it is 50 for cards."'));
+  roundLedger(w, c, { reviewComments: [{ repo: 'guide-docs', pr: 81, id: 8003, updatedAt: t1(2), at: t1(3) }] });
+  t = await w.one('985');
+  assert.deepEqual(t.steps, []);
+  assert.equal(t.prs[0].others, undefined, 'the worded reply under the expert\'s answer handed it on');
+});
+
+test('in a thread an expert opened, an expert\'s reply needs no word; in a colleague\'s thread it is for people', async () => {
+  const c = card({ number: 986, status: 'finalReview' });
+  const threads = [
+    { id: 'T8101', resolved: false, comments: [comment(8101, 'expert-one', 'Step 2 is wrong.', { reviewId: 6500, path: PAGE, line: 5 }), comment(8102, 'expert-one', 'It should be step 3.', { reviewId: 6501, inReplyTo: 8101 })] },
+    { id: 'T8201', resolved: false, comments: [comment(8201, 'colleague-two', 'Odd wording.', { reviewId: 6502, path: PAGE, line: 9 }), comment(8202, 'expert-one', 'Agreed.', { reviewId: 6503, inReplyTo: 8201 })] },
+  ];
+  const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 81, headCommit: HEAD })], activity: { 'guide-docs#81': { threads } }, extra: ROUNDS() });
+  roundLedger(w, c);
+  const t = await w.one('986');
+  assert.deepEqual(t.steps[0].take.map((x) => x.id), [8101, 8102]);
+  assert.equal(t.steps[0].take[0].context, undefined, 'the thread\'s first comment has no earlier one');
+  assert.deepEqual(t.prs[0].others.map((x) => x.id), [8201, 8202]);
 });
 
 // ------------------------------------------------------------------ the round's record (scopes 1–3, AC-1)
