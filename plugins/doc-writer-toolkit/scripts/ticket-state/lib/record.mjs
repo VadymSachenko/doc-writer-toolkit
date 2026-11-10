@@ -10,7 +10,7 @@ import { KINDS, recordedSize } from './cleanup.mjs';
 import { imagePairsAt } from './pairs.mjs';
 import { originHead, writtenIn } from './worktree.mjs';
 import { addEdits, addEnSides } from './edits.mjs';
-import { changedLines, commentProblems, markersAt, markersMessage, placeProblems, placesNotListed, questionProblems } from './gates.mjs';
+import { changedLines, commentProblems, languageMessage, markersAt, markersMessage, placeLanguageProblems, placeProblems, placesNotListed, questionProblems } from './gates.mjs';
 
 // `record <key> --stage <s> --status running|done|failed`: one stage result, written only when the tracker, the forge
 // and the files support it (context/ticket-flow.md, "When a record is accepted"). On any problem nothing is written.
@@ -404,6 +404,9 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
             if (missing.length) throw new Refused('places', `${prId(p)}'s description doesn't list place${missing.length > 1 ? 's' : ''} ${missing.map((x) => x.id).join(', ')} (by the link to its line comment, or, on an unchanged line, its why): write it there with its source and why`, { places: missing.map((x) => x.id) });
           }
         }
+        // The places' language, on whatever `checks` say: the description's places section is written from `claim` and
+        // `why`, so they are in the language of the page, the words of the line comment (lib/gates.mjs).
+        languageGate(result.places, entries.map((e) => l.prs.find((x) => x.branch === e.branch && (!e.repo || x.repo === e.repo))));
         // The places' comments are posted before this record, so a place from the code with no reference at a commit is
         // not refused (a retry would post them again): the record stands, the session is told, and `status` reports it.
         for (const place of result.places ?? []) {
@@ -525,6 +528,11 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         // The questions to the owner left open after this round: the summary's own and the earlier ones its comments
         // didn't answer (the brief lists them). The runner sets the check label from them.
         pr.openQuestions = { items: questionsOf(result, stage, { required: true }), stage, at, seq: l.seq + 1 };
+        // A place this round rewrites keeps the language of its page (its `claim` and `why`, when given).
+        languageGate((result.places ?? []).map((u) => {
+          const place = l.places.find((p) => p.id === u?.id && p.repo === pr.repo && Number(p.pr) === pr.number);
+          return place ? { id: u.id, repo: pr.repo, pr: pr.number, page: place.page, claim: u.claim, why: u.why } : null;
+        }).filter(Boolean), [pr]);
         for (const u of result.places ?? []) {
           const place = l.places.find((p) => p.id === u.id && p.repo === pr.repo && Number(p.pr) === pr.number);
           if (place) Object.assign(place, u, { at });
@@ -787,6 +795,16 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
   function addRound(round) {
     pr.rounds ??= [];
     pr.rounds.push({ n: pr.rounds.length + 1, stage, at, seq: l.seq + 1, commits: round.commits, review: round.review, comments: round.comments, ...(round.notes.length ? { notes: round.notes } : {}) });
+  }
+
+  // The places' language (lib/gates.mjs, `placeLanguageProblems`): a `claim` or `why` with no letter of its page's script
+  // is refused. The line comments are posted already, in the page's language: the record takes their words, and nothing
+  // is posted again.
+  function languageGate(places, prs) {
+    const found = placeLanguageProblems(settings, places, prs.filter(Boolean));
+    if (!found.length) return;
+    const fix = settings.reviewRounds ? '' : ', and the description\'s text of each place in the same words';
+    throw new Refused('places', `${languageMessage(found)}: write each place's "claim" and "why" in the language of its page, in the words of its line comment (code names stay as they are, in backticks)${fix}, and record again; post no comment twice`, { places: found.map((x) => x.id) });
   }
 
   // The places a round changed: `places`: [{ id, state, replyId?, answer? }]. A place confirmed or whose block went
