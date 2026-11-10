@@ -41,6 +41,9 @@ import { withoutHeader } from '../../tracker/lib/comment-header.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const PLUGIN_ROOT = path.resolve(HERE, '../../..');
 const SCRIPT = path.join(PLUGIN_ROOT, 'scripts', 'ticket-state', 'ticket-state.mjs');
+// The ticket stages a session may end by asking, its `questions` record its whole result: the plan, the write and the
+// gate before a PR (a marker left, TASK-048).
+const ASKING = ['plan', 'write', 'pr'];
 export const ROLE_HOOK = path.join(PLUGIN_ROOT, 'scripts', 'ticket-state', 'role-hook.mjs');
 export const ROLE_DIR = path.join(PLUGIN_ROOT, 'context', 'ticket-roles');
 // A git allow rule in the `git -C <worktree>` spelling, for each worktree the runner made for the step: the literal
@@ -1822,7 +1825,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
           return null;
         }
       })() : l.stages?.[step.stage];
-      const asked = !step.pr && ['plan', 'write'].includes(step.stage) ? l?.stages?.questions : null;
+      const asked = !step.pr && ASKING.includes(step.stage) ? l?.stages?.questions : null;
       return !(rec && rec.status !== 'running' && rec.seq > before) && !(asked && asked.seq > before);
     });
   }
@@ -1845,10 +1848,10 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         if (!busy) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'failed', pr: step.pr, note: 'the session ended without recording the stage', now: clock() }).catch(() => {});
         ok = false;
       } else if (!rec || rec.status !== 'done' || rec.seq <= (seqBefore.get(k) ?? 0)) {
-        // A plan or a write may end by asking: the `questions` record is then the session's whole result, not a failure.
-        // A session that also recorded the stage, even as failed, ended on that record.
+        // A plan, a write or a PR's gate may end by asking (`ASKING`): the `questions` record is then the session's whole
+        // result, not a failure. A session that also recorded the stage, even as failed, ended on that record.
         const before = seqBefore.get(k) ?? 0;
-        const asked = !step.pr && ['plan', 'write'].includes(step.stage) && (!rec || rec.seq <= before) ? l?.stages?.questions : null;
+        const asked = !step.pr && ASKING.includes(step.stage) && (!rec || rec.seq <= before) ? l?.stages?.questions : null;
         if (asked?.status !== 'done' || asked.seq <= before) ok = false;
       }
     }

@@ -10,6 +10,7 @@ import { KINDS, recordedSize } from './cleanup.mjs';
 import { imagePairsAt } from './pairs.mjs';
 import { writtenIn } from './worktree.mjs';
 import { addEdits, addEnSides } from './edits.mjs';
+import { commentsMissing, markersAt, markersMessage, placeProblems, placesNotListed, questionProblems } from './gates.mjs';
 
 // `record <key> --stage <s> --status running|done|failed`: one stage result, written only when the tracker, the forge
 // and the files support it (context/ticket-flow.md, "When a record is accepted"). On any problem nothing is written.
@@ -177,6 +178,14 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
       }
       case 'questions': {
         const card = await needCard('blocked');
+        // The questions-first gate (D-044, `checks.questionSources`): no question without the sources it checked, and
+        // each asked in a comment the card has. The comment's words are the host's: only its id is checked.
+        if (settings.checks?.questionSources) {
+          const problems = questionProblems(result.questions);
+          if (problems.length) throw new Refused('sources', `${problems.join('; ')}. A question is asked only once every source was checked: check them, then record what each gave`);
+          const missing = commentsMissing(result.questions, (await tracker.readCard({ card: card.id })).comments);
+          if (missing.length) throw new Refused('comment', `the card has no comment ${missing.join(', ')}: ask the questions on the card, then record that comment's id`, { missing });
+        }
         for (const q of result.questions ?? []) l.questions.push({ ...q, askedAt: q.askedAt ?? at, ...(pr ? { repo: pr.repo, pr: pr.number } : {}) });
         if (pr) {
           if (pr.stage !== 'questions') pr.resumeTo = pr.stage;
@@ -284,16 +293,27 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
           warnings.push(`${e.branch}: no "expertReview": { "recommended": true|false, "why": "<the open questions for the expert, or the facts not found in the code or the UI; or why none is needed>" }; recorded as null`);
           return null;
         };
+        // Without review rounds the session wrote the description's places, so the places gate reads it (with them, the
+        // runner writes them from this record).
+        const bodies = new Map();
+        const readBody = Boolean(settings.checks?.places && !settings.reviewRounds);
         for (const e of entries) {
           const p = l.prs.find((x) => x.branch === e.branch && (!e.repo || x.repo === e.repo));
           if (!p) throw new CliError(`no PR entry for the branch ${e.branch}; the write record names the branches`, { code: 2 });
           p.number = Number(e.number);
-          const st = await clients.forge.prState({ repo: p.repo, number: p.number }).catch((err) => {
+          const st = await clients.forge.prState({ repo: p.repo, number: p.number, ...(readBody ? { withBody: true } : {}) }).catch((err) => {
             throw new Refused('noPr', `${p.repo}#${e.number} is not on the forge: ${err.message}`);
           });
           if (st.head !== p.branch) throw new Refused('noPr', `${p.repo}#${p.number} is the PR of ${st.head}, not ${p.branch}`);
           p.url = st.url;
           p.lastSeenHead = st.headCommit;
+          if (readBody) bodies.set(p, st.body ?? '');
+          // The gate before review (`checks.markers`): a marker the PR's UA pages gained is a question, never the owner's.
+          if (settings.checks?.markers) {
+            const m = markersAt(settings, p, st.headCommit);
+            if (m.error) throw new Refused('markers', `the marker check can't run on ${prId(p)}: ${m.error}`);
+            if (m.found.length) throw new Refused('markers', `${prId(p)} adds markers to its UA pages: ${markersMessage(m.found)}. Each is a question: settle it from a source and push, or ask it on the card (stage questions, the card to Blocked)`, { markers: m.found });
+          }
           p.label = (st.labels ?? []).find((x) => Object.values(targetOf(p)?.labels ?? {}).some((y) => y.toLowerCase() === x.toLowerCase())) ?? null;
           addAll(p.reviewersRequested, e.reviewersRequested);
           addAll(p.pipelineCommits, e.commits);
@@ -312,6 +332,17 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
           }
           const asked =(st.reviewRequests ?? []).map((r) => r.login ?? r.team ?? r).filter((r) => !p.reviewersRequested.map(String).includes(String(r)));
           if (asked.length) warnings.push(`${p.repo}#${p.number} has review requests (${asked.join(', ')}): every PR opens with no reviewer, and the expert is called by a person's move`);
+        }
+        // The places gate (D-052, `checks.places`): each place names its source and why it isn't confirmed, and the
+        // description the session wrote lists it. The comments are posted already: the cause is fixed where it is (the
+        // description, the place's source or why), and the record given again posts nothing twice.
+        if (settings.checks?.places) {
+          const problems = placeProblems(result.places);
+          if (problems.length) throw new Refused('places', `${problems.join('; ')}: a place names its page, its claim, its source and why it isn't confirmed`);
+          for (const [p, body] of bodies) {
+            const missing = placesNotListed((result.places ?? []).filter((x) => x.repo === p.repo && Number(x.pr) === p.number), body);
+            if (missing.length) throw new Refused('places', `${prId(p)}'s description doesn't list place${missing.length > 1 ? 's' : ''} ${missing.map((x) => x.id).join(', ')} (by the link to its line comment, or its page): write it there with its source and why`, { places: missing.map((x) => x.id) });
+          }
         }
         // The places' comments are posted before this record, so a place from the code with no reference at a commit is
         // not refused (a retry would post them again): the record stands, the session is told, and `status` reports it.
