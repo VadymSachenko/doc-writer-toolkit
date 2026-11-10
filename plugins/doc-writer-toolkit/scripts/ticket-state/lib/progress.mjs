@@ -37,7 +37,7 @@ const CHAIN_LABELS = {
   build: 'Building the site',
   visualPack: 'Checking the screenshots',
 };
-const STAGE_LABEL = { ...Object.fromEntries(TICKET_ROWS), ...CHAIN_LABELS, close: 'Closing the ticket', resync: 'Re-syncing after a change in UA', answerComments: 'Answering the review comments', styleCheck: 'Style check of hand edits', move: 'Moving the card', follow: 'Following the card', readyForMerge: 'Marking ready for merge' };
+const STAGE_LABEL = { ...Object.fromEntries(TICKET_ROWS), ...CHAIN_LABELS, close: 'Closing the ticket', resync: 'Re-syncing after a change in UA', answerComments: 'Answering the review comments', styleCheck: 'Style check of hand edits', move: 'Moving the card', follow: 'Following the card', readyForMerge: 'Marking ready for merge', untranslated: 'Taking the translated label off', idSync: 'Keeping the heading ids in step' };
 export const labelOf = (stage) => STAGE_LABEL[stage] ?? String(stage);
 
 // ------------------------------------------------------------------ small formats
@@ -60,6 +60,15 @@ const oneLine = (t, max = 160) => {
   const s = String(t ?? '').replace(/\s+/g, ' ').trim();
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 };
+
+// The local date of a time (`YYYY-MM-DD`), the day the owner lives in.
+const localDay = (t) => new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(t));
+
+// The PRs of the tickets closed when `onDate` says that were merged without the translated label (`merged.translated`,
+// which the close records only with the label set): { key, id, url, base }. The report and this file list them.
+export function mergedUntranslated(ledgers, onDate) {
+  return ledgers.filter((l) => l.stages?.close?.status === 'done' && onDate(l.stages.close.at)).flatMap((l) => (l.prs ?? []).filter((p) => p.merged?.translated === false).map((p) => ({ key: l.key, id: prId(p), url: p.url ?? null, base: p.base ?? 'main' })));
+}
 
 // ------------------------------------------------------------------ gates
 
@@ -275,7 +284,7 @@ function runSection(run, flights, now, live, { starts = null, startHours = null,
 }
 
 // The whole file as text. Pure: the same input gives the same text.
-export function renderProgress({ ledgers = [], bad = [], memory = {}, run = null, live = false, flights = [], now = Date.now(), mode = null, stepsText = null, starts = null, startHours = null }) {
+export function renderProgress({ ledgers = [], bad = [], memory = {}, run = null, live = false, flights = [], now = Date.now(), mode = null, stepsText = null, starts = null, startHours = null, translatedLabel = null }) {
   const stale = new Map(Object.entries(memory.stale ?? {}));
   const open = ledgers.filter((l) => l.stages?.close?.status !== 'done');
   const mine = open.filter((l) => l.mode === 'pipeline');
@@ -284,7 +293,10 @@ export function renderProgress({ ledgers = [], bad = [], memory = {}, run = null
   const out = ['# Ticket flow progress', '', `Updated ${hhmm(now)}${mode ? ` · mode ${mode}` : ''}`, '', '## Waiting for you', ''];
   // A colleague's comment the pipeline doesn't take (the trigger words): the owner hands it on or leaves it.
   const others = Object.entries(memory.others ?? {}).filter(([k]) => mine.some((l) => k.startsWith(`${l.key}|`))).flatMap(([k, list]) => list.map((c) => ({ key: k.split('|')[0], pr: k.split('|').slice(1).join('|'), ...c })));
-  if (!gates.length && !others.length) out.push('Nothing waits for you.');
+  // With the translated label: a PR closed today that was merged without it, whose translations may be behind its base.
+  const untranslated = translatedLabel ? mergedUntranslated(ledgers, (t) => Number.isFinite(ms(t)) && localDay(ms(t)) === localDay(now)) : [];
+  if (!gates.length && !others.length && !untranslated.length) out.push('Nothing waits for you.');
+  for (const x of untranslated) out.push(`- ⚠️ ${x.key} — ${x.id}: merged without «${translatedLabel}»: its translations may be behind ${x.base}${x.url ? ` (${x.url})` : ''}`);
   for (const g of gates) {
     const l = mine.find((x) => x.key === g.key);
     out.push(`- 👉 ${g.key}${l?.card?.name ? ` · ${oneLine(l.card.name, 70)}` : ''} — ${g.pr ? `${g.pr}: ` : ''}${GATE_ACTION[g.kind] ?? g.why}${g.recommended ? ` (an expert review is recommended: ${g.recommended})` : ''}`);
@@ -413,7 +425,7 @@ export function writeProgress({ settings, now = Date.now(), st = null, run = nul
     const memory = { ...mem.data, stale: staleFrom(st, mem.data.stale), others: othersFrom(st, mem.data.others), ...(run ? { lastRun: run } : {}) };
     // The first write seeds the gates already standing, so a host that starts using the file isn't told about all of them.
     if (!mem.exists) memory.notified = Object.fromEntries(ledgers.flatMap((l) => gatesOf(l).filter((g) => g.notify).map((g) => [gateId(g), iso(now)])));
-    const text = renderProgress({ ledgers, bad, memory, run: run ?? memory.lastRun ?? null, live: live && Boolean(run), flights, now, mode: settings.mode ?? null, stepsText: readSteps(settings.progress?.stepsFile), starts: startsOf(state), startHours: settings.limits?.startHours ?? null });
+    const text = renderProgress({ ledgers, bad, memory, run: run ?? memory.lastRun ?? null, live: live && Boolean(run), flights, now, mode: settings.mode ?? null, stepsText: readSteps(settings.progress?.stepsFile), starts: startsOf(state), startHours: settings.limits?.startHours ?? null, translatedLabel: settings.forge?.translatedLabel ?? null });
     atomicWrite(progressPath(state), text);
     atomicWrite(memoryPath(state), JSON.stringify(memory, null, 2) + '\n');
     return { written: true, file: progressPath(state) };

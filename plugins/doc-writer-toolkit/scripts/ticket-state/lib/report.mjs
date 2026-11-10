@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import { readAllLedgers } from './ledger.mjs';
 import { readFeed } from './feed.mjs';
 import { reviewCommentFor } from './experts.mjs';
-import { duration as spell } from './progress.mjs';
+import { duration as spell, mergedUntranslated } from './progress.mjs';
 
 // The morning report (design §7): a local file `<state>/reports/<date>.md`, written with no model call. Nothing goes to
 // the tracker or the forge. A separate skill reads it on demand.
@@ -138,6 +138,9 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
   }
   out.push('## Videos waiting for transcripts', '', list(videos), '');
   out.push('## Ready for merge', '', list(ready), '');
+  // With the translated label: a PR merged without it today (the close record keeps whether it had it), whose
+  // translations may be behind its base.
+  if (settings.forge.translatedLabel) out.push(`## Merged without «${settings.forge.translatedLabel}»`, '', list(mergedUntranslated(ledgers, (iso) => Boolean(iso) && Number.isFinite(Date.parse(iso)) && localDate(Date.parse(iso)) === date).map((x) => `${x.url ? `[${x.id}](${x.url})` : x.id} (${x.key}): merged without the label: its translations may be behind ${x.base}`)), '');
 
   for (const w of watched) out.push(`## Cards left in ${w.list}`, '', list(w.cards.map((c) => `[${c.name}](${c.url}), last activity ${c.lastActivity}`)), '');
 

@@ -1,6 +1,7 @@
 import { CARD_STATUS_OF, CHAIN, IN_PROGRESS, PR_ORDER, PR_STAGE_OF_STATUS, ROLE_OF, WAITING } from './stages.mjs';
 import { prId } from './ledger.mjs';
 import { editsOf, mergedEdits, nextEditNumber, parseReply, parseThreadReply, resolveReply, resolveThreadReply, suggestionOf } from './edits.mjs';
+import { IMAGE } from './world.mjs';
 
 // The next-step rule of the ticket flow (context/ticket-flow.md, "The rule"). A pure function of a ledger and what the
 // tracker, the forge, git and the files show now: the world wins over the ledger. First match wins:
@@ -478,6 +479,15 @@ function prStep(l, p, w, out, prs) {
   }
   const target = w.settings.targets.find((t) => t.id === pr.targets?.[0]) ?? w.settings.targets.find((t) => t.repo === pr.repo);
   const head = world.headCommit;
+  // The translated label (`forge.translatedLabel`), at any stage: UA changed in words since the head it was put on for
+  // (a page, not an image; not an id-only change, not the runner's own id commit) takes it off, with no model step. The
+  // owner's move, EN and images leave it.
+  const tr = w.settings.forge?.translatedLabel ? pr.translated : null;
+  if (tr?.head && head && tr.head !== head) {
+    const changed = changedAround(pr, w, target, tr.head, head);
+    if (changed === null) out.notes.push(`${id}: translated at ${String(tr.head).slice(0, 7)}, the head is ${String(head).slice(0, 7)}, and git here can't compare them`);
+    else if (changed.some((f) => !IMAGE.test(f))) return step('untranslated', { pr: id, head, since: tr.head, pages: changed.filter((f) => !IMAGE.test(f)).length });
+  }
   // Row 8: commits the pipeline didn't make (neither in pipelineCommits nor from the base).
   const hand = handCommits(pr, head, w);
   if (hand === null) out.notes.push(`${id}: the head ${String(head ?? '').slice(0, 7)} is not fetched here: hand edits and stale chain stages are not checked`);
@@ -490,10 +500,13 @@ function prStep(l, p, w, out, prs) {
     // image, and no re-sync.
     const ready = pr.readyForMerge?.at(-1);
     if (p.stage === 'readyForMerge' && ready && head && ready.head !== head) {
-      const changed = w.git?.changedUnder(target, ready.head, head, uaRoots(pr, w, target), baseOf(pr, target)) ?? null;
+      const changed = changedAround(pr, w, target, ready.head, head);
       if (changed === null) out.notes.push(`${id}: ready for merge at ${String(ready.head).slice(0, 7)}, the head is ${String(head).slice(0, 7)}, and git here can't compare them`);
       else if (changed.length) return step('move', { pr: id, to: 'finalReview', uaChanged: changed.length, since: ready.head });
       else if (hand.length) {
+        // A hand edit of an EN page: its heading ids kept in step with UA first, then ready for the head that gives.
+        const ids = idSyncStep(pr, w, target, head, hand, out);
+        if (ids) return ids;
         const after = readyAgain(pr, w, target, head, out);
         if (after) return after;
       }
@@ -502,8 +515,7 @@ function prStep(l, p, w, out, prs) {
   // The approval (a person's move of the card to In translation) saw a head; a word change in UA since then is reported.
   // An id-only change (heading ids, link fragments) keeps it (D-073).
   if (pr.approval?.head && head && pr.approval.head !== head && ['translation', 'readyForMerge'].includes(p.stage)) {
-    const roots = uaRoots(pr, w, target);
-    const changed = w.git?.changedUnder(target, pr.approval.head, head, roots, baseOf(pr, target)) ?? null;
+    const changed = changedAround(pr, w, target, pr.approval.head, head);
     const v = out.prs.find((x) => x.id === id);
     if (changed?.length) {
       v.approvalStale = changed.length;
@@ -514,6 +526,10 @@ function prStep(l, p, w, out, prs) {
   // and the target's card members onto it (lib/experts.mjs). A request a move already took along (a reviewer who hasn't
   // answered when a person moved the card back) doesn't move it again.
   if (p.stage === 'finalReview' && newReviewRequests(pr, world).length) return step('move', { pr: id, to: 'smeReview' });
+  // The owner's reply in the thread of a published id the runner kept, asking to rename it instead
+  // (`forge.idComments.rename`): the rename, with no model step, before the other comments.
+  const rename = renameAsked(pr, world, w);
+  if (rename.length) return step('idSync', { pr: id, head, commits: [], rename });
   // Row 11.
   const approved = p.stage === 'smeReview' ? expertApproved(l, p) : null;
   if (world.newComments?.length) {
@@ -525,6 +541,11 @@ function prStep(l, p, w, out, prs) {
     // The questions to the owner still open from the PR's last summaries: the session says which are left (lib/pr-labels.mjs).
     const asked = pr.openQuestions?.items?.length ? { openQuestions: pr.openQuestions.items } : {};
     return step('answerComments', { pr: id, comments: world.newComments.length, owner: owner.length, reviewer, ...ownerForms(l, pr, world.newComments, w), ...ask, ...asked });
+  }
+  // After the translation, a hand edit of an EN page at any other stage: its heading ids kept in step with UA (`idSync`).
+  if (hand?.length && p.stage !== 'readyForMerge') {
+    const ids = idSyncStep(pr, w, target, head, hand, out);
+    if (ids) return ids;
   }
   // Row 11b, the style check: hand commits that changed UA and no style check read are reviewed while the PR is in the
   // owner's queue (D-081, D-082), each once, whatever the head (the check records the shas it read). A ready PR went
@@ -604,6 +625,44 @@ function handToCheck(pr, hand, w, target, head, out, { grace = false } = {}) {
 // How long a hand commit waits before its style check (the owner's push, then the move).
 export const GRACE_MS = 10 * 60000;
 
+// After the translation (`forge.translatedLabel` on, and `pr.translated` still matching UA), the hand commits since it
+// that changed an EN page (a page outside the repo's UA roots) and no id check read: the runner checks their pages'
+// heading ids against UA (`idSync`, no model). Oldest first, each with its pages. A commit git here can't diff is noted
+// and left for a later check.
+function idSyncStep(pr, w, target, head, hand, out) {
+  const tr = w.settings.forge?.translatedLabel ? pr.translated : null;
+  if (!tr?.head || !hand.length || tr.head === head) return null;
+  const id = prId(pr);
+  const checked = (sha) => (pr.idChecked ?? []).some((x) => sha.startsWith(String(x)) || String(x).startsWith(sha));
+  const after = w.git?.commitsBetween?.(target, tr.head, head) ?? null;
+  if (after === null) return null;
+  const todo = hand.filter((sha) => !checked(sha) && after.includes(sha));
+  const ua = w.settings.targets.filter((t) => t.repo === pr.repo).map((t) => t.uaRoot);
+  const commits = [];
+  for (const sha of [...todo].reverse()) {
+    const changed = w.git?.changedUnder(target, `${sha}^`, sha, ['.'], baseOf(pr, target)) ?? null;
+    if (changed === null) out.notes.push(`${id}: the hand commit ${sha.slice(0, 7)} can't be diffed here: its heading ids are not checked yet`);
+    else {
+      const pages = changed.filter((f) => /\.mdx?$/.test(f) && !ua.some((r) => f.startsWith(r)));
+      if (pages.length) commits.push({ sha, pages });
+    }
+  }
+  return commits.length ? step('idSync', { pr: id, head, commits }) : null;
+}
+
+// The owner's replies in the threads of the published ids the runner kept (`pr.idComments`, kind `kept`) that ask for
+// the rename (`forge.idComments.rename`, after the trigger word when the host has one): [{ comment, reply, page, id }].
+const plainReply = (t) => String(t ?? '').replace(/[`«»"'.!]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+function renameAsked(pr, world, w) {
+  const phrase = w.settings.idComments?.rename;
+  const kept = (pr.idComments ?? []).filter((c) => c.kind === 'kept' && !c.renamed && c.commentId !== undefined && c.commentId !== null);
+  if (!w.settings.forge?.translatedLabel || !phrase || !kept.length) return [];
+  return (world.newComments ?? []).flatMap((c) => {
+    const k = c.by === 'owner' && c.kind === 'review-comment' ? kept.find((x) => String(x.commentId) === String(c.root)) : null;
+    return k && plainReply(c.body) === plainReply(phrase) ? [{ comment: k.commentId, reply: c.id, updatedAt: c.updatedAt ?? null, page: k.page, ua: k.ua, id: k.old }] : [];
+  });
+}
+
 // The latest approving review of a PR in the expert's review, when one of its experts approved since it entered the review;
 // none while any expert's last verdict asks for changes, whatever its time (lib/world.mjs `reviewerSignals`) (an older
 // approval, of a review before a move back, moves nothing), and no review asks for changes. With the head it approved.
@@ -667,7 +726,7 @@ function resyncAfterReady(pr, w, target, head, out) {
   const id = prId(pr);
   const ready = pr.readyForMerge.at(-1);
   if (ready.head !== head) {
-    const changed = w.git?.changedUnder(target, ready.head, head, uaRoots(pr, w, target), baseOf(pr, target)) ?? null;
+    const changed = changedAround(pr, w, target, ready.head, head);
     if (changed === null) {
       out.notes.push(`${id}: ready for merge at ${String(ready.head).slice(0, 7)}, the head is ${String(head).slice(0, 7)}, and git here can't compare them`);
       return null;
@@ -699,7 +758,6 @@ function readyAgain(pr, w, target, head, out) {
 function chainStep(l, p, w, out, target, head) {
   const { pr } = p;
   const id = prId(pr);
-  const roots = uaRoots(pr, w, target);
   // Ready for merge before, every chain stage done: the UA changes since then are re-synced as one range, not by the
   // chain again.
   if (pr.readyForMerge?.length && CHAIN.every((s) => pr.chain?.[s]?.status === 'done')) return resyncAfterReady(pr, w, target, head, out);
@@ -709,7 +767,7 @@ function chainStep(l, p, w, out, target, head) {
     const numbered = stage === 'enReview' ? { nextEdit: nextEditNumber(pr) } : {};
     if (!rec || rec.status !== 'done') return step(stage, { pr: id, head, ...numbered });
     if (rec.head && head && rec.head !== head) {
-      const changed = w.git?.changedUnder(target, rec.head, head, roots, baseOf(pr, target)) ?? null;
+      const changed = changedAround(pr, w, target, rec.head, head);
       if (changed === null) out.notes.push(`${id}: ${stage} saw ${String(rec.head).slice(0, 7)}, the head is ${String(head).slice(0, 7)}, and git here can't compare them`);
       else if (changed.length) return step(stage, { pr: id, head, stale: changed.length, ...numbered });
     }
@@ -720,6 +778,35 @@ function chainStep(l, p, w, out, target, head) {
 
 // The PR's base: a page or an image the base brought into the branch (a merge of the base) is never the PR's change.
 const baseOf = (pr, target) => pr.base ?? target?.base ?? 'main';
+
+// The files under the PR's UA roots that changed between two of its heads (`changedUnder`), read around the runner's
+// own id commits (`pr.idCommits`, the `idSync` step): such a commit changes heading ids and the links to them only,
+// which `changedUnder` counts (a changed id is no id-only change), so the range is read in pieces that leave each out,
+// `from..c^` and `c..to`. With none in the range, the range as one. Null when git here can't tell.
+function changedAround(pr, w, target, from, to) {
+  const roots = uaRoots(pr, w, target);
+  const base = baseOf(pr, target);
+  const ids = (pr.idCommits ?? []).map((c) => String(c.sha ?? c));
+  if (!ids.length) return w.git?.changedUnder(target, from, to, roots, base) ?? null;
+  const between = w.git?.commitsBetween?.(target, from, to) ?? null;
+  if (between === null) return null;
+  const skip = [...between].reverse().filter((sha) => ids.some((x) => sha.startsWith(x) || x.startsWith(sha)));
+  if (!skip.length) return w.git?.changedUnder(target, from, to, roots, base) ?? null;
+  const pieces = [];
+  let start = from;
+  for (const c of skip) {
+    pieces.push([start, `${c}^`]);
+    start = c;
+  }
+  pieces.push([start, to]);
+  const out = new Set();
+  for (const [a, b] of pieces) {
+    const piece = w.git?.changedUnder(target, a, b, roots, base) ?? null;
+    if (piece === null) return null;
+    for (const f of piece) out.add(f);
+  }
+  return [...out];
+}
 
 function uaRoots(pr, w, target) {
   const roots = (pr.targets ?? []).map((tid) => w.settings.targets.find((t) => t.id === tid)?.uaRoot).filter(Boolean);
