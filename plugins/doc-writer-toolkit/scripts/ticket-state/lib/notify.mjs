@@ -71,7 +71,7 @@ export function notificationsOf({ morning, run, startPass = null, jobs = [], err
     const parts = [
       morning.handedOn ? `${handed} group(s) handed on, ${starts} start(s) handed on` : `${done} step(s) done, ${failed} failed, ${started} started`,
       wip ? `${wip.inProgress} in progress, ${wip.waiting} waiting` : null,
-      a ? `week ${a.used}% of ${a.cap}% allowed` : 'no usage reading',
+      a?.unlimited ? 'usage guard off' : a ? `week ${a.used}% of ${a.cap}% allowed` : 'no usage reading',
     ].filter(Boolean);
     out.push({ key: `morning:${today}`, urgent: false, title: `Ticket flow${morning.mode && morning.mode !== 'on' ? ` (${morning.mode})` : ''}: the morning report`, text: `${parts.join('; ')}. /ticket-report` });
   }

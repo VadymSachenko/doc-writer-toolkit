@@ -9,6 +9,8 @@ import { loadSettings, validateSettings } from '../lib/settings.mjs';
 import { estimatesOf, pageKey, related, remainingOf } from '../lib/limits.mjs';
 import { takeLock } from '../lib/locks.mjs';
 import { renderReport } from '../lib/report.mjs';
+import { digestRun, renderProgress } from '../lib/progress.mjs';
+import { notificationsOf } from '../lib/notify.mjs';
 
 // AC-2 (the limits), D-067 (the allowance and the estimates), D-071 (priority), AC-5 (the intake), and the settings.
 
@@ -122,6 +124,20 @@ test('D-067: no estimate for a size yet means one ticket at a time; measured cos
   assert.deepEqual(est.newPage, { percent: 8, source: 'settings', tickets: 0 });
   assert.equal(est.newSection, null);
   assert.equal(remainingOf({ triage: { size: 'newPage' }, runs: [{ weekPercent: { before: 0, after: 7.5 } }] }, est), 1.6, 'never below a fifth of the estimate');
+});
+
+test('limits.usageGuard off: no estimate holds a start, and the report, the progress file and the morning note say the guard is off', async () => {
+  const w = world({ extra: { limits: { usageGuard: false, estimates: { edit: 60 } } } });
+  inProgress(w, 1);
+  ready(w, 501);
+  ready(w, 502, { size: 'newSection' });
+  const st = await w.status({ usage: null });
+  assert.deepEqual(st.startable.map((g) => g.group), ['501', '502'], 'neither an estimate above what is left nor no estimate at all holds a start');
+  assert.equal(st.allowance.unlimited, true);
+  assert.match(renderReport({ settings: w.settings, st, date: '2026-11-10', ledgers: [] }), /Usage guard off \(`limits\.usageGuard`\)/);
+  assert.match(renderProgress({ ledgers: [], now: NOW, mode: 'on', run: digestRun({ out: {}, st, now: NOW }) }), /Usage guard off/);
+  const morning = notificationsOf({ morning: { mode: 'on', ran: [], starts: [], after: { allowance: st.allowance } }, today: '2026-11-10' });
+  assert.match(morning[0].text, /usage guard off/);
 });
 
 test('D-071: high first, then the oldest within a level; a lower level waits while a higher one is held back', async () => {

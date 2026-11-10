@@ -187,7 +187,7 @@ export function startable({ tickets, groups, settings, allowance, estimates, inW
     return est.every((x) => typeof x === 'number') ? round(est.reduce((a, b) => a + b, 0)) : null;
   };
   let committed = round(inWork.reduce((sum, l) => sum + (remainingOf(l, estimates) ?? 0), 0) + flying.reduce((sum, g) => sum + (estimateOf(g) ?? 0), 0));
-  const budget = allowance ? { remaining: allowance.remaining, cap: allowance.cap, used: allowance.used, day: allowance.day, inWork: committed, inWorkUnknown: unknown } : null;
+  const budget = allowance ? { remaining: allowance.remaining, cap: allowance.cap, used: allowance.used, day: allowance.day, inWork: committed, inWorkUnknown: unknown, ...(allowance.unlimited ? { unlimited: true } : {}) } : null;
 
   const out = [];
   const notStarted = [];
@@ -221,8 +221,11 @@ export function startable({ tickets, groups, settings, allowance, estimates, inW
     if (inProgress + g.size > limits.inProgress && !(g.size > limits.inProgress && inProgress === 0)) {
       why.push(`${inProgress} in progress + ${g.size} > ${limits.inProgress}`);
     }
+    // With the usage guard off (`unlimited`), no estimate holds a start: no run measures one, and nothing is spent.
     if (!allowance) why.push("the day's allowance is unknown (no usage reading)");
-    else if (estimate === null) {
+    else if (allowance.unlimited) {
+      /* only the ticket limits above */
+    } else if (estimate === null) {
       if (inWork.length || out.length) why.push(`no cost estimate for size ${g.members.filter((m, i) => est[i] === null).map((m) => m.size ?? 'unknown').join(', ')} yet: one ticket at a time`);
       else if (allowance.remaining <= 0) why.push(`the day's allowance is used (${allowance.used}% of ${allowance.cap}%)`);
     } else if (committed + estimate > allowance.remaining) {
