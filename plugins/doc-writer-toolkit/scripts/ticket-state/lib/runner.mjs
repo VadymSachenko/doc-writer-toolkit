@@ -359,6 +359,14 @@ export const startOrigin = (step) => (step.startedBy === 'schedule' ? 'schedule'
 
 // ------------------------------------------------------------------ one step's session
 
+// The PR's own pages that changed in a range (`files`, from the rule), and how to read just them: a merge of the base in
+// the range (`forge.keepFresh` makes one each time the base moves) brings the base's whole diff into
+// `git diff <since>..<head>`, which is not the PR's to re-sync.
+function pagesRead(step, settings) {
+  if (!settings.keepFresh || !step.files?.length || !step.since) return '';
+  return `; the PR's own pages that changed: ${step.files.join(', ')}. Read only them: \`git diff ${step.since}..${step.head ?? 'HEAD'} -- <those pages>\` (a merge of the base in the range brings the base's own changes, which are not the PR's: a block the base brought has its EN from the base)`;
+}
+
 // What a session is told: the ticket, the stage, where the settings and the ticket's status are, and how to record.
 export function briefFor(step, settings) {
   const root = settings.root;
@@ -379,7 +387,7 @@ export function briefFor(step, settings) {
     step.interrupted ? 'The last run of this stage was interrupted: read what it left and finish it.' : null,
     step.withoutVideo ? 'The owner moved the card back before every video part had its transcript: go on without the video, and say so in the plan comment.' : null,
     step.changed ? 'The section plan file changed after its gate: post the new plan and move the card back to Blocked (a new gate).' : null,
-    step.stage === 'resync' && step.since ? `UA changed since ready for merge at ${step.since}, and the owner moved the card to In translation: re-sync the blocks changed in ${step.since}..${step.head ?? 'HEAD'}, the whole range at once.` : null,
+    step.stage === 'resync' && step.since ? `UA changed since ready for merge at ${step.since}, and the owner moved the card to In translation: re-sync the blocks changed in ${step.since}..${step.head ?? 'HEAD'}, the whole range at once${pagesRead(step, settings)}.` : null,
     ...resyncItemLines(step.items),
     step.stage === 'baseFix' ? `The runner merged origin/${step.base} into the branch, and it conflicted in ${step.files?.length ?? 0} file(s): ${(step.files ?? []).join(', ')}. The merge is in progress in the worktree, with the conflicts marked in those files: resolve each one so it keeps the branch's change and the base's, then \`git -C <worktree> add <file>\`. Never commit, merge, abort the merge or push: the runner commits the merge and pushes it once no file is left unmerged and no conflict marker is staged.` : null,
     step.nextEdit ? (rounds ? `Number the edits you record on this PR from ${step.nextEdit}: the numbers stay in the ledger (no posted text shows them), and the numbers already there keep their items.` : `A numbered list of edits you post on this PR starts at ${step.nextEdit}: the numbers already posted keep their items.`) : null,
@@ -393,7 +401,7 @@ export function briefFor(step, settings) {
     ...(step.stage === 'styleCheck' ? styleCheckLines(step.commits, step.fixes, { rounds }) : []),
     ...(rounds ? roundLines(step) : []),
     rounds && settings.triggerWords?.length && ['answerComments', 'styleCheck', 'enReview', 'pr'].includes(step.stage) ? `The owner addresses the pipeline with a comment that starts with ${settings.triggerWords.map((w) => `\`${w}:\``).join(' or ')}: a line comment that tells the owner how to ask for something says so with that word.` : null,
-    step.stale ? `The UA pages changed after this stage last ran (${step.stale} file(s)): run it again on the current head.` : null,
+    step.stale ? `The UA pages changed after this stage last ran (${step.stale} file(s)): run it again on the current head${pagesRead(step, settings)}.` : null,
     ...buildLines(step),
     step.cards ? `Cards, highest priority first:\n${step.cards.map((c) => `- ${c.key}: ${c.url ?? c.shortLink} (${c.priority})`).join('\n')}` : null,
     step.worktrees?.length ? worktreeLines(step.worktrees) : null,
@@ -1756,7 +1764,20 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
     if (m.error) return failed(m.error);
     // The worktree's own fetch found the base already in the branch: nothing to merge, and the status, which reads the
     // same refs, agrees from now on.
-    if (m.upToDate) return moved(`${pr.branch} already has origin/${into} at ${String(m.tip).slice(0, 7)}: nothing merged`);
+    if (m.upToDate) {
+      // A merge recorded running (its commit is among the pipeline's own) that a run which stopped after the push never
+      // recorded done: the branch has it, so it is recorded now, and the rule goes on from it.
+      const left = pr.steps?.baseMerge;
+      if (left?.status === 'running' && head && (left.result?.commits ?? []).includes(head)) {
+        try {
+          for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'done', pr: step.pr, head, result: JSON.stringify({ merged: { ...(left.result?.merged ?? {}), commit: head }, commits: [head] }), now: clock() });
+        } catch (e) {
+          return failed(`the base merge ${head.slice(0, 7)} is on the branch, but its record was refused: ${String(e.message).slice(0, 300)}`);
+        }
+        return ran(`the base merge ${head.slice(0, 7)}, pushed by a run that stopped before its record, recorded`);
+      }
+      return moved(`${pr.branch} already has origin/${into} at ${String(m.tip).slice(0, 7)}: nothing merged`);
+    }
     const warnings = [];
     const readyOff = async () => {
       if (!settings.forge.readyLabel || pr.stage !== 'readyForMerge') return;
@@ -1768,15 +1789,30 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
     };
     if (m.conflict) {
       try {
-        for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'done', pr: step.pr, head, result: JSON.stringify({ conflict: { base: m.tip, files: m.conflict } }), now: clock() });
+        for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'done', pr: step.pr, head, result: JSON.stringify({ conflict: { base: m.tip, files: m.conflict, ...(m.unresolvable?.length ? { unresolvable: m.unresolvable } : {}) } }), now: clock() });
       } catch (e) {
         return failed(`the merge of origin/${into} conflicted and was aborted, but its record was refused: ${String(e.message).slice(0, 300)}`);
       }
       await readyOff();
-      return ran([`the merge of origin/${into} (${String(m.tip).slice(0, 7)}) conflicted in ${m.conflict.join(', ')}: aborted, nothing pushed; a session resolves it`, ...warnings].join('; '));
+      const who = m.unresolvable?.length ? `the owner resolves it, since it needs a delete or a move, which no session makes: ${m.unresolvable.map((u) => `${u.path} (${u.kind})`).join(', ')}` : 'a session resolves it';
+      return ran([`the merge of origin/${into} (${String(m.tip).slice(0, 7)}) conflicted in ${m.conflict.join(', ')}: aborted, nothing pushed; ${who}`, ...warnings].join('; '));
+    }
+    // The merge commit is the pipeline's own before it is pushed (a `running` record), so a run that stops between the
+    // push and the record never leaves it to read as a hand edit; the next run records it done (above).
+    try {
+      for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'running', pr: step.pr, result: JSON.stringify({ merged: { base: m.tip, commit: m.merged, behind: step.behind ?? null }, commits: [m.merged] }), now: clock() });
+    } catch (e) {
+      abortMerge(tree.path, head);
+      return failed(`the base merge ${m.merged.slice(0, 7)} was not pushed: its record was refused: ${String(e.message).slice(0, 300)}`);
     }
     const push = (io.pushMerge ?? pushMerge)(tree.path, { branch: pr.branch, head });
-    if (!push.ok) return push.rejected ? moved(`the push of the base merge was rejected (${String(push.error).slice(0, 200)}): someone pushed to ${pr.branch}; the status is read again`) : failed(`the push of the base merge: ${push.error}`);
+    if (!push.ok && push.moved) {
+      // Not a failure: the `running` record is closed with no run, so nothing counts it and nothing resumes it.
+      const note = `the push of the base merge was refused (${String(push.error).slice(0, 200)}), and ${pr.branch} is no longer at ${head.slice(0, 7)}: someone pushed to it; the status is read again`;
+      for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'failed', pr: step.pr, note, now: clock() }).catch(() => {});
+      return moved(note);
+    }
+    if (!push.ok) return failed(`the push of the base merge: ${push.error}`);
     try {
       for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'done', pr: step.pr, head: m.merged, result: JSON.stringify({ merged: { base: m.tip, commit: m.merged, behind: step.behind ?? null }, commits: [m.merged] }), now: clock() });
     } catch (e) {
@@ -1805,8 +1841,19 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
     if (step.head && tree.head && tree.head !== step.head) return moved(`the branch is at ${tree.head.slice(0, 7)}, not ${step.head.slice(0, 7)}: the status is read again`);
     const into = tree.base ?? step.base;
     const m = (io.mergeBaseIn ?? mergeBaseIn)(tree.path, { base: into, branch: pr.branch, commit: false });
-    if (m.conflict) return null;
+    if (m.conflict && !m.unresolvable?.length) {
+      // What the session's resolution may stage: what the merge staged by itself, and the conflicting files.
+      step.mergeAllowed = [...new Set([...(m.staged ?? []), ...m.conflict])];
+      return null;
+    }
     abortMerge(tree.path, step.head);
+    // The base moved since, and now conflicts in a way no edit of the files resolves: recorded, so the rule hands it to
+    // the owner; no session.
+    if (m.conflict) {
+      const note = `the merge of origin/${into} now conflicts in ${m.unresolvable.map((u) => `${u.path} (${u.kind})`).join(', ')}, which needs a delete or a move: no session; the owner resolves it`;
+      for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: 'baseMerge', status: 'done', pr: step.pr, head: step.head, result: JSON.stringify({ conflict: { base: m.tip, files: m.conflict, unresolvable: m.unresolvable } }), now: clock() }).catch(() => {});
+      return moved(note);
+    }
     if (m.error) return failedBeforeSession(step, `the merge for the session: ${m.error}`);
     const note = `origin/${into} no longer conflicts with ${pr.branch}: no session; the runner merges it at the next step`;
     for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: 'baseMerge', status: 'failed', pr: step.pr, note, now: clock() }).catch(() => {});
@@ -1829,10 +1876,22 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
       say({ kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, role: step.role, outcome: 'failed', note: note.slice(0, 300) });
       return 'failed';
     };
-    const f = (io.finishMerge ?? finishMerge)(tree.path, { head: step.head });
+    const f = (io.finishMerge ?? finishMerge)(tree.path, { head: step.head, allowed: step.mergeAllowed ?? null });
     if (f.error) return fail(`the resolved merge was not committed: ${f.error}`);
+    // The merge commit is the pipeline's own before the push (a `running` record, as in `runBaseMergeStep`). A push that
+    // fails puts the conflict's record back, so the next step is this one again and its failures count.
+    const conflict = pr.steps?.baseMerge?.result?.conflict ?? { base: step.tip ?? null, files: step.files ?? [] };
+    try {
+      for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: 'baseMerge', status: 'running', pr: step.pr, result: JSON.stringify({ merged: { base: step.tip ?? null, commit: f.merged, resolved: step.files ?? [] }, commits: [f.merged] }), now: clock() });
+    } catch (e) {
+      abortMerge(tree.path, step.head);
+      return fail(`the resolved merge ${f.merged.slice(0, 7)} was not pushed: its record was refused: ${String(e.message).slice(0, 300)}`);
+    }
     const push = (io.pushMerge ?? pushMerge)(tree.path, { branch: pr.branch, head: step.head });
-    if (!push.ok) return fail(`the push of the resolved merge: ${push.error}`);
+    if (!push.ok) {
+      for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: 'baseMerge', status: 'done', pr: step.pr, head: step.head, result: JSON.stringify({ conflict }), now: clock() }).catch(() => {});
+      return fail(`the push of the resolved merge: ${push.error}`);
+    }
     try {
       for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: 'baseMerge', status: 'done', pr: step.pr, head: f.merged, result: JSON.stringify({ merged: { base: step.tip ?? null, commit: f.merged, resolved: step.files ?? [] }, commits: [f.merged] }), now: clock() });
     } catch (e) {

@@ -123,9 +123,10 @@ const gitFetch = (cwd, refspecs) => {
   }
 };
 
-// The PR's own change to one file between a merge-base and a head, as `git patch-id --stable` reads its diff with no
-// context lines: the same id for the same change wherever its lines stand. '' when the PR didn't change the file, null
-// when git can't tell (then the file counts).
+// The change to one file from a merge-base to a head (the PR's own, plus whatever the PR merged in from that base on),
+// as `git patch-id --stable` reads its diff with no context lines: the same id for the same change wherever its lines
+// stand. `patch-id` ignores whitespace, so two changes that differ in whitespace only get the same id. '' when the file
+// didn't change, null when git can't tell (then the file counts).
 const ownPatch = (cwd, from, to, file) => {
   const diff = gitOut(cwd, ['diff', '-U0', '--no-color', '--no-ext-diff', '--no-renames', from, to, '--', file]);
   if (diff === null) return null;
@@ -161,7 +162,8 @@ export function makeGit(settings, opts = {}) {
   // With `forge.keepFresh`, a file the PR and the base both changed counts only when the PR's own change to it differs
   // between the two heads: its diff against the merge-base, with no context lines, compared by `git patch-id`, which
   // reads no line number. So a block the base changed in a page of the PR's, merged in cleanly, is the base's change, not
-  // the PR's; a block the PR changed, by hand or by a conflict's resolution, still counts.
+  // the PR's; a block the PR changed, by hand or by a conflict's resolution, still counts, unless the edit changed
+  // whitespace only (`patch-id` ignores whitespace, so such an edit doesn't count in such a page).
   const ownOnly = (cwd, from, to, base, files) => {
     const ref = base && gitOut(cwd, ['rev-parse', '--verify', '-q', `refs/remotes/origin/${base}`]) !== null ? `refs/remotes/origin/${base}` : null;
     const mbFrom = ref && gitOut(cwd, ['merge-base', from, ref])?.trim();

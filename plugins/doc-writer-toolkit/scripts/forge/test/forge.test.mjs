@@ -1261,7 +1261,7 @@ test('normalizePr: a read by number gives the base tip and the head\'s CI checks
   assert.equal('baseCommit' in normalizePr(base), false);
   const run = (name, status, conclusion = null) => ({ __typename: 'CheckRun', name, status, conclusion });
   const ctx = (context, state) => ({ __typename: 'StatusContext', context, state });
-  const withChecks = (state, nodes) => normalizePr({ ...base, baseRef: { target: { oid: 'b'.repeat(40) } }, commits: { nodes: [{ commit: { oid: 'c'.repeat(40), statusCheckRollup: state ? { state, contexts: { nodes } } : null } }] } });
+  const withChecks = (state, nodes) => normalizePr({ ...base, baseRef: { target: { oid: 'b'.repeat(40) } }, headRef: { target: { oid: 'c'.repeat(40), statusCheckRollup: state ? { state, contexts: { nodes } } : null } } });
   const red = withChecks('FAILURE', [run('build', 'COMPLETED', 'SUCCESS'), run('links', 'COMPLETED', 'FAILURE'), ctx('preview', 'ERROR'), run('lint', 'COMPLETED', 'SKIPPED')]);
   assert.equal(red.baseCommit, 'b'.repeat(40));
   assert.deepEqual(red.checks, { commit: 'c'.repeat(40), state: 'failure', failing: ['links', 'preview'], pending: [] });
@@ -1269,6 +1269,10 @@ test('normalizePr: a read by number gives the base tip and the head\'s CI checks
   assert.deepEqual(withChecks('SUCCESS', [run('build', 'COMPLETED', 'SUCCESS'), run('lint', 'COMPLETED', 'NEUTRAL')]).checks.state, 'success');
   // No check reported on the head yet (a push the forge hasn't started CI for, or a repository with none).
   assert.deepEqual(withChecks(null, []).checks, { commit: 'c'.repeat(40), state: null, failing: [], pending: [] });
+  // A required check that never started (EXPECTED) is pending, never a pass.
+  assert.deepEqual(withChecks('EXPECTED', [ctx('deploy', 'EXPECTED')]).checks, { commit: 'c'.repeat(40), state: 'pending', failing: [], pending: ['deploy'] });
+  // A head branch GitHub doesn't show (deleted): no commit, so the caller reads no checks of the PR's head.
+  assert.deepEqual(normalizePr({ ...base, baseRef: null, headRef: null }).checks, { commit: null, state: null, failing: [], pending: [] });
 });
 
 test('prState asks GitHub for the base tip and the CI checks only with forge.keepFresh; the read is as before without it', async () => {
@@ -1280,7 +1284,8 @@ test('prState asks GitHub for the base tip and the CI checks only with forge.kee
     return calls.find((c) => c.op === 'PrByNumber').query;
   };
   assert.doesNotMatch(await asked({}), /statusCheckRollup|baseRef \{/);
-  assert.match(await asked({ keepFresh: true }), /baseRef \{ target \{ oid \} \}[\s\S]*statusCheckRollup/);
+  assert.match(await asked({ keepFresh: true }), /baseRef \{ target \{ oid \} \}[\s\S]*headRef \{ target \{ \.\.\. on Commit \{ oid statusCheckRollup/);
+  assert.doesNotMatch(await asked({ keepFresh: true }), /commits\(last: 1\)/, "the head branch's own tip, not the PR's last listed commit");
   assert.equal('keepFresh' in validateForge(settingsJson().forge, settingsJson().targets), false);
 });
 

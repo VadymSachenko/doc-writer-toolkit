@@ -11,7 +11,7 @@
 //              mergeCommit|null, mergedAt|null, closedAt|null, createdAt, updatedAt, author|null,
 //              reviewDecision|null, mergeable, mergeState, reviewRequests: [{ login }|{ team }], labels: [names],
 //              assignees: [logins], baseCommit?, checks? }
-//            (`pr` alone gives `baseCommit`, the base branch's tip now, and `checks`, the CI of the head commit:
+//            (`pr` alone gives `baseCommit`, the base branch's tip now, and `checks`, the CI of the head branch's tip, its `commit` for the caller to compare with `headCommit`:
 //            { commit, state: 'success'|'failure'|'pending'|null, failing: [names], pending: [names] }, `state` null
 //            when no check reported on it; an adapter that can't tell leaves both out)
 //   Event    { id, event, createdAt, actor|null, number, label?, reviewer?, team?, requester?, commit? }

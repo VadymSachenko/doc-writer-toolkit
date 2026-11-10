@@ -23,11 +23,13 @@ const PR_FIELDS = `
 `;
 
 // With `forge.keepFresh` (`fresh`), one PR read by number also gives its base branch's tip now (`baseRef`, not
-// `baseRefOid`, which GitHub keeps from the PR's last update) and the CI checks of its head commit: what keeping the
-// branch up to date with its base reads. Without it the read is as before, so a token that can't read checks reads PRs.
+// `baseRefOid`, which GitHub keeps from the PR's last update) and the CI checks of the head branch's own tip
+// (`headRef`, not the PR's last listed commit, which can lag a push): what keeping the branch up to date with its base
+// reads. The caller compares the checks' commit with `headCommit`. Without it the read is as before, so a token that
+// can't read checks reads PRs.
 const PR_FRESH_FIELDS = `
   baseRef { target { oid } }
-  commits(last: 1) { nodes { commit { oid statusCheckRollup { state contexts(first: 100) { nodes { __typename ... on CheckRun { name status conclusion } ... on StatusContext { context state } } } } } } }
+  headRef { target { ... on Commit { oid statusCheckRollup { state contexts(first: 100) { nodes { __typename ... on CheckRun { name status conclusion } ... on StatusContext { context state } } } } } } }
 `;
 
 const Q = {
@@ -169,7 +171,7 @@ export function normalizePr(n) {
     headRepository: n.headRepository?.nameWithOwner ?? null,
     // Only from a read by number, which asks for them.
     ...(n.baseRef !== undefined ? { baseCommit: n.baseRef?.target?.oid ?? null } : {}),
-    ...(n.commits !== undefined ? { checks: checksOf(n.commits?.nodes?.[0]?.commit) } : {}),
+    ...(n.headRef !== undefined ? { checks: checksOf(n.headRef?.target) } : {}),
   };
 }
 

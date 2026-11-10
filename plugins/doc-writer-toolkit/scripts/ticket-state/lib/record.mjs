@@ -508,7 +508,14 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         const c = result.conflict;
         if (c !== undefined && (!c || typeof c !== 'object' || !Array.isArray(c.files) || !c.files.length)) throw new CliError('baseMerge: "conflict" is { "base", "files": [paths] }', { code: 2 });
         if (c === undefined && !result.commits?.length) throw new CliError('baseMerge: give the merge commit ("commits") or the "conflict"', { code: 2 });
+        if (c?.unresolvable !== undefined && (!Array.isArray(c.unresolvable) || c.unresolvable.some((u) => typeof u?.path !== 'string' || typeof u?.kind !== 'string'))) throw new CliError('baseMerge: "conflict.unresolvable" is [{ "path", "kind" }]', { code: 2 });
         record.head = String(given);
+        // The PR's conflicts with its base, counted once for each head and base tip (`baseConflicts`): never reset by a
+        // merge that went through, so a base that keeps conflicting goes to the owner after a few (lib/rule.mjs).
+        if (c) {
+          const n = pr.baseConflicts ?? { count: 0 };
+          if (n.head !== record.head || n.base !== (c.base ?? null)) pr.baseConflicts = { count: n.count + 1, head: record.head, base: c.base ?? null, at };
+        }
         return;
       }
       case 'untranslated': {
