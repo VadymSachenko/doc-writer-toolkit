@@ -11,6 +11,7 @@ import { quietGit, settingsFor } from './fakes.mjs';
 import { emptyFeed, sourcesOf, writeFeed } from '../lib/feed.mjs';
 import { runCheck } from '../lib/watch.mjs';
 import { localDate } from '../lib/report.mjs';
+import { writeLedger } from '../lib/ledger.mjs';
 
 // The video gate's runner side (TASK-055): the automatic try through a transcriber adapter (uploads, then looks for
 // the transcripts in a later run), the fallback on each failure with no retry, and the runner's frame sweep with every
@@ -158,6 +159,30 @@ test('the day is the account\'s: an older gate\'s parts go first, and the upload
   const s = standIn();
   await run(w, { transcriber: s.transcriber }, { named: ['602'] });
   assert.deepEqual(s.calls.filter((x) => Array.isArray(x)).map((x) => x[2]), ['602-b.mp4-part-01.m4a'], 'three a day, two of them the older gate\'s');
+});
+
+test("the day is counted once the browser holds the profile: another run's uploads just before count", async () => {
+  const cards = [card({ number: 611, status: 'inProgress' }), card({ number: 612, status: 'inProgress' })];
+  const w = world({ cards, extra: { video: AUTO, limits: { stepsPerTicket: 3 } } });
+  fs.mkdirSync(path.join(w.root, 't'), { recursive: true });
+  const partsOf = (name, n) => Array.from({ length: n }, (_, i) => ({ file: `t/${name}-part-0${i + 1}.m4a`, start: i * 1800, transcript: `t/${name}-${i}.txt`, tries: [] }));
+  for (const p of [...partsOf('a', 3), ...partsOf('b', 2)]) fs.writeFileSync(path.join(w.root, p.file), 'sound');
+  // The younger gate's run (612) read the status while the older one (611) had uploaded nothing yet.
+  ledger(w, cards[0], { stages: { start: 'done', plan: 'done', videoGate: 'done', videoTry: 'done' }, video: { videos: [{ file: 't/a.mp4', parts: partsOf('a', 3) }], gateComment: 'g', at: at(300) } });
+  ledger(w, cards[1], { stages: { start: 'done', plan: 'done', videoGate: 'done' }, video: { videos: [{ file: 't/b.mp4', parts: partsOf('b', 2) }], gateComment: 'g', at: at(10) } });
+  const s = standIn();
+  const open = s.transcriber.open;
+  // While 612 waits for the profile, 611's run uploads its three and records them.
+  s.transcriber.open = async () => {
+    const l = read(w, '611');
+    for (const p of l.video.videos[0].parts) p.tries.push({ at: at(1), outcome: 'uploaded', ref: { name: `611-${path.basename(p.file)}` } });
+    writeLedger(w.settings.state, l);
+    return open();
+  };
+  const out = await run(w, { transcriber: s.transcriber }, { named: ['612'] });
+  assert.deepEqual(s.calls.filter((x) => Array.isArray(x)), [], 'the day is used: nothing uploaded');
+  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['videoTry', 'busy']]);
+  assert.match(out.ran[0].note, /today's uploads are used/);
 });
 
 test('the frame sweep: every part\'s transcript at its whole-second start, never without one (Whisper), then the merges', () => {

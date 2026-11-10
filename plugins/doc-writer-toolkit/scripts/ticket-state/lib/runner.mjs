@@ -990,10 +990,12 @@ async function runScripted(step, ctx) {
 
 // The automatic transcription try (lib/rule.mjs, row 13), through the adapter `video.transcriber` names
 // (scripts/transcriber/). One browser for the step: first the looks for the transcripts of the parts uploaded earlier,
-// then the uploads, at most what the account has left today (`videoQuota`). Each part one try, never a retry: the
-// first failure ends the step, and the gate falls back to the person; the parts not reached stay untried. A transcript
-// not there `transcriptHours` after its upload is a failure. A profile in use by another run is no failure: nothing is
-// recorded, and a later check tries.
+// then the uploads, at most what the account has left today (`videoQuota`), counted once the browser holds the
+// profile, so two runs never count the same uploads. Each look and each upload is recorded as it ends, before the
+// next: a run that dies part way never uploads a part again. Each part one try, never a retry: the first failure ends
+// the step, and the gate falls back to the person; the parts not reached stay untried. A transcript not there
+// `transcriptHours` after its upload is a failure. A profile in use by another run is no failure: nothing is recorded,
+// and a later check tries.
 async function runVideoTry(step, ledger, { settings, io }, rec) {
   const key = ledger.key;
   const clock = io.now ?? Date.now;
@@ -1001,54 +1003,51 @@ async function runVideoTry(step, ledger, { settings, io }, rec) {
   const parts = ledger.video?.videos.flatMap((x) => x.parts) ?? [];
   const partOf = (file) => parts.find((p) => p.file === file);
   const exists = (rel) => fs.existsSync(path.resolve(settings.root, rel));
-  const allowed = videoQuota(readAllLedgers(settings.state), ledger, settings, clock(), exists);
-  const uploads = (step.parts ?? []).slice(0, allowed);
   const fetches = step.fetch ?? [];
-  const notes = uploads.length < (step.parts ?? []).length ? [`${(step.parts ?? []).length - uploads.length} part(s) wait: today's uploads are used, or an older video gate goes first`] : [];
-  if (!uploads.length && !fetches.length) return { busy: true, warnings: notes };
-  const results = [];
-  const failAll = (reason) => [...fetches.map((file) => ({ file, fetch: true, outcome: 'failed', reason })), ...uploads.slice(0, 1).map((file) => ({ file, outcome: 'failed', reason }))];
+  const asked = step.parts ?? [];
+  const record = (results) => rec(key, { result: JSON.stringify({ parts: results }) });
+  // No session: one failure, on the first part the step names, so the gate falls back.
+  const failFirst = (reason) => record([...fetches.slice(0, 1).map((file) => ({ file, fetch: true, outcome: 'failed', reason })), ...(fetches.length ? [] : asked.slice(0, 1).map((file) => ({ file, outcome: 'failed', reason })))]);
   let transcriber = io.transcriber ?? null;
   if (!transcriber && v.transcriber) {
     const { createTranscriber } = await import('../../transcriber/lib/index.mjs');
     transcriber = createTranscriber(v.transcriber, { settings });
   }
-  let session = null;
-  if (!transcriber) results.push(...failAll('no transcriber adapter is installed'));
-  else {
-    try {
-      session = await transcriber.open();
-    } catch (e) {
-      if (e.busy) return { busy: true, warnings: [...notes, `the transcriber waits: ${e.message}`] };
-      results.push(...failAll(String(e.message).split('\n')[0].slice(0, 300)));
-    }
+  if (!transcriber) {
+    await failFirst('no transcriber adapter is installed');
+    return [];
   }
-  if (session) {
-    try {
-      let stop = false;
-      for (const file of fetches) {
-        const part = partOf(file);
-        const up = part?.tries?.filter((t) => !t.fetch).at(-1);
-        const r = await session.fetch({ ref: up?.ref ?? null, dest: path.resolve(settings.root, part.transcript) });
-        const late = r.outcome === 'waiting' && up?.at && clock() - Date.parse(up.at) > v.transcriptHours * 3600000;
-        results.push({ file, fetch: true, ...(late ? { outcome: 'failed', reason: `no transcript within ${v.transcriptHours} h of the upload` } : r) });
-        if (r.outcome === 'failed' || late) {
-          stop = true;
-          break;
-        }
-      }
-      for (const file of stop ? [] : uploads) {
-        // The name the service lists it by: the ticket's key in front, so two tickets' `video-1.mp4-part-01.m4a` differ.
-        const r = await session.upload({ file: path.resolve(settings.root, file), name: `${key}-${path.basename(file)}` });
-        results.push({ file, ...r });
-        if (r.outcome !== 'uploaded') break;
-      }
-    } finally {
-      await session.close();
-    }
+  let session;
+  try {
+    session = await transcriber.open();
+  } catch (e) {
+    if (e.busy) return { busy: true, warnings: [`the transcriber waits: ${e.message}`] };
+    await failFirst(String(e.message).split('\n')[0].slice(0, 300));
+    return [];
   }
-  await rec(key, { result: JSON.stringify({ parts: results }) });
-  return notes;
+  try {
+    const allowed = videoQuota(readAllLedgers(settings.state), ledger, settings, clock(), exists);
+    const uploads = asked.slice(0, allowed);
+    const notes = uploads.length < asked.length ? [`${asked.length - uploads.length} part(s) wait: today's uploads are used, or an older video gate goes first`] : [];
+    if (!uploads.length && !fetches.length) return { busy: true, warnings: notes };
+    for (const file of fetches) {
+      const part = partOf(file);
+      const up = part?.tries?.filter((t) => !t.fetch).at(-1);
+      const r = await session.fetch({ ref: up?.ref ?? null, dest: path.resolve(settings.root, part.transcript) });
+      const late = r.outcome === 'waiting' && up?.at && clock() - Date.parse(up.at) > v.transcriptHours * 3600000;
+      await record([{ file, fetch: true, ...(late ? { outcome: 'failed', reason: `no transcript within ${v.transcriptHours} h of the upload` } : r) }]);
+      if (r.outcome === 'failed' || late) return notes;
+    }
+    for (const file of uploads) {
+      // The name the service lists it by: the ticket's key in front, so two tickets' `video-1.mp4-part-01.m4a` differ.
+      const r = await session.upload({ file: path.resolve(settings.root, file), name: `${key}-${path.basename(file)}` });
+      await record([{ file, ...r }]);
+      if (r.outcome !== 'uploaded') break;
+    }
+    return notes;
+  } finally {
+    await session.close();
+  }
 }
 
 // The frame sweep of `videoExtract`: per video, the commands the runner runs (no shell, fixed arguments, every path
