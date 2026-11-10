@@ -139,6 +139,14 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
   out.push('## Videos waiting for transcripts', '', list(videos), '');
   out.push('## Ready for merge', '', list(ready), '');
 
+  // With `forge.keepFresh`: today's merges of the base into the PRs' branches and their conflicts (the run log), and the
+  // open PRs still behind their base.
+  if (settings.keepFresh) {
+    const merges = runLog.filter((e) => e.kind === 'step' && (e.stage === 'baseMerge' || e.stage === 'baseFix') && e.outcome !== 'moved').map((e) => `${e.at} ${e.pr ?? (e.keys ?? []).join(', ')} ${e.stage}: ${e.note ?? e.outcome}`);
+    const behind = st.tickets.flatMap((t) => (t.prs ?? []).filter((p) => p.state !== 'merged' && p.behind > 0).map((p) => `${p.url ? `[${p.id}](${p.url})` : p.id} (${link(t)}): ${p.behind} commit(s) behind its base, at ${p.stage}${p.stage === 'readyForMerge' ? '' : ' (merged in from ready for merge on)'}`));
+    out.push('## Kept up to date with the base', '', list([...merges, ...behind], 'no merge of the base today, and no ready PR behind it'), '');
+  }
+
   for (const w of watched) out.push(`## Cards left in ${w.list}`, '', list(w.cards.map((c) => `[${c.name}](${c.url}), last activity ${c.lastActivity}`)), '');
 
   // The watcher: when it last read each source, what fails, and the host jobs waiting for their quiet hours.
@@ -206,7 +214,7 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
   const timed = ledgers.flatMap((l) => (l.runs ?? []).filter((r) => onDate(r.start) && typeof r.wallMs === 'number').map((r) => ({ ...r, key: l.key }))).sort((x, y) => String(x.start).localeCompare(String(y.start)));
   if (timed.length) {
     const total = timed.reduce((s, r) => s + r.wallMs * (r.share ?? 1), 0);
-    out.push("## Today's steps by wall-clock time", '', `${spell(total)} in all.`, '', list(timed.map((r) => `${new Date(Date.parse(r.start)).toTimeString().slice(0, 5)} ${r.key} ${r.stage}${r.pr ? ` (${r.pr})` : ''}${r.script ? ', the runner\'s build' : ''}: ${spell(r.wallMs)}${typeof r.durationMs === 'number' && r.wallMs - r.durationMs >= 60000 ? ` (session ${spell(r.durationMs)})` : ''}, ${r.outcome}`)), '');
+    out.push("## Today's steps by wall-clock time", '', `${spell(total)} in all.`, '', list(timed.map((r) => `${new Date(Date.parse(r.start)).toTimeString().slice(0, 5)} ${r.key} ${r.stage}${r.pr ? ` (${r.pr})` : ''}${r.script ? (r.stage === 'baseMerge' ? ', the runner\'s merge of the base' : ', the runner\'s build') : ''}: ${spell(r.wallMs)}${typeof r.durationMs === 'number' && r.wallMs - r.durationMs >= 60000 ? ` (session ${spell(r.durationMs)})` : ''}, ${r.outcome}`)), '');
   }
   if (proposal?.proposals?.length) {
     out.push('## Proposed changes to the roles (yes or no)', '', list(proposal.proposals.map((p) => `${p.role}: ${p.change} (${p.why})`)), '');

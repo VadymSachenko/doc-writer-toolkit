@@ -37,7 +37,7 @@ const CHAIN_LABELS = {
   build: 'Building the site',
   visualPack: 'Checking the screenshots',
 };
-const STAGE_LABEL = { ...Object.fromEntries(TICKET_ROWS), ...CHAIN_LABELS, close: 'Closing the ticket', resync: 'Re-syncing after a change in UA', answerComments: 'Answering the review comments', styleCheck: 'Style check of hand edits', move: 'Moving the card', follow: 'Following the card', readyForMerge: 'Marking ready for merge' };
+const STAGE_LABEL = { ...Object.fromEntries(TICKET_ROWS), ...CHAIN_LABELS, close: 'Closing the ticket', resync: 'Re-syncing after a change in UA', answerComments: 'Answering the review comments', styleCheck: 'Style check of hand edits', move: 'Moving the card', follow: 'Following the card', readyForMerge: 'Marking ready for merge', baseMerge: 'Merging the base into the branch', baseFix: 'Resolving the base merge conflict' };
 export const labelOf = (stage) => STAGE_LABEL[stage] ?? String(stage);
 
 // ------------------------------------------------------------------ small formats

@@ -108,6 +108,8 @@ function checkGit(words, cfg, cwd) {
   }
   if (!['add', 'commit', 'push', 'fetch', 'ls-remote'].includes(sub)) return `git ${sub} (no stage runs it)`;
   if (!tree) return `git ${sub} outside \`git -C <the worktree in your brief>\``;
+  // A `baseFix` session resolves a merge the runner started: the runner commits it and pushes it.
+  if (cfg.noCommit && (sub === 'commit' || sub === 'push')) return `git ${sub} in this stage: the runner commits the merge and pushes it`;
   if (sub === 'add') {
     const bad = values.find((v) => abbreviates(v, '--force') || cluster(v, 'f') || abbreviates(v, '--pathspec-from-file'));
     return bad ? `git add ${bad}` : null;

@@ -487,6 +487,18 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         }
         return;
       }
+      case 'baseMerge': {
+        // The runner's merge of the base (`forge.keepFresh`): the head it left the branch at, with the merge commit
+        // among the pipeline's own (`commits`, above), or the conflict it aborted, with the head unchanged. Not checked
+        // against the forge: the runner pushed a moment ago, and the forge may not show the push yet.
+        const given = head ?? result.head ?? null;
+        if (!given) throw new CliError('baseMerge done needs --head: the branch head after the merge (on a conflict, the head it left as it was)', { code: 2 });
+        const c = result.conflict;
+        if (c !== undefined && (!c || typeof c !== 'object' || !Array.isArray(c.files) || !c.files.length)) throw new CliError('baseMerge: "conflict" is { "base", "files": [paths] }', { code: 2 });
+        if (c === undefined && !result.commits?.length) throw new CliError('baseMerge: give the merge commit ("commits") or the "conflict"', { code: 2 });
+        record.head = String(given);
+        return;
+      }
       case 'readyForMerge':
       case 'resync':
       default: {

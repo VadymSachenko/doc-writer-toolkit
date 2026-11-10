@@ -123,6 +123,20 @@ const gitFetch = (cwd, refspecs) => {
   }
 };
 
+// The PR's own change to one file between a merge-base and a head, as `git patch-id --stable` reads its diff with no
+// context lines: the same id for the same change wherever its lines stand. '' when the PR didn't change the file, null
+// when git can't tell (then the file counts).
+const ownPatch = (cwd, from, to, file) => {
+  const diff = gitOut(cwd, ['diff', '-U0', '--no-color', '--no-ext-diff', '--no-renames', from, to, '--', file]);
+  if (diff === null) return null;
+  if (!diff.trim()) return '';
+  try {
+    return execFileSync('git', ['-C', cwd, 'patch-id', '--stable'], { input: diff, encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }).trim().split(/\s/)[0] || null;
+  } catch {
+    return null;
+  }
+};
+
 // A `-z` list of paths (`diff --name-only`, `ls-tree --name-only`): never quoted, so a non-ASCII name is read as it is.
 const zList = (out) => (out ?? '').split('\0').filter(Boolean);
 
@@ -143,13 +157,20 @@ export function makeGit(settings, opts = {}) {
   // was merged into the branch (the forge's "Update branch": other PRs' pages from the base) is not the PR's change. With
   // no `origin/<base>` here (never the owner's local base, which may be anywhere), or a head already on it, every file
   // counts.
+  //
+  // With `forge.keepFresh`, a file the PR and the base both changed counts only when the PR's own change to it differs
+  // between the two heads: its diff against the merge-base, with no context lines, compared by `git patch-id`, which
+  // reads no line number. So a block the base changed in a page of the PR's, merged in cleanly, is the base's change, not
+  // the PR's; a block the PR changed, by hand or by a conflict's resolution, still counts.
   const ownOnly = (cwd, from, to, base, files) => {
     const ref = base && gitOut(cwd, ['rev-parse', '--verify', '-q', `refs/remotes/origin/${base}`]) !== null ? `refs/remotes/origin/${base}` : null;
     const mbFrom = ref && gitOut(cwd, ['merge-base', from, ref])?.trim();
     const mbTo = ref && gitOut(cwd, ['merge-base', to, ref])?.trim();
     if (!mbFrom || !mbTo || mbFrom === from || mbTo === to) return files;
     const blob = (c, f) => gitOut(cwd, ['rev-parse', '-q', '--verify', `${c}:${f}`])?.trim() ?? null;
-    return files.filter((f) => blob(from, f) !== blob(mbFrom, f) || blob(to, f) !== blob(mbTo, f));
+    const theirs = files.filter((f) => blob(from, f) !== blob(mbFrom, f) || blob(to, f) !== blob(mbTo, f));
+    if (!settings.keepFresh || mbFrom === mbTo) return theirs;
+    return theirs.filter((f) => ownPatch(cwd, mbFrom, from, f) !== ownPatch(cwd, mbTo, to, f));
   };
   return {
     repoPath,
@@ -164,7 +185,8 @@ export function makeGit(settings, opts = {}) {
       for (const w of wanted ?? []) {
         const cwd = repoPath(w.target);
         const key = `${cwd}\0${w.branch}`;
-        if (!cwd || !w.branch || !w.head || asked.has(key) || !fs.existsSync(cwd) || hasCommit(cwd, w.head)) continue;
+        // `baseHead`, the base's tip the forge gives (`forge.keepFresh`): fetched too when the clone hasn't got it.
+        if (!cwd || !w.branch || !w.head || asked.has(key) || !fs.existsSync(cwd) || (hasCommit(cwd, w.head) && (!w.baseHead || hasCommit(cwd, w.baseHead)))) continue;
         asked.add(key);
         const refs = byClone.get(cwd) ?? new Set();
         for (const b of [w.base, w.branch]) if (b) refs.add(`+refs/heads/${b}:refs/remotes/origin/${b}`);
@@ -180,6 +202,16 @@ export function makeGit(settings, opts = {}) {
       if (!ref) return null;
       const out = gitOut(cwd, ['rev-list', head, '--not', ref]);
       return out === null ? null : out.split('\n').filter(Boolean);
+    },
+    // How many commits of the base the head doesn't have (`forge.keepFresh`): of `tip`, the base's tip the forge gives,
+    // when the clone has it, else of `origin/<base>`. Null when the head or the base isn't here.
+    behind(target, head, base, tip = null) {
+      const cwd = repoPath(target);
+      if (!cwd || !hasCommit(cwd, head)) return null;
+      const ref = tip && hasCommit(cwd, tip) ? tip : gitOut(cwd, ['rev-parse', '--verify', '-q', `refs/remotes/origin/${base}`]) !== null ? `refs/remotes/origin/${base}` : null;
+      if (!ref) return null;
+      const out = gitOut(cwd, ['rev-list', '--count', ref, '--not', head]);
+      return out === null ? null : Number(out.trim());
     },
     // When a commit was written and when it was committed (ms), for the style check's cutoff and its wait. Null when it
     // isn't here; a date git can't give is null.
@@ -271,6 +303,8 @@ export async function readPrs({ settings, forge, ledgers }) {
       if (!pr.number || pr.merged) continue;
       const st = await forge.prState({ repo: pr.repo, number: pr.number });
       const entry = { state: st.state, url: st.url ?? null, headCommit: st.headCommit, reviewRequests: st.reviewRequests ?? [], reviewDecision: st.reviewDecision ?? null, labels: st.labels ?? [], mergeCommit: st.mergeCommit ?? null, mergedAt: st.mergedAt ?? null, newComments: [] };
+      // The base's tip and the head's CI, for keeping the branch up to date with its base (`forge.keepFresh`).
+      if (settings.keepFresh) Object.assign(entry, { baseCommit: st.baseCommit ?? null, checks: st.checks ?? null });
       if (st.state === 'open') {
         const activity = await forge.prActivity({ repo: pr.repo, number: pr.number });
         const experts = [...expertsOf(settings, pr).reviewers, ...(pr.reviewersRequested ?? [])];

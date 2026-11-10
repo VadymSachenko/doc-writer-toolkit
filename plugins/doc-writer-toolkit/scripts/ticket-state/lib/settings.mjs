@@ -151,6 +151,15 @@ function validateReviewRounds(raw) {
   return { labels };
 }
 
+// Keeping each pipeline PR up to date with its base (`forge.keepFresh`, D-113, D-127): from ready for merge on, the
+// runner merges the base into the branch whenever the base moved, CI runs again, and a conflict goes back to a session.
+// Absent or false: the branch is never touched for its base, as before.
+function validateKeepFresh(raw) {
+  if (raw === undefined || raw === null) return false;
+  if (typeof raw !== 'boolean') fail('forge.keepFresh must be true or false');
+  return raw;
+}
+
 function validateBuild(raw) {
   if (raw === undefined || raw === null) return { ...BUILD_DEFAULTS, command: [...BUILD_DEFAULTS.command] };
   if (!isObject(raw)) fail('build must be { command, outDir, timeoutMinutes, waitMinutes }');
@@ -217,6 +226,7 @@ export function validateSettings(merged, { root, stateRootDefault }) {
   const reviewComment = rawReview ?? DEFAULT_REVIEW_COMMENT;
   const triggerWords = validateTriggerWords(merged.forge?.triggerWords);
   const reviewRounds = validateReviewRounds(merged.forge?.reviewRounds);
+  const keepFresh = validateKeepFresh(merged.forge?.keepFresh);
 
   const mode = merged.mode ?? LOCAL_DEFAULTS.mode;
   if (!MODES.includes(mode)) fail(`mode must be one of ${MODES.join(', ')}`);
@@ -294,6 +304,7 @@ export function validateSettings(merged, { root, stateRootDefault }) {
     reviewComment,
     triggerWords,
     reviewRounds,
+    keepFresh,
     hostRules: merged.hostRules ?? {},
     hostJobs: validateJobs(merged.hostJobs ?? [], root),
     styleCheck,
@@ -371,6 +382,6 @@ export function printable(s) {
   return {
     ...rest,
     tracker: { ...tracker, credentials: { ...tracker.credentials } },
-    forge: { kind: forge.kind, owner: forge.owner, self: forge.self, assignee: forge.assignee, checkLabel: forge.checkLabel, expertLabel: forge.expertLabel ?? null, readyLabel: forge.readyLabel ?? null, repos: forge.repos, triggerWords: s.triggerWords ?? [], reviewRounds: s.reviewRounds ? true : false },
+    forge: { kind: forge.kind, owner: forge.owner, self: forge.self, assignee: forge.assignee, checkLabel: forge.checkLabel, expertLabel: forge.expertLabel ?? null, readyLabel: forge.readyLabel ?? null, repos: forge.repos, triggerWords: s.triggerWords ?? [], reviewRounds: s.reviewRounds ? true : false, keepFresh: Boolean(s.keepFresh) },
   };
 }
