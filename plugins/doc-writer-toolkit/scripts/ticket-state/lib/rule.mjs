@@ -867,11 +867,28 @@ function inVideoHours(ms, settings) {
   return m >= h.from && m < h.to;
 }
 
-// How long the transcriber's profile has been in use by another run, at every try since the first (`busySince`), when
-// that is longer than `transcriptHours`: a lock the runs can't get past. Null otherwise.
-function busyTooLong(l, now, v) {
+// The time between two moments that falls inside `limits.startHours`, local time (ms): the hours in which a try runs.
+export function startHoursBetween(from, to, settings) {
+  const h = parseStartHours(settings.limits?.startHours) ?? parseStartHours('10-22');
+  let total = 0;
+  const day = new Date(from);
+  day.setHours(0, 0, 0, 0);
+  for (; day.getTime() < to; day.setDate(day.getDate() + 1)) {
+    const a = new Date(day);
+    a.setHours(0, h.from, 0, 0);
+    const b = new Date(day);
+    b.setHours(0, h.to, 0, 0);
+    total += Math.max(0, Math.min(to, b.getTime()) - Math.max(from, a.getTime()));
+  }
+  return total;
+}
+
+// Whether the transcriber's profile has been in use by another run, at every try since the first (`busySince`), for
+// longer than `transcriptHours` of the start hours: a lock the runs can't get past. The night outside them, when no
+// try runs, doesn't count; the profile opening clears `busySince` (lib/record.mjs).
+function busyTooLong(l, now, settings) {
   const since = Date.parse(l.video?.busySince ?? '');
-  return Number.isFinite(since) && now - since > v.transcriptHours * 3600000 ? since : null;
+  return Number.isFinite(since) && startHoursBetween(since, now, settings) > settings.video.transcriptHours * 3600000;
 }
 
 // For the watcher, inside the start hours: a ticket at the video gate with an uploaded part whose transcript is due a
@@ -921,19 +938,20 @@ function videoGate(l, w, out, status) {
   const uploaded = missing.filter((p) => lastUpload(p)?.outcome === 'uploaded');
   const quota = Math.max(0, v.partsPerDay - triedToday);
   out.gate = { who: 'owner', why: `transcripts of ${missing.length} video part(s)` };
-  const stuck = automaticVideo(v) ? busyTooLong(l, w.now, v) : null;
-  if (failed.length || !automaticVideo(v) || stuck) {
-    const reason = failed.length ? 'the automatic try failed' : stuck ? `the transcriber's browser profile stayed in use by another run for more than ${v.transcriptHours} h (video.transcriptHours)` : 'no automatic try configured (video.transcriber and video.browserProfile)';
+  const block = (reason) => {
     if (status !== 'blocked') out.steps.push(step('videoBlock', { reason }));
     return out;
-  }
+  };
+  if (failed.length || !automaticVideo(v)) return block(failed.length ? 'the automatic try failed' : 'no automatic try configured (video.transcriber and video.browserProfile)');
   const due = uploaded.filter((p) => fetchDue(p, w.now, v));
   const upload = untried.slice(0, quota);
   if (uploaded.length || upload.length) out.gate = { who: 'transcriber', why: 'the automatic transcription try' };
+  // Outside the start hours the try waits, before anything else: the busy profile's time counts only inside them.
   if ((upload.length || due.length) && !inVideoHours(w.now, w.settings)) {
     out.notes.push(`the automatic try waits for the start hours (${w.settings.limits?.startHours ?? '10-22'}): no browser opens outside them`);
     return out;
   }
+  if (busyTooLong(l, w.now, w.settings)) return block(`the transcriber's browser profile stayed in use by another run for more than ${v.transcriptHours} h of the start hours (video.transcriptHours)`);
   if (upload.length || due.length) out.steps.push(step('videoTry', { parts: upload.map((p) => p.file), ...(due.length ? { fetch: due.map((p) => p.file) } : {}) }));
   if (untried.length > upload.length) out.notes.push(`${untried.length - upload.length} part(s) wait for tomorrow: ${v.partsPerDay} a day`);
   if (uploaded.length > due.length) out.notes.push(`${uploaded.length - due.length} uploaded part(s) wait for their transcript (looked for every ${v.fetchMinutes} min)`);

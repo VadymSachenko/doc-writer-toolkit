@@ -250,9 +250,15 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         // (`fetch`): `waiting` or `done` is a look (`checks`); `failed` is a try, marked `fetch`, so the gate falls back.
         if (!l.video) throw new Refused('noGate', 'no video gate was recorded');
         // `busy`: the profile was in use by another run, nothing tried. The first such try is kept (`busySince`), so a
-        // lock that never frees falls back to the person after `transcriptHours` (lib/rule.mjs); a real try clears it.
+        // lock that never frees falls back to the person after `transcriptHours` inside the start hours (lib/rule.mjs);
+        // the profile opening (`opened`) or a real try clears it.
         if (result.busy) {
           l.video.busySince ??= at;
+          return;
+        }
+        // `opened`: the profile opened for this ticket's step, so it is no longer busy.
+        if (result.opened) {
+          delete l.video.busySince;
           return;
         }
         if ((result.parts ?? []).length) delete l.video.busySince;

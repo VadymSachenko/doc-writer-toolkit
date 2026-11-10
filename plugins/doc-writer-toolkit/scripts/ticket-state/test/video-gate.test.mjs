@@ -7,6 +7,7 @@ import { NOW, card, tmp } from './fakes.mjs';
 import { ledger, read, world } from './helpers.mjs';
 import { ROLE_DENIED, briefFor, extractCalls, extractPreflight, runDaily, scriptedCalls, sessionEnv, smePython, writeDeniedFor, SME_SCRIPT } from '../lib/runner.mjs';
 import { refusalOf, HOOK_VARIABLE } from '../lib/role-hook.mjs';
+import { startHoursBetween } from '../lib/rule.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
 import { quietGit, settingsFor } from './fakes.mjs';
 import { emptyFeed, sourcesOf, writeFeed } from '../lib/feed.mjs';
@@ -152,6 +153,23 @@ test('a browser profile in use is no failure: nothing is tried, a later check tr
   const t = await g.w.one(g.key);
   assert.equal(t.next.stage, 'videoBlock');
   assert.match(t.next.reason, /browser profile stayed in use by another run for more than 2 h/);
+  // Busy at the end of one day's start hours: the night doesn't count, so the next morning tries before falling back.
+  const hour = new Date(NOW).getHours();
+  if (hour >= 3) {
+    const h = gated({ number: 504, extra: { limits: { stepsPerTicket: 5, startHours: `${hour}-24` } } });
+    const hl = read(h.w, '504');
+    hl.video.busySince = at(3 * 60);
+    writeLedger(h.w.settings.state, hl);
+    assert.equal((await h.w.one('504')).next.stage, 'videoTry', 'three hours ago, but under one of them inside the start hours');
+  }
+  // The profile opening clears it, even when the step then has nothing to do (another ticket used the day).
+  const { runScripted } = await import('../lib/runner.mjs');
+  l.video.busySince = at(30);
+  writeLedger(g.w.settings.state, l);
+  const none = standIn();
+  await runScripted({ stage: 'videoTry', keys: [g.key], parts: [], fetch: [] }, { settings: g.w.settings, clients: g.w.clients(), io: { transcriber: none.transcriber, now: () => NOW } });
+  assert.deepEqual(none.calls, ['open', 'close']);
+  assert.equal(read(g.w, g.key).video.busySince, undefined);
   // A real try clears it.
   l.video.busySince = at(30);
   writeLedger(g.w.settings.state, l);
@@ -276,25 +294,38 @@ test('the frame sweep runs in the runner, records the package and the frames, an
   assert.match(brief, /- t\/call\.mp4: transcript t\/call\.mp4-sme\/transcript\.txt; frames t\/frames\/call\.mp4-frames; context t\/call\.mp4-sme\/context\.md; parts at 0 s, 1800 s\./);
 });
 
-test('a frame sweep that fails is recorded with its run, waits for a person, and is not swept again at the next check', async () => {
-  const g = gated({ tries: [[]] });
-  fs.writeFileSync(path.join(g.w.root, g.parts[0].transcript), '(0:00 - 0:01)\nx\n');
-  let n = 0;
-  const runExtract = async () => {
-    n++;
-    return { code: 1, timedOut: false, tail: ['tesseract: command not found'] };
-  };
-  const out = await run(g.w, { runExtract, smePython: '/venv/bin/python' }, { named: [g.key] });
-  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['videoExtract', 'failed']]);
-  const l = read(g.w, g.key);
-  assert.match(l.stages.videoExtract.note, /^the frame sweep of t\/call\.mp4 failed \(exit 1\): tesseract: command not found/);
-  assert.deepEqual([l.runs.at(-1).outcome, l.runs.at(-1).failures], ['failed', 1]);
-  assert.match((await g.w.one(g.key)).next.waits, /a person acting on the ticket/);
-  await run(g.w, { runExtract, smePython: '/venv/bin/python' }, { named: [g.key] });
-  assert.equal(n, 1);
-  // No venv: failed before anything runs.
-  const h = gated({ number: 502, tries: [[]] });
-  fs.writeFileSync(path.join(h.w.root, h.parts[0].transcript), '(0:00 - 0:01)\nx\n');
+test('a frame sweep that fails or times out is skipped with the reason, never held: the import goes on without frames, the hand path too', async () => {
+  for (const [video, res, want] of [
+    [AUTO, { code: 1, timedOut: false, tail: ['Traceback: ModuleNotFoundError'] }, /^the frame sweep was skipped: the sweep of t\/call\.mp4 failed \(exit 1\): Traceback: ModuleNotFoundError/],
+    [{ ...AUTO, transcriber: null, browserProfile: null }, { code: null, timedOut: true, tail: [] }, /^the frame sweep was skipped: the sweep of t\/call\.mp4 timed out after 120 min \(video\.extractMinutes\)/],
+  ]) {
+    const g = gated({ tries: [[]], video });
+    fs.writeFileSync(path.join(g.w.root, g.parts[0].transcript), '(0:00 - 0:01)\nx\n');
+    let n = 0;
+    const runExtract = async () => {
+      n++;
+      return res;
+    };
+    const out = await run(g.w, { runExtract, smePython: '/venv/bin/python' }, { named: [g.key] });
+    assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['videoExtract', 'done']]);
+    assert.equal(n, 1, 'the first failing command ends the sweep');
+    const l = read(g.w, g.key);
+    assert.match(l.stages.videoExtract.note, want);
+    assert.deepEqual([l.stages.videoExtract.status, l.runs.at(-1).outcome, l.runs.at(-1).failures], ['done', 'done', undefined], 'no failure: nothing waits for a person');
+    const t = await g.w.one(g.key);
+    assert.equal(t.next.stage, 'videoImport', 'not swept again: the import, without frames');
+    assert.equal(t.next.waits, undefined);
+    assert.match(briefFor({ ...t.next, keys: [g.key] }, g.w.settings), /The runner did not sweep the video's frames \(the sweep of t\/call\.mp4/);
+  }
+});
+
+test('the start hours between two moments: only the time inside them counts', () => {
+  const s = { limits: { startHours: '10-22' } };
+  const t = (d, h, m = 0) => new Date(2026, 10, d, h, m).getTime();
+  assert.equal(startHoursBetween(t(9, 21, 59), t(10, 10), s), 60000, '21:59 to 10:00 the next day: one minute');
+  assert.equal(startHoursBetween(t(9, 10), t(9, 13), s), 3 * 3600000);
+  assert.equal(startHoursBetween(t(9, 23), t(10, 9), s), 0, 'the night');
+  assert.equal(startHoursBetween(t(9, 12), t(11, 12), s), 24 * 3600000, 'two days of twelve hours');
 });
 
 test('the sweep\'s preflight: no venv, tesseract or ffmpeg skips it, whatever the settings, and the import goes on without frames', async () => {

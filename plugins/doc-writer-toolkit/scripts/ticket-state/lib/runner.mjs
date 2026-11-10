@@ -1080,6 +1080,8 @@ async function runVideoTry(step, ledger, { settings, io }, rec) {
     return [];
   }
   try {
+    // The profile opened: no longer busy, whatever follows (a step with nothing left to do records nothing else).
+    if (ledger.video?.busySince) await rec(key, { result: JSON.stringify({ opened: true }) });
     const allowed = videoQuota(readAllLedgers(settings.state), ledger, settings, clock(), exists);
     const uploads = asked.slice(0, allowed);
     const notes = uploads.length < asked.length ? [`${asked.length - uploads.length} part(s) wait: today's uploads are used, or an older video gate goes first`] : [];
@@ -1729,8 +1731,9 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
   // The video's frame sweep (`videoExtract`), run by the runner itself with no model, as the build is: no role session
   // may run Python, ffmpeg or tesseract. The commands of `extractCalls`, each under `video.extractMinutes`, with the
   // environment of a host script. Done: recorded with each video's package, merged transcript and frames folder. A
-  // failure leaves a run with its count and the ticket's mark, so the failed-step rules wait for a person and then hold,
-  // as for a failed build: a sweep that can't run is not run again at every check.
+  // sweep that can't run (its preflight) or that fails (a Python error, a timeout) is recorded skipped with the reason,
+  // never failed: the import goes on without frames, so the sweep never holds a ticket, the hand path's least of all.
+  // Only a refused record is a failure.
   async function runExtractStep(step) {
     const began = clock();
     const key = step.keys[0];
@@ -1746,25 +1749,28 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
       log('failed', note);
       return { ...pick(step), outcome: 'failed', note: note.slice(0, 300) };
     };
+    // Skipped, with why: the record says so, and the import's brief. A sweep that ran leaves its run too (its time).
+    const skip = async (why, { ran = false, exit = null, hint = '' } = {}) => {
+      const reason = `the frame sweep was skipped: ${why}${hint}`;
+      try {
+        for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'done', note: reason.slice(0, 300), result: JSON.stringify({ skipped: why }), now: clock() });
+      } catch (e) {
+        return failed(`the frame sweep's skip was refused: ${String(e.message).slice(0, 300)}`, { ran });
+      }
+      if (ran) for (const k of step.keys) await runRecord({ settings, clients, key: k, run: JSON.stringify({ ...base, start: new Date(began).toISOString(), wallMs: clock() - began, outcome: 'done', session: null, exit, note: reason.slice(0, 300) }), now: clock() }).catch(() => {});
+      log('done', reason);
+      return { ...pick(step), outcome: 'done', note: reason.slice(0, 300), warnings: [reason] };
+    };
     let calls;
     try {
       calls = extractCalls(readLedger(settings.state, key), settings, io.smePython ? { python: io.smePython } : {});
     } catch (e) {
-      return failed(`the frame sweep: ${String(e.message).slice(0, 400)}`, { ran: false });
+      return skip(String(e.message).slice(0, 300));
     }
     // The preflight: without the venv, `tesseract` or `ffmpeg` the sweep is skipped, not failed, whatever the video
     // settings, and the import goes on with the parts' transcripts (no frames), as before the sweep.
     const lacking = (io.extractPreflight ?? (io.runExtract ? () => null : extractPreflight))(calls[0]?.commands[0][0] ?? smePython());
-    if (lacking) {
-      const reason = `the frame sweep was skipped: ${lacking}; scripts/sme-video-context/README.md sets them up`;
-      try {
-        for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'done', note: reason.slice(0, 300), result: JSON.stringify({ skipped: lacking }), now: clock() });
-      } catch (e) {
-        return failed(`the frame sweep's skip was refused: ${String(e.message).slice(0, 300)}`, { ran: false });
-      }
-      log('done', reason);
-      return { ...pick(step), outcome: 'done', note: reason.slice(0, 300), warnings: [reason] };
-    }
+    if (lacking) return skip(lacking, { hint: '; scripts/sme-video-context/README.md sets them up' });
     const mine = step.group ?? key;
     if (allLocks(settings.state, clock()).some((l) => l.group === mine && l.pid === process.pid)) renewLock(settings.state, mine, { leaseMinutes: settings.limits.lockLeaseMinutes, stage: step.stage, now: clock() });
     const renew = every(() => {
@@ -1776,7 +1782,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
           const res = await (io.runExtract ?? runSiteBuild)({ cwd: settings.root, command, timeoutMs: settings.video.extractMinutes * 60000 });
           if (res.code !== 0) {
             const tail = (res.tail ?? []).join('\n').trim();
-            return await failed(`${res.timedOut ? `the frame sweep of ${c.file} timed out after ${settings.video.extractMinutes} min (video.extractMinutes)` : `the frame sweep of ${c.file} failed (exit ${res.code})`}${tail ? `: ${tail.slice(-1500)}` : ''}`);
+            return await skip(`${res.timedOut ? `the sweep of ${c.file} timed out after ${settings.video.extractMinutes} min (video.extractMinutes)` : `the sweep of ${c.file} failed (exit ${res.code})`}${tail ? `: ${tail.slice(-200)}` : ''}`, { ran: true, exit: res.code });
           }
         }
       }
