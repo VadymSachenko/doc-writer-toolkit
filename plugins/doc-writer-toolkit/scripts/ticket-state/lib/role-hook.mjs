@@ -48,7 +48,8 @@ function subcommandOf(words, booleans) {
 }
 // Records that are the runner's alone: the translated label coming off (`untranslated`) and its own heading-id commits
 // (`idSync`, which keeps commits apart from the UA changes the rule reads). A role that recorded one could hide a UA edit.
-export const RUNNER_STAGES = { 'ticket-state/ticket-state.mjs': ['idSync', 'untranslated'] };
+// And the video gate's scripted steps: the automatic try (`videoTry`) and the frame sweep (`videoExtract`).
+export const RUNNER_STAGES = { 'ticket-state/ticket-state.mjs': ['idSync', 'untranslated', 'videoTry', 'videoExtract'] };
 function runnerStage(rel, words) {
   const denied = RUNNER_STAGES[rel];
   if (!denied) return null;
@@ -361,10 +362,30 @@ function checkRedirect(r) {
 }
 
 // The reason a command line is refused, or null. `cfg`: { role, trees: [{ path, branch, base }], roots, scripts, write,
-// sources, read, playwright, docusaurus, npmRun, commands }. `cwd`: the shell's folder, from the hook's input.
+// sources, read, playwright, docusaurus, npmRun, commands, secrets }. `cwd`: the shell's folder, from the hook's input.
 export function refusalOf(command, cfg, { cwd } = {}) {
+  // `secrets`: folders no command names, the transcriber's browser profile (the owner's sign-in) and its lock, as text
+  // anywhere in the line (a `--user-data-dir=` value, a quoted path) or as a word that resolves inside one. A spec file
+  // that names it is not a command line: the hook can't see into it (scripts/transcriber/README.md).
+  const secret = (cfg.secrets ?? []).find((d) => new RegExp(`${d.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w.-])`).test(command));
+  if (secret) return "the transcriber's browser profile, which holds the owner's sign-in: no session reads, writes or launches it";
   const parsed = parseShell(command);
   if (parsed.error) return `${parsed.error}: a command this hook can't read without running it. One plain command per call`;
+  if ((cfg.secrets ?? []).length) {
+    // Followed through a `cd`, so `cd <parent> && ls <name>` is seen too.
+    let here = cwd ?? '/';
+    const resolve = (v) => path.resolve(here, v.replace(/^~(?=\/|$)/, process.env.HOME ?? '~'));
+    for (const c of parsed.commands) {
+      for (const w of [...c.words, ...c.redirects.map((r) => r.target).filter(Boolean)]) {
+        if (!w.value) continue;
+        // A flag's value after `=` (`--user-data-dir=<dir>`), or the word itself.
+        const value = w.value.startsWith('-') && w.value.includes('=') ? w.value.slice(w.value.indexOf('=') + 1) : w.value;
+        const file = resolve(value);
+        if (cfg.secrets.some((d) => inside(file, d))) return "the transcriber's browser profile, which holds the owner's sign-in: no session reads, writes or launches it";
+      }
+      if (c.words[0]?.value === 'cd' && c.words[1]?.value) here = resolve(c.words[1].value);
+    }
+  }
   if (!parsed.commands.length) return 'an empty command';
   // A second `cd` starts from the first one's folder, which the hook doesn't follow.
   if (parsed.commands.filter((c) => c.words[0]?.value === 'cd').length > 1) return 'two cd in one call. One plain command per call';

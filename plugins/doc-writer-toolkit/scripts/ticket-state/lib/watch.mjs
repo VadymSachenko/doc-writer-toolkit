@@ -18,6 +18,7 @@ import { progressAfterCheck } from './progress.mjs';
 import { commentWait } from './quiet.mjs';
 import { dropHandOnStep, handOnLive, liveHandOnKeys, runsGoingIn, startsInFlight, takeHandOn } from './forge-state.mjs';
 import { makeDispatcher } from './dispatch.mjs';
+import { videoFetchDue } from './rule.mjs';
 
 // One check of the watcher (design §5, D-048), started by launchd every few minutes. No model call of its own:
 //   1. read every source since its cursor; a check that finds nothing ends here, with no status, no runner, no claude;
@@ -445,6 +446,11 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
         for (const l of ledgers) if ((l.runs ?? []).length) want(l.key);
         next.rearmSeen = iso(rearmed);
       }
+      // A video part uploaded for its transcript, due a look (`video.fetchMinutes`): the upload's run never waits for
+      // it, and nothing on the board changes when it is ready. And a part the day still allows to upload, once the start
+      // hours begin (the automatic try opens no browser outside them).
+      const exists = (rel) => fs.existsSync(path.resolve(settings.root, rel));
+      for (const l of ledgers) if (videoFetchDue(l, checkStart, settings, exists, ledgers)) want(l.key);
     } catch (e) {
       failed('the ledgers', e);
     }

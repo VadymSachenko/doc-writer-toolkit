@@ -3,7 +3,7 @@
 // the role sessions and by the host's skills; this file only names them.
 
 // Ticket-level stages (before or around the PRs).
-export const TICKET_STAGES = ['triage', 'start', 'plan', 'questions', 'planGate', 'planApproval', 'videoGate', 'videoTry', 'videoBlock', 'videoImport', 'answers', 'write', 'uaReview', 'pr', 'follow', 'close'];
+export const TICKET_STAGES = ['triage', 'start', 'plan', 'questions', 'planGate', 'planApproval', 'videoGate', 'videoTry', 'videoBlock', 'videoExtract', 'videoImport', 'answers', 'write', 'uaReview', 'pr', 'follow', 'close'];
 
 // The translation chain of one PR, in order. It runs only at the PR stage `translation`: a person moved the card there.
 export const CHAIN = ['translate', 'enReview', 'locales', 'align', 'labelSync', 'build', 'visualPack'];
@@ -17,7 +17,8 @@ export const PR_STAGES = ['move', 'follow', 'answerComments', 'styleCheck', 'que
 export const STATUSES = ['running', 'done', 'failed'];
 
 // Who runs a stage: a role (one `claude -p` session) or null (the runner itself, with no model). The chain's `build` is
-// the runner's: the host's build command in the PR's worktree, under the build lock (lib/build-lock.mjs).
+// the runner's: the host's build command in the PR's worktree, under the build lock (lib/build-lock.mjs). So is the
+// video's `videoExtract`: the frame sweep with every part's transcript, before the import's session.
 export const ROLE_OF = {
   triage: 'triage',
   start: 'writer',
@@ -28,6 +29,7 @@ export const ROLE_OF = {
   videoGate: 'writer',
   videoTry: null,
   videoBlock: null,
+  videoExtract: null,
   videoImport: 'writer',
   answers: 'writer',
   write: 'writer',
@@ -100,7 +102,7 @@ export function finishRank(step) {
   if (['readyForMerge', 'resync', 'untranslated', 'idSync', 'baseMerge', 'baseFix'].includes(step.stage)) return 1;
   if (CHAIN.includes(step.stage) || (['move', 'follow'].includes(step.stage) && ['finalReview', 'translation'].includes(step.to))) return 2;
   if (step.stage === 'answerComments' || step.stage === 'styleCheck' || (step.stage === 'move' && step.to === 'smeReview') || step.stage === 'follow' || step.stage === 'move') return 3;
-  if (['answers', 'planApproval', 'videoImport', 'videoTry', 'videoBlock'].includes(step.stage)) return 4;
+  if (['answers', 'planApproval', 'videoImport', 'videoTry', 'videoBlock', 'videoExtract'].includes(step.stage)) return 4;
   return 5;
 }
 

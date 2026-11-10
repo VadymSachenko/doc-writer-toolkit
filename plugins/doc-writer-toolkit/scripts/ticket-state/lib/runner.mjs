@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { computeStatus } from './status.mjs';
+import { videoQuota } from './rule.mjs';
 import { makeGit } from './world.mjs';
 import { readAllLedgers, readLedger, findPr, prId } from './ledger.mjs';
 import { allLocks, takeLock, releaseLock, renewLock } from './locks.mjs';
@@ -138,7 +139,7 @@ const CODE_DENIED = [
 const MCP_DENIED = ['mcp__claude_ai_Trello', 'mcp__trello', 'mcp__playwright'];
 // `ffmpeg` and `ffprobe` by hand, which a layer may allow (an owner's has allowed single calls): a role cuts a video only
 // with `video-parts`, which runs them with fixed arguments on paths inside the ticket's work folder.
-const MEDIA_DENIED = ['Bash(ffmpeg:*)', 'Bash(ffprobe:*)'];
+const MEDIA_DENIED = ['Bash(ffmpeg:*)', 'Bash(ffprobe:*)', 'Bash(tesseract:*)'];
 // Moving or removing folders, which a broad host allow would reopen, and a browser lock made by hand (no holder, so
 // nothing frees it): a role takes and frees the lock only with browser-lock.mjs. The build lock is the runner's alone.
 const FOLDER_DENIED = ['Bash(mv:*)', 'Bash(rmdir:*)', 'Bash(mkdir *.playwright.lock*)', 'Bash(mkdir .playwright.lock*)', 'Bash(mkdir *.build.lock*)', 'Bash(mkdir .build.lock*)'];
@@ -223,6 +224,8 @@ export function writeDeniedFor(settings, roots = []) {
     ...['.zshrc', '.zshenv', '.zprofile', '.zlogin', '.bashrc', '.bash_profile', '.profile'].map((f) => `Edit(~/${f})`),
     ...[...new Set(own)].map((f) => `Edit(${abs(f)})`),
     ...ENV_FILES.map((f) => `Read(//**/${f})`),
+    // The transcriber's browser profile holds the owner's sign-in: no session reads or writes it, nor its lock.
+    ...(settings.video?.browserProfile ? [`Read(${abs(settings.video.browserProfile)}/**)`, `Edit(${abs(settings.video.browserProfile)}/**)`, `Edit(${abs(`${settings.video.browserProfile}.lock`)}/**)`, `Bash(mkdir ${settings.video.browserProfile}.lock:*)`, `Bash(mkdir -p ${settings.video.browserProfile}.lock:*)`] : []),
     ...roots.map((r) => `Edit(${abs(r)}/**)`),
     ...['tickets', 'locks', 'roles', 'watch', 'jobs', 'runs', 'reports', 'code', LOCK_NAME, BUSY_NAME, BUILD_LOCK_NAME].map((d) => `Edit(${abs(path.join(state, d))}/**)`),
     // The browser lock and the busy notes go only through browser-lock.mjs: no holder-less lock, no forged holder. The
@@ -407,6 +410,7 @@ export function briefFor(step, settings) {
     rounds && settings.triggerWords?.length && ['answerComments', 'styleCheck', 'enReview', 'pr'].includes(step.stage) ? `The owner addresses the pipeline with a comment that starts with ${settings.triggerWords.map((w) => `\`${w}:\``).join(' or ')}: a line comment that tells the owner how to ask for something says so with that word.` : null,
     step.stale ? `The UA pages changed after this stage last ran (${step.stale} file(s)): run it again on the current head${pagesRead(step, settings)}.` : null,
     ...buildLines(step),
+    ...videoImportLines(step),
     ...gateLines(step, settings),
     step.cards ? `Cards, highest priority first:\n${step.cards.map((c) => `- ${c.key}: ${c.url ?? c.shortLink} (${c.priority})`).join('\n')}` : null,
     step.worktrees?.length ? worktreeLines(step.worktrees) : null,
@@ -453,6 +457,22 @@ export function buildLines(step) {
   if (step.stage === 'visualPack' && step.buildDir) return [`The chain's \`build\` stage built this head into ${step.buildDir}: run visual-pack with \`--build-dir ${step.buildDir}\`, so the site is not built again.`];
   if (step.stage === 'visualPack' || step.stage === 'resync') return [`The runner holds the build lock for this session: ${step.stage === 'resync' ? 'the locale-translator\'s build' : 'visual-pack\'s own build (no build of this head is there to reuse)'} runs as usual, and no other pipeline build runs meanwhile.`];
   return [];
+}
+
+// What the brief says at the video's import: what the runner's frame sweep (`videoExtract`) left, per video. The
+// session runs no part of it again (Python, ffmpeg and tesseract are denied to it).
+export function videoImportLines(step) {
+  if (step.stage === 'videoImport' && step.noFrames) {
+    return [
+      `The runner did not sweep the video's frames (${step.noFrames}). Run convert-sme-input on the parts' transcripts below, each at its offset in the video (a part's time plus its start), with no frames: a fact that needs a screenshot is cited without one, or left as a NEEDS CONFIRMATION marker. Never run a frame extraction or the script yourself.`,
+      ...(step.videos ?? []).map((x) => `- ${x.file}: ${x.parts.map((p) => `${p.transcript} at ${p.start} s`).join('; ')}.`),
+    ];
+  }
+  if (step.stage !== 'videoImport' || !step.extract?.length) return [];
+  return [
+    "The runner swept the video's frames with every part's transcript at its offset (no Whisper). Per video: the merged transcript, in the video's time, and the frames folder, kept as extract-sme-screenshots keeps them (its `frames-index.json` first, then only the frames you pick). Run convert-sme-input on these, as /doc-from-interview's Phase 2 does; never run the sweep or the script again.",
+    ...step.extract.map((x) => `- ${x.file}: transcript ${x.transcript}; frames ${x.frames}${x.context ? `; context ${x.context}` : ''}; parts at ${x.parts.map((p) => `${p.start} s`).join(', ')}.`),
+  ];
 }
 
 // What the brief says about the worktrees the runner made for the session.
@@ -574,6 +594,8 @@ export function sessionEnv(step, settings, { roots, roleRules, trees }) {
     docusaurus: has('Bash(npx docusaurus'),
     npmRun: has('Bash(npm run'),
     commands: commandsOfRules(roleRules),
+    // The transcriber's browser profile and its lock: the hook refuses a command that names either.
+    secrets: settings.video?.browserProfile ? [settings.video.browserProfile, `${settings.video.browserProfile}.lock`] : [],
     // `baseFix`: the hook refuses a commit and a push too (the runner commits the merge and pushes it).
     ...(step.stage === 'baseFix' ? { noCommit: true } : {}),
   };
@@ -838,7 +860,13 @@ export function scriptedCalls(step, ledger, settings) {
     case 'videoBlock':
       return [...(ledger.video?.gateComment ? [`tracker comment ${card} --text-file <the gate comment> --unless-header <its first line>`] : []), `tracker move ${card} --to blocked`];
     case 'videoTry':
-      return [`the transcriber adapter: ${step.parts?.length ?? 0} part(s)`];
+      return [`the transcriber adapter (${settings.video.transcriber ?? 'none'}): upload ${step.parts?.length ?? 0} part(s), look for ${step.fetch?.length ?? 0} transcript(s)`];
+    case 'videoExtract':
+      try {
+        return extractCalls(ledger, settings).flatMap((c) => c.commands.map((cmd) => cmd.join(' ')));
+      } catch (e) {
+        return [`the frame sweep can't run: ${e.message}`];
+      }
     default:
       return [];
   }
@@ -855,7 +883,7 @@ function cardsMovedWith(step, ledger, settings) {
   return readAllLedgers(settings.state).filter((o) => o.key !== ledger.key && !step.keys.includes(o.key) && o.group === ledger.group && o.mode === 'pipeline' && o.left?.status === from && o.stages?.close?.status !== 'done' && (o.prs ?? []).some((p) => p.number && shared.has(prId(p)) && (followsMove(p.stage, from, step.to) || taken.has(prId(p)))));
 }
 
-async function runScripted(step, ctx) {
+export async function runScripted(step, ctx) {
   const { settings, clients, io } = ctx;
   const key = step.keys[0];
   const ledger = readLedger(settings.state, key);
@@ -1000,17 +1028,8 @@ async function runScripted(step, ctx) {
       // UA changed in words since the translations were made: the translated label comes off, as the record says.
       for (const k of step.keys) await rec(k);
       return;
-    case 'videoTry': {
-      // The transcriber is the host's adapter (the video gate's own task builds it). Without one, every try fails
-      // at once, which is the fallback to the person.
-      const parts = [];
-      for (const file of step.parts ?? []) {
-        const r = io.transcriber ? await io.transcriber.tryPart({ ledger, file, settings }) : { outcome: 'failed', reason: 'no transcriber adapter is installed' };
-        parts.push({ file, ...r });
-      }
-      await rec(key, { result: JSON.stringify({ parts }) });
-      return;
-    }
+    case 'videoTry':
+      return runVideoTry(step, ledger, ctx, rec);
     case 'videoBlock': {
       const gate = ledger.video?.gateComment;
       let commentId = null;
@@ -1035,6 +1054,153 @@ async function runScripted(step, ctx) {
     default:
       throw new Error(`no scripted handler for ${step.stage}`);
   }
+}
+
+// The automatic transcription try (lib/rule.mjs, row 13), through the adapter `video.transcriber` names
+// (scripts/transcriber/). One browser for the step: first the looks for the transcripts of the parts uploaded earlier,
+// then the uploads, at most what the account has left today (`videoQuota`), counted once the browser holds the
+// profile, so two runs never count the same uploads. Each look and each upload is recorded as it ends, before the
+// next: a run that dies part way never uploads a part again. Each part one try, never a retry: the first failure ends
+// the step, and the gate falls back to the person; the parts not reached stay untried. A transcript not there
+// `transcriptHours` after its upload is a failure. A profile in use by another run is no failure: nothing is recorded,
+// and a later check tries.
+async function runVideoTry(step, ledger, { settings, io }, rec) {
+  const key = ledger.key;
+  const clock = io.now ?? Date.now;
+  const v = settings.video;
+  const parts = ledger.video?.videos.flatMap((x) => x.parts) ?? [];
+  const partOf = (file) => parts.find((p) => p.file === file);
+  const exists = (rel) => fs.existsSync(path.resolve(settings.root, rel));
+  const fetches = step.fetch ?? [];
+  const asked = step.parts ?? [];
+  const record = (results) => rec(key, { result: JSON.stringify({ parts: results }) });
+  // No session: one failure, on the first part the step names, so the gate falls back.
+  const failFirst = (reason) => record([...fetches.slice(0, 1).map((file) => ({ file, fetch: true, outcome: 'failed', reason })), ...(fetches.length ? [] : asked.slice(0, 1).map((file) => ({ file, outcome: 'failed', reason })))]);
+  let transcriber = io.transcriber ?? null;
+  if (!transcriber && v.transcriber) {
+    const { createTranscriber } = await import('../../transcriber/lib/index.mjs');
+    transcriber = createTranscriber(v.transcriber, { settings });
+  }
+  if (!transcriber) {
+    await failFirst('no transcriber adapter is installed');
+    return [];
+  }
+  let session;
+  try {
+    session = await transcriber.open();
+  } catch (e) {
+    if (e.busy) {
+      // Recorded, so a lock that never frees falls back after `transcriptHours` (lib/rule.mjs, `busySince`).
+      await rec(key, { result: JSON.stringify({ busy: true }) });
+      return { busy: true, warnings: [`the transcriber waits: ${e.message}`] };
+    }
+    await failFirst(String(e.message).split('\n')[0].slice(0, 300));
+    return [];
+  }
+  try {
+    // The profile opened: no longer busy, whatever follows (a step with nothing left to do records nothing else).
+    if (ledger.video?.busySince) await rec(key, { result: JSON.stringify({ opened: true }) });
+    const allowed = videoQuota(readAllLedgers(settings.state), ledger, settings, clock(), exists);
+    const uploads = asked.slice(0, allowed);
+    const notes = uploads.length < asked.length ? [`${asked.length - uploads.length} part(s) wait: today's uploads are used, or an older video gate goes first`] : [];
+    if (!uploads.length && !fetches.length) return { busy: true, warnings: notes };
+    for (const file of fetches) {
+      const part = partOf(file);
+      // A part the ledger no longer has: nothing to look for (the gate was recorded again since the step was chosen).
+      if (!part) {
+        notes.push(`${file}: no such video part in the ledger, not looked for`);
+        continue;
+      }
+      const up = part.tries?.filter((t) => !t.fetch).at(-1);
+      // No path for its transcript, or no name the upload is listed by: one failure with the reason, never a guess.
+      const why = !part.transcript ? 'the part has no transcript path in the ledger' : typeof up?.ref?.name !== 'string' || !up.ref.name ? 'the upload has no name it is listed by' : null;
+      if (why) {
+        await record([{ file, fetch: true, outcome: 'failed', reason: why }]);
+        return notes;
+      }
+      const r = await session.fetch({ ref: up.ref, dest: path.resolve(settings.root, part.transcript) });
+      const late = r.outcome === 'waiting' && up?.at && clock() - Date.parse(up.at) > v.transcriptHours * 3600000;
+      await record([{ file, fetch: true, ...(late ? { outcome: 'failed', reason: `no transcript within ${v.transcriptHours} h of the upload` } : r) }]);
+      if (r.outcome === 'failed' || late) return notes;
+    }
+    for (const file of uploads) {
+      const part = partOf(file);
+      if (!part) {
+        notes.push(`${file}: no such video part in the ledger, not uploaded`);
+        continue;
+      }
+      if (!part.transcript || !fs.existsSync(path.resolve(settings.root, file))) {
+        await record([{ file, outcome: 'failed', reason: !part.transcript ? 'the part has no transcript path in the ledger' : 'the part file is not on disk' }]);
+        break;
+      }
+      // The name the service lists it by: the ticket's key in front, so two tickets' `video-1.mp4-part-01.m4a` differ.
+      const r = await session.upload({ file: path.resolve(settings.root, file), name: `${key}-${path.basename(file)}` });
+      await record([{ file, ...r }]);
+      if (r.outcome !== 'uploaded') break;
+    }
+    return notes;
+  } finally {
+    await session.close();
+  }
+}
+
+// The frame sweep of `videoExtract`: per video, the commands the runner runs (no shell, fixed arguments, every path
+// from the ledger and inside the host repo), with the venv of `extract-sme-screenshots`. The full pass, with each part's
+// transcript at its start (`--transcript <file>@<seconds>`, whole seconds: the parts are cut at whole seconds, so
+// rounding changes nothing), so Whisper never runs; then the frames it kept and the transcript's key frames are merged
+// into `frames/<video file name>-frames/` next to the video, as the skill keeps them. The package stays whole, next to
+// the video, as `<video file name>-sme/` (`-sme-2` and on when one is there already: the pass wants a new folder).
+export const SME_SCRIPT = path.join(PLUGIN_ROOT, 'scripts', 'sme-video-context', 'sme_video_context.py');
+// Whether a program is on the PATH the runner runs with (no shell, no `which`).
+export function onPath(name, env = process.env) {
+  return String(env.PATH ?? '').split(path.delimiter).filter(Boolean).some((d) => {
+    try {
+      fs.accessSync(path.join(d, name), fs.constants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
+// The sweep's preflight: what it needs and doesn't find (the venv's Python, `tesseract`, `ffmpeg`), as one reason, or
+// null. Run before the sweep is chosen to run, so a machine without them never fails the step: the import goes on
+// without frames (lib/rule.mjs, `importStep`).
+export function extractPreflight(python, { exists = (p) => fs.existsSync(p), has = (n) => onPath(n) } = {}) {
+  const lacking = [...(exists(python) ? [] : [`no Python at ${python} (the venv of extract-sme-screenshots)`]), ...['tesseract', 'ffmpeg'].filter((n) => !has(n)).map((n) => `no ${n} on the PATH`)];
+  return lacking.length ? lacking.join('; ') : null;
+}
+export const smePython = (home = os.homedir()) => path.join(home, '.cache', 'doc-writer-toolkit', 'sme-video-venv', 'bin', 'python');
+export function extractCalls(ledger, settings, { python = smePython(), exists = (p) => fs.existsSync(p) } = {}) {
+  const abs = (rel) => path.resolve(settings.root, rel);
+  const rel = (p) => path.relative(settings.root, p).split(path.sep).join('/');
+  return (ledger.video?.videos ?? []).map((v) => {
+    const video = abs(v.file);
+    if (!video.startsWith(settings.root + path.sep)) throw new Error(`the video ${v.file} is not inside the host repo`);
+    const parts = v.parts ?? [];
+    if (!parts.length || parts.some((p) => !p.transcript || !exists(abs(p.transcript)))) throw new Error(`${v.file}: a part has no transcript file: the sweep needs every one, or Whisper would run`);
+    const transcripts = parts.map((p) => {
+      const t = abs(p.transcript);
+      if (!t.startsWith(settings.root + path.sep)) throw new Error(`the transcript ${p.transcript} is not inside the host repo`);
+      if (!(Number.isFinite(p.start) && p.start >= 0)) throw new Error(`${p.file}: its start is not a number of seconds`);
+      return ['--transcript', `${t}@${Math.round(p.start)}`];
+    });
+    const dir = path.dirname(video);
+    const name = path.basename(video);
+    let out = path.join(dir, `${name}-sme`);
+    for (let n = 2; exists(out); n++) out = path.join(dir, `${name}-sme-${n}`);
+    const frames = path.join(dir, 'frames', `${name}-frames`);
+    return {
+      file: v.file,
+      out,
+      frames,
+      result: { file: v.file, package: rel(out), transcript: rel(path.join(out, 'transcript.txt')), context: rel(path.join(out, 'context.md')), frames: rel(frames) },
+      commands: [
+        [python, SME_SCRIPT, video, out, ...transcripts.flat(), '--progress-file', path.join(out, 'progress.json')],
+        [python, SME_SCRIPT, video, frames, '--merge-from', path.join(out, 'images')],
+        [python, SME_SCRIPT, video, frames, '--merge-from', path.join(out, 'transcript-key', 'images')],
+      ],
+    };
+  });
 }
 
 export const trashOf = (settings, io = {}) => io.trashDir ?? settings.cleanup.trashDir ?? path.join(os.homedir(), '.Trash');
@@ -1411,7 +1577,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         // Neither call stops the step or what follows it: a throw is a warning.
         const marked = (note) => say({ kind: 'reactions', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, outcome: 'warning', note });
         const picked = step.role ? await pickMarks({ settings, clients, step }).catch((e) => (marked(`no marks: ${e.message}`), null)) : null;
-        const r = await live.tracked(step, () => (step.role ? runModelStep(step) : step.stage === 'build' ? runBuildStep(step) : step.stage === 'idSync' ? runIdSyncStep(step) : step.stage === 'baseMerge' ? runBaseMergeStep(step) : runScriptedStep(step)));
+        const r = await live.tracked(step, () => (step.role ? runModelStep(step) : step.stage === 'build' ? runBuildStep(step) : step.stage === 'idSync' ? runIdSyncStep(step) : step.stage === 'baseMerge' ? runBaseMergeStep(step) : step.stage === 'videoExtract' ? runExtractStep(step) : runScriptedStep(step)));
         for (const note of await settleMarks({ settings, clients, step, picked, outcome: r.outcome }).catch((e) => [`the marks were not set: ${e.message}`])) marked(note);
         // The ready, check and translated labels follow what the step recorded (lib/pr-labels.mjs), whoever recorded it.
         for (const note of await followLabels({ settings, clients, keys: step.keys, before })) say({ kind: 'label', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, outcome: 'failed', note });
@@ -1464,10 +1630,14 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
 
   async function runScriptedStep(step) {
     try {
-      const warnings = (await runScripted(step, { settings, clients, io })) ?? [];
+      const res = (await runScripted(step, { settings, clients, io })) ?? [];
+      // `{ busy, warnings }`: the step did nothing this run and recorded nothing (the transcriber's profile in use):
+      // `busy`, so the group doesn't take the same step again in this run, and a later check does.
+      const warnings = Array.isArray(res) ? res : res.warnings ?? [];
+      const outcome = res.busy ? 'busy' : 'done';
       const note = warnings.length ? warnings.join('; ').slice(0, 300) : null;
-      say({ kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, outcome: 'done', ...(note ? { note } : {}) });
-      return { ...pick(step), outcome: 'done', ...(warnings.length ? { warnings, note } : {}) };
+      say({ kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, outcome, ...(note ? { note } : {}) });
+      return { ...pick(step), outcome, ...(warnings.length ? { warnings, note } : {}) };
     } catch (e) {
       const note = `${e.message}`.slice(0, 300);
       for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'failed', pr: step.pr, note, now: clock() }).catch(() => {});
@@ -1572,6 +1742,77 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
       return failed(`the build passed, but its record was refused: ${String(e.message).slice(0, 300)}`);
     }
     for (const k of step.keys) await runRecord({ settings, clients, key: k, run: JSON.stringify({ ...base, start: new Date(began).toISOString(), wallMs, waitedMs, outcome: 'done', session: null, exit: 0 }), pr: step.pr, now: clock() }).catch(() => {});
+    log('done');
+    return { ...pick(step), outcome: 'done' };
+  }
+
+  // The video's frame sweep (`videoExtract`), run by the runner itself with no model, as the build is: no role session
+  // may run Python, ffmpeg or tesseract. The commands of `extractCalls`, each under `video.extractMinutes`, with the
+  // environment of a host script. Done: recorded with each video's package, merged transcript and frames folder. A
+  // sweep that can't run (its preflight) or that fails (a Python error, a timeout) is recorded skipped with the reason,
+  // never failed: the import goes on without frames, so the sweep never holds a ticket, the hand path's least of all.
+  // Only a refused record is a failure.
+  async function runExtractStep(step) {
+    const began = clock();
+    const key = step.keys[0];
+    const base = { stage: step.stage, role: null, script: true, trigger: manual ? 'manual' : trigger };
+    const log = (outcome, note) => say({ kind: 'step', group: step.group, keys: step.keys, stage: step.stage, outcome, ...(note ? { note: note.slice(0, 300) } : {}) });
+    const failed = async (note, { ran = true } = {}) => {
+      for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'failed', note, now: clock() }).catch(() => {});
+      const marks = await marksOf(step);
+      const failures = (step.prior ?? 0) + 1;
+      const { script, ...noRun } = base;
+      const run = { ...(ran ? { ...base, start: new Date(began).toISOString(), wallMs: clock() - began } : noRun), outcome: 'failed', session: null, note: note.slice(0, 300), failures };
+      for (const k of step.keys) await runRecord({ settings, clients, key: k, run: JSON.stringify({ ...run, ...(marks[k] ? { after: marks[k] } : {}) }), now: clock() }).catch(() => {});
+      log('failed', note);
+      return { ...pick(step), outcome: 'failed', note: note.slice(0, 300) };
+    };
+    // Skipped, with why: the record says so, and the import's brief. A sweep that ran leaves its run too (its time).
+    const skip = async (why, { ran = false, exit = null, hint = '' } = {}) => {
+      const reason = `the frame sweep was skipped: ${why}${hint}`;
+      try {
+        for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'done', note: reason.slice(0, 300), result: JSON.stringify({ skipped: why }), now: clock() });
+      } catch (e) {
+        return failed(`the frame sweep's skip was refused: ${String(e.message).slice(0, 300)}`, { ran });
+      }
+      if (ran) for (const k of step.keys) await runRecord({ settings, clients, key: k, run: JSON.stringify({ ...base, start: new Date(began).toISOString(), wallMs: clock() - began, outcome: 'done', session: null, exit, note: reason.slice(0, 300) }), now: clock() }).catch(() => {});
+      log('done', reason);
+      return { ...pick(step), outcome: 'done', note: reason.slice(0, 300), warnings: [reason] };
+    };
+    let calls;
+    try {
+      calls = extractCalls(readLedger(settings.state, key), settings, io.smePython ? { python: io.smePython } : {});
+    } catch (e) {
+      return skip(String(e.message).slice(0, 300));
+    }
+    // The preflight: without the venv, `tesseract` or `ffmpeg` the sweep is skipped, not failed, whatever the video
+    // settings, and the import goes on with the parts' transcripts (no frames), as before the sweep.
+    const lacking = (io.extractPreflight ?? (io.runExtract ? () => null : extractPreflight))(calls[0]?.commands[0][0] ?? smePython());
+    if (lacking) return skip(lacking, { hint: '; scripts/sme-video-context/README.md sets them up' });
+    const mine = step.group ?? key;
+    if (allLocks(settings.state, clock()).some((l) => l.group === mine && l.pid === process.pid)) renewLock(settings.state, mine, { leaseMinutes: settings.limits.lockLeaseMinutes, stage: step.stage, now: clock() });
+    const renew = every(() => {
+      if (step.group) renewLock(settings.state, step.group, { leaseMinutes: settings.limits.lockLeaseMinutes, now: clock() });
+    }, 5 * 60000);
+    try {
+      for (const c of calls) {
+        for (const command of c.commands) {
+          const res = await (io.runExtract ?? runSiteBuild)({ cwd: settings.root, command, timeoutMs: settings.video.extractMinutes * 60000 });
+          if (res.code !== 0) {
+            const tail = (res.tail ?? []).join('\n').trim();
+            return await skip(`${res.timedOut ? `the sweep of ${c.file} timed out after ${settings.video.extractMinutes} min (video.extractMinutes)` : `the sweep of ${c.file} failed (exit ${res.code})`}${tail ? `: ${tail.slice(-200)}` : ''}`, { ran: true, exit: res.code });
+          }
+        }
+      }
+    } finally {
+      stopEvery(renew);
+    }
+    try {
+      for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'done', result: JSON.stringify({ videos: calls.map((c) => c.result) }), now: clock() });
+    } catch (e) {
+      return failed(`the frame sweep ran, but its record was refused: ${String(e.message).slice(0, 300)}`);
+    }
+    for (const k of step.keys) await runRecord({ settings, clients, key: k, run: JSON.stringify({ ...base, start: new Date(began).toISOString(), wallMs: clock() - began, outcome: 'done', session: null, exit: 0 }), now: clock() }).catch(() => {});
     log('done');
     return { ...pick(step), outcome: 'done' };
   }

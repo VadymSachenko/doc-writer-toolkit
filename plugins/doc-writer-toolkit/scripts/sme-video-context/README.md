@@ -69,6 +69,8 @@ The output contains:
 
 OCR and transcription are evidence aids, not ground truth. Verify critical names, values, and decisions against the recording.
 
+**Parts of a cut video.** A video longer than 30 minutes is cut into parts for transcription (`scripts/video-parts/`), each with its start in whole seconds. Pass each part's transcript at its start, `--transcript <part-01>@0 --transcript <part-02>@1800 …`: every part's timestamps land on the video's time, in one merged `transcript.txt`, and Whisper doesn't run. An offset must be whole seconds: anything else after the `@` is read as part of the file's name, which then isn't found. The ticket flow's video gate runs this full pass itself, with every part's transcript, before the import's session (`scripts/ticket-state/README.md`, "The video gate").
+
 ## Progress: `progress.json`
 
 Rewritten atomically (write to `.tmp`, then `os.replace()`) at most once a second while any long stage is running, so it's always valid JSON to read mid-run:
@@ -161,7 +163,7 @@ Without the skill's venv, make a throwaway one: `python3 -m venv .venv-sme && .v
 
 What they cover:
 
-- **`tests/test_logic.py`** (standard library only): the time and file-name helpers; TurboScribe parsing with offsets; the transcript score (`transcript_relevance`) and `--plan-from-transcript`; the `frames-index.json` entries and their append-only rule; `--merge-from` (tolerance, carried entries, no overwrite); the `progress.json` fields, its once-a-second write and the `eta_s` window; the `--extract-at` option parsing; the transcript-driven package; and the plan and merge modes started as a command line.
+- **`tests/test_logic.py`** (standard library only): the time and file-name helpers; TurboScribe parsing with offsets, and the parts of a cut video mapped onto its time; the transcript score (`transcript_relevance`) and `--plan-from-transcript`; the `frames-index.json` entries and their append-only rule; `--merge-from` (tolerance, carried entries, no overwrite); the `progress.json` fields, its once-a-second write and the `eta_s` window; the `--extract-at` option parsing; the transcript-driven package; and the plan and merge modes started as a command line.
 - **`tests/test_frames.py`** (Pillow and ImageHash): the de-duplication walk of the bulk pass on generated frames, with the OCR replaced by a lookup table; the targeted `--extract-at` pass with `ffmpeg` and the OCR replaced; the contact sheet and the OCR preparation.
 
 Not covered, because each needs the real tool: `ffmpeg` frame extraction and probing, `tesseract` itself, Whisper transcription, the worker pool behind `--jobs N`, and a whole run on a video.

@@ -1,0 +1,12 @@
+{
+  "name": "transcriber",
+  "private": true,
+  "type": "module",
+  "description": "The video gate's automatic transcription: upload a ticket's video parts to a transcription service and fetch each plain-text transcript, in a persistent browser profile the owner signed in to once. No model call, no runtime dependency of its own (the host's Playwright).",
+  "bin": { "transcriber": "./transcriber.mjs" },
+  "engines": { "node": ">=18.3" },
+  "scripts": {
+    "test": "node test/run.mjs",
+    "test:offline": "node --test test/offline.test.mjs"
+  }
+}

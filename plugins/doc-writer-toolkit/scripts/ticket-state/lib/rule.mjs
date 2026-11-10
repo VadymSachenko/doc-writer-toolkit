@@ -2,6 +2,7 @@ import { CARD_STATUS_OF, CHAIN, IN_PROGRESS, PR_ORDER, PR_STAGE_OF_STATUS, ROLE_
 import { prId } from './ledger.mjs';
 import { editsOf, mergedEdits, nextEditNumber, parseReply, parseThreadReply, resolveReply, resolveThreadReply, suggestionOf } from './edits.mjs';
 import { IMAGE } from './world.mjs';
+import { parseStartHours } from './settings.mjs';
 
 // The next-step rule of the ticket flow (context/ticket-flow.md, "The rule"). A pure function of a ledger and what the
 // tracker, the forge, git and the files show now: the world wins over the ledger. First match wins:
@@ -20,7 +21,8 @@ import { IMAGE } from './world.mjs';
 //         With `forge.keepFresh`, from ready for merge on (D-113, D-127): the base merged into the branch when it moved
 //         (`baseMerge`, the runner's), a conflict resolved by a session (`baseFix`), and ready for merge only once CI
 //         passed on the head
-//   13 videoGate                                      the automatic try, the fallback, or the import
+//   13 videoGate                                      the automatic try (uploads, then fetches), the fallback, or
+//                                                     the frame sweep and the import
 //   14 ready and a free slot                          start (the `startable` groups, see limits.mjs)
 //   15 otherwise                                      the state's own next step
 //
@@ -79,7 +81,7 @@ function phaseOf(l) {
   if (l.stages?.pr?.status === 'done') return 'prs';
   if (last === 'questions' && rec?.status === 'done') return 'questions';
   if (last === 'planGate' && rec?.status === 'done') return 'planGate';
-  if (['videoGate', 'videoTry', 'videoBlock'].includes(last) && l.stages?.videoGate?.status === 'done') return 'videoGate';
+  if (['videoGate', 'videoTry', 'videoBlock', 'videoExtract'].includes(last) && l.stages?.videoGate?.status === 'done') return 'videoGate';
   if (l.stages?.write?.status === 'done' || ['write', 'uaReview', 'pr'].includes(last)) return 'writing';
   if (['start', 'plan', 'answers', 'planApproval', 'videoImport'].includes(last)) return 'planning';
   return 'card';
@@ -439,7 +441,7 @@ function personMoved(l, w, out, prs) {
       if (missing.length) {
         out.notes.push(`went on without the video: ${missing.length} part(s) had no transcript when the card came back`);
         out.steps.push(step('answers', { withoutVideo: true }));
-      } else out.steps.push(step('videoImport'));
+      } else out.steps.push(importStep(l));
     } else if (phase === 'questions') {
       out.state = 'planning';
       out.steps.push(step('answers'));
@@ -985,34 +987,131 @@ function missingParts(l, w) {
   return parts.filter((p) => !(p.transcript && w.fileExists?.(p.transcript)));
 }
 
-// Row 13: the video gate. Parts not yet tried go to the automatic try, as many as the day allows; a failed try (or no
-// automatic try configured) falls back to the gate: the card to Blocked with the gate comment, the parts in the
-// report. Once every part has its transcript: the import.
+// A part's uploads (a fetch's failure is a try too, marked `fetch`), and the last upload.
+const uploadsOf = (p) => (p.tries ?? []).filter((t) => !t.fetch);
+const lastUpload = (p) => uploadsOf(p).at(-1) ?? null;
+// The automatic try is on only with both settings: the adapter and its browser profile.
+export const automaticVideo = (v) => Boolean(v?.transcriber && v?.browserProfile);
+// An uploaded part's transcript is looked for every `fetchMinutes`, from its upload or its last look.
+function fetchDue(p, now, v) {
+  const up = lastUpload(p);
+  if (up?.outcome !== 'uploaded') return false;
+  const last = Math.max(Date.parse(up.at), ...(p.checks ?? []).map((c) => Date.parse(c.at)).filter(Number.isFinite));
+  return now - last >= v.fetchMinutes * 60000;
+}
+
+// The step once every part has its transcript, whatever the video settings (a person's transcripts too): the runner's
+// frame sweep with them (`videoExtract`), then the import's session. A sweep recorded before the last gate was for
+// another set of parts. A sweep the runner skipped (no venv, no `tesseract` or `ffmpeg`: its preflight) leaves the
+// import on the parts' transcripts at their offsets, with no frames, as before the sweep, and says why.
+function importStep(l) {
+  const videos = l.video?.videos ?? [];
+  const parts = videos.flatMap((v) => v.parts ?? []).length;
+  if (!doneAfter(l, 'videoExtract', 'videoGate')) return step('videoExtract', { parts });
+  const skipped = l.video?.extractSkipped?.reason ?? null;
+  const partsOf = (v) => (v.parts ?? []).map((p) => ({ transcript: p.transcript, start: p.start }));
+  if (skipped) return step('videoImport', { parts, noFrames: skipped, videos: videos.map((v) => ({ file: v.file, parts: partsOf(v) })) });
+  const extract = videos.filter((v) => v.extract).map((v) => ({ file: v.file, transcript: v.extract.transcript, frames: v.extract.frames, ...(v.extract.context ? { context: v.extract.context } : {}), parts: partsOf(v) }));
+  return step('videoImport', { parts, ...(extract.length ? { extract } : {}) });
+}
+
+// Whether a time is inside `limits.startHours`, local time: the automatic try opens a browser only then (D-109: no
+// work in the early morning). Outside them it waits; nothing falls back.
+function inVideoHours(ms, settings) {
+  const h = parseStartHours(settings.limits?.startHours) ?? parseStartHours('10-22');
+  const d = new Date(ms);
+  const m = d.getHours() * 60 + d.getMinutes();
+  return m >= h.from && m < h.to;
+}
+
+// The time between two moments that falls inside `limits.startHours`, local time (ms): the hours in which a try runs.
+export function startHoursBetween(from, to, settings) {
+  const h = parseStartHours(settings.limits?.startHours) ?? parseStartHours('10-22');
+  let total = 0;
+  const day = new Date(from);
+  day.setHours(0, 0, 0, 0);
+  for (; day.getTime() < to; day.setDate(day.getDate() + 1)) {
+    const a = new Date(day);
+    a.setHours(0, h.from, 0, 0);
+    const b = new Date(day);
+    b.setHours(0, h.to, 0, 0);
+    total += Math.max(0, Math.min(to, b.getTime()) - Math.max(from, a.getTime()));
+  }
+  return total;
+}
+
+// Whether the transcriber's profile has been in use by another run, at every try since the first (`busySince`), for
+// longer than `transcriptHours` of the start hours: a lock the runs can't get past. The night outside them, when no
+// try runs, doesn't count; the profile opening clears `busySince` (lib/record.mjs).
+function busyTooLong(l, now, settings) {
+  const since = Date.parse(l.video?.busySince ?? '');
+  return Number.isFinite(since) && startHoursBetween(since, now, settings) > settings.video.transcriptHours * 3600000;
+}
+
+// For the watcher, inside the start hours: a ticket at the video gate with an uploaded part whose transcript is due a
+// look, or (with `ledgers`, every ticket's) a part not yet uploaded that the day's uploads still allow: a gate reached
+// before the start hours, or a day's parts left for tomorrow, is tried once they begin. `exists(rel)`: a file of the
+// host repo exists.
+export function videoFetchDue(l, now, settings, exists, ledgers = null) {
+  if (!automaticVideo(settings.video) || !l.video || l.video.importedAt || l.video.skipped || l.video.blockedAt || phaseOf(l) !== 'videoGate' || !inVideoHours(now, settings)) return false;
+  const parts = (l.video.videos ?? []).flatMap((v) => v.parts ?? []).filter((p) => !(p.transcript && exists(p.transcript)));
+  if (parts.some((p) => (p.tries ?? []).some((t) => t.outcome === 'failed'))) return false;
+  if (parts.some((p) => fetchDue(p, now, settings.video))) return true;
+  return Boolean(ledgers) && parts.some((p) => !uploadsOf(p).length) && videoQuota(ledgers, l, settings, now, exists) > 0;
+}
+
+// The uploads the transcription account has left today for this ticket: `partsPerDay` is the account's, across every
+// ticket, and the oldest gate goes first (D-070), so the parts an older gate still waits to upload come off it. A gate
+// that fell back to the person waits for no upload. `exists(rel)`: a file of the host repo exists.
+export function videoQuota(ledgers, l, settings, now, exists) {
+  const v = settings.video;
+  const today = dayOf(now);
+  const used = ledgers.flatMap((x) => (x.video?.videos ?? []).flatMap((vv) => vv.parts ?? [])).flatMap(uploadsOf).filter((t) => t.at && dayOf(Date.parse(t.at)) === today).length;
+  const older = (x) => x.key !== l.key && x.video?.at && (x.video.at < l.video.at || (x.video.at === l.video.at && String(x.key) < String(l.key)));
+  const waiting = ledgers
+    .filter((x) => older(x) && !x.video.importedAt && !x.video.skipped && !x.video.blockedAt && phaseOf(x) === 'videoGate')
+    .map((x) => (x.video.videos ?? []).flatMap((vv) => vv.parts ?? []))
+    .filter((ps) => !ps.some((p) => (p.tries ?? []).some((t) => t.outcome === 'failed')))
+    .flatMap((ps) => ps.filter((p) => !uploadsOf(p).length && !(p.transcript && exists(p.transcript)))).length;
+  return Math.max(0, v.partsPerDay - used - waiting);
+}
+
+// Row 13: the video gate. With the automatic try on, parts not yet uploaded go to it, as many as the day allows, and
+// an uploaded part's transcript is looked for every `fetchMinutes` (uploading and fetching are separate runs). A failed
+// try (or no automatic try configured) falls back to the gate: the card to Blocked with the gate comment, the parts in
+// the report. Once every part has its transcript: the frame sweep, then the import.
 function videoGate(l, w, out, status) {
   const v = w.settings.video;
-  const parts = (l.video?.videos ?? []).flatMap((x) => x.parts ?? []);
   const missing = missingParts(l, w);
   if (!missing.length) {
-    out.steps.push(step('videoImport', { parts: parts.length }));
+    out.steps.push(importStep(l));
     return out;
   }
   const tz = undefined; // the machine's own zone: the day the owner lives in
   const today = dayOf(w.now, tz);
-  const tries = parts.flatMap((p) => p.tries ?? []);
-  const triedToday = tries.filter((t) => t.at && dayOf(Date.parse(t.at), tz) === today).length;
-  const late = (t) => t.outcome === 'uploaded' && w.now - Date.parse(t.at) > v.transcriptHours * 3600000;
-  const failed = missing.filter((p) => (p.tries ?? []).some((t) => t.outcome === 'failed' || late(t)));
-  const untried = missing.filter((p) => !(p.tries ?? []).length);
+  const triedToday = (l.video?.videos ?? []).flatMap((x) => x.parts ?? []).flatMap(uploadsOf).filter((t) => t.at && dayOf(Date.parse(t.at), tz) === today).length;
+  const failed = missing.filter((p) => (p.tries ?? []).some((t) => t.outcome === 'failed'));
+  const untried = missing.filter((p) => !uploadsOf(p).length);
+  const uploaded = missing.filter((p) => lastUpload(p)?.outcome === 'uploaded');
   const quota = Math.max(0, v.partsPerDay - triedToday);
   out.gate = { who: 'owner', why: `transcripts of ${missing.length} video part(s)` };
-  if (failed.length || !v.browserProfile) {
-    if (status !== 'blocked') out.steps.push(step('videoBlock', { reason: failed.length ? 'the automatic try failed' : 'no automatic try configured (video.browserProfile)' }));
+  const block = (reason) => {
+    if (status !== 'blocked') out.steps.push(step('videoBlock', { reason }));
+    return out;
+  };
+  if (failed.length || !automaticVideo(v)) return block(failed.length ? 'the automatic try failed' : 'no automatic try configured (video.transcriber and video.browserProfile)');
+  const due = uploaded.filter((p) => fetchDue(p, w.now, v));
+  const upload = untried.slice(0, quota);
+  if (uploaded.length || upload.length) out.gate = { who: 'transcriber', why: 'the automatic transcription try' };
+  // Outside the start hours the try waits, before anything else: the busy profile's time counts only inside them.
+  if ((upload.length || due.length) && !inVideoHours(w.now, w.settings)) {
+    out.notes.push(`the automatic try waits for the start hours (${w.settings.limits?.startHours ?? '10-22'}): no browser opens outside them`);
     return out;
   }
-  if (untried.length && quota > 0) {
-    out.gate = { who: 'transcriber', why: 'the automatic transcription try' };
-    out.steps.push(step('videoTry', { parts: untried.slice(0, quota).map((p) => p.file) }));
-  } else if (untried.length) out.notes.push(`${untried.length} part(s) wait for tomorrow: ${v.partsPerDay} a day`);
+  if (busyTooLong(l, w.now, w.settings)) return block(`the transcriber's browser profile stayed in use by another run for more than ${v.transcriptHours} h of the start hours (video.transcriptHours)`);
+  if (upload.length || due.length) out.steps.push(step('videoTry', { parts: upload.map((p) => p.file), ...(due.length ? { fetch: due.map((p) => p.file) } : {}) }));
+  if (untried.length > upload.length) out.notes.push(`${untried.length - upload.length} part(s) wait for tomorrow: ${v.partsPerDay} a day`);
+  if (uploaded.length > due.length) out.notes.push(`${uploaded.length - due.length} uploaded part(s) wait for their transcript (looked for every ${v.fetchMinutes} min)`);
   return out;
 }
 

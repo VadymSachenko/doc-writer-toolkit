@@ -131,6 +131,51 @@ class TurboscribeParsingTests(TempDirTestCase):
         self.assertEqual(len(lines), 2)
 
 
+class CutPartsOffsetTests(TempDirTestCase):
+    """A video longer than 30 minutes is cut into parts (scripts/video-parts/): a 3725.4-second video gives parts
+    at 0, 1800 and 3600 seconds. Each part's TurboScribe transcript starts at 0:00; passed as `<file>@<start>`, its
+    timestamps land on the original's time, the edges of the parts included."""
+
+    def parts(self):
+        return [
+            self.transcript_file("call.mp4-part-01-transcript-turboscribe.txt", "(0:00 - 0:04)\nfirst words\n\n(29:55 - 29:59)\nend of part one\n"),
+            self.transcript_file("call.mp4-part-02-transcript-turboscribe.txt", "(0:01 - 0:06)\nstart of part two\n\n(29:58 - 30:00)\nend of part two\n"),
+            self.transcript_file("call.mp4-part-03-transcript-turboscribe.txt", "(0:00 - 2:05)\nthe short last part\n\n(Transcribed by TurboScribe.ai. Go Unlimited to remove this message.)\n"),
+        ]
+
+    def test_each_part_maps_onto_the_original_time(self):
+        files = self.parts()
+        segments, sources = svc.parse_turboscribe([f"{f}@{start}" for f, start in zip(files, (0, 1800, 3600))])
+        self.assertEqual(
+            [(s["start"], s["end"], s["text"]) for s in segments],
+            [
+                (0, 4, "first words"),
+                (1795, 1799, "end of part one"),
+                (1801, 1806, "start of part two"),
+                (3598, 3600, "end of part two"),
+                (3600, 3725, "the short last part"),
+            ],
+        )
+        self.assertEqual([s["offset"] for s in sources], [0.0, 1800.0, 3600.0])
+
+    def test_the_merged_transcript_reads_in_the_original_time_whatever_the_order_given(self):
+        files = self.parts()
+        out = self.tmp / "out"
+        out.mkdir()
+        svc.import_turboscribe([f"{files[2]}@3600", f"{files[0]}@0", f"{files[1]}@1800"], out)
+        lines = (out / "transcript.txt").read_text(encoding="utf-8").splitlines()
+        self.assertEqual([line.split("]")[0] + "]" for line in lines], [
+            "[00:00:00–00:00:04]", "[00:29:55–00:29:59]", "[00:30:01–00:30:06]", "[00:59:58–01:00:00]", "[01:00:00–01:02:05]",
+        ])
+
+    def test_an_offset_that_is_not_whole_seconds_is_no_offset(self):
+        # The parser reads whole seconds only: `@1800.5` is read as part of the file's name, which doesn't exist, so a
+        # wrong offset can never shift a part silently. The runner passes whole seconds (the parts are cut at them).
+        files = self.parts()
+        with self.assertRaises(FileNotFoundError):
+            svc.parse_turboscribe([f"{files[1]}@1800.5"])
+
+
 class TranscriptRelevanceTests(unittest.TestCase):
     def test_no_keywords_scores_zero(self):
         self.assertEqual(svc.transcript_relevance("Нічого особливого"), (0, []))
