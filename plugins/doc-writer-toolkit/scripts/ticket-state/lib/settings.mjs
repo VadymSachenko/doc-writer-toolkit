@@ -175,6 +175,15 @@ function validateReviewRounds(raw) {
   return { labels };
 }
 
+// Keeping each pipeline PR up to date with its base (`forge.keepFresh`, D-113, D-127): from ready for merge on, the
+// runner merges the base into the branch whenever the base moved, CI runs again, and a conflict goes back to a session.
+// Absent or false: the branch is never touched for its base, as before.
+function validateKeepFresh(raw) {
+  if (raw === undefined || raw === null) return false;
+  if (typeof raw !== 'boolean') fail('forge.keepFresh must be true or false');
+  return raw;
+}
+
 // The status marks on the comments a step takes (`forge.reactions`, `tracker.reactions`, TASK-095): the runner's own
 // reactions around the session (lib/reactions.mjs). Absent or false: none, as before. On the forge the comments come
 // from `take`, which only the trigger words give, and the pipeline's own reactions are `forge.self`'s: without either,
@@ -260,6 +269,7 @@ export function validateSettings(merged, { root, stateRootDefault }) {
   if (rawIds !== undefined && rawIds !== null && (!isObject(rawIds) || Object.entries(rawIds).some(([k, v]) => !(k in DEFAULT_ID_COMMENTS) || typeof v !== 'string' || !v.trim()))) fail(`forge.idComments must be { ${Object.keys(DEFAULT_ID_COMMENTS).join(', ')} }, each a text`);
   const idComments = { ...DEFAULT_ID_COMMENTS, ...(rawIds ?? {}) };
   const reviewRounds = validateReviewRounds(merged.forge?.reviewRounds);
+  const keepFresh = validateKeepFresh(merged.forge?.keepFresh);
   const reactions = validateReactions(merged, { triggerWords, self: forge.self });
 
   const mode = merged.mode ?? LOCAL_DEFAULTS.mode;
@@ -348,6 +358,7 @@ export function validateSettings(merged, { root, stateRootDefault }) {
     idComments,
     triggerWords,
     reviewRounds,
+    keepFresh,
     reactions,
     hostRules: merged.hostRules ?? {},
     hostJobs: validateJobs(merged.hostJobs ?? [], root),
@@ -427,6 +438,6 @@ export function printable(s) {
   return {
     ...rest,
     tracker: { ...tracker, credentials: { ...tracker.credentials } },
-    forge: { kind: forge.kind, owner: forge.owner, self: forge.self, assignee: forge.assignee, checkLabel: forge.checkLabel, expertLabel: forge.expertLabel ?? null, readyLabel: forge.readyLabel ?? null, translatedLabel: forge.translatedLabel ?? null, repos: forge.repos, triggerWords: s.triggerWords ?? [], reviewRounds: s.reviewRounds ? true : false },
+    forge: { kind: forge.kind, owner: forge.owner, self: forge.self, assignee: forge.assignee, checkLabel: forge.checkLabel, expertLabel: forge.expertLabel ?? null, readyLabel: forge.readyLabel ?? null, translatedLabel: forge.translatedLabel ?? null, repos: forge.repos, triggerWords: s.triggerWords ?? [], reviewRounds: s.reviewRounds ? true : false, keepFresh: Boolean(s.keepFresh) },
   };
 }

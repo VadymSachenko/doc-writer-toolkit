@@ -17,6 +17,9 @@ import { IMAGE } from './world.mjs';
 //         review requested; new comments; a hand edit of UA no style check read (styleCheck); smeReview with a reviewer's
 //         approval since it entered the review (to finalReview); translation: the first chain stage not done for the
 //         head, or after ready for merge the re-sync of the whole range since the ready head
+//         With `forge.keepFresh`, from ready for merge on (D-113, D-127): the base merged into the branch when it moved
+//         (`baseMerge`, the runner's), a conflict resolved by a session (`baseFix`), and ready for merge only once CI
+//         passed on the head
 //   13 videoGate                                      the automatic try, the fallback, or the import
 //   14 ready and a free slot                          start (the `startable` groups, see limits.mjs)
 //   15 otherwise                                      the state's own next step
@@ -55,12 +58,15 @@ const doneAfter = (l, stage, after) => l.stages?.[stage]?.status === 'done' && (
 
 // A chain stage or a re-sync left running on a PR that isn't at `translation` now (an old ledger, a person's move back,
 // a re-sync the earlier rule started at ready for merge) waits for a person's move like the rest of the chain: no
-// session starts for it.
+// session starts for it. So does a merge of the base, or its conflict's session, left running on a PR that isn't at
+// ready for merge now (D-127: the owner moved it back, and edits the branch there).
+const FRESH_STAGES = ['baseMerge', 'baseFix'];
 function runningStage(l) {
   for (const [stage, rec] of Object.entries(l.stages ?? {})) if (rec?.status === 'running') return { stage };
   for (const pr of l.prs ?? []) {
     for (const [stage, rec] of Object.entries({ ...(pr.chain ?? {}), ...(pr.steps ?? {}) })) {
-      if (rec?.status === 'running' && ((!CHAIN.includes(stage) && stage !== 'resync') || pr.stage === 'translation')) return { stage, pr: prId(pr) };
+      const resumes = FRESH_STAGES.includes(stage) ? pr.stage === 'readyForMerge' : (!CHAIN.includes(stage) && stage !== 'resync') || pr.stage === 'translation';
+      if (rec?.status === 'running' && resumes) return { stage, pr: prId(pr) };
     }
   }
   return null;
@@ -238,7 +244,7 @@ const times = (n) => (n === 1 ? 'once' : n === 2 ? 'twice' : `${n} times`);
 // session's.
 function heldWhy(failed) {
   const where = `${failed.stage}${failed.pr ? ` on ${failed.pr}` : ''}`;
-  if (failed.script) return `${where} failed ${times(failed.sessions)} with no one acting in between, the last time in the runner's own build (${failed.noSession.slice(0, 200)})`;
+  if (failed.script) return `${where} failed ${times(failed.sessions)} with no one acting in between, the last time in the runner's own ${failed.stage === 'baseMerge' ? 'merge of the base' : 'build'} (${failed.noSession.slice(0, 200)})`;
   if (failed.noSession) return `${where} failed ${times(failed.sessions)} with no one acting in between, the last time before any session started (${failed.noSession.slice(0, 200)})`;
   if (failed.withoutSession) return `${where} failed ${times(failed.sessions)} with no one acting in between, ${times(failed.withoutSession)} before any session started`;
   return `${where} failed in ${failed.sessions} sessions with no one acting in between`;
@@ -479,6 +485,8 @@ function prStep(l, p, w, out, prs) {
   }
   const target = w.settings.targets.find((t) => t.id === pr.targets?.[0]) ?? w.settings.targets.find((t) => t.repo === pr.repo);
   const head = world.headCommit;
+  // How far behind its base the PR is, for `status` and the report (`forge.keepFresh`).
+  if (w.settings.keepFresh) out.prs.find((x) => x.id === id).behind = w.git?.behind?.(target, head, baseOf(pr, target), world.baseCommit ?? null) ?? null;
   // The translated label (`forge.translatedLabel`), at any stage: UA changed in words since the head it was put on for
   // (a page, not an image; not an id-only change, not the runner's own id commit) takes it off, with no model step. The
   // owner's move, EN and images leave it.
@@ -513,9 +521,14 @@ function prStep(l, p, w, out, prs) {
         if (w.settings.forge?.translatedLabel && pr.idBlocked?.length) {
           out.notes.push(`${id}: the heading ids of ${[...new Set(pr.idBlocked.flatMap((b) => b.pages))].join(', ')} can't be kept in step with UA (see the line comment): not made ready for ${String(head).slice(0, 7)}`);
         } else {
-          const after = readyAgain(pr, w, target, head, out);
+          const after = readyAgain(pr, w, target, head, out, world);
           if (after) return after;
         }
+      } else if (w.settings.keepFresh && mergedAt(pr, head)) {
+        // The runner's own merge of the base made the head and changed no UA block of the PR's own: ready again for it,
+        // once CI passed (`readyStep`).
+        const after = readyAgain(pr, w, target, head, out, world);
+        if (after) return after;
       }
     }
   }
@@ -578,6 +591,13 @@ function prStep(l, p, w, out, prs) {
   if (approved) return step('move', { pr: id, to: 'finalReview', approved: true, review: approved });
   // Row 12.
   if (p.stage === 'translation') return chainStep(l, p, w, out, target, head);
+  // Row 12b, with `forge.keepFresh`: a PR ready for merge whose base moved gets the base merged in, after every row
+  // above, so no merge pushes under an answer. In the owner's queue and before, never (D-127): the owner edits there.
+  if (p.stage === 'readyForMerge' && w.settings.keepFresh) {
+    const s = freshStep(pr, world, w, target, head, out)?.step ?? null;
+    if (s) notReady(out, id, stepWhy(s));
+    return s;
+  }
   return null;
 }
 
@@ -730,7 +750,7 @@ function ownerForms(l, pr, comments, w) {
 // re-synced (`resync`, once over the whole range, whatever rounds of comments made it), then, when an image changed
 // since the visual pack saw the branch, the pack again (`visualPack`), and only then `readyForMerge` for the new head.
 // The numbered edits made since the ready head go with the re-sync, so it records their EN side.
-function resyncAfterReady(pr, w, target, head, out) {
+function resyncAfterReady(pr, w, target, head, out, world = null) {
   const id = prId(pr);
   const ready = pr.readyForMerge.at(-1);
   if (ready.head !== head) {
@@ -743,14 +763,14 @@ function resyncAfterReady(pr, w, target, head, out) {
     if (changed.length && !synced) {
       const since = (e) => (ready.seq !== undefined && e.seq !== undefined ? e.seq > ready.seq : String(e.at ?? '') > String(ready.at ?? ''));
       const items = editsOf(pr).filter(since).map((e) => ({ n: e.n, page: e.page, block: e.block, en: Boolean(e.en) }));
-      return step('resync', { pr: id, head, since: ready.head, pages: changed.length, ...(items.length ? { items } : {}) });
+      return step('resync', { pr: id, head, since: ready.head, pages: changed.length, files: changed, ...(items.length ? { items } : {}) });
     }
   }
-  return readyAgain(pr, w, target, head, out);
+  return readyAgain(pr, w, target, head, out, world);
 }
 
 // The pack again when an image changed since it saw the branch, then ready for this head.
-function readyAgain(pr, w, target, head, out) {
+function readyAgain(pr, w, target, head, out, world = null) {
   const id = prId(pr);
   const pack = pr.chain?.visualPack;
   if (pack?.head && pack.head !== head) {
@@ -758,7 +778,7 @@ function readyAgain(pr, w, target, head, out) {
     if (images === null) out.notes.push(`${id}: the visual pack saw ${String(pack.head).slice(0, 7)}, the head is ${String(head).slice(0, 7)}, and git here can't compare their images`);
     else if (images.length) return step('visualPack', { pr: id, head, images: images.length });
   }
-  return step('readyForMerge', { pr: id, head });
+  return readyStep(pr, w, target, head, out, world);
 }
 
 // The first chain stage not done for the current head. UA pages changed after a stage's head make it (and so every
@@ -768,7 +788,7 @@ function chainStep(l, p, w, out, target, head) {
   const id = prId(pr);
   // Ready for merge before, every chain stage done: the UA changes since then are re-synced as one range, not by the
   // chain again.
-  if (pr.readyForMerge?.length && CHAIN.every((s) => pr.chain?.[s]?.status === 'done')) return resyncAfterReady(pr, w, target, head, out);
+  if (pr.readyForMerge?.length && CHAIN.every((s) => pr.chain?.[s]?.status === 'done')) return resyncAfterReady(pr, w, target, head, out, p.world);
   for (const stage of CHAIN) {
     const rec = pr.chain?.[stage];
     // The EN review posts its rewrites on the description's numbered list, going on from the PR's last number.
@@ -777,11 +797,148 @@ function chainStep(l, p, w, out, target, head) {
     if (rec.head && head && rec.head !== head) {
       const changed = changedAround(pr, w, target, rec.head, head);
       if (changed === null) out.notes.push(`${id}: ${stage} saw ${String(rec.head).slice(0, 7)}, the head is ${String(head).slice(0, 7)}, and git here can't compare them`);
-      else if (changed.length) return step(stage, { pr: id, head, stale: changed.length, ...numbered });
+      else if (changed.length) return step(stage, { pr: id, head, stale: changed.length, since: rec.head, files: changed, ...numbered });
     }
   }
   // Every stage is done for this head: ready again. So a person's move here with nothing changed starts no model step.
+  return readyStep(pr, w, target, head, out, p.world);
+}
+
+// ------------------------------------------------------------------ keeping a PR up to date with its base
+
+// How long a new head waits for a CI check to report (`forge.keepFresh`): the forge takes a moment to start CI after a
+// push. After it, a head no check reported on opens a gate to the owner: it is never read as passing.
+export const CI_GRACE_MS = 10 * 60000;
+// How long CI may stay pending (or expected: a required check that never started) on a head before the owner is asked.
+export const CI_TIMEOUT_MS = 60 * 60000;
+// The conflicts with its base a PR's sessions resolve: from this many on (counted once per head and base tip, never
+// reset by a merge that went through), the owner merges the base in.
+export const CONFLICT_LIMIT = 2;
+
+const short = (sha) => String(sha ?? '').slice(0, 7);
+
+// Why a PR the rule keeps from ready for merge for its head is not ready yet (`forge.keepFresh`), on its view
+// (`prs[].notReady`): the report and the progress file never call it ready for the merge meanwhile.
+function notReady(out, id, why) {
+  const v = out.prs.find((x) => x.id === id);
+  if (v) v.notReady = why;
+}
+const stepWhy = (s) => (s.stage === 'baseFix' ? `the merge of the base conflicted in ${(s.files ?? []).join(', ')}: a session resolves it` : `${s.behind} commit(s) behind its base: the runner merges it in first`);
+
+// The runner's last base merge of a PR, when it made this head (a merge pushed, not a conflict aborted).
+function mergedAt(pr, head) {
+  const m = pr.steps?.baseMerge;
+  return m?.status === 'done' && !m.result?.conflict && m.head && head && m.head === head ? m : null;
+}
+
+// Ready for merge for this head. With `forge.keepFresh`: on a PR at ready for merge (D-127: from ready for merge on,
+// never at the chain's end, where the PR is marked ready first), only once the branch has its base (`freshStep`); and
+// at every stage only once CI passed on the head (`ciHolds`). Without it, as before.
+function readyStep(pr, w, target, head, out, world) {
+  const id = prId(pr);
+  if (w.settings.keepFresh) {
+    if (pr.stage === 'readyForMerge') {
+      const fresh = freshStep(pr, world, w, target, head, out);
+      if (fresh?.step) {
+        notReady(out, id, stepWhy(fresh.step));
+        return fresh.step;
+      }
+      if (fresh) return null;
+    }
+    if (ciHolds(pr, world, w, head, out)) return null;
+  }
   return step('readyForMerge', { pr: id, head });
+}
+
+// Whether CI keeps the head from ready for merge (`ciOf`), with what the status says: a wait is a note; a red check is
+// a mismatch with the check named and a gate; CI that never reported, or stayed pending past CI_TIMEOUT_MS, is a gate
+// to the owner. The PR's view says why it is not ready (`notReady`).
+function ciHolds(pr, world, w, head, out) {
+  const id = prId(pr);
+  const ci = ciOf(pr, world, w, head);
+  if (!ci) return false;
+  if (ci.wait) {
+    out.notes.push(`${id}: ${ci.wait}: ready for merge once it passes`);
+    notReady(out, id, `${ci.wait}: ready for merge once it passes`);
+  } else if (ci.stuck) {
+    out.notes.push(`${id}: ${ci.stuck}`);
+    out.gate = { who: 'owner', why: `${ci.stuck} on ${id}: see why on the PR (a check that never starts, or one the branch protection expects); it is ready for merge once CI passes on ${short(head)}` };
+    notReady(out, id, ci.stuck);
+  } else {
+    out.mismatch.push(`${id}: CI failed on ${short(head)}: ${ci.red.join(', ')}; not ready for merge until a later head passes`);
+    out.gate = { who: 'owner', why: `CI failed on ${id} (${ci.red.join(', ')}): a commit that fixes it, and the PR is ready for merge once CI passes on it` };
+    notReady(out, id, `CI failed on ${short(head)}: ${ci.red.join(', ')}`);
+  }
+  return true;
+}
+
+// A gate to the owner for the PR's merge of the base, with the PR kept out of ready for merge.
+function ownerMerges(out, id, why) {
+  out.notes.push(`${id}: ${why}`);
+  out.gate = { who: 'owner', why: `${id}: ${why}` };
+  notReady(out, id, why);
+  return { gate: true };
+}
+
+// Whether the base has to be merged into the branch first (D-113), on a PR at ready for merge: `{ step }`, the runner's
+// `baseMerge` when the head lacks commits of the base, or, after a merge that conflicted at this head and this base,
+// the session that resolves it (`baseFix`: the writer, or the translator when no conflicting file is under a UA root);
+// `{ gate }` for a conflict no session resolves (a delete or a rename in it), or once the PR's conflicts reach
+// CONFLICT_LIMIT; `{ wait }` while new comments are answered first, whatever the merge needs; null when the branch is up
+// to date, while CI on the runner's last merge still runs or hasn't reported yet (so a base that moves often merges once
+// per CI run), or when git here can't tell.
+function freshStep(pr, world, w, target, head, out) {
+  const id = prId(pr);
+  if (world?.newComments?.length) return { wait: true };
+  const base = baseOf(pr, target);
+  const tip = world?.baseCommit ?? null;
+  const last = pr.steps?.baseMerge;
+  const conflict = last?.status === 'done' && last.head === head ? last.result?.conflict : null;
+  if (conflict && (!tip || !conflict.base || conflict.base === tip)) {
+    const files = conflict.files.join(', ');
+    if (conflict.unresolvable?.length) return ownerMerges(out, id, `the merge of origin/${base} conflicts in ${conflict.unresolvable.map((u) => `${u.path} (${u.kind})`).join(', ')}, which needs a delete or a move that no session makes: merge origin/${base} into ${pr.branch} and resolve it`);
+    const count = pr.baseConflicts?.count ?? 1;
+    if (count >= CONFLICT_LIMIT) return ownerMerges(out, id, `the merge of origin/${base} conflicted ${count} times on this PR, the last time in ${files}: merge origin/${base} into ${pr.branch} and resolve it`);
+    const roots = uaRoots(pr, w, target);
+    const ua = conflict.files.some((f) => roots.some((r) => f.startsWith(r)));
+    return { step: step('baseFix', { role: ua ? 'writer' : 'translator', pr: id, head, base, ...(conflict.base ? { tip: conflict.base } : {}), files: conflict.files }) };
+  }
+  if (mergedAt(pr, head) && ciOf(pr, world, w, head)?.wait) return null;
+  const behind = w.git?.behind?.(target, head, base, tip) ?? null;
+  if (behind === null) {
+    out.notes.push(`${id}: the head ${short(head)} or ${base} is not fetched here: whether the branch is behind its base is not checked`);
+    return null;
+  }
+  if (!behind) return null;
+  return { step: step('baseMerge', { pr: id, head, base, behind, ...(tip ? { tip } : {}) }) };
+}
+
+// When the head was first seen: the earliest ledger record made at it (a chain stage, a step such as the runner's
+// merge), else the forge's last update of the PR (a push updates it). Null when neither is known.
+function headSince(pr, world, head) {
+  const at = [...Object.values(pr.chain ?? {}), ...Object.values(pr.steps ?? {})].filter((r) => r?.head === head && r.at).map((r) => Date.parse(r.at)).filter(Number.isFinite);
+  if (at.length) return Math.min(...at);
+  const updated = Date.parse(world?.updatedAt ?? '');
+  return Number.isFinite(updated) ? updated : null;
+}
+
+// The CI of the head (`forge.keepFresh`), read only from the checks of that very commit: `{ red: [names] }` when one
+// failed; `{ wait }` while one runs, or while none has reported within CI_GRACE_MS of the head; `{ stuck }` past either
+// (CI pending past CI_TIMEOUT_MS, or no check at all after the grace); null when CI passed. Checks of another commit,
+// or none, are never a pass.
+function ciOf(pr, world, w, head) {
+  const c = world?.checks?.commit && world.checks.commit === head ? world.checks : null;
+  if (c?.state === 'failure') return { red: c.failing?.length ? c.failing : ['a check'] };
+  if (c?.state === 'success') return null;
+  const since = headSince(pr, world, head);
+  const age = since === null ? null : w.now - since;
+  if (c?.state === 'pending') {
+    const names = c.pending?.length ? ` (${c.pending.join(', ')})` : '';
+    if (age !== null && age > CI_TIMEOUT_MS) return { stuck: `CI on ${short(head)} has been pending for over ${CI_TIMEOUT_MS / 60000} min${names}` };
+    return { wait: `CI runs on ${short(head)}${names}` };
+  }
+  if (age === null || age > CI_GRACE_MS) return { stuck: `no CI check has reported on ${short(head)} in ${CI_GRACE_MS / 60000} min` };
+  return { wait: `no CI check has reported on ${short(head)} yet` };
 }
 
 // The PR's base: a page or an image the base brought into the branch (a merge of the base) is never the PR's change.

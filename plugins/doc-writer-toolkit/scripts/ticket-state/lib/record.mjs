@@ -538,6 +538,25 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         }
         return;
       }
+      case 'baseMerge': {
+        // The runner's merge of the base (`forge.keepFresh`): the head it left the branch at, with the merge commit
+        // among the pipeline's own (`commits`, above), or the conflict it aborted, with the head unchanged. Not checked
+        // against the forge: the runner pushed a moment ago, and the forge may not show the push yet.
+        const given = head ?? result.head ?? null;
+        if (!given) throw new CliError('baseMerge done needs --head: the branch head after the merge (on a conflict, the head it left as it was)', { code: 2 });
+        const c = result.conflict;
+        if (c !== undefined && (!c || typeof c !== 'object' || !Array.isArray(c.files) || !c.files.length)) throw new CliError('baseMerge: "conflict" is { "base", "files": [paths] }', { code: 2 });
+        if (c === undefined && !result.commits?.length) throw new CliError('baseMerge: give the merge commit ("commits") or the "conflict"', { code: 2 });
+        if (c?.unresolvable !== undefined && (!Array.isArray(c.unresolvable) || c.unresolvable.some((u) => typeof u?.path !== 'string' || typeof u?.kind !== 'string'))) throw new CliError('baseMerge: "conflict.unresolvable" is [{ "path", "kind" }]', { code: 2 });
+        record.head = String(given);
+        // The PR's conflicts with its base, counted once for each head and base tip (`baseConflicts`): never reset by a
+        // merge that went through, so a base that keeps conflicting goes to the owner after a few (lib/rule.mjs).
+        if (c) {
+          const n = pr.baseConflicts ?? { count: 0 };
+          if (n.head !== record.head || n.base !== (c.base ?? null)) pr.baseConflicts = { count: n.count + 1, head: record.head, base: c.base ?? null, at };
+        }
+        return;
+      }
       case 'untranslated': {
         // The translated label comes off (`forge.translatedLabel`): the rule saw UA change in words since the head it was
         // put on for. Only an open PR; the label follows the ledger (lib/pr-labels.mjs).

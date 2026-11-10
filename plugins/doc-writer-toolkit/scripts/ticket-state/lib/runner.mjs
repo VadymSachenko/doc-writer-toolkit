@@ -18,7 +18,7 @@ import { ROLES } from './settings.mjs';
 import { cleanupTicket } from './cleanup.mjs';
 import { removeClosedMarkdown } from './import.mjs';
 import { DOWNLOAD_DIRS_VARIABLE, ROLE_SESSION_VARIABLE, childEnv, sessionChildEnv } from './env.mjs';
-import { TREE_STAGES, adoptSources, builtOn, checkClone, clonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureReadCheckout, ensureWorktree, headOf, originHead, prsForStep, setAsideWork, worktreePath } from './worktree.mjs';
+import { TREE_STAGES, abortMerge, adoptSources, builtOn, checkClone, clonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureReadCheckout, ensureWorktree, finishMerge, headOf, mergeBaseIn, originHead, prsForStep, pushMerge, setAsideWork, worktreePath } from './worktree.mjs';
 import { BUSY_NAME, LOCK_NAME, busyEnded, freeBrowserLock } from './browser-lock.mjs';
 import { BUILD_LOCK_NAME, freeBuildLock, renewBuildLock, waitForBuildLock } from './build-lock.mjs';
 import { runSiteBuild } from './site-build.mjs';
@@ -363,6 +363,14 @@ export const startOrigin = (step) => (step.startedBy === 'schedule' ? 'schedule'
 
 // ------------------------------------------------------------------ one step's session
 
+// The PR's own pages that changed in a range (`files`, from the rule), and how to read just them: a merge of the base in
+// the range (`forge.keepFresh` makes one each time the base moves) brings the base's whole diff into
+// `git diff <since>..<head>`, which is not the PR's to re-sync.
+function pagesRead(step, settings) {
+  if (!settings.keepFresh || !step.files?.length || !step.since) return '';
+  return `; the PR's own pages that changed: ${step.files.join(', ')}. Read only them: \`git diff ${step.since}..${step.head ?? 'HEAD'} -- <those pages>\` (a merge of the base in the range brings the base's own changes, which are not the PR's: a block the base brought has its EN from the base)`;
+}
+
 // What a session is told: the ticket, the stage, where the settings and the ticket's status are, and how to record.
 export function briefFor(step, settings) {
   const root = settings.root;
@@ -383,8 +391,9 @@ export function briefFor(step, settings) {
     step.interrupted ? 'The last run of this stage was interrupted: read what it left and finish it.' : null,
     step.withoutVideo ? 'The owner moved the card back before every video part had its transcript: go on without the video, and say so in the plan comment.' : null,
     step.changed ? 'The section plan file changed after its gate: post the new plan and move the card back to Blocked (a new gate).' : null,
-    step.stage === 'resync' && step.since ? `UA changed since ready for merge at ${step.since}, and the owner moved the card to In translation: re-sync the blocks changed in ${step.since}..${step.head ?? 'HEAD'}, the whole range at once.` : null,
+    step.stage === 'resync' && step.since ? `UA changed since ready for merge at ${step.since}, and the owner moved the card to In translation: re-sync the blocks changed in ${step.since}..${step.head ?? 'HEAD'}, the whole range at once${pagesRead(step, settings)}.` : null,
     ...resyncItemLines(step.items),
+    step.stage === 'baseFix' ? `The runner merged origin/${step.base} into the branch, and it conflicted in ${step.files?.length ?? 0} file(s): ${(step.files ?? []).join(', ')}. The merge is in progress in the worktree, with the conflicts marked in those files: resolve each one so it keeps the branch's change and the base's, then \`git -C <worktree> add <file>\`. Never commit, merge, abort the merge or push: the runner commits the merge and pushes it once no file is left unmerged and no conflict marker is staged.` : null,
     step.nextEdit ? (rounds ? `Number the edits you record on this PR from ${step.nextEdit}: the numbers stay in the ledger (no posted text shows them), and the numbers already there keep their items.` : `A numbered list of edits you post on this PR starts at ${step.nextEdit}: the numbers already posted keep their items.`) : null,
     ...takeLines(step.take),
     ...replyLines(step.replies),
@@ -396,7 +405,7 @@ export function briefFor(step, settings) {
     ...(step.stage === 'styleCheck' ? styleCheckLines(step.commits, step.fixes, { rounds }) : []),
     ...(rounds ? roundLines(step) : []),
     rounds && settings.triggerWords?.length && ['answerComments', 'styleCheck', 'enReview', 'pr'].includes(step.stage) ? `The owner addresses the pipeline with a comment that starts with ${settings.triggerWords.map((w) => `\`${w}:\``).join(' or ')}: a line comment that tells the owner how to ask for something says so with that word.` : null,
-    step.stale ? `The UA pages changed after this stage last ran (${step.stale} file(s)): run it again on the current head.` : null,
+    step.stale ? `The UA pages changed after this stage last ran (${step.stale} file(s)): run it again on the current head${pagesRead(step, settings)}.` : null,
     ...buildLines(step),
     ...gateLines(step, settings),
     step.cards ? `Cards, highest priority first:\n${step.cards.map((c) => `- ${c.key}: ${c.url ?? c.shortLink} (${c.priority})`).join('\n')}` : null,
@@ -513,10 +522,13 @@ export function commandFor(step, settings, { model, agentsPath, claude = 'claude
   // The read checkouts at `origin/<base>` a step with no worktree reads pages in (lib/worktree.mjs, `ensureReadCheckout`).
   const readCheckouts = trees.length ? [] : (step.clones ?? []).map((c) => c.read?.path).filter(Boolean);
   const readDirs = [...(trees.length ? [] : [...new Set(settings.targets.map((t) => clonePath(settings, t)).filter(Boolean))]), ...readCheckouts, ...codeDirs];
-  const allowed = [...new Set([...withGitC(roleRules, dirsOf), ...cloneReadRules(roleRules, readDirs), ...writeAllowedFor(step, settings), ...scriptRulesFor(roots, step.role), ...pushRulesFor(trees), ...fetchRulesFor(trees), ...lsRemoteRulesFor(trees)])];
+  // A `baseFix` session resolves the conflicts the runner left in the worktree and adds the files: the runner commits
+  // the merge and pushes it, so the session gets no push rule, and a commit, a merge and a push there are denied.
+  const fixing = step.stage === 'baseFix';
+  const allowed = [...new Set([...withGitC(roleRules, dirsOf), ...cloneReadRules(roleRules, readDirs), ...writeAllowedFor(step, settings), ...scriptRulesFor(roots, step.role), ...(fixing ? [] : pushRulesFor(trees)), ...fetchRulesFor(trees), ...lsRemoteRulesFor(trees)])];
   // A role that doesn't run Playwright doesn't get it from the hub's `npx playwright:*`.
   const noPlaywright = roleRules.some((r) => r.startsWith('Bash(npx playwright')) ? [] : ['Bash(npx playwright:*)'];
-  const disallowed = [...new Set([...def.disallowedTools, ...(role.disallowedTools ?? []), ...PUSH_DENIED_PLAIN, ...BRANCH_DENIED, ...deniedFor(dirsOf), ...dirsOf.flatMap((d) => [`Bash(git -C ${d} branch:*)`, `Bash(git -C ${d} grep:*)`]), ...ROLE_DENIED, ...noPlaywright, ...scriptFlagsDenied(roots), ...writeDeniedFor(settings, roots), ...(trees.length ? checkoutDeniedFor(settings) : []), ...SETUP_DENIED, ...codeDenied(settings)])];
+  const disallowed = [...new Set([...def.disallowedTools, ...(role.disallowedTools ?? []), ...PUSH_DENIED_PLAIN, ...BRANCH_DENIED, ...deniedFor(dirsOf), ...dirsOf.flatMap((d) => [`Bash(git -C ${d} branch:*)`, `Bash(git -C ${d} grep:*)`]), ...ROLE_DENIED, ...noPlaywright, ...scriptFlagsDenied(roots), ...writeDeniedFor(settings, roots), ...(trees.length ? checkoutDeniedFor(settings) : []), ...SETUP_DENIED, ...codeDenied(settings), ...(fixing ? dirsOf.flatMap((d) => ['commit', 'merge', 'push'].map((c) => `Bash(git -C ${d} ${c}:*)`)) : [])])];
   // The folders a session may reach (`--add-dir`, and so `cd`): the step's worktrees; a step with none (triage, the plan)
   // works in the read checkouts (only their `.sources/` folders writable, `writeAllowedFor`), and reaches the target
   // clones too, for the Playwright spec it runs there and for what the `.sources/` links lead to.
@@ -562,6 +574,8 @@ export function sessionEnv(step, settings, { roots, roleRules, trees }) {
     docusaurus: has('Bash(npx docusaurus'),
     npmRun: has('Bash(npm run'),
     commands: commandsOfRules(roleRules),
+    // `baseFix`: the hook refuses a commit and a push too (the runner commits the merge and pushes it).
+    ...(step.stage === 'baseFix' ? { noCommit: true } : {}),
   };
   return { [ROLE_SESSION_VARIABLE]: step.role, [DOWNLOAD_DIRS_VARIABLE]: JSON.stringify(downloadDirsFor(step, settings)), [HOOK_VARIABLE]: JSON.stringify(config) };
 }
@@ -810,6 +824,10 @@ export function scriptedCalls(step, ledger, settings) {
     case 'idSync': {
       const pages = [...new Set((step.commits ?? []).flatMap((c) => c.pages)), ...(step.rename ?? []).map((a) => a.page)];
       return [`the heading ids of ${pages.length} EN page(s) checked against UA in ${worktreePath(settings, findPr(ledger, step.pr))} at ${String(step.head ?? 'the head').slice(0, 12)}: one commit pushed when they differ, with a line comment under each heading changed${step.rename?.length ? `, and ${step.rename.length} rename(s) the owner asked for` : ''}`];
+    }
+    case 'baseMerge': {
+      const pr = findPr(ledger, step.pr);
+      return [`git merge --no-edit origin/${step.base} in ${worktreePath(settings, pr)} at ${String(step.head ?? 'the head').slice(0, 12)} (${step.behind ?? '?'} commit(s) behind), then git push origin HEAD:refs/heads/${pr.branch}; on a conflict git merge --abort and nothing pushed`, ...(pr.stage === 'readyForMerge' ? readyOff(pr) : [])];
     }
     case 'build': {
       const b = settings.build;
@@ -1393,7 +1411,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         // Neither call stops the step or what follows it: a throw is a warning.
         const marked = (note) => say({ kind: 'reactions', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, outcome: 'warning', note });
         const picked = step.role ? await pickMarks({ settings, clients, step }).catch((e) => (marked(`no marks: ${e.message}`), null)) : null;
-        const r = await live.tracked(step, () => (step.role ? runModelStep(step) : step.stage === 'build' ? runBuildStep(step) : step.stage === 'idSync' ? runIdSyncStep(step) : runScriptedStep(step)));
+        const r = await live.tracked(step, () => (step.role ? runModelStep(step) : step.stage === 'build' ? runBuildStep(step) : step.stage === 'idSync' ? runIdSyncStep(step) : step.stage === 'baseMerge' ? runBaseMergeStep(step) : runScriptedStep(step)));
         for (const note of await settleMarks({ settings, clients, step, picked, outcome: r.outcome }).catch((e) => [`the marks were not set: ${e.message}`])) marked(note);
         // The ready, check and translated labels follow what the step recorded (lib/pr-labels.mjs), whoever recorded it.
         for (const note of await followLabels({ settings, clients, keys: step.keys, before })) say({ kind: 'label', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, outcome: 'failed', note });
@@ -1718,6 +1736,192 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
     return false;
   }
 
+  // The base merged into a PR's branch (`forge.keepFresh`, D-113), by the runner itself with no model, like the build:
+  // `git merge` of `origin/<base>` in the PR's worktree as it fetched it, then the push a session would use, never
+  // forced. A clean merge is recorded with its commit among the pipeline's own (`commits`), so it is never a hand edit;
+  // a conflict is aborted, nothing is pushed, and it is recorded for the session that resolves it (`baseFix`). Either way
+  // the ready label comes off: the rule marks the PR ready for merge again only once CI passed on its new head. A merge
+  // or a push that fails leaves the worktree at its head and a run (`script`, no session) with its count, so the
+  // failed-step rules wait for a person and then hold, as for a failed build.
+  async function runBaseMergeStep(step) {
+    const began = clock();
+    const key = step.keys[0];
+    const pr = findPr(readLedger(settings.state, key), step.pr);
+    const base = { stage: step.stage, role: null, script: true, trigger: manual ? 'manual' : trigger };
+    const log = (outcome, note) => say({ kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, outcome, ...(note ? { note: note.slice(0, 300) } : {}) });
+    const ran = async (note) => {
+      for (const k of step.keys) await runRecord({ settings, clients, key: k, run: JSON.stringify({ ...base, start: new Date(began).toISOString(), wallMs: clock() - began, outcome: 'done', session: null, note: note.slice(0, 300) }), pr: step.pr, now: clock() }).catch(() => {});
+      log('done', note);
+      return { ...pick(step), outcome: 'done', note };
+    };
+    const failed = async (note, { ran: tried = true } = {}) => {
+      for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'failed', pr: step.pr, note, now: clock() }).catch(() => {});
+      const marks = await marksOf(step);
+      const failures = (step.prior ?? 0) + 1;
+      const { script, ...noRun } = base;
+      const run = { ...(tried ? { ...base, start: new Date(began).toISOString(), wallMs: clock() - began } : noRun), outcome: 'failed', session: null, note: note.slice(0, 300), failures };
+      for (const k of step.keys) await runRecord({ settings, clients, key: k, run: JSON.stringify({ ...run, ...(marks[k] ? { after: marks[k] } : {}) }), pr: step.pr, now: clock() }).catch(() => {});
+      log('failed', note);
+      return { ...pick(step), outcome: 'failed', note: note.slice(0, 300) };
+    };
+    const moved = (note) => {
+      log('moved', note);
+      return { ...pick(step), outcome: 'moved', note };
+    };
+    let tree;
+    try {
+      tree = (io.ensureWorktree ?? ensureWorktree)(settings, pr);
+      const stuck = (tree.stuck ?? []).map((n) => `${tree.path}: ${n}`);
+      if (stuck.length) throw new Error(stuck.join('; '));
+    } catch (e) {
+      return failed(`the worktree: ${String(e.message).slice(0, 400)}`, { ran: false });
+    }
+    if (step.head && tree.head && tree.head !== step.head && tree.unfetched) return failed(`could not fetch ${pr.branch} into the worktree: it is at ${tree.head.slice(0, 7)}, not ${step.head.slice(0, 7)}, so nothing was merged`, { ran: false });
+    if (step.head && tree.head && tree.head !== step.head) return moved(`the branch is at ${tree.head.slice(0, 7)}, not ${step.head.slice(0, 7)}: the status is read again`);
+    const head = tree.head ?? step.head;
+    const into = tree.base ?? step.base;
+    const m = (io.mergeBaseIn ?? mergeBaseIn)(tree.path, { base: into, branch: pr.branch });
+    if (m.error) return failed(m.error);
+    // The worktree's own fetch found the base already in the branch: nothing to merge, and the status, which reads the
+    // same refs, agrees from now on.
+    if (m.upToDate) {
+      // A merge recorded running (its commit is among the pipeline's own) that a run which stopped after the push never
+      // recorded done: the branch has it, so it is recorded now, and the rule goes on from it.
+      const left = pr.steps?.baseMerge;
+      if (left?.status === 'running' && head && (left.result?.commits ?? []).includes(head)) {
+        try {
+          for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'done', pr: step.pr, head, result: JSON.stringify({ merged: { ...(left.result?.merged ?? {}), commit: head }, commits: [head] }), now: clock() });
+        } catch (e) {
+          return failed(`the base merge ${head.slice(0, 7)} is on the branch, but its record was refused: ${String(e.message).slice(0, 300)}`);
+        }
+        return ran(`the base merge ${head.slice(0, 7)}, pushed by a run that stopped before its record, recorded`);
+      }
+      return moved(`${pr.branch} already has origin/${into} at ${String(m.tip).slice(0, 7)}: nothing merged`);
+    }
+    const warnings = [];
+    const readyOff = async () => {
+      if (!settings.forge.readyLabel || pr.stage !== 'readyForMerge') return;
+      try {
+        await clients.forge.removeLabel({ repo: pr.repo, number: pr.number, label: settings.forge.readyLabel });
+      } catch (err) {
+        warnings.push(`${prId(pr)}: the label '${settings.forge.readyLabel}' was not removed: ${err.message}`);
+      }
+    };
+    if (m.conflict) {
+      try {
+        for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'done', pr: step.pr, head, result: JSON.stringify({ conflict: { base: m.tip, files: m.conflict, ...(m.unresolvable?.length ? { unresolvable: m.unresolvable } : {}) } }), now: clock() });
+      } catch (e) {
+        return failed(`the merge of origin/${into} conflicted and was aborted, but its record was refused: ${String(e.message).slice(0, 300)}`);
+      }
+      await readyOff();
+      const who = m.unresolvable?.length ? `the owner resolves it, since it needs a delete or a move, which no session makes: ${m.unresolvable.map((u) => `${u.path} (${u.kind})`).join(', ')}` : 'a session resolves it';
+      return ran([`the merge of origin/${into} (${String(m.tip).slice(0, 7)}) conflicted in ${m.conflict.join(', ')}: aborted, nothing pushed; ${who}`, ...warnings].join('; '));
+    }
+    // The merge commit is the pipeline's own before it is pushed (a `running` record), so a run that stops between the
+    // push and the record never leaves it to read as a hand edit; the next run records it done (above).
+    try {
+      for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'running', pr: step.pr, result: JSON.stringify({ merged: { base: m.tip, commit: m.merged, behind: step.behind ?? null }, commits: [m.merged] }), now: clock() });
+    } catch (e) {
+      abortMerge(tree.path, head);
+      return failed(`the base merge ${m.merged.slice(0, 7)} was not pushed: its record was refused: ${String(e.message).slice(0, 300)}`);
+    }
+    const push = (io.pushMerge ?? pushMerge)(tree.path, { branch: pr.branch, head });
+    if (!push.ok && push.moved) {
+      // Not a failure: the `running` record is closed with no run, so nothing counts it and nothing resumes it.
+      const note = `the push of the base merge was refused (${String(push.error).slice(0, 200)}), and ${pr.branch} is no longer at ${head.slice(0, 7)}: someone pushed to it; the status is read again`;
+      for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'failed', pr: step.pr, note, now: clock() }).catch(() => {});
+      return moved(note);
+    }
+    if (!push.ok) return failed(`the push of the base merge: ${push.error}`);
+    try {
+      for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'done', pr: step.pr, head: m.merged, result: JSON.stringify({ merged: { base: m.tip, commit: m.merged, behind: step.behind ?? null }, commits: [m.merged] }), now: clock() });
+    } catch (e) {
+      return failed(`the base merge ${m.merged.slice(0, 7)} was pushed, but its record was refused: ${String(e.message).slice(0, 300)}`);
+    }
+    await readyOff();
+    return ran([`merged origin/${into} (${step.behind ?? '?'} commit(s), to ${String(m.tip).slice(0, 7)}) into ${pr.branch} as ${m.merged.slice(0, 7)}, pushed; ready for merge again once CI passes on it`, ...warnings].join('; '));
+  }
+
+  // The worktree of a `baseFix` step's PR.
+  function fixTreeOf(step) {
+    const pr = findPr(readLedger(settings.state, step.keys[0]), step.pr);
+    return { pr, tree: (step.worktrees ?? []).find((t) => t.branch === pr.branch && t.repo === pr.repo) ?? null };
+  }
+
+  // Before each `baseFix` session: the runner starts the merge in the worktree, with the conflicts left in the files,
+  // for the session to resolve. Null when it conflicts as recorded; else the step's result: no worktree, the branch
+  // moved, or a merge that no longer conflicts (the conflict's record is set failed, so the status gives `baseMerge`).
+  async function beginBaseFix(step) {
+    const { pr, tree } = fixTreeOf(step);
+    if (!tree?.path) return failedBeforeSession(step, `no worktree of ${step.pr} to resolve the merge in`);
+    const moved = (note) => {
+      say({ kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, role: step.role, outcome: 'moved', note });
+      return { ...pick(step), outcome: 'moved', note };
+    };
+    if (step.head && tree.head && tree.head !== step.head) return moved(`the branch is at ${tree.head.slice(0, 7)}, not ${step.head.slice(0, 7)}: the status is read again`);
+    const into = tree.base ?? step.base;
+    const m = (io.mergeBaseIn ?? mergeBaseIn)(tree.path, { base: into, branch: pr.branch, commit: false });
+    if (m.conflict && !m.unresolvable?.length) {
+      // What the session's resolution may stage: what the merge staged by itself, and the conflicting files.
+      step.mergeAllowed = [...new Set([...(m.staged ?? []), ...m.conflict])];
+      step.mergeFiles = m.conflict;
+      return null;
+    }
+    abortMerge(tree.path, step.head);
+    // The base moved since, and now conflicts in a way no edit of the files resolves: recorded, so the rule hands it to
+    // the owner; no session.
+    if (m.conflict) {
+      const note = `the merge of origin/${into} now conflicts in ${m.unresolvable.map((u) => `${u.path} (${u.kind})`).join(', ')}, which needs a delete or a move: no session; the owner resolves it`;
+      for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: 'baseMerge', status: 'done', pr: step.pr, head: step.head, result: JSON.stringify({ conflict: { base: m.tip, files: m.conflict, unresolvable: m.unresolvable } }), now: clock() }).catch(() => {});
+      return moved(note);
+    }
+    if (m.error) return failedBeforeSession(step, `the merge for the session: ${m.error}`);
+    const note = `origin/${into} no longer conflicts with ${pr.branch}: no session; the runner merges it at the next step`;
+    for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: 'baseMerge', status: 'failed', pr: step.pr, note, now: clock() }).catch(() => {});
+    return moved(note);
+  }
+
+  // After a `baseFix` session: once it recorded the stage done, the runner commits the merge (lib/worktree.mjs,
+  // `finishMerge`, which checks that nothing is left unmerged, unstaged or marked) and pushes it, never forced, and
+  // records the `baseMerge` with its commit among the pipeline's own. Anything else aborts the merge, the worktree back
+  // at the step's head, and the stage is failed. Returns the step's outcome.
+  async function finishBaseFix(step, outcome) {
+    const { pr, tree } = fixTreeOf(step);
+    if (!tree?.path) return 'failed';
+    if (outcome !== 'done') {
+      abortMerge(tree.path, step.head);
+      return outcome;
+    }
+    const fail = async (note) => {
+      for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'failed', pr: step.pr, note, now: clock() }).catch(() => {});
+      say({ kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, role: step.role, outcome: 'failed', note: note.slice(0, 300) });
+      return 'failed';
+    };
+    const f = (io.finishMerge ?? finishMerge)(tree.path, { head: step.head, allowed: step.mergeAllowed ?? null, files: step.mergeFiles ?? step.files ?? null });
+    if (f.error) return fail(`the resolved merge was not committed: ${f.error}`);
+    // The merge commit is the pipeline's own before the push (a `running` record, as in `runBaseMergeStep`). A push that
+    // fails puts the conflict's record back, so the next step is this one again and its failures count.
+    const conflict = pr.steps?.baseMerge?.result?.conflict ?? { base: step.tip ?? null, files: step.files ?? [] };
+    try {
+      for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: 'baseMerge', status: 'running', pr: step.pr, result: JSON.stringify({ merged: { base: step.tip ?? null, commit: f.merged, resolved: step.files ?? [] }, commits: [f.merged] }), now: clock() });
+    } catch (e) {
+      abortMerge(tree.path, step.head);
+      return fail(`the resolved merge ${f.merged.slice(0, 7)} was not pushed: its record was refused: ${String(e.message).slice(0, 300)}`);
+    }
+    const push = (io.pushMerge ?? pushMerge)(tree.path, { branch: pr.branch, head: step.head });
+    if (!push.ok) {
+      for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: 'baseMerge', status: 'done', pr: step.pr, head: step.head, result: JSON.stringify({ conflict }), now: clock() }).catch(() => {});
+      return fail(`the push of the resolved merge: ${push.error}`);
+    }
+    try {
+      for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: 'baseMerge', status: 'done', pr: step.pr, head: f.merged, result: JSON.stringify({ merged: { base: step.tip ?? null, commit: f.merged, resolved: step.files ?? [] }, commits: [f.merged] }), now: clock() });
+    } catch (e) {
+      return fail(`the resolved merge ${f.merged.slice(0, 7)} was pushed, but its record was refused: ${String(e.message).slice(0, 300)}`);
+    }
+    say({ kind: 'step', group: step.group, keys: step.keys, stage: 'baseMerge', pr: step.pr ?? null, outcome: 'done', note: `the conflict in ${(step.files ?? []).join(', ')} resolved by the session; merged as ${f.merged.slice(0, 7)}, pushed`.slice(0, 300) });
+    return 'done';
+  }
+
   // Another live session that may read a read checkout: a lock of a stage with no worktree, or one that names no stage
   // (a hand run's). Each model step puts its own stage on its group's lock first, so a chain that goes on in one lock
   // from a worktree stage to one with none is seen as what it runs now.
@@ -1819,6 +2023,11 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
       const ledgered = step.keys.some((k) => readLedger(settings.state, k));
       for (let attempt = 0; attempt < 2; attempt++) {
         const seqBefore = new Map(step.keys.map((k) => [k, readLedger(settings.state, k)?.seq ?? 0]));
+        // The conflict a `baseFix` session resolves, set up again for each attempt.
+        if (step.stage === 'baseFix') {
+          const begun = await beginBaseFix(step);
+          if (begun) return begun;
+        }
         const before = usage?.week?.percent ?? null;
         const cmd = commandFor(step, settings, { model, agentsPath, claude });
         const began = clock();
@@ -1888,6 +2097,8 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         usage = (await readUsage()) ?? usage;
         const after = usage?.week?.percent ?? null;
         let outcome = await gateOf(step, seqBefore, { busy });
+        // The runner commits the merge a `baseFix` session resolved, and pushes it.
+        if (step.stage === 'baseFix') outcome = await finishBaseFix(step, outcome);
         // A session that failed because a person moved the PR's branch under it (its push rejected, its record refused as
         // stale): not the model's failure. None is counted, no bigger model is tried, and the step's status is read again.
         const moved = outcome === 'failed' ? movedEarly ?? (await movedUnder(step)) : null;

@@ -83,7 +83,9 @@ export function validateForge(forge, targets, header = null) {
   for (const extra of [checkLabel, expertLabel, readyLabel, translatedLabel]) if (extra && !addable.has(labelKey(extra))) addable.set(labelKey(extra), extra);
   for (const extra of [checkLabel, readyLabel, translatedLabel]) if (extra && !removable.has(labelKey(extra))) removable.set(labelKey(extra), extra);
   const logins = new Set([self, assignee, ...list.flatMap((t) => t.reviewers)].filter(Boolean));
-  return { kind, owner, self, assignee, checkLabel, expertLabel, readyLabel, translatedLabel, commentHeader: validateCommentHeader(header), targets: list, repos: [...new Set(list.map((t) => t.repo))], addable, removable, logins };
+  // `keepFresh` (the ticket flow's keeping of a PR up to date with its base): the PR read by number asks for the base's
+  // tip and the head's CI too. Absent when off.
+  return { kind, owner, self, assignee, checkLabel, expertLabel, readyLabel, translatedLabel, commentHeader: validateCommentHeader(header), targets: list, repos: [...new Set(list.map((t) => t.repo))], addable, removable, logins, ...(forge.keepFresh === true ? { keepFresh: true } : {}) };
 }
 
 export async function loadSettings({ root, settings: flag }) {

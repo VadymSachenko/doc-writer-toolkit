@@ -13,7 +13,7 @@ import { prId } from './ledger.mjs';
 // `origin/<base>`, kept across tickets and never removed by the close step.
 
 // The stages that work on a PR branch, so their session gets the worktree (`build` and `idSync` are the runner's own).
-export const TREE_STAGES = ['write', 'uaReview', 'pr', 'answerComments', 'styleCheck', 'translate', 'enReview', 'locales', 'align', 'labelSync', 'build', 'visualPack', 'resync', 'idSync'];
+export const TREE_STAGES = ['write', 'uaReview', 'pr', 'answerComments', 'styleCheck', 'translate', 'enReview', 'locales', 'align', 'labelSync', 'build', 'visualPack', 'resync', 'idSync', 'baseMerge', 'baseFix'];
 export const DEFAULT_LINKS = ['node_modules'];
 
 const run = (cwd, args) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 }).trim();
@@ -157,14 +157,32 @@ export function ensureWorktree(settings, pr) {
   } else if (remoteBranch) {
     // Up to date with the branch: a fast-forward only, never over the session's own unpushed commits or changes to
     // tracked files. Untracked files (a session's notes, a pack's output) don't stop it; one git would overwrite does,
-    // and the brief says so.
+    // and the brief says so. A merge of the base left in progress (only the runner merges here: a run that stopped
+    // during a `baseFix`) is aborted first, so it doesn't leave the worktree stuck.
+    if (mergeInProgress(wt)) {
+      abortMerge(wt);
+      notes.push('a merge of the base left in progress by a run that stopped was aborted');
+    }
     const dirty = tryRun(wt, ['status', '--porcelain', '--untracked-files=no']);
     const head = tryRun(wt, ['rev-parse', 'HEAD']);
     // The branch moved on (a fast-forward), or was rewritten (the owner rebased and force-pushed it): a clean worktree
     // whose head the branch once had, by the remote-tracking ref's own log, follows it. A head the branch never had
     // holds a session's unpushed work, and stays.
-    const wasBranch = head && (tryRun(wt, ['merge-base', '--is-ancestor', head, remoteBranch]) !== null || (tryRun(clone, ['reflog', 'show', '--format=%H', `refs/remotes/origin/${pr.branch}`]) ?? '').split('\n').includes(head));
-    if (dirty) stuck.push(`uncommitted changes to tracked files from an earlier session, left as they are, so it may not be at the branch's head (see the ticket-state README, "A stuck worktree")`);
+    const had = (sha) => Boolean(sha) && (tryRun(wt, ['merge-base', '--is-ancestor', sha, remoteBranch]) !== null || (tryRun(clone, ['reflog', 'show', '--format=%H', `refs/remotes/origin/${pr.branch}`]) ?? '').split('\n').includes(sha));
+    const wasBranch = had(head);
+    // The runner's own merge of the base that a run which stopped never pushed (`forge.keepFresh`): a merge commit with
+    // the runner's message, on a head the branch had, whose second parent is the base's. It is dropped, and the next
+    // `baseMerge` merges again; its sha is in the PR's pipeline commits already (lib/runner.mjs), so nothing reads it
+    // as a hand edit.
+    const unpushedMerge = !dirty && head && !wasBranch && isOwnMerge(wt, head, { base, branch: pr.branch }) && had(tryRun(wt, ['rev-parse', `${head}^1`]));
+    if (unpushedMerge) {
+      try {
+        run(wt, ['checkout', '-q', '--detach', remoteBranch]);
+        notes.push(`a merge of the base (${head.slice(0, 7)}) that a run which stopped never pushed was dropped: the runner merges the base again`);
+      } catch (e) {
+        stuck.push(`could not drop the unpushed merge of the base ${head.slice(0, 7)}: ${gitError(e)} (see the ticket-state README, "A stuck worktree")`);
+      }
+    } else if (dirty) stuck.push(`uncommitted changes to tracked files from an earlier session, left as they are, so it may not be at the branch's head (see the ticket-state README, "A stuck worktree")`);
     else if (wasBranch) {
       if (head !== tryRun(wt, ['rev-parse', remoteBranch])) {
         try {
@@ -216,6 +234,146 @@ export function setAsideWork(pr, wt, from) {
     return { left: gitError(e) };
   }
   return { ref, commit: head };
+}
+
+// ------------------------------------------------------------------ the base merged into a PR branch
+
+// What keeping a PR up to date with its base runs in the PR's worktree (`forge.keepFresh`, lib/runner.mjs): a merge of
+// `origin/<base>` as the worktree fetched it, never a rebase and never a force-push, since the owner reads the branch.
+// The runner alone merges and pushes it; a session only resolves a conflict it was handed (`baseFix`).
+export const mergeInProgress = (wt) => tryRun(wt, ['rev-parse', '-q', '--verify', 'MERGE_HEAD']) !== null;
+// A merge left in progress (a run that died mid-way, a session's) is aborted, and the worktree goes back to `head`.
+export function abortMerge(wt, head = null) {
+  if (mergeInProgress(wt)) tryRun(wt, ['merge', '--abort']);
+  if (head && tryRun(wt, ['rev-parse', 'HEAD']) !== head) tryRun(wt, ['reset', '-q', '--hard', head]);
+}
+const zPaths = (wt, args) => (tryRun(wt, [...args, '-z']) ?? '').split('\0').filter(Boolean);
+const mergeMessage = (base, branch) => `Merge branch '${base}' into ${branch}`;
+// Whether `sha` is a merge the runner made: two parents, its message, and the second parent in `origin/<base>`.
+function isOwnMerge(wt, sha, { base, branch }) {
+  const parents = (tryRun(wt, ['rev-list', '--parents', '-n', '1', sha]) ?? '').split(' ').slice(1);
+  if (parents.length !== 2) return false;
+  if ((tryRun(wt, ['log', '-1', '--format=%s', sha]) ?? '') !== mergeMessage(base, branch)) return false;
+  return tryRun(wt, ['merge-base', '--is-ancestor', parents[1], `refs/remotes/origin/${base}`]) !== null;
+}
+
+// The conflicts a session can resolve by editing the files: both sides changed the file (`UU`) or both added it
+// (`AA`). The others (a file one side deleted or renamed and the other changed: `DU`, `UD`, `AU`, `UA`, `DD`) need a
+// delete or a move, which a session may not make: they go to the owner (lib/rule.mjs). Returns [{ path, kind }] for
+// those, from `git status` of the merge in progress.
+const KIND = { DD: 'deleted on both sides', AU: 'added by the branch only', UA: 'added by the base only', DU: 'deleted by the branch, changed in the base', UD: 'deleted or renamed in the base, changed by the branch' };
+function unresolvableOf(wt) {
+  const parts = (tryRun(wt, ['status', '--porcelain=v1', '-z', '--untracked-files=no']) ?? '').split('\0');
+  const out = [];
+  for (let i = 0; i < parts.length; i++) {
+    const e = parts[i];
+    if (!e) continue;
+    const xy = e.slice(0, 2);
+    if ('RC'.includes(xy[0])) i++;
+    if (KIND[xy]) out.push({ path: e.slice(3), kind: KIND[xy] });
+  }
+  return out;
+}
+
+// The branch's head on origin by `ls-remote` from the worktree, never waiting for a password; null when it can't be read.
+function remoteHeadOf(wt, branch) {
+  try {
+    const out = execFileSync('git', ['-C', wt, 'ls-remote', 'origin', `refs/heads/${branch}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 60000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
+    return out.trim().split(/\s/)[0] || null;
+  } catch {
+    return null;
+  }
+}
+
+// Merges the base into the worktree's head. `commit: false` stops before the commit with the conflicts left in the files
+// (the runner hands them to `baseFix`), and gives what the merge staged by itself (`staged`), which is all a session's
+// resolution may add to. Returns { merged: <the merge commit, not pushed>, tip }, { upToDate, tip }, { conflict: [paths],
+// unresolvable: [{ path, kind }], tip } (with `commit`, the merge aborted and the worktree clean at its head again), or
+// { error }. `unresolvable` lists the conflicts no edit of the files resolves (`unresolvableOf`).
+export function mergeBaseIn(wt, { base, branch, commit = true }) {
+  abortMerge(wt);
+  const head = tryRun(wt, ['rev-parse', 'HEAD']);
+  const tip = tryRun(wt, ['rev-parse', '--verify', '-q', `refs/remotes/origin/${base}^{commit}`]);
+  if (!head || !tip) return { error: `no ${head ? `origin/${base}` : 'HEAD'} in ${wt}` };
+  if (tryRun(wt, ['merge-base', '--is-ancestor', tip, head]) !== null) return { upToDate: true, tip };
+  let failed = null;
+  try {
+    run(wt, ['merge', '--no-edit', '--no-ff', ...(commit ? [] : ['--no-commit']), '-m', mergeMessage(base, branch), `refs/remotes/origin/${base}`]);
+  } catch (e) {
+    failed = gitError(e);
+  }
+  if (!failed) return commit ? { merged: tryRun(wt, ['rev-parse', 'HEAD']), tip } : { clean: true, tip };
+  const files = zPaths(wt, ['diff', '--name-only', '--diff-filter=U']);
+  const unresolvable = files.length ? unresolvableOf(wt) : [];
+  if (files.length && !commit) return { conflict: files, unresolvable, staged: zPaths(wt, ['diff', '--cached', '--name-only', '--no-renames']), tip };
+  abortMerge(wt, head);
+  const left = tryRun(wt, ['status', '--porcelain', '--untracked-files=no']);
+  if (left || mergeInProgress(wt) || tryRun(wt, ['rev-parse', 'HEAD']) !== head) return { error: `the merge of origin/${base} failed and was aborted, but ${wt} is not clean at ${head.slice(0, 7)}: ${left || 'a merge is still in progress'}` };
+  return files.length ? { conflict: files, unresolvable, tip } : { error: `git merge of origin/${base}: ${failed}` };
+}
+
+// After the session that resolved a conflict (`baseFix`): the runner commits the merge it handed over, once no file is
+// left unmerged, nothing is changed but not added, nothing is staged beyond what the merge staged by itself and the
+// conflicting files (`allowed`: a stray edit is refused), and no conflict marker is staged (`git diff --cached --check
+// --no-textconv`, which finds `<<<<<<<`, `=======`, `>>>>>>>` and diff3's `|||||||`, and the same four read from the
+// staged diff, so no text conversion hides one). Otherwise the merge is aborted and the worktree goes back to `head`. A
+// session that committed is refused too: only the runner commits a base merge. Returns { merged } (not pushed) or
+// { error }.
+export function finishMerge(wt, { head, allowed = null, files = null }) {
+  const back = (why) => {
+    abortMerge(wt, head);
+    return { error: why };
+  };
+  if (tryRun(wt, ['rev-parse', 'HEAD']) !== head) return back('the session committed: only the runner commits a base merge');
+  if (!mergeInProgress(wt)) return back('no merge is in progress: the session aborted it');
+  const unmerged = zPaths(wt, ['diff', '--name-only', '--diff-filter=U']);
+  if (unmerged.length) return back(`still unmerged: ${unmerged.join(', ')}`);
+  const unstaged = zPaths(wt, ['diff', '--name-only']);
+  if (unstaged.length) return back(`changed but not added: ${unstaged.join(', ')}`);
+  if (allowed) {
+    const ok = new Set(allowed);
+    const stray = zPaths(wt, ['diff', '--cached', '--name-only', '--no-renames']).filter((f) => !ok.has(f));
+    if (stray.length) return back(`staged beyond the merge and its conflicting files: ${stray.join(', ')}`);
+  }
+  // Only the conflicting files (`files`) are read for markers: a page the base brought in cleanly may hold a line of
+  // seven `=` of its own (a heading's underline). `--check` exits non-zero when it finds something; whitespace is not
+  // the session's, so only its markers count.
+  const only = files?.length ? ['--', ...files] : [];
+  let check = '';
+  try {
+    execFileSync('git', ['-C', wt, 'diff', '--cached', '--check', '--no-textconv', '--no-color', ...only], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
+  } catch (e) {
+    check = String(e?.stdout ?? '');
+  }
+  const staged = tryRun(wt, ['diff', '--cached', '--no-color', '--no-ext-diff', '--no-textconv', '-U0', ...only]) ?? '';
+  if (/leftover conflict marker/.test(check) || /^\+(<{7}|={7}|>{7}|\|{7})(\s|$)/m.test(staged)) return back('a conflict marker is still in a staged file');
+  try {
+    run(wt, ['commit', '-q', '--no-edit']);
+  } catch (e) {
+    return back(`git commit: ${gitError(e)}`);
+  }
+  return { merged: tryRun(wt, ['rev-parse', 'HEAD']) };
+}
+
+// The push of the worktree's head to its branch, the runner's own, as a session's: never forced. What happened is read
+// from the heads, as `movedUnder` does, never from git's error text (a person's push, a protected branch, a pre-receive
+// hook and a token without the rights all print "rejected"): origin's head is the merge commit, so the push landed
+// though git failed (`ok`); origin's head is no longer `head`, so someone pushed meanwhile (`moved`: the status is read
+// again); anything else (still `head`, or origin not readable) is the push's failure, counted toward the step's
+// failures. All but a landed push leave the worktree back at `head`, its merge commit dropped. Returns { ok }, or
+// { error, moved }.
+export function pushMerge(wt, { branch, head }) {
+  const merged = tryRun(wt, ['rev-parse', 'HEAD']);
+  try {
+    execFileSync('git', ['-C', wt, 'push', '-q', 'origin', `HEAD:refs/heads/${branch}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 60000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
+    return { ok: true };
+  } catch (e) {
+    const error = gitError(e);
+    const remote = remoteHeadOf(wt, branch);
+    if (remote && merged && remote === merged) return { ok: true, landed: true };
+    tryRun(wt, ['reset', '-q', '--hard', head]);
+    return { error, moved: Boolean(remote && remote !== head) };
+  }
 }
 
 export const codeTreesRoot = (settings) => path.join(path.resolve(settings.state), 'code');

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { prId, readLedgersApart } from './ledger.mjs';
+import { notReadyYet, prId, readLedgersApart } from './ledger.mjs';
 import { CHAIN, PR_ORDER } from './stages.mjs';
 import { readFeed, watchDir } from './feed.mjs';
 
@@ -37,7 +37,7 @@ const CHAIN_LABELS = {
   build: 'Building the site',
   visualPack: 'Checking the screenshots',
 };
-const STAGE_LABEL = { ...Object.fromEntries(TICKET_ROWS), ...CHAIN_LABELS, close: 'Closing the ticket', resync: 'Re-syncing after a change in UA', answerComments: 'Answering the review comments', styleCheck: 'Style check of hand edits', move: 'Moving the card', follow: 'Following the card', readyForMerge: 'Marking ready for merge', untranslated: 'Taking the translated label off', idSync: 'Keeping the heading ids in step' };
+const STAGE_LABEL = { ...Object.fromEntries(TICKET_ROWS), ...CHAIN_LABELS, close: 'Closing the ticket', resync: 'Re-syncing after a change in UA', answerComments: 'Answering the review comments', styleCheck: 'Style check of hand edits', move: 'Moving the card', follow: 'Following the card', readyForMerge: 'Marking ready for merge', untranslated: 'Taking the translated label off', idSync: 'Keeping the heading ids in step', baseMerge: 'Merging the base into the branch', baseFix: 'Resolving the base merge conflict' };
 export const labelOf = (stage) => STAGE_LABEL[stage] ?? String(stage);
 
 // ------------------------------------------------------------------ small formats
@@ -114,7 +114,8 @@ export function gatesOf(l) {
     if (p.stage === 'smeReview') gate('smeReview', 'reviewer', { pr: id });
     else if (p.stage === 'reworkWait') gate('reworkWait', 'owner', { pr: id });
     else if (p.stage === 'finalReview') gate('finalReview', 'owner', { pr: id, ident: String(p.pipelineCommits?.at(-1) ?? st.pr?.seq ?? ''), recommended: p.expertReview?.recommended ? oneLine(p.expertReview.why, 140) : null });
-    else if (p.stage === 'readyForMerge') gate('readyForMerge', 'owner', { pr: id, ident: String(p.readyForMerge?.at(-1)?.head ?? '') });
+    // Not while the base is merged in (`forge.keepFresh`): a conflict, or CI on the merge, comes first.
+    else if (p.stage === 'readyForMerge' && !notReadyYet(p)) gate('readyForMerge', 'owner', { pr: id, ident: String(p.readyForMerge?.at(-1)?.head ?? '') });
   }
   return gates;
 }
@@ -231,7 +232,7 @@ function ticketBlock(l, { flights, stale, now }) {
     const rg = gates.find((g) => g.kind === 'readyForMerge' && g.pr === id);
     if (p.merged) add({ text: `- ✅ Merged${p.merged.at ? ` at ${hhmm(p.merged.at)}` : ''}`, done: true });
     else if (rg) add({ text: gateRow('Ready for merge', rg) });
-    else add({ text: '- ⬜ Ready for merge' });
+    else add({ text: `- ⬜ Ready for merge${notReadyYet(p) ? ` (${notReadyYet(p)})` : ''}` });
   }
   if (prs.length) lines.push('');
   add(stageRow(labelOf('close'), { rec: st.close, run: null, flight: flightOf(flights, l.key, 'close', null), now }));

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { readAllLedgers } from './ledger.mjs';
+import { notReadyYet, prId, readAllLedgers } from './ledger.mjs';
 import { readFeed } from './feed.mjs';
 import { reviewCommentFor } from './experts.mjs';
 import { duration as spell, mergedUntranslated } from './progress.mjs';
@@ -120,7 +120,10 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
       const open = (l?.places ?? []).filter((x) => x.repo === p.repo && Number(x.pr) === Number(p.number) && (x.state ?? 'open') === 'open').length;
       if (open && p.state !== 'merged') places.push(`${p.url ? `[${p.id}](${p.url})` : p.id} (${link(t)}): ${open} open place(s)`);
       if (checkLabel && (p.labels ?? []).some((x) => x.toLowerCase() === checkLabel)) check.push(`${p.url ? `[${p.id}](${p.url})` : p.id} (${link(t)})`);
-      if (p.stage === 'readyForMerge') ready.push(`${p.url ? `[${p.id}](${p.url})` : p.id} (${link(t)}): ready for your final edit and the merge`);
+      // With `forge.keepFresh`, not while the base is merged in: a PR behind its base, with a conflict, or whose CI runs
+      // or failed says why instead.
+      const hold = settings.keepFresh ? p.notReady ?? notReadyYet((l?.prs ?? []).find((x) => prId(x) === p.id)) : null;
+      if (p.stage === 'readyForMerge') ready.push(`${p.url ? `[${p.id}](${p.url})` : p.id} (${link(t)}): ${hold ? `not ready for merge yet: ${hold}` : 'ready for your final edit and the merge'}`);
       else if (p.stage === 'finalReview' && t.state !== 'finalReview' && t.prs.length > 1) ready.push(`${p.id} (${link(t)}): in the owner's queue; it waits for the card, which stands where the slower PR is`);
     }
   }
@@ -141,6 +144,14 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
   // With the translated label: a PR merged without it today (the close record keeps whether it had it), whose
   // translations may be behind its base.
   if (settings.forge.translatedLabel) out.push(`## Merged without «${settings.forge.translatedLabel}»`, '', list(mergedUntranslated(ledgers, (iso) => Boolean(iso) && Number.isFinite(Date.parse(iso)) && localDate(Date.parse(iso)) === date).map((x) => `${x.url ? `[${x.id}](${x.url})` : x.id} (${x.key}): merged without the label: its translations may be behind ${x.base}`)), '');
+
+  // With `forge.keepFresh`: today's merges of the base into the PRs' branches and their conflicts (the run log), and the
+  // open PRs still behind their base.
+  if (settings.keepFresh) {
+    const merges = runLog.filter((e) => e.kind === 'step' && (e.stage === 'baseMerge' || e.stage === 'baseFix') && e.outcome !== 'moved').map((e) => `${e.at} ${e.pr ?? (e.keys ?? []).join(', ')} ${e.stage}: ${e.note ?? e.outcome}`);
+    const behind = st.tickets.flatMap((t) => (t.prs ?? []).filter((p) => p.state !== 'merged' && p.behind > 0).map((p) => `${p.url ? `[${p.id}](${p.url})` : p.id} (${link(t)}): ${p.behind} commit(s) behind its base, at ${p.stage}${p.stage === 'readyForMerge' ? '' : ' (merged in from ready for merge on)'}`));
+    out.push('## Kept up to date with the base', '', list([...merges, ...behind], 'no merge of the base today, and no ready PR behind it'), '');
+  }
 
   for (const w of watched) out.push(`## Cards left in ${w.list}`, '', list(w.cards.map((c) => `[${c.name}](${c.url}), last activity ${c.lastActivity}`)), '');
 
@@ -209,7 +220,7 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
   const timed = ledgers.flatMap((l) => (l.runs ?? []).filter((r) => onDate(r.start) && typeof r.wallMs === 'number').map((r) => ({ ...r, key: l.key }))).sort((x, y) => String(x.start).localeCompare(String(y.start)));
   if (timed.length) {
     const total = timed.reduce((s, r) => s + r.wallMs * (r.share ?? 1), 0);
-    out.push("## Today's steps by wall-clock time", '', `${spell(total)} in all.`, '', list(timed.map((r) => `${new Date(Date.parse(r.start)).toTimeString().slice(0, 5)} ${r.key} ${r.stage}${r.pr ? ` (${r.pr})` : ''}${r.script ? ', the runner\'s build' : ''}: ${spell(r.wallMs)}${typeof r.durationMs === 'number' && r.wallMs - r.durationMs >= 60000 ? ` (session ${spell(r.durationMs)})` : ''}, ${r.outcome}`)), '');
+    out.push("## Today's steps by wall-clock time", '', `${spell(total)} in all.`, '', list(timed.map((r) => `${new Date(Date.parse(r.start)).toTimeString().slice(0, 5)} ${r.key} ${r.stage}${r.pr ? ` (${r.pr})` : ''}${r.script ? (r.stage === 'baseMerge' ? ', the runner\'s merge of the base' : ', the runner\'s build') : ''}: ${spell(r.wallMs)}${typeof r.durationMs === 'number' && r.wallMs - r.durationMs >= 60000 ? ` (session ${spell(r.durationMs)})` : ''}, ${r.outcome}`)), '');
   }
   if (proposal?.proposals?.length) {
     out.push('## Proposed changes to the roles (yes or no)', '', list(proposal.proposals.map((p) => `${p.role}: ${p.change} (${p.why})`)), '');
