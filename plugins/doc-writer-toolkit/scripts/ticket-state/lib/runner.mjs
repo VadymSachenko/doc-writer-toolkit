@@ -1593,13 +1593,17 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         const why = String(e.stderr ?? e.message).trim().split('\n')[0].slice(0, 200);
         // A person's push in between (origin's head is another): the commit is set aside and the status read again.
         // Any other refusal (rights, a protected branch, the network) is the step's failure, the worktree back at its head.
+        // A push that landed though git said it failed (origin's head is the id commit) counts as pushed.
         const remote = (io.originHead ?? originHead)(settings, pr);
-        if (remote && tree.head && remote !== tree.head) {
+        if (remote && remote === r.commit) {
+          /* pushed */
+        } else if (remote && tree.head && remote !== tree.head) {
           setAsideWork(pr, tree.path, tree.head);
           return moved(`the push of the id commit was refused (${why}): the branch moved, the status is read again`);
+        } else {
+          resetTree();
+          return failed(`the push of the id commit was refused: ${why}`);
         }
-        resetTree();
-        return failed(`the push of the id commit was refused: ${why}`);
       }
       head = r.commit;
     }

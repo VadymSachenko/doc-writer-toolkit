@@ -110,7 +110,7 @@ function runner(t, { sessions = [] } = {}) {
   const spawnClaude = async (cmd) => {
     const stage = stageOf(cmd);
     sessions.push(stage);
-    const result = stage === 'styleCheck' ? { reviewed: [...briefOf(cmd).matchAll(/^- ([0-9a-f]{40}): /gm)].map((m) => ({ sha: m[1] })) } : {};
+    const result = stage === 'styleCheck' ? { reviewed: [...briefOf(cmd).matchAll(/^- ([0-9a-f]{40}): /gm)].map((m) => ({ sha: m[1] })) } : stage === 'answerComments' ? { questions: [], handled: [] } : {};
     await runRecord({ settings: t.w.settings, clients: t.w.clients(), key: '1194', stage, pr: 'guide-docs#57', status: 'done', head: t.originHead(), result, now: NOW });
     return { code: 0, stdout: RESULT, stderr: '' };
   };
@@ -440,6 +440,17 @@ test('fix 3: a rename that can\'t be made blocks its page: nothing on it changes
   assert.equal(t.show(t.originHead(), 'docs/x/index.md'), PAGES['docs/x/index.md'].replaceAll('new-fields', 'added-fields'));
 });
 
+test('re-check: a PR held by a blocked page still answers a comment; only its ready step waits', async () => {
+  const t = setup();
+  t.handEdit({ [`${EN}/x/index.md`]: (s) => s.replace('## Old part', '## Earlier part').replace('## New fields', '## Old part') });
+  assert.deepEqual(stages(await runner(t)()), ['idSync'], 'held');
+  t.w.forge.activity['guide-docs#57'] = { comments: [{ id: 9300, author: 'owner-login', body: 'Please shorten the intro.', createdAt: ago(0.2), updatedAt: ago(0.2) }] };
+  const sessions = [];
+  const out = await runner(t, { sessions })();
+  assert.ok(sessions.includes('answerComments'), stages(out).join(', '));
+  assert.ok(!stages(out).includes('readyForMerge'), 'still not made ready');
+});
+
 test('fix 3 and 4, in the id step itself: a chain of renames made whole; a commit a hook refuses leaves the worktree as it was', async () => {
   const root = tmp('ids-');
   const g = (...args) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -476,6 +487,19 @@ test('fix 3 and 4, in the id step itself: a chain of renames made whole; a commi
   assert.equal(fs.readFileSync(path.join(root, 'docs/x.md'), 'utf8'), UA.replace('{/* #example */}', '{/* #sample */}').replace('{/* #example-1 */}', '{/* #example */}').replace('(#example) і [другий](#example-1)', '(#sample) і [другий](#example)'));
   assert.equal(fs.readFileSync(path.join(root, `${EN}/x.md`), 'utf8'), ENP.replace('(#example) and [second](#example-1)', '(#sample) and [second](#example)'), 'no EN link left pointing nowhere');
   assert.equal(g('status', '--porcelain'), '');
+});
+
+test('re-check: a push that landed though git said it failed counts as pushed', async () => {
+  const t = setup();
+  reviewsOf(t);
+  t.handEdit({ [`${EN}/x/index.md`]: (s) => s.replace('## New fields', '## Added fields') });
+  // The ref is updated by the hook itself, then the push is reported refused: origin has the id commit all the same.
+  fs.writeFileSync(path.join(t.bare, 'hooks', 'update'), '#!/bin/sh\ngit update-ref "$1" "$3"\necho "timed out" >&2\nexit 1\n', { mode: 0o755 });
+  const out = await runner(t)();
+  assert.equal(out.ran[0].stage, 'idSync');
+  assert.equal(out.ran[0].outcome, 'done', out.ran[0].note);
+  const p = read(t.w, '1194').prs[0];
+  assert.ok(p.pipelineCommits.includes(t.originHead()), 'the id commit is the pipeline\'s');
 });
 
 test('fix 6a: a push refused for another reason than a moved branch (a hook, rights) is a failed step, the worktree back at its head', async () => {

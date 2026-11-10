@@ -508,13 +508,14 @@ function prStep(l, p, w, out, prs) {
         const ids = idSyncStep(pr, w, target, head, hand, out);
         if (ids) return ids;
         // A page whose heading ids the step couldn't keep in step holds the PR at its ready head: the line comment says
-        // what to change, and a later commit's check of that page lets it go on.
+        // what to change, and a later commit's check of that page lets it go on. Only the ready step waits: a review
+        // request, a comment or a rename asked for still goes on below.
         if (w.settings.forge?.translatedLabel && pr.idBlocked?.length) {
           out.notes.push(`${id}: the heading ids of ${[...new Set(pr.idBlocked.flatMap((b) => b.pages))].join(', ')} can't be kept in step with UA (see the line comment): not made ready for ${String(head).slice(0, 7)}`);
-          return null;
+        } else {
+          const after = readyAgain(pr, w, target, head, out);
+          if (after) return after;
         }
-        const after = readyAgain(pr, w, target, head, out);
-        if (after) return after;
       }
     }
   }
