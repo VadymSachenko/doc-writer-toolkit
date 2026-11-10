@@ -5,7 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { NOW, card, tmp } from './fakes.mjs';
 import { ledger, read, world } from './helpers.mjs';
-import { briefFor, extractCalls, runDaily, scriptedCalls, smePython, writeDeniedFor, SME_SCRIPT } from '../lib/runner.mjs';
+import { ROLE_DENIED, briefFor, extractCalls, extractPreflight, runDaily, scriptedCalls, sessionEnv, smePython, writeDeniedFor, SME_SCRIPT } from '../lib/runner.mjs';
+import { refusalOf, HOOK_VARIABLE } from '../lib/role-hook.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
 import { quietGit, settingsFor } from './fakes.mjs';
 import { emptyFeed, sourcesOf, writeFeed } from '../lib/feed.mjs';
@@ -27,7 +28,7 @@ const run = (w, io, options = {}) => runDaily({ settings: w.settings, clients: w
 // A ticket at the video gate: its parts (with their tries) in `t/`, and the files on disk.
 function gated({ number = 501, tries = [[], []], video = AUTO, status = 'inProgress', extra = {}, stages = {} } = {}) {
   const c = card({ number, status });
-  const w = world({ cards: [c], extra: { video, limits: { stepsPerTicket: 1 }, ...extra } });
+  const w = world({ cards: [c], extra: { video, limits: { stepsPerTicket: 1, startHours: '0-24' }, ...extra } });
   fs.mkdirSync(path.join(w.root, 't'), { recursive: true });
   fs.writeFileSync(path.join(w.root, 't/call.mp4'), 'video');
   const parts = tries.map((t, i) => {
@@ -133,21 +134,63 @@ test('AC-3: each failure is one fallback with no retry: a wall on upload, a wall
   assert.equal((await g.w.one(g.key)).next.stage, 'videoBlock', 'no adapter set: straight to the gate, no try');
 });
 
-test('a browser profile in use is no failure: nothing is recorded, and a later check tries', async () => {
-  const g = gated({ extra: { limits: { stepsPerTicket: 5 } } });
+test('a browser profile in use is no failure: nothing is tried, a later check tries, and a lock held past transcriptHours falls back', async () => {
+  const g = gated({ extra: { limits: { stepsPerTicket: 5, startHours: '0-24' } } });
   const busy = Object.assign(new Error('the browser profile is in use by another run (pid 7)'), { busy: true });
   const s = standIn({ open: busy });
   const out = await run(g.w, { transcriber: s.transcriber }, { named: [g.key] });
   assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['videoTry', 'busy']], 'not taken again in the same run');
   assert.deepEqual(s.calls, ['open']);
   assert.match(out.ran[0].note, /the transcriber waits: the browser profile is in use/);
-  assert.deepEqual(read(g.w, g.key).video.videos[0].parts.map((p) => p.tries.length), [0, 0]);
+  const l = read(g.w, g.key);
+  assert.deepEqual(l.video.videos[0].parts.map((p) => p.tries.length), [0, 0]);
+  assert.equal(l.video.busySince, new Date(NOW).toISOString(), 'the first busy try is kept');
   assert.equal((await g.w.one(g.key)).next.stage, 'videoTry');
+  // Busy since longer than transcriptHours (2 h): the gate falls back to the person, with the reason.
+  l.video.busySince = at(3 * 60);
+  writeLedger(g.w.settings.state, l);
+  const t = await g.w.one(g.key);
+  assert.equal(t.next.stage, 'videoBlock');
+  assert.match(t.next.reason, /browser profile stayed in use by another run for more than 2 h/);
+  // A real try clears it.
+  l.video.busySince = at(30);
+  writeLedger(g.w.settings.state, l);
+  await run(g.w, { transcriber: standIn().transcriber }, { named: [g.key] });
+  assert.equal(read(g.w, g.key).video.busySince, undefined);
+});
+
+test('a look with no name for its upload, or a part the ledger lost, never guesses', async () => {
+  const g = gated({ tries: [[{ at: at(30), outcome: 'uploaded' }], []] });
+  const s = standIn();
+  const out = await run(g.w, { transcriber: s.transcriber }, { named: [g.key] });
+  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['videoTry', 'done']]);
+  assert.deepEqual(s.calls.filter((x) => Array.isArray(x)), [], 'neither a look nor an upload after the refusal');
+  const p = read(g.w, g.key).video.videos[0].parts[0];
+  assert.deepEqual([p.tries.at(-1).outcome, p.tries.at(-1).fetch, p.tries.at(-1).reason], ['failed', true, 'the upload has no name it is listed by']);
+  assert.equal((await g.w.one(g.key)).next.stage, 'videoBlock');
+  // A step naming a part the ledger doesn't have: skipped with a note, the rest goes on.
+  const h = gated({ number: 503, tries: [[]] });
+  const s2 = standIn();
+  const { runScripted } = await import('../lib/runner.mjs');
+  const res = await runScripted({ stage: 'videoTry', keys: ['503'], parts: ['t/gone.m4a', h.parts[0].file] }, { settings: h.w.settings, clients: h.w.clients(), io: { transcriber: s2.transcriber, now: () => NOW } });
+  assert.match(res.join('\n'), /t\/gone\.m4a: no such video part in the ledger, not uploaded/);
+  assert.deepEqual(s2.calls.filter((x) => Array.isArray(x)).map((x) => x[1]), ['call.mp4-part-01.m4a']);
+});
+
+test('the automatic try opens no browser outside the start hours; the watcher wants an untried part once they begin', async () => {
+  const hour = new Date(NOW).getHours();
+  const outside = hour < 23 ? `${hour + 1}-24` : '0-23';
+  const g = gated({ extra: { limits: { stepsPerTicket: 1, startHours: outside } } });
+  const t = await g.w.one(g.key);
+  assert.equal(t.next, null);
+  assert.ok(t.notes.some((n) => /waits for the start hours/.test(n)));
+  const out = await run(g.w, { transcriber: { open: () => assert.fail('no browser outside the start hours') } }, { named: [g.key] });
+  assert.deepEqual(out.ran, []);
 });
 
 test('the day is the account\'s: an older gate\'s parts go first, and the uploads stop at what is left', async () => {
   const cards = [card({ number: 601, status: 'inProgress' }), card({ number: 602, status: 'inProgress' })];
-  const w = world({ cards, extra: { video: AUTO, limits: { stepsPerTicket: 1 } } });
+  const w = world({ cards, extra: { video: AUTO, limits: { stepsPerTicket: 1, startHours: '0-24' } } });
   fs.mkdirSync(path.join(w.root, 't'), { recursive: true });
   const gate = (c, name, gateAt) => {
     const parts = [0, 1].map((i) => ({ file: `t/${name}.mp4-part-0${i + 1}.m4a`, start: i * 1800, transcript: `t/${name}-${i}.txt`, tries: [] }));
@@ -163,7 +206,7 @@ test('the day is the account\'s: an older gate\'s parts go first, and the upload
 
 test("the day is counted once the browser holds the profile: another run's uploads just before count", async () => {
   const cards = [card({ number: 611, status: 'inProgress' }), card({ number: 612, status: 'inProgress' })];
-  const w = world({ cards, extra: { video: AUTO, limits: { stepsPerTicket: 3 } } });
+  const w = world({ cards, extra: { video: AUTO, limits: { stepsPerTicket: 3, startHours: '0-24' } } });
   fs.mkdirSync(path.join(w.root, 't'), { recursive: true });
   const partsOf = (name, n) => Array.from({ length: n }, (_, i) => ({ file: `t/${name}-part-0${i + 1}.m4a`, start: i * 1800, transcript: `t/${name}-${i}.txt`, tries: [] }));
   for (const p of [...partsOf('a', 3), ...partsOf('b', 2)]) fs.writeFileSync(path.join(w.root, p.file), 'sound');
@@ -252,8 +295,29 @@ test('a frame sweep that fails is recorded with its run, waits for a person, and
   // No venv: failed before anything runs.
   const h = gated({ number: 502, tries: [[]] });
   fs.writeFileSync(path.join(h.w.root, h.parts[0].transcript), '(0:00 - 0:01)\nx\n');
-  const o = await run(h.w, { smePython: path.join(h.w.root, 'no-venv', 'python') }, { named: ['502'] });
-  assert.match(o.ran[0].note, /no Python at .*no-venv\/python \(the venv of extract-sme-screenshots/);
+});
+
+test('the sweep\'s preflight: no venv, tesseract or ffmpeg skips it, whatever the settings, and the import goes on without frames', async () => {
+  for (const video of [AUTO, { ...AUTO, transcriber: null, browserProfile: null }]) {
+    const h = gated({ number: 502, tries: [[], []], video });
+    for (const p of h.parts) fs.writeFileSync(path.join(h.w.root, p.transcript), '(0:00 - 0:01)\nx\n');
+    const o = await run(h.w, { smePython: path.join(h.w.root, 'no-venv', 'python'), extractPreflight: (py) => extractPreflight(py, { has: (n) => n !== 'tesseract' }), runExtract: () => assert.fail('no sweep') }, { named: ['502'] });
+    assert.deepEqual(o.ran.map((r) => [r.stage, r.outcome]), [['videoExtract', 'done']]);
+    assert.match(o.ran[0].note, /the frame sweep was skipped: no Python at .*no-venv\/python \(the venv of extract-sme-screenshots\); no tesseract on the PATH/);
+    const l = read(h.w, '502');
+    assert.match(l.video.extractSkipped.reason, /no tesseract on the PATH/);
+    assert.deepEqual(l.runs ?? [], [], 'no failed run: nothing waits for a person');
+    const t = await h.w.one('502');
+    assert.equal(t.next.stage, 'videoImport');
+    assert.deepEqual(t.next.videos, [{ file: 't/call.mp4', parts: h.parts.map((p) => ({ transcript: p.transcript, start: p.start })) }]);
+    const brief = briefFor({ ...t.next, keys: ['502'] }, h.w.settings);
+    assert.match(brief, /The runner did not sweep the video's frames \(no Python at/);
+    assert.match(brief, /a fact that needs a screenshot is cited without one, or left as a NEEDS CONFIRMATION marker/);
+    assert.match(brief, /- t\/call\.mp4: t\/call\.mp4-parts\/call\.mp4-part-01-transcript-turboscribe\.txt at 0 s; .* at 1800 s\./);
+  }
+  // The preflight itself: a venv and both programs, or each one missing named.
+  assert.equal(extractPreflight('/venv/python', { exists: () => true, has: () => true }), null);
+  assert.equal(extractPreflight('/venv/python', { exists: () => false, has: () => false }), 'no Python at /venv/python (the venv of extract-sme-screenshots); no tesseract on the PATH; no ffmpeg on the PATH');
 });
 
 test('the watcher looks at a ticket whose uploaded part is due a look, with nothing on the board, and at no other', async () => {
@@ -294,4 +358,14 @@ test('the settings: both keys turn the try on; the profile is absolute and outsi
   const denied = writeDeniedFor(s);
   for (const r of ['Read(//somewhere/profile/**)', 'Edit(//somewhere/profile/**)', 'Edit(//somewhere/profile.lock/**)']) assert.ok(denied.includes(r), r);
   assert.ok(!writeDeniedFor(settingsFor(root)).some((r) => r.includes('somewhere')), 'no profile, no rule');
+  for (const r of ['Bash(mkdir /somewhere/profile.lock:*)', 'Bash(mkdir -p /somewhere/profile.lock:*)']) assert.ok(denied.includes(r), r);
+  assert.ok(ROLE_DENIED.includes('Bash(tesseract:*)'), 'no OCR in a role session');
+  // The role hook refuses a command that names the profile or its lock: a Playwright run on it, a copy, a cd.
+  const cfg = JSON.parse(sessionEnv({ role: 'writer', keys: ['1'] }, s, { roots: [], roleRules: ['Bash(npx playwright:*)'], trees: [] })[HOOK_VARIABLE]);
+  assert.deepEqual(cfg.secrets, ['/somewhere/profile', '/somewhere/profile.lock']);
+  for (const c of ['npx playwright open --user-data-dir=/somewhere/profile https://x.test', 'cp -R /somewhere/profile /tmp/x', "cat '/somewhere/profile/Default/Cookies'", 'cd /somewhere && ls profile/Default', 'mkdir /somewhere/profile.lock']) {
+    assert.match(refusalOf(c, cfg, { cwd: '/' }) ?? '', /the transcriber's browser profile/, c);
+  }
+  assert.doesNotMatch(refusalOf('ls /somewhere/profiles-other', cfg, { cwd: '/' }) ?? '', /browser profile/, 'another folder is not it');
+  assert.deepEqual(JSON.parse(sessionEnv({ role: 'writer', keys: ['1'] }, settingsFor(root), { roots: [], roleRules: [], trees: [] })[HOOK_VARIABLE]).secrets, []);
 });

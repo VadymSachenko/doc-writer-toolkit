@@ -18,21 +18,22 @@ const from = path.resolve(process.env.TRANSCRIBER_PLAYWRIGHT_FROM ?? process.env
 const chromium = loadPlaywright(from);
 
 // The server's state: what the dashboard is (`mode`), the files uploaded, and whether their transcripts are done.
-const state = { mode: 'ok', files: [], done: false, timestamps: true };
+// `banner`: the dashboard names the day's limit at all times (a free plan's upsell), which a look never reads.
+const state = { mode: 'ok', files: [], done: false, timestamps: true, banner: false };
 const page = (title, body) => `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title></head><body>${body}</body></html>`;
 const SIGNED = '<nav><a href="/logout">Log out</a></nav>';
 function dashboard() {
   const list = state.files.map((n, i) => `<li><a href="/transcript/${i}">${n}</a></li>`).join('');
   return page(
     'Dashboard',
-    `${SIGNED}<button id="openUpload">Transcribe Files</button>
+    `${SIGNED}${state.banner ? '<p>You have reached your daily limit.</p>' : ''}<button id="openUpload">Transcribe Files</button>
 <dialog id="d"><input type="file" id="f"><button id="go">Transcribe</button></dialog><ul>${list}</ul>
 <script>
 openUpload.onclick = () => d.showModal();
 go.onclick = async () => {
   const file = f.files[0];
   const r = await fetch('/upload?name=' + encodeURIComponent(file.name), { method: 'POST', body: await file.arrayBuffer() });
-  if ((await r.text()) === 'limit') { d.close(); document.body.insertAdjacentHTML('beforeend', '<p>You have reached your daily limit.</p>'); return; }
+  if ((await r.text()) === 'limit') { d.insertAdjacentHTML('beforeend', '<p>You have reached your daily limit.</p>'); return; }
   location.reload();
 };
 </script>`,
@@ -107,7 +108,7 @@ function open(dir) {
 }
 
 test('the upload, a look while the transcript is in work, then its plain-text export with timestamps', async () => {
-  Object.assign(state, { mode: 'ok', files: [], done: false, timestamps: true });
+  Object.assign(state, { mode: 'ok', files: [], done: false, timestamps: true, banner: false });
   const dir = tmp();
   const part = path.join(dir, 'call.mp4-part-01.m4a');
   fs.writeFileSync(part, 'sound');
@@ -119,7 +120,8 @@ test('the upload, a look while the transcript is in work, then its plain-text ex
   } finally {
     await s.close();
   }
-  // A later run: still in work, then done.
+  // A later run: still in work, then done. The dashboard's limit banner is no wall for a look.
+  state.banner = true;
   s = await open(dir);
   try {
     assert.deepEqual(await s.fetch({ ref: { name: '501-call.mp4-part-01.m4a' }, dest }), { outcome: 'waiting' });
@@ -131,8 +133,22 @@ test('the upload, a look while the transcript is in work, then its plain-text ex
   assert.match(fs.readFileSync(dest, 'utf8'), /^\(0:00 - 0:04\)\nHello\./);
 });
 
+test('a look finds its file by the exact name only, never a longer one', async () => {
+  Object.assign(state, { mode: 'ok', files: ['501-x.m4a-old'], done: true, timestamps: true, banner: false });
+  const dir = tmp();
+  const dest = path.join(dir, 'x-transcript.txt');
+  const s = await open(dir);
+  try {
+    assert.deepEqual(await s.fetch({ ref: { name: '501-x.m4a' }, dest }), { outcome: 'failed', reason: 'an unexpected page (no the uploaded file in the list)' });
+    assert.deepEqual(await s.fetch({ ref: {}, dest }), { outcome: 'failed', reason: 'an unexpected page (no name the upload is listed by)' });
+  } finally {
+    await s.close();
+  }
+  assert.ok(!fs.existsSync(dest));
+});
+
 test('an export the site gives without timestamps is refused, and nothing is saved', async () => {
-  Object.assign(state, { mode: 'ok', files: ['501-x.m4a'], done: true, timestamps: false });
+  Object.assign(state, { mode: 'ok', files: ['501-x.m4a'], done: true, timestamps: false, banner: false });
   const dir = tmp();
   const dest = path.join(dir, 'x-transcript.txt');
   const s = await open(dir);
@@ -151,7 +167,7 @@ for (const [mode, reason] of [
   ['unexpected', 'an unexpected page (no the upload button on the dashboard)'],
 ]) {
   test(`one failure, no retry: ${mode}`, async () => {
-    Object.assign(state, { mode, files: [], done: false, timestamps: true });
+    Object.assign(state, { mode, files: [], done: false, timestamps: true, banner: false });
     const dir = tmp();
     const part = path.join(dir, 'p.m4a');
     fs.writeFileSync(part, 'sound');

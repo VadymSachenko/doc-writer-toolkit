@@ -42,13 +42,18 @@ const alive = (pid) => {
   }
 };
 
-// One run's browser on the profile at a time: a folder next to it, with the holder's pid; a holder that is gone frees it.
-export function takeProfileLock(profile, { pid = process.pid, isAlive = alive } = {}) {
+// One run's browser on the profile at a time: a folder next to it, with the holder's pid and when it took it. A lock
+// is broken, and taken over, when its holder is gone, when it is older than `staleMs` (no step holds a browser that
+// long), or when it has no readable holder a minute after it was made (a run that died while writing it). So no lock
+// sticks for good.
+export const LOCK_STALE_MS = 6 * 3600 * 1000;
+const UNWRITTEN_MS = 60 * 1000;
+export function takeProfileLock(profile, { pid = process.pid, isAlive = alive, now = Date.now(), staleMs = LOCK_STALE_MS } = {}) {
   const dir = `${profile}.lock`;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       fs.mkdirSync(dir);
-      fs.writeFileSync(path.join(dir, 'owner.json'), JSON.stringify({ pid }) + '\n');
+      fs.writeFileSync(path.join(dir, 'owner.json'), JSON.stringify({ pid, at: new Date(now).toISOString() }) + '\n');
       return { taken: true, free: () => fs.rmSync(dir, { recursive: true, force: true }) };
     } catch (e) {
       if (e.code !== 'EEXIST') throw e;
@@ -56,9 +61,18 @@ export function takeProfileLock(profile, { pid = process.pid, isAlive = alive } 
       try {
         holder = JSON.parse(fs.readFileSync(path.join(dir, 'owner.json'), 'utf8'));
       } catch {
-        // a lock being written, or broken: held
+        // a lock being written, or broken
       }
-      if (holder?.pid && !isAlive(holder.pid)) {
+      const made = (() => {
+        try {
+          return fs.statSync(dir).mtimeMs;
+        } catch {
+          return now;
+        }
+      })();
+      const at = Date.parse(holder?.at ?? '') || made;
+      const broken = holder ? !holder.pid || !isAlive(holder.pid) || now - at > staleMs : now - made > UNWRITTEN_MS;
+      if (broken) {
         fs.rmSync(dir, { recursive: true, force: true });
         continue;
       }
@@ -105,9 +119,11 @@ export function createDriver({ site, settings, chromium = null, origin = site.SI
           }
         },
         async fetch({ ref, dest }) {
+          // The upload's name is how the file is found: without it, no guess.
+          if (typeof ref?.name !== 'string' || !ref.name) return { outcome: 'failed', reason: `${REASONS.unexpected} (no name the upload is listed by)` };
           const tmp = `${dest}.download`;
           try {
-            const r = await site.exportText(page, { name: ref?.name, origin, saveAs: (d) => d.saveAs(tmp) });
+            const r = await site.exportText(page, { name: ref.name, origin, saveAs: (d) => d.saveAs(tmp) });
             if (r.kind) return failed(r);
             if (r.outcome !== 'done') return { outcome: 'waiting' };
             const text = fs.readFileSync(tmp, 'utf8');

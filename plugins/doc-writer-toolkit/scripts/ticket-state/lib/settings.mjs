@@ -88,7 +88,7 @@ export const LOCAL_DEFAULTS = {
   // straight to the person. `headless`: the browser with no window (a visible one by default: a sign-in and a bot check
   // pass more often there). `channel`: an installed browser instead of Playwright's Chromium (`chrome`). `fetchMinutes`:
   // how often an uploaded part's transcript is looked for; `transcriptHours`: how long after its upload it may take.
-  // `extractMinutes`: the longest the frame sweep of one video may run (`videoExtract`).
+  // `extractMinutes`: the longest one command of the frame sweep may run (`videoExtract`: three per video).
   video: { transcriber: null, fallback: 'person', partMinutes: 30, partsPerDay: 3, browserProfile: null, transcriptHours: 2, headless: false, channel: null, fetchMinutes: 15, extractMinutes: 120 },
   // What the close step does with a merged ticket's recorded work files (D-074).
   cleanup: { mode: 'trash', keep: DEFAULT_KEEP, trashDir: null },

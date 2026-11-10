@@ -442,9 +442,10 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
         next.rearmSeen = iso(rearmed);
       }
       // A video part uploaded for its transcript, due a look (`video.fetchMinutes`): the upload's run never waits for
-      // it, and nothing on the board changes when it is ready.
+      // it, and nothing on the board changes when it is ready. And a part the day still allows to upload, once the start
+      // hours begin (the automatic try opens no browser outside them).
       const exists = (rel) => fs.existsSync(path.resolve(settings.root, rel));
-      for (const l of ledgers) if (videoFetchDue(l, checkStart, settings, exists)) want(l.key);
+      for (const l of ledgers) if (videoFetchDue(l, checkStart, settings, exists, ledgers)) want(l.key);
     } catch (e) {
       failed('the ledgers', e);
     }

@@ -122,7 +122,7 @@ test('rows 1, 2, 3 and 7: locked, hand, outside, interrupted', async () => {
 
 test('row 13: the video gate tries parts within the day, falls back to Blocked, and sweeps the frames when every part has its transcript', async () => {
   const c = { auto: card({ number: 401, status: 'inProgress' }), none: card({ number: 402, status: 'inProgress' }), failed: card({ number: 403, status: 'inProgress' }), waits: card({ number: 404, status: 'blocked' }), all: card({ number: 405, status: 'blocked' }), full: card({ number: 406, status: 'inProgress' }) };
-  const w = world({ cards: Object.values(c), extra: { video: { transcriber: 'turboscribe', browserProfile: '/somewhere/profile', partsPerDay: 3 } } });
+  const w = world({ cards: Object.values(c), extra: { limits: { startHours: '0-24' }, video: { transcriber: 'turboscribe', browserProfile: '/somewhere/profile', partsPerDay: 3 } } });
   const parts = (name, n, tries = []) => Array.from({ length: n }, (_, i) => ({ file: `t/${name}-part${i + 1}.mp4`, start: i * 1800, transcript: `t/${name}-part${i + 1}-transcript.txt`, tries: typeof tries === 'function' ? tries(i) : tries }));
   const video = (ps) => ({ videos: [{ file: 't/v.mp4', parts: ps }], gateComment: 'Gate: the video', at: ago(5) });
   const failedTry = [{ at: ago(1), outcome: 'failed', reason: 'a sign-in wall' }];
@@ -160,7 +160,7 @@ test('row 13: the video gate tries parts within the day, falls back to Blocked, 
 
 test('row 13: an uploaded part is looked for every fetchMinutes, the day counts uploads only, and the import follows the sweep', async () => {
   const c = { soon: card({ number: 411, status: 'inProgress' }), due: card({ number: 412, status: 'inProgress' }), looked: card({ number: 413, status: 'inProgress' }), swept: card({ number: 414, status: 'inProgress' }), late: card({ number: 415, status: 'inProgress' }) };
-  const w = world({ cards: Object.values(c), extra: { video: { transcriber: 'turboscribe', browserProfile: '/somewhere/profile', partsPerDay: 3, fetchMinutes: 15 } } });
+  const w = world({ cards: Object.values(c), extra: { limits: { startHours: '0-24' }, video: { transcriber: 'turboscribe', browserProfile: '/somewhere/profile', partsPerDay: 3, fetchMinutes: 15 } } });
   const at = (min) => new Date(NOW - min * 60000).toISOString();
   const video = (name, tries, more = {}) => ({ videos: [{ file: `t/${name}.mp4`, parts: tries.map((t, i) => ({ file: `t/${name}-part${i + 1}.m4a`, start: i * 1800, transcript: `t/${name}-part${i + 1}-transcript-turboscribe.txt`, tries: t, ...(more.checks ? { checks: more.checks[i] ?? [] } : {}) })) }], gateComment: 'Gate', at: ago(5) });
   const gate = { start: 'done', plan: 'done', videoGate: 'done', videoTry: 'done' };
@@ -191,7 +191,7 @@ test('row 13: an uploaded part is looked for every fetchMinutes, the day counts 
 });
 
 test("the video gate across tickets: the day is the account's, the oldest gate first; the watcher looks only where a look is due", () => {
-  const settings = { video: { transcriber: 'turboscribe', browserProfile: '/p', partsPerDay: 3, fetchMinutes: 15 } };
+  const settings = { limits: { startHours: '0-24' }, video: { transcriber: 'turboscribe', browserProfile: '/p', partsPerDay: 3, fetchMinutes: 15 } };
   const today = new Date(NOW - 60000).toISOString();
   const part = (n, tries = [], extra = {}) => ({ file: `p${n}.m4a`, start: 0, transcript: `p${n}.txt`, tries, ...extra });
   const gated = (key, at, parts, extra = {}) => ({ key, stage: 'videoTry', stages: { videoGate: { status: 'done', seq: 1 }, videoTry: { status: 'done', seq: 2 } }, video: { at, videos: [{ file: 'v.mp4', parts }], ...extra } });
@@ -210,6 +210,14 @@ test("the video gate across tickets: the day is the account's, the oldest gate f
   assert.equal(videoFetchDue(gated('4', 'x', [part(8, up(20), { checks: [{ at: new Date(NOW - 60000).toISOString(), outcome: 'waiting' }] })]), NOW, settings, none), false, 'looked at a minute ago');
   assert.equal(videoFetchDue(gated('4', 'x', [part(8, up(20))]), NOW, settings, () => true), false, 'the transcript is there');
   assert.equal(videoFetchDue(gated('4', 'x', [part(8, up(20))]), NOW, { video: { ...settings.video, transcriber: null } }, none), false, 'the automatic try is off');
+  const hour = new Date(NOW).getHours();
+  assert.equal(videoFetchDue(gated('4', 'x', [part(8, up(20))]), NOW, { ...settings, limits: { startHours: hour < 23 ? `${hour + 1}-24` : '0-23' } }, none), false, 'outside the start hours');
+  // A part not yet uploaded, with the day's uploads left (the ledgers given): wanted, so a gate reached before the start
+  // hours is tried once they begin. None left: not wanted.
+  assert.equal(videoFetchDue(mine, NOW, settings, none, [older, mine, younger]), true, 'one upload left today');
+  assert.equal(videoFetchDue(mine, NOW, settings, none), false, 'no ledgers: looks only');
+  const full = gated('5', '2026-01-01T00:00:00Z', [part(9, [{ at: today, outcome: 'uploaded' }]), part(10, [{ at: today, outcome: 'uploaded' }]), part(11, [{ at: today, outcome: 'uploaded' }])]);
+  assert.equal(videoFetchDue(mine, NOW, settings, none, [full, mine]), false, "today's uploads are used");
 });
 
 test('the video gate: a card the owner moves back before every transcript goes on without the video', async () => {

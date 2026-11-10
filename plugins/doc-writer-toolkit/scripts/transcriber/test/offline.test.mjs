@@ -23,7 +23,10 @@ test('the page checks: a captcha, a sign-in wall, the day\'s limit, an unexpecte
   assert.equal(classify(snap({ host: 'accounts.google.com', path: '/v3/signin/identifier', present: {} })).kind, 'signIn', "Google's sign-in");
   assert.equal(classify(snap({ text: 'Continue with Google', present: {} })).kind, 'signIn', 'a page that asks to sign in again');
   assert.equal(classify(snap({ text: 'Signed in. Continue with Google Drive import' })).kind, 'ok', 'the words on a signed-in page are no wall');
-  assert.equal(classify(snap({ text: "You've reached your daily limit. Upgrade to Unlimited to transcribe more." })).kind, 'limit');
+  // The day's limit is read on the upload's pages only: a dashboard that names it at all times is no wall for a look.
+  assert.equal(classify(snap({ text: "You've reached your daily limit. Upgrade to Unlimited to transcribe more." }), { limit: true }).kind, 'limit');
+  assert.equal(classify(snap({ text: "You've reached your daily limit. Upgrade to Unlimited to transcribe more." })).kind, 'ok', 'not read on a look');
+  assert.equal(classify(snap({ text: 'Free plan: 3 files per day. Daily limit resets at midnight.' }), { limit: true }).kind, 'ok', 'an upsell that names the limit is not the limit reached');
   assert.equal(classify(snap({ present: {} }), { expect: SIGNED_IN }).kind, 'unexpected', 'not the signed-in dashboard');
   assert.equal(classify(snap(), { expect: SIGNED_IN }).kind, 'ok');
   // A captcha wins over the rest: a bot check on the sign-in page is a captcha.
@@ -119,6 +122,12 @@ test('the driver: a look for a transcript waits, saves an export with timestamps
   s = await open({ exp: { kind: 'signIn', what: 'x' } });
   assert.deepEqual(await s.fetch({ ref: { name: '501-p.m4a' }, dest }), { outcome: 'failed', reason: REASONS.signIn });
   await s.close();
+  // No name to find the upload by: refused, and the site is never asked.
+  const none = siteWith({ exp: { outcome: 'done' } });
+  s = await createDriver({ site: none.site, settings: settingsWith(dir), chromium: b.chromium }).open();
+  assert.deepEqual(await s.fetch({ ref: {}, dest }), { outcome: 'failed', reason: 'an unexpected page (no name the upload is listed by)' });
+  assert.deepEqual(none.calls, []);
+  await s.close();
   s = await open({ exp: { outcome: 'done' } });
   assert.deepEqual(await s.fetch({ ref: { name: '501-p.m4a' }, dest }), { outcome: 'done' });
   await s.close();
@@ -141,6 +150,25 @@ test('the driver: a profile in use is busy, not a failure; a browser that does n
   await assert.rejects(createDriver({ site: siteWith().site, settings, chromium: standIn({ launchError: new Error('Failed to create a ProcessSingleton for your profile directory') }).chromium }).open(), (e) => e.busy === true);
   await assert.rejects(createDriver({ site: siteWith().site, settings, chromium: standIn({ launchError: new Error('Executable doesn\'t exist at https://x.test/a?token=abc') }).chromium }).open(), (e) => !e.busy && /^the browser did not start: Executable doesn't exist at https:\/\/x\.test\/a$/.test(e.message));
   assert.ok(!fs.existsSync(`${settings.video.browserProfile}.lock`), 'the lock is freed when the browser does not start');
+  // No lock sticks: one older than its limit, one with no pid, and one with no holder a minute on are broken; a fresh
+  // lock still being written is held.
+  const lock = `${settings.video.browserProfile}.lock`;
+  const now = Date.now();
+  const writeLock = (owner) => {
+    fs.mkdirSync(lock);
+    if (owner) fs.writeFileSync(path.join(lock, 'owner.json'), JSON.stringify(owner));
+  };
+  writeLock({ pid: process.pid, at: new Date(now - 7 * 3600 * 1000).toISOString() });
+  assert.equal(takeProfileLock(settings.video.browserProfile, { now }).taken, true, 'older than six hours');
+  fs.rmSync(lock, { recursive: true });
+  writeLock({ at: new Date(now).toISOString() });
+  assert.equal(takeProfileLock(settings.video.browserProfile, { now }).taken, true, 'no pid');
+  fs.rmSync(lock, { recursive: true });
+  writeLock(null);
+  assert.equal(takeProfileLock(settings.video.browserProfile, { now }).taken, false, 'being written');
+  assert.equal(takeProfileLock(settings.video.browserProfile, { now: now + 2 * 60 * 1000 }).taken, true, 'no holder a minute on');
+  assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(path.join(lock, 'owner.json'), 'utf8'))).sort(), ['at', 'pid'], 'the holder: its pid and when');
+  fs.rmSync(lock, { recursive: true });
   // The profile folder is the owner's only.
   assert.equal(fs.statSync(settings.video.browserProfile).mode & 0o077, 0);
 });

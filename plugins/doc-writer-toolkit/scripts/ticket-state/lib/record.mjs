@@ -238,6 +238,13 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         // An upload: a try, `uploaded` (with the name the service lists it by) or `failed`. A look for its transcript
         // (`fetch`): `waiting` or `done` is a look (`checks`); `failed` is a try, marked `fetch`, so the gate falls back.
         if (!l.video) throw new Refused('noGate', 'no video gate was recorded');
+        // `busy`: the profile was in use by another run, nothing tried. The first such try is kept (`busySince`), so a
+        // lock that never frees falls back to the person after `transcriptHours` (lib/rule.mjs); a real try clears it.
+        if (result.busy) {
+          l.video.busySince ??= at;
+          return;
+        }
+        if ((result.parts ?? []).length) delete l.video.busySince;
         for (const r of result.parts ?? []) {
           const part = l.video.videos.flatMap((v) => v.parts).find((p) => p.file === r.file);
           if (!part) throw new CliError(`no video part ${r.file}`, { code: 2 });
@@ -260,6 +267,13 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         if (!l.video) throw new Refused('noGate', 'no video gate was recorded');
         const missing = l.video.videos.flatMap((v) => v.parts).filter((p) => !p.transcript || !fs.existsSync(path.resolve(settings.root, p.transcript)));
         if (missing.length) throw new Refused('file', `${missing.length} part(s) have no transcript file yet`, { parts: missing.map((p) => p.file) });
+        // `skipped`: the runner's preflight found no venv, `tesseract` or `ffmpeg`. No frames: the import goes on with
+        // the parts' transcripts at their offsets, and the brief says why.
+        if (result.skipped) {
+          l.video.extractSkipped = { at, reason: String(result.skipped).slice(0, 300) };
+          return;
+        }
+        delete l.video.extractSkipped;
         if (!Array.isArray(result.videos) || !result.videos.length) throw new CliError('videoExtract needs --result {"videos": [{ "file", "package", "transcript", "frames" }]}', { code: 2 });
         for (const x of result.videos) {
           const v = l.video.videos.find((y) => y.file === x.file);

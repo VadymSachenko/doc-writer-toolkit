@@ -58,7 +58,11 @@ export async function main(argv, io = {}) {
     if (command === 'sign-in') {
       await session.page.goto(origin + SITE.login, { waitUntil: 'domcontentloaded' }).catch(() => {});
       stdout.write(`Sign in to ${v.transcriber} in the window that opened, check that its dashboard shows, then close the window.\n`);
-      await new Promise((resolve) => session.page.context().on('close', resolve));
+      // On macOS closing the window may leave the browser running: the page's close ends the command too.
+      await new Promise((resolve) => {
+        session.page.context().on('close', resolve);
+        session.page.on('close', resolve);
+      });
       stdout.write(JSON.stringify({ ok: true, command, profile: v.browserProfile }, null, 2) + '\n');
       return 0;
     }

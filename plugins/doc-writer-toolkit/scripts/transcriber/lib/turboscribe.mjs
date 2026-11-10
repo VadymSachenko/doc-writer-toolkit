@@ -21,9 +21,11 @@ export const CHECKS = {
     path: [/^\/login\b/, /^\/signup\b/],
     text: [/sign in with google/i, /continue with google/i, /log in to turboscribe/i],
   },
-  // The free plan's day: three files a day.
+  // The free plan's day used up (three files a day). Read only on the upload's pages: a free plan's dashboard may name
+  // its limit at all times (an upsell), so a look for a transcript never reads it. Narrow on purpose, and for the pilot
+  // to confirm: a limit these miss shows as the upload not taken (an unexpected page), which falls back all the same.
   limit: {
-    text: [/daily limit/i, /reached your (?:free |daily )?limit/i, /limit reached/i, /transcribe more files tomorrow/i, /upgrade to (?:turboscribe )?unlimited to transcribe more/i],
+    text: [/you(?:'ve| have) reached (?:your|the) (?:daily |free |)(?:upload |transcription |)limit/i, /no (?:more )?(?:free )?transcriptions? left today/i, /transcribe more files tomorrow/i],
   },
 };
 
@@ -36,10 +38,10 @@ export const SELECTORS = {
   fileInput: 'input[type="file"]',
   // The dialog's button that starts the transcription.
   submit: { role: 'button', name: /^\s*transcribe\s*$/i },
-  // The upload done: the file in the list, or the page of its transcript.
-  uploaded: (name) => ({ text: name }),
-  // A file in the dashboard's list, by its name: a link to its transcript.
-  fileLink: (name) => ({ role: 'link', name }),
+  // The upload dialog while it is open: the upload is done once it is gone (or the page moved on).
+  uploadDialog: 'dialog[open], [role="dialog"]',
+  // A file in the dashboard's list, by its exact name: a link to its transcript. Never the dialog's own file name.
+  fileLink: (name) => ({ role: 'link', name, exact: true }),
   // On a transcript's page: still in work.
   inWork: [/queued/i, /transcribing/i, /processing/i, /in progress/i, /\b\d{1,3}\s?%/],
   // On a transcript's page: the export, its plain-text choice, the timestamps option and the final download button.
@@ -58,13 +60,13 @@ const any = (patterns = [], value = '') => patterns.some((p) => p.test(value));
 
 // What a page is, from a snapshot of it: { host, path, title, text, present: { <selector>: true } }. `expect`: the
 // selectors that make it the page the step wants (any of them). Returns { kind } with kind one of `captcha`, `signIn`,
-// `limit`, `ok` and `unexpected`.
-export function classify(snap, { expect = [] } = {}) {
+// `limit`, `ok` and `unexpected`. `limit`: whether the day's limit is read here (the upload's pages only).
+export function classify(snap, { expect = [], limit = false } = {}) {
   const present = (sels = []) => sels.some((s) => snap.present?.[s]);
   if (any(CHECKS.captcha.title, snap.title) || any(CHECKS.captcha.text, snap.text) || present(CHECKS.captcha.selectors)) return { kind: 'captcha' };
   const signedIn = present(SIGNED_IN);
   if (any(CHECKS.signIn.host, snap.host) || any(CHECKS.signIn.path, snap.path) || (!signedIn && any(CHECKS.signIn.text, snap.text))) return { kind: 'signIn' };
-  if (any(CHECKS.limit.text, snap.text)) return { kind: 'limit' };
+  if (limit && any(CHECKS.limit.text, snap.text)) return { kind: 'limit' };
   if (!expect.length || present(expect)) return { kind: 'ok' };
   return { kind: 'unexpected' };
 }
@@ -88,27 +90,27 @@ export async function snapshotOf(page, extra = []) {
   return { host, path, title, text, present };
 }
 
-const locate = (page, sel) => (typeof sel === 'string' ? page.locator(sel) : sel.role ? page.getByRole(sel.role, { name: sel.name }) : page.getByText(sel.text));
+const locate = (page, sel) => (typeof sel === 'string' ? page.locator(sel) : sel.role ? page.getByRole(sel.role, { name: sel.name, ...(sel.exact ? { exact: true } : {}) }) : page.getByText(sel.text));
 
 // One step's page check: the kind, or `ok`. `what`: what the step looks for, for the reason of an unexpected page.
-async function check(page, expect, what) {
-  const kind = classify(await snapshotOf(page, expect), { expect }).kind;
+async function check(page, expect, what, { limit = false } = {}) {
+  const kind = classify(await snapshotOf(page, expect), { expect, limit }).kind;
   return kind === 'ok' ? null : { kind, what };
 }
 
-// Opens the dashboard and checks that it is the signed-in one.
-export async function openDashboard(page, { origin = SITE.origin, timeoutMs = 60000 } = {}) {
+// Opens the dashboard and checks that it is the signed-in one (and, before an upload, that the day isn't used up).
+export async function openDashboard(page, { origin = SITE.origin, timeoutMs = 60000, limit = false } = {}) {
   await page.goto(origin + SITE.dashboard, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
-  return check(page, SIGNED_IN, 'the signed-in dashboard');
+  return check(page, SIGNED_IN, 'the signed-in dashboard', { limit });
 }
 
 // Polls until `ready()` holds, a page check finds a wall (the day's limit can show only after the upload starts), or
 // the time is up (an unexpected page: `what` didn't show).
-async function until(page, ready, { timeoutMs, everyMs = 1000, what }) {
+async function until(page, ready, { timeoutMs, everyMs = 1000, what, limit = false }) {
   const end = Date.now() + timeoutMs;
   for (;;) {
     if (await ready().catch(() => false)) return null;
-    const wall = await check(page, [], what).catch(() => null);
+    const wall = await check(page, [], what, { limit }).catch(() => null);
     if (wall) return wall;
     if (Date.now() > end) return { kind: 'unexpected', what };
     await page.waitForTimeout(everyMs);
@@ -116,8 +118,8 @@ async function until(page, ready, { timeoutMs, everyMs = 1000, what }) {
 }
 
 // Uploads one part under `name`. Resolves null when the site took it, or { kind, what } for the page it stopped on.
-export async function uploadFile(page, { file, name, origin = SITE.origin, timeoutMs = 600000 }) {
-  const wall = await openDashboard(page, { origin });
+export async function uploadFile(page, { file, name, origin = SITE.origin, timeoutMs = 600000, listMs = 60000 }) {
+  const wall = await openDashboard(page, { origin, limit: true });
   if (wall) return wall;
   const open = locate(page, SELECTORS.openUpload);
   if ((await open.count()) > 0) await open.first().click();
@@ -128,8 +130,17 @@ export async function uploadFile(page, { file, name, origin = SITE.origin, timeo
   await input.setInputFiles({ name, mimeType: 'audio/mp4', buffer: file });
   const submit = locate(page, SELECTORS.submit);
   if ((await submit.count()) === 0) return { kind: 'unexpected', what: 'the transcribe button of the upload dialog' };
+  const before = page.url();
   await submit.first().click();
-  return until(page, () => locate(page, SELECTORS.uploaded(name)).first().isVisible(), { timeoutMs, what: 'the uploaded file in the list' });
+  // The upload runs while the dialog is open: done once it closes or the page moves on. Only then the dashboard again,
+  // where the file must be in the list under its exact name.
+  const sent = await until(page, async () => page.url() !== before || !(await page.locator(SELECTORS.uploadDialog).first().isVisible()), { timeoutMs, what: 'the end of the upload', limit: true });
+  if (sent) return sent;
+  const again = await openDashboard(page, { origin });
+  if (again) return again;
+  const listed = await until(page, () => locate(page, SELECTORS.fileLink(name)).first().isVisible(), { timeoutMs: listMs, what: 'the uploaded file in the list' });
+  // Not in the list: the day's limit may say why (read only now, since the dashboard of a day just used up names it too).
+  return listed && listed.kind === 'unexpected' ? (await check(page, [], listed.what, { limit: true }).catch(() => null)) ?? listed : listed;
 }
 
 // Looks for the transcript of the file uploaded as `name` and, when it is done, saves its plain-text export with
