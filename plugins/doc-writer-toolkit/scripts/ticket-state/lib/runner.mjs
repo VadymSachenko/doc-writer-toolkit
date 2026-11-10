@@ -18,7 +18,7 @@ import { ROLES } from './settings.mjs';
 import { cleanupTicket } from './cleanup.mjs';
 import { removeClosedMarkdown } from './import.mjs';
 import { DOWNLOAD_DIRS_VARIABLE, ROLE_SESSION_VARIABLE, childEnv, sessionChildEnv } from './env.mjs';
-import { TREE_STAGES, adoptSources, builtOn, checkClone, clonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureReadCheckout, ensureWorktree, headOf, prsForStep, setAsideWork, worktreePath } from './worktree.mjs';
+import { TREE_STAGES, adoptSources, builtOn, checkClone, clonePath, codeTreePath, codeTreesRoot, ensureCodeTree, ensureReadCheckout, ensureWorktree, headOf, originHead, prsForStep, setAsideWork, worktreePath } from './worktree.mjs';
 import { BUSY_NAME, LOCK_NAME, busyEnded, freeBrowserLock } from './browser-lock.mjs';
 import { BUILD_LOCK_NAME, freeBuildLock, renewBuildLock, waitForBuildLock } from './build-lock.mjs';
 import { runSiteBuild } from './site-build.mjs';
@@ -1539,8 +1539,8 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
     const pr = findPr(readLedger(settings.state, key), step.pr);
     const base = { stage: step.stage, role: null, script: true, trigger: manual ? 'manual' : trigger };
     const log = (outcome, note) => say({ kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, outcome, ...(note ? { note: note.slice(0, 300) } : {}) });
-    const failed = async (note, { ran = true } = {}) => {
-      for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'failed', pr: step.pr, note, now: clock() }).catch(() => {});
+    const failed = async (note, { ran = true, result: res } = {}) => {
+      for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'failed', pr: step.pr, note, ...(res ? { result: JSON.stringify(res) } : {}), now: clock() }).catch(() => {});
       const marks = await marksOf(step);
       const { script, ...none } = base;
       const run = { ...(ran ? { ...base, start: new Date(began).toISOString(), wallMs: clock() - began } : none), outcome: 'failed', session: null, note: note.slice(0, 300), failures: (step.prior ?? 0) + 1 };
@@ -1561,32 +1561,58 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
       return failed(`the worktree: ${String(e.message).slice(0, 400)}`, { ran: false });
     }
     if (step.head && tree.head && tree.head !== step.head) return moved(`the branch is at ${tree.head.slice(0, 7)}, not ${step.head.slice(0, 7)}: the status is read again`);
+    // Back to the head the step started at: what a failure after a write leaves is never left in the worktree, so the
+    // next check finds it clean.
+    const resetTree = () => {
+      try {
+        if (tree.head) execGit(tree.path, ['reset', '-q', '--hard', tree.head]);
+      } catch {
+        // the next ensureWorktree reports what is left
+      }
+    };
     let r;
     try {
       r = await syncIds({ wt: tree.path, base: tree.base ?? pr.base ?? 'main', pages: [...new Set((step.commits ?? []).flatMap((c) => c.pages))], asked: (step.rename ?? []).map((a) => ({ page: a.page, id: a.id })) });
     } catch (e) {
+      resetTree();
       return failed(`the heading ids: ${String(e.message ?? e).slice(0, 400)}`);
     }
-    if (r.error) return failed(r.error);
+    if (r.error) {
+      resetTree();
+      return failed(r.error);
+    }
     const warnings = [...r.notes];
     const posted = [];
     const comments = [];
     let head = tree.head ?? step.head;
+    const rename = settings.triggerWords?.length ? `${settings.triggerWords[0]}: ${settings.idComments.rename}` : settings.idComments.rename;
     if (r.commit) {
       try {
         execGit(tree.path, ['push', '-q', 'origin', `HEAD:refs/heads/${pr.branch}`]);
       } catch (e) {
-        // A person's push in between: the commit is set aside and the status read again.
-        setAsideWork(pr, tree.path, tree.head);
-        return moved(`the push of the id commit was refused (${String(e.stderr ?? e.message).trim().split('\n')[0].slice(0, 200)}): the status is read again`);
+        const why = String(e.stderr ?? e.message).trim().split('\n')[0].slice(0, 200);
+        // A person's push in between (origin's head is another): the commit is set aside and the status read again.
+        // Any other refusal (rights, a protected branch, the network) is the step's failure, the worktree back at its head.
+        const remote = (io.originHead ?? originHead)(settings, pr);
+        if (remote && tree.head && remote !== tree.head) {
+          setAsideWork(pr, tree.path, tree.head);
+          return moved(`the push of the id commit was refused (${why}): the branch moved, the status is read again`);
+        }
+        resetTree();
+        return failed(`the push of the id commit was refused: ${why}`);
       }
       head = r.commit;
-      // The line comments need the forge to show the push: a short wait, then a warning.
-      const shown = await forgeShows(pr, head);
-      const rename = settings.triggerWords?.length ? `${settings.triggerWords[0]}: ${settings.idComments.rename}` : settings.idComments.rename;
-      const lines = r.fixes.filter((f) => f.kind !== 'asked').map((f) => ({ fix: f, path: f.page, line: f.line, body: idCommentText(settings.idComments[f.kind], f, rename) }));
-      if (lines.length && !shown) warnings.push(`the forge didn't show ${head.slice(0, 7)} in time: no line comment under the heading(s) ${lines.map((x) => `${x.path}:${x.line}`).join(', ')}`);
-      else if (lines.length) {
+    }
+    // A pushed id commit is the pipeline's whatever happens to the record next: a failed record carries it too, so it
+    // never reads as a hand commit (`idCommits`, `pipelineCommits`).
+    const pushed = r.commit ? { commits: [r.commit] } : {};
+    // The line comments under each heading the step changed, or left because a rename on its page can't be made; they
+    // need the forge to show the push: a short wait, then a warning (not retried: README).
+    const lines = r.fixes.filter((f) => f.kind !== 'asked' && f.line).map((f) => ({ fix: f, path: f.page, line: f.line, body: idCommentText(settings.idComments[f.kind], f, rename) }));
+    if (lines.length) {
+      const shown = r.commit ? await forgeShows(pr, head) : true;
+      if (!shown) warnings.push(`the forge didn't show ${head.slice(0, 7)} in time: no line comment under the heading(s) ${lines.map((x) => `${x.path}:${x.line}`).join(', ')}`);
+      else {
         try {
           const made = await clients.forge.reviewOnLines({ repo: pr.repo, number: pr.number, commit: head, comments: lines.map(({ path: p, line, body }) => ({ path: p, line, body })), outsideInBody: true });
           posted.push(...(made.posted ?? []).map((x) => x.id), ...(made.skipped ?? []).map((x) => x.existing).filter((x) => x !== undefined && x !== null));
@@ -1598,30 +1624,46 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
           warnings.push(`the line comments under the heading(s) were not posted: ${String(e.message).slice(0, 200)}`);
         }
       }
-      for (const f of r.fixes.filter((x) => x.kind === 'asked')) {
-        const a = (step.rename ?? []).find((x) => x.page === f.page && x.id === f.old);
-        if (!a) continue;
-        try {
-          const made = await clients.forge.reply({ repo: pr.repo, number: pr.number, comment: a.comment, body: idCommentText(settings.idComments.renamed, f, rename) });
-          posted.push(...(made.posted ?? []).map((x) => x.id), ...(made.existing ? [made.existing] : []));
-        } catch (e) {
-          warnings.push(`the reply in the thread of ${f.page}:${f.line} was not posted: ${String(e.message).slice(0, 200)}`);
-        }
+    }
+    // Each rename the owner asked for gets a reply in its thread: the renamed text, or why nothing changed.
+    const renamedIds = [];
+    for (const a of step.rename ?? []) {
+      const f = r.fixes.find((x) => x.kind === 'asked' && x.page === a.page && x.old === a.id);
+      const blocked = r.fixes.find((x) => x.kind === 'blocked' && x.page === a.page && x.old === a.id);
+      const note = r.notes.find((n) => n.startsWith(`${a.page}:`) || n.startsWith(`${a.ua}:`));
+      const why = blocked ? blocked.why : (note ? note.slice(note.indexOf(':') + 1).trim() : 'the EN heading already gives it');
+      const body = f ? idCommentText(settings.idComments.renamed, f, rename) : idCommentText(settings.idComments.notRenamed, { old: a.id, new: a.id, why }, rename);
+      if (f) renamedIds.push(a.comment);
+      try {
+        const made = await clients.forge.reply({ repo: pr.repo, number: pr.number, comment: a.comment, body });
+        posted.push(...(made.posted ?? []).map((x) => x.id), ...(made.existing ? [made.existing] : []));
+      } catch (e) {
+        warnings.push(`the reply in the thread of ${a.page} (#${a.id}) was not posted: ${String(e.message).slice(0, 200)}`);
       }
     }
+    // The hand commits read: a commit with a page left `blocked` is not checked as fine (`blocked`, which the rule reads
+    // as checked so it isn't read again, and which holds a ready PR until a later commit's check of that page passes).
+    const blockedPages = new Set(r.fixes.filter((f) => f.kind === 'blocked').map((f) => f.page));
+    const isBlocked = (c) => (c.pages ?? []).some((p) => blockedPages.has(p));
     const result = {
-      checked: (step.commits ?? []).map((c) => c.sha),
-      ...(r.commit ? { commits: [r.commit] } : {}),
+      checked: (step.commits ?? []).filter((c) => !isBlocked(c)).map((c) => c.sha),
+      ...((step.commits ?? []).some(isBlocked) ? { blocked: (step.commits ?? []).filter(isBlocked).map((c) => ({ sha: c.sha, pages: c.pages.filter((p) => blockedPages.has(p)) })) } : {}),
+      clear: [...new Set((step.commits ?? []).flatMap((c) => c.pages ?? []))].filter((p) => !blockedPages.has(p)),
+      ...pushed,
       fixes: r.fixes,
       ...(comments.length ? { comments } : {}),
-      ...(step.rename?.length ? { renamed: step.rename.map((a) => a.comment), handled: step.rename.map((a) => ({ id: a.reply, updatedAt: a.updatedAt ?? null })) } : {}),
+      ...(step.rename?.length ? { renamed: renamedIds, handled: step.rename.map((a) => ({ id: a.reply, updatedAt: a.updatedAt ?? null })) } : {}),
       ...(posted.length ? { posted } : {}),
     };
     try {
       for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'done', pr: step.pr, head, result: JSON.stringify(result), ...(warnings.length ? { note: warnings.join('; ').slice(0, 300) } : {}), now: clock() });
     } catch (e) {
-      if (e.refused === 'stale') return moved(`the branch moved: ${String(e.message).slice(0, 200)}`);
-      return failed(`the heading ids were checked, but their record was refused: ${String(e.message).slice(0, 300)}`);
+      if (e.refused === 'stale') {
+        // The branch moved after the push: the record of the commit stays, so the rule reads around it.
+        if (r.commit) for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'failed', pr: step.pr, note: `the branch moved after the id commit ${r.commit.slice(0, 7)} was pushed`, result: JSON.stringify({ ...pushed, ...(posted.length ? { posted } : {}) }), now: clock() }).catch(() => {});
+        return moved(`the branch moved: ${String(e.message).slice(0, 200)}`);
+      }
+      return failed(`the heading ids were checked, but their record was refused: ${String(e.message).slice(0, 300)}`, { result: { ...pushed, ...(posted.length ? { posted } : {}) } });
     }
     for (const k of step.keys) await runRecord({ settings, clients, key: k, run: JSON.stringify({ ...base, start: new Date(began).toISOString(), wallMs: clock() - began, outcome: 'done', session: null }), pr: step.pr, now: clock() }).catch(() => {});
     const note = warnings.length ? warnings.join('; ').slice(0, 300) : r.commit ? `heading ids kept in step in ${r.commit.slice(0, 7)}: ${r.fixes.map((f) => `${f.kind} #${f.old}${f.kind === 'kept' ? '' : ` → #${f.new}`}`).join(', ')}` : null;

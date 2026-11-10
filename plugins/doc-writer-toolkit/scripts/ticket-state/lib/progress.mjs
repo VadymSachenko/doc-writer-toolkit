@@ -64,10 +64,11 @@ const oneLine = (t, max = 160) => {
 // The local date of a time (`YYYY-MM-DD`), the day the owner lives in.
 const localDay = (t) => new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(t));
 
-// The PRs of the tickets closed when `onDate` says that were merged without the translated label (`merged.translated`,
-// which the close records only with the label set): { key, id, url, base }. The report and this file list them.
+// The PRs of the pipeline's tickets (mode `pipeline`, not the owner's hand ones) closed when `onDate` says that were merged
+// without the translated label (`merged.translated`, which the close records only with the label set): { key, id, url,
+// base }. The report and this file list them.
 export function mergedUntranslated(ledgers, onDate) {
-  return ledgers.filter((l) => l.stages?.close?.status === 'done' && onDate(l.stages.close.at)).flatMap((l) => (l.prs ?? []).filter((p) => p.merged?.translated === false).map((p) => ({ key: l.key, id: prId(p), url: p.url ?? null, base: p.base ?? 'main' })));
+  return ledgers.filter((l) => l.mode === 'pipeline' && l.stages?.close?.status === 'done' && onDate(l.stages.close.at)).flatMap((l) => (l.prs ?? []).filter((p) => p.merged?.translated === false).map((p) => ({ key: l.key, id: prId(p), url: p.url ?? null, base: p.base ?? 'main' })));
 }
 
 // ------------------------------------------------------------------ gates

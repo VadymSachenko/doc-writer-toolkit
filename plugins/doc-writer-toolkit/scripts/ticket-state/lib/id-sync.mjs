@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { parse } from '../../doc-align/lib/parse.mjs';
-import { EXPLICIT_ID, uaHeadingId } from '../../doc-align/lib/headings.mjs';
+import { EXPLICIT_ID, enHeadingIds, uaHeadingId } from '../../doc-align/lib/headings.mjs';
 import { headingIdMismatches, renameIds, withExplicitId } from '../../doc-align/lib/ids.mjs';
 import { deriveLocaleRoot, loadSettings as loadDocSettings, readDocusaurusI18n, requirePairs } from '../../ui-labels/lib/config.mjs';
 
@@ -17,8 +17,9 @@ import { deriveLocaleRoot, loadSettings as loadDocSettings, readDocusaurusI18n, 
 //     (`kept`).
 // A rename the owner asked for in a `kept` thread is the first branch for that heading: the EN heading's explicit id is
 // taken off, and the UA id takes the anchor its words give (`asked`). Ids change, and the links to them; never a word.
-// Everything is one commit in the worktree, which the runner pushes. Returns { commit, fixes, notes, checked }, or
-// { error } when the worktree's declarations can't be read.
+// A heading whose rename can't be made (`blocked`) leaves its whole page as it is. Everything is one commit in the
+// worktree, which the runner pushes. Returns { commit, fixes, notes, files }, or { error } (the worktree reset to its
+// head) when the worktree's declarations can't be read or a write or the commit fails.
 
 const git = (wt, args) => execFileSync('git', ['-C', wt, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 }).trim();
 const tryGit = (wt, args) => {
@@ -45,15 +46,38 @@ async function layoutOf(wt) {
   return pairs.map((p) => ({ ...p, ua: p.ua.replace(/\/+$/, ''), en: p.en.replace(/\/+$/, ''), locales: further.map((l) => ({ locale: l, root: deriveLocaleRoot(`${p.en.replace(/\/+$/, '')}/`, l).replace(/\/+$/, '') })) }));
 }
 
-// The UA page's text at the base, or null when the base doesn't have it.
+// A page's text at the base, or null when the base doesn't have it.
 function atBase(wt, base, rel) {
   const ref = tryGit(wt, ['rev-parse', '--verify', '-q', `refs/remotes/origin/${base}`]) ? `refs/remotes/origin/${base}` : base;
   return tryGit(wt, ['show', `${ref}:${rel}`]);
 }
-const publishedIds = (text) => new Set(text === null ? [] : parse(text).headings.map((h) => (h.level >= 2 ? uaHeadingId(h.raw).id : null)).filter(Boolean));
+// The ids a page's headings have on the base, so live: the UA page's `{/* #id */}` comments and the EN page's anchors
+// (its explicit ids, else the slugs of its words). A page published before UA ids existed has none on UA (the translator
+// adds them in the chain, rule 10), but its EN anchors are live all the same.
+function publishedIds(uaText, enText) {
+  const ids = new Set();
+  if (uaText !== null) for (const h of parse(uaText).headings) if (h.level >= 2 && uaHeadingId(h.raw).id) ids.add(uaHeadingId(h.raw).id);
+  if (enText !== null) {
+    const heads = parse(enText).headings;
+    enHeadingIds(heads).forEach((x, i) => heads[i].level >= 2 && x.id && ids.add(x.id));
+  }
+  return ids;
+}
 
 // `pages`: the EN pages the hand commits changed (repo paths). `asked`: [{ page, id }], a rename the owner asked for.
+// Whatever fails once it writes (a write, a rename, a commit a hook or signing refuses) leaves the worktree as it found
+// it: reset to the head it started at, so the next check finds it clean, and { error }.
 export async function syncIds({ wt, base, pages = [], asked = [], message = 'Heading ids: UA and the locales in step with EN' }) {
+  const start = tryGit(wt, ['rev-parse', 'HEAD']);
+  try {
+    return await syncPages({ wt, base, pages, asked, message });
+  } catch (e) {
+    const reset = start ? tryGit(wt, ['reset', '-q', '--hard', start]) !== null : false;
+    return { error: `the heading ids: ${String(e.stderr || e.message || e).trim().split('\n')[0].slice(0, 300)}${reset ? '' : ' (and the worktree could not be reset)'}`, reset };
+  }
+}
+
+async function syncPages({ wt, base, pages, asked, message }) {
   let layout;
   try {
     layout = await layoutOf(wt);
@@ -107,7 +131,7 @@ export async function syncIds({ wt, base, pages = [], asked = [], message = 'Hea
       if (wanted.length) notes.push(`${enRel}: the EN heading already has the id '${wanted.map((a) => a.id).join("', '")}': nothing to rename`);
       continue;
     }
-    const published = publishedIds(atBase(wt, base, uaRel));
+    const published = publishedIds(atBase(wt, base, uaRel), atBase(wt, base, enRel));
     const renames = [];
     const keep = [];
     for (const m of found) {
@@ -115,15 +139,26 @@ export async function syncIds({ wt, base, pages = [], asked = [], message = 'Hea
       if (ask || !published.has(m.uaId)) renames.push({ m, from: m.uaId, to: m.enId, kind: ask ? 'asked' : 'renamed' });
       else keep.push(m);
     }
+    const locales = pair.locales.map((l) => path.join(wt, l.root, rel)).filter((f) => fs.existsSync(f)).map((f) => ({ path: f, text: fs.readFileSync(f, 'utf8') }));
+    const opts = { uaPath: uaAbs, enPath: enAbs, locales, roots, renames: renames.map(({ from, to }) => ({ from, to })) };
+    // A rename that can't be made (its target taken once every rename is made, say): nothing on the page changes, so no
+    // rename is half made, and each such heading is `blocked`, for a line comment.
+    const dry = renames.length ? await renameIds(uaText, enText, { ...opts, write: false }) : null;
+    if (dry?.skipped.length) {
+      for (const sk of dry.skipped) {
+        const x = renames.find((y) => y.from === sk.from);
+        fixes.push({ kind: 'blocked', page: enRel, ua: uaRel, line: x?.m.enLine ?? null, old: sk.from, new: sk.to, why: sk.reason });
+      }
+      notes.push(`${enRel}: ${dry.skipped.map((sk) => `the id '${sk.from}' can't become '${sk.to}' (${sk.reason})`).join('; ')}: no heading id on the page is changed`);
+      continue;
+    }
     if (wanted.length) {
       fs.writeFileSync(enAbs, enText);
       touched.add(enRel);
     }
     if (renames.length) {
-      const locales = pair.locales.map((l) => path.join(wt, l.root, rel)).filter((f) => fs.existsSync(f)).map((f) => ({ path: f, text: fs.readFileSync(f, 'utf8') }));
-      const r = await renameIds(uaText, enText, { uaPath: uaAbs, enPath: enAbs, locales, roots, renames: renames.map(({ from, to }) => ({ from, to })), write: true });
+      const r = await renameIds(uaText, enText, { ...opts, write: true });
       for (const f of r.written ?? []) touched.add(posix(path.relative(wt, path.resolve(f))));
-      for (const s of r.skipped) notes.push(`${uaRel}: the id '${s.from}' is not renamed to '${s.to}': ${s.reason}`);
       for (const u of r.unresolved) notes.push(`${posix(path.relative(wt, path.resolve(u.file)))}:${u.line}: ${u.url} may reach the heading and is left as it is (${u.reason})`);
       for (const x of r.renamed) {
         const { m, kind } = renames.find((y) => y.from === x.from);
@@ -144,12 +179,12 @@ export async function syncIds({ wt, base, pages = [], asked = [], message = 'Hea
   }
   if (!touched.size) return { commit: null, fixes, notes };
   git(wt, ['add', '--', ...touched]);
-  if (tryGit(wt, ['diff', '--cached', '--quiet']) !== null) return { commit: null, fixes: [], notes };
+  if (tryGit(wt, ['diff', '--cached', '--quiet']) !== null) return { commit: null, fixes: fixes.filter((f) => f.kind === 'blocked'), notes };
   git(wt, ['commit', '-q', '-m', message]);
   return { commit: git(wt, ['rev-parse', 'HEAD']), fixes, notes, files: [...touched] };
 }
 
-// A line comment's text from a template: `<old>`, `<new>`, `<links>` and `<rename>` filled in.
+// A line comment's text from a template: `<old>`, `<new>`, `<links>`, `<rename>` and `<why>` filled in.
 export function idCommentText(template, fix, rename) {
-  return String(template).replaceAll('<old>', fix.old).replaceAll('<new>', fix.new).replaceAll('<links>', String(fix.links ?? 0)).replaceAll('<rename>', rename);
+  return String(template).replaceAll('<old>', fix.old).replaceAll('<new>', fix.new).replaceAll('<links>', String(fix.links ?? 0)).replaceAll('<rename>', rename).replaceAll('<why>', fix.why ?? '');
 }

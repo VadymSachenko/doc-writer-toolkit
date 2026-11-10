@@ -507,6 +507,12 @@ function prStep(l, p, w, out, prs) {
         // A hand edit of an EN page: its heading ids kept in step with UA first, then ready for the head that gives.
         const ids = idSyncStep(pr, w, target, head, hand, out);
         if (ids) return ids;
+        // A page whose heading ids the step couldn't keep in step holds the PR at its ready head: the line comment says
+        // what to change, and a later commit's check of that page lets it go on.
+        if (w.settings.forge?.translatedLabel && pr.idBlocked?.length) {
+          out.notes.push(`${id}: the heading ids of ${[...new Set(pr.idBlocked.flatMap((b) => b.pages))].join(', ')} can't be kept in step with UA (see the line comment): not made ready for ${String(head).slice(0, 7)}`);
+          return null;
+        }
         const after = readyAgain(pr, w, target, head, out);
         if (after) return after;
       }
@@ -633,7 +639,8 @@ function idSyncStep(pr, w, target, head, hand, out) {
   const tr = w.settings.forge?.translatedLabel ? pr.translated : null;
   if (!tr?.head || !hand.length || tr.head === head) return null;
   const id = prId(pr);
-  const checked = (sha) => (pr.idChecked ?? []).some((x) => sha.startsWith(String(x)) || String(x).startsWith(sha));
+  const read = [...(pr.idChecked ?? []), ...(pr.idBlocked ?? []).map((b) => b.sha)].map(String);
+  const checked = (sha) => read.some((x) => sha.startsWith(x) || x.startsWith(sha));
   const after = w.git?.commitsBetween?.(target, tr.head, head) ?? null;
   if (after === null) return null;
   const todo = hand.filter((sha) => !checked(sha) && after.includes(sha));

@@ -14,6 +14,9 @@ import { renderReport } from '../lib/report.mjs';
 import { renderProgress } from '../lib/progress.mjs';
 import { computeStatus } from '../lib/status.mjs';
 import { makeGit } from '../lib/world.mjs';
+import { worktreePath } from '../lib/worktree.mjs';
+import { syncIds } from '../lib/id-sync.mjs';
+import { mergedUntranslated } from '../lib/progress.mjs';
 
 // The translated label (`forge.translatedLabel`): whether a PR's translations match its UA, next to the stage label and
 // the ready label. Each row of the scenarios is a test below, through the real git of a target clone; then a person's
@@ -47,7 +50,7 @@ const PAGES = {
 
 // A target clone with a bare origin, the base with its pages, and the ticket branch with the PR's pages (the pipeline's
 // commit, its draft and translation). `handEdit` is the owner's push from a clone of their own.
-function setup({ extra = LABELS, stage = 'readyForMerge', translated = true } = {}) {
+function setup({ extra = LABELS, stage = 'readyForMerge', translated = true, base = BASE } = {}) {
   const c = card({ number: 1194, status: stage === 'translation' ? 'translation' : stage === 'smeReview' ? 'smeReview' : 'finalReview' });
   const forgePr = pr({ repo: 'guide-docs', number: 57, head: 'ticket-57', labels: [STAGE, ...(stage === 'readyForMerge' ? [READY] : []), ...(translated ? [TRANSLATED] : [])] });
   const w = world({ cards: [c], prs: [forgePr], extra });
@@ -58,9 +61,9 @@ function setup({ extra = LABELS, stage = 'readyForMerge', translated = true } = 
     '.gitignore': 'node_modules/\n.sources/\nbuild/\n',
     'CLAUDE.md': `# Site\n\n## Documentation toolkit configuration\n\n- **UA content root:** \`docs/\`\n- **EN i18n root:** \`${EN}/\`\n`,
     'docusaurus.config.ts': "export default { i18n: { defaultLocale: 'uk', locales: ['uk', 'en', 'de'] } };\n",
-    'docs/x/index.md': BASE.ua,
-    [`${EN}/x/index.md`]: BASE.en,
-    [`${DE}/x/index.md`]: BASE.de,
+    'docs/x/index.md': base.ua,
+    [`${EN}/x/index.md`]: base.en,
+    [`${DE}/x/index.md`]: base.de,
     'docs/y/other.md': '# Інша\n\nДив. [стару частину](/x/#old-part).\n',
     [`${EN}/y/other.md`]: '# Other\n\nSee [the old part](/x/#old-part).\n',
   }, 'base');
@@ -369,4 +372,156 @@ test('scope 4: a PR merged without the translated label: the close records it, a
   const plain = { ...t.w.settings, forge: { ...t.w.settings.forge, translatedLabel: null } };
   assert.doesNotMatch(renderReport({ settings: plain, st, date, ledgers: [l] }), /Merged without/);
   assert.doesNotMatch(renderProgress({ ledgers: [l], now: NOW }), /merged without/);
+});
+
+// ------------------------------------------------------------------ the review round: fixes, each with its test
+
+test('fix 1: a heading published before UA ids existed (its id only an EN anchor on the base) keeps its id: never renamed without the owner asking', async () => {
+  const t = setup({ base: { ua: '# Сторінка\n\n## Стара частина\n\nТекст.\n', en: BASE.en, de: '# Seite\n\n## Alter Teil\n\nText.\n' } });
+  const posted = reviewsOf(t);
+  const h2 = t.handEdit({ [`${EN}/x/index.md`]: (s) => s.replace('## Old part', '## Earlier part') });
+  assert.deepEqual(stages(await runner(t)()), ['idSync', 'readyForMerge']);
+  const h3 = t.originHead();
+  assert.deepEqual(t.filesOf(h2, h3), [`${EN}/x/index.md`], 'only EN: the live #old-part is kept, UA and the locales untouched');
+  assert.equal(t.show(h3, `${EN}/x/index.md`), PAGES[`${EN}/x/index.md`].replace('## Old part', '## Earlier part \\{#old-part}'));
+  assert.equal(t.show(h3, 'docs/x/index.md'), PAGES['docs/x/index.md']);
+  assert.deepEqual(read(t.w, '1194').prs[0].idComments.map((c) => [c.kind, c.old]), [['kept', 'old-part']]);
+  assert.match(posted.find((x) => x.kind === 'review').comments[0].body, /published with the id `#old-part`/);
+});
+
+test('fix 2: an id commit whose record is refused after its push (the branch moved) is still the pipeline\'s: no hand commit, no UA change, the label stays', async () => {
+  const t = setup();
+  const posted = reviewsOf(t);
+  const review = t.w.forge.createReview;
+  let h3 = null;
+  // The owner pushes an EN text edit while the runner posts its line comments: the record of the step sees another head.
+  t.w.forge.createReview = async (a) => {
+    h3 = t.originHead();
+    t.handEdit({ [`${EN}/x/index.md`]: (s) => s.replace('Text.', 'Edited text.') });
+    return review(a);
+  };
+  t.handEdit({ [`${EN}/x/index.md`]: (s) => s.replace('## New fields', '## Added fields') });
+  const first = await runner(t)();
+  assert.equal(first.ran[0].stage, 'idSync');
+  assert.equal(first.ran[0].outcome, 'moved');
+  const p = read(t.w, '1194').prs[0];
+  assert.ok(p.idCommits.some((c) => c.sha === h3) && p.pipelineCommits.includes(h3), 'the pushed id commit is recorded with the failed record');
+  assert.equal(p.steps.idSync.status, 'failed');
+  t.w.forge.createReview = review;
+  const next = await runner(t)();
+  assert.ok(!stages(next).includes('untranslated') && !stages(next).includes('move') && !stages(next).includes('styleCheck'), stages(next).join(', '));
+  assert.deepEqual(touches(t, TRANSLATED).filter(([, remove]) => remove.length), []);
+  assert.equal(read(t.w, '1194').prs[0].translated.head, t.originHead());
+  assert.ok(posted.length >= 1);
+});
+
+test('fix 3: a rename that can\'t be made blocks its page: nothing on it changes, a line comment says why, and the ready PR waits for a later check of that page', async () => {
+  const t = setup();
+  const posted = reviewsOf(t);
+  // The published heading reworded, and the new one given the published heading's words: `new-fields` → `old-part`
+  // would take the id the published heading keeps.
+  const h2 = t.handEdit({ [`${EN}/x/index.md`]: (s) => s.replace('## Old part', '## Earlier part').replace('## New fields', '## Old part') });
+  const out = await runner(t)();
+  assert.deepEqual(stages(out), ['idSync'], 'held: no ready for merge');
+  assert.equal(t.originHead(), h2, 'no commit: no rename half made');
+  const p = read(t.w, '1194').prs[0];
+  assert.deepEqual(p.idBlocked.map((b) => [b.sha, b.pages]), [[h2, [`${EN}/x/index.md`]]]);
+  assert.ok(!(p.idChecked ?? []).includes(h2), 'not checked as fine');
+  const review = posted.find((x) => x.kind === 'review');
+  assert.deepEqual(review.comments.map((c) => c.line), [7]);
+  assert.match(review.comments[0].body, /not changed: `#new-fields` can't become `#old-part` \('old-part' is already the id of the UA heading on line 3\)/);
+  assert.deepEqual(stages(await runner(t)()), [], 'not read again, and still held');
+  // The owner rewords the new heading: its check passes, the block goes, and the PR is ready again.
+  const h4 = t.handEdit({ [`${EN}/x/index.md`]: (s) => s.replace('## Old part\n\nSee', '## Added fields\n\nSee') });
+  assert.deepEqual(stages(await runner(t)()), ['idSync', 'readyForMerge']);
+  const after = read(t.w, '1194').prs[0];
+  assert.ok(!after.idBlocked?.length, 'the block is gone');
+  assert.ok(after.idChecked.includes(h4));
+  assert.equal(t.show(t.originHead(), 'docs/x/index.md'), PAGES['docs/x/index.md'].replaceAll('new-fields', 'added-fields'));
+});
+
+test('fix 3 and 4, in the id step itself: a chain of renames made whole; a commit a hook refuses leaves the worktree as it was', async () => {
+  const root = tmp('ids-');
+  const g = (...args) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  const put = (files) => {
+    for (const [rel, text] of Object.entries(files)) {
+      fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+      fs.writeFileSync(path.join(root, rel), text);
+    }
+  };
+  g('init', '-q', '-b', 'main');
+  for (const [k, v] of [['user.email', 'bot@example.com'], ['user.name', 'Bot'], ['commit.gpgsign', 'false']]) g('config', k, v);
+  put({ 'CLAUDE.md': `# Site\n\n## Documentation toolkit configuration\n\n- **UA content root:** \`docs/\`\n- **EN i18n root:** \`${EN}/\`\n`, 'docs/a.md': '# А\n' });
+  g('add', '-A');
+  g('commit', '-q', '-m', 'base');
+  g('checkout', '-q', '-b', 'pr');
+  const UA = '# Сторінка\n\n## Приклад {/* #example */}\n\nТекст.\n\n## Приклад {/* #example-1 */}\n\nДив. [перший](#example) і [другий](#example-1).\n';
+  const ENP = '# Page\n\n## Sample\n\nText.\n\n## Example\n\nSee [first](#example) and [second](#example-1).\n';
+  put({ 'docs/x.md': UA, [`${EN}/x.md`]: ENP });
+  g('add', '-A');
+  g('commit', '-q', '-m', 'pr');
+  const start = g('rev-parse', 'HEAD');
+  // A commit the hook refuses: an error, and the worktree back at its head.
+  const hook = path.join(root, '.git', 'hooks', 'pre-commit');
+  fs.writeFileSync(hook, '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+  const refused = await syncIds({ wt: root, base: 'main', pages: [`${EN}/x.md`] });
+  assert.match(refused.error ?? '', /the heading ids/);
+  assert.equal(refused.reset, true);
+  assert.equal(g('status', '--porcelain'), '');
+  assert.equal(g('rev-parse', 'HEAD'), start);
+  fs.rmSync(hook);
+  // The chain, whole: `example` → `sample`, `example-1` → `example`, and both links follow.
+  const r = await syncIds({ wt: root, base: 'main', pages: [`${EN}/x.md`] });
+  assert.deepEqual(r.fixes.map((f) => [f.kind, f.old, f.new]), [['renamed', 'example', 'sample'], ['renamed', 'example-1', 'example']]);
+  assert.equal(fs.readFileSync(path.join(root, 'docs/x.md'), 'utf8'), UA.replace('{/* #example */}', '{/* #sample */}').replace('{/* #example-1 */}', '{/* #example */}').replace('(#example) і [другий](#example-1)', '(#sample) і [другий](#example)'));
+  assert.equal(fs.readFileSync(path.join(root, `${EN}/x.md`), 'utf8'), ENP.replace('(#example) and [second](#example-1)', '(#sample) and [second](#example)'), 'no EN link left pointing nowhere');
+  assert.equal(g('status', '--porcelain'), '');
+});
+
+test('fix 6a: a push refused for another reason than a moved branch (a hook, rights) is a failed step, the worktree back at its head', async () => {
+  const t = setup();
+  reviewsOf(t);
+  const h2 = t.handEdit({ [`${EN}/x/index.md`]: (s) => s.replace('## New fields', '## Added fields') });
+  fs.writeFileSync(path.join(t.bare, 'hooks', 'pre-receive'), '#!/bin/sh\necho "protected branch" >&2\nexit 1\n', { mode: 0o755 });
+  const out = await runner(t)();
+  assert.equal(out.ran[0].stage, 'idSync');
+  assert.equal(out.ran[0].outcome, 'failed');
+  assert.match(out.ran[0].note, /push of the id commit was refused/);
+  const wt = worktreePath(t.w.settings, read(t.w, '1194').prs[0]);
+  assert.equal(execFileSync('git', ['-C', wt, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), h2);
+  assert.equal(execFileSync('git', ['-C', wt, 'status', '--porcelain', '--untracked-files=no'], { encoding: 'utf8' }).trim(), '');
+  assert.equal(read(t.w, '1194').prs[0].steps.idSync.status, 'failed');
+});
+
+test('fix 6b: a rename the owner asks for that changes nothing gets a reply saying why; the reply is the runner\'s and the request is handled', async () => {
+  const t = setup();
+  const posted = reviewsOf(t);
+  t.handEdit({ [`${EN}/x/index.md`]: (s) => s.replace('## Old part', '## Earlier part') });
+  await runner(t)();
+  const kept = read(t.w, '1194').prs[0].idComments.find((c) => c.kind === 'kept');
+  // The owner puts the old words back, then asks for the rename all the same.
+  t.handEdit({ [`${EN}/x/index.md`]: (s) => s.replace('## Earlier part \\{#old-part}', '## Old part') });
+  await runner(t)();
+  t.w.forge.activity['guide-docs#57'] = { threads: [{ id: 'T1', path: `${EN}/x/index.md`, line: 3, comments: [
+    { id: kept.commentId, author: 'owner-login', body: 'x', createdAt: ago(1), updatedAt: ago(1), reviewId: 1 },
+    { id: 9002, author: 'owner-login', body: 'rename id.', inReplyTo: kept.commentId, createdAt: ago(0.5), updatedAt: ago(0.5), reviewId: 9101 },
+  ] }] };
+  const before = t.originHead();
+  const out = await runner(t)();
+  assert.equal(out.ran[0].stage, 'idSync');
+  assert.equal(t.originHead(), before, 'no commit');
+  const reply = posted.find((x) => x.kind === 'reply');
+  assert.equal(String(reply.comment), String(kept.commentId));
+  assert.match(reply.body, /^The id `#old-part` is not renamed: .*already has the id 'old-part'/);
+  const l = read(t.w, '1194');
+  assert.ok(l.reviewComments.some((c) => String(c.id) === '9002'), 'handled');
+  assert.ok(!l.prs[0].idComments.find((c) => c.kind === 'kept').renamed, 'not marked renamed');
+  assert.ok(l.posted.pr.length > 0);
+});
+
+test('fix 6d: a merged hand-mode ticket is not listed as merged without the label', () => {
+  const l = { key: '9', mode: 'hand', stages: { close: { status: 'done', at: new Date(NOW).toISOString() } }, prs: [{ repo: 'guide-docs', number: 3, merged: { translated: false } }] };
+  const today = () => true;
+  assert.deepEqual(mergedUntranslated([l], today), []);
+  assert.equal(mergedUntranslated([{ ...l, mode: 'pipeline' }], today).length, 1);
 });

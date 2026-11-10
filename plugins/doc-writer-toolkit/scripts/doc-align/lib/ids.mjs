@@ -228,11 +228,20 @@ export async function renameIds(uaText, enText, { uaPath, enPath, locales = [], 
     if (u?.id && !u.problem) ids.set(u.id, h.line);
   }
   const comment = (id) => new RegExp(`\\{\\/\\*[ \\t]*#${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[ \\t]*\\*\\/\\}`);
+  // A target is checked against the ids the page has once every rename is made, so a chain (`example` → `sample`,
+  // `example-1` → `example`) is made whole: a target is free when no heading keeps it and no other rename takes it.
   const todo = [];
+  const formed = [];
   for (const r of renames) {
     if (!ids.has(r.from)) report.skipped.push({ from: r.from, to: r.to, reason: `no UA heading has the id '${r.from}'` });
     else if (!ID_FORM.test(r.to)) report.skipped.push({ from: r.from, to: r.to, reason: `'${r.to}' is not lowercase ASCII kebab-case` });
-    else if (ids.has(r.to)) report.skipped.push({ from: r.from, to: r.to, reason: `'${r.to}' is already the id of the UA heading on line ${ids.get(r.to)}` });
+    else if (formed.some((x) => x.from === r.from)) report.skipped.push({ from: r.from, to: r.to, reason: `the id '${r.from}' is renamed twice` });
+    else formed.push(r);
+  }
+  const moving = new Set(formed.map((r) => r.from));
+  for (const r of formed) {
+    if (ids.has(r.to) && !moving.has(r.to)) report.skipped.push({ from: r.from, to: r.to, reason: `'${r.to}' is already the id of the UA heading on line ${ids.get(r.to)}` });
+    else if (formed.some((x) => x !== r && x.to === r.to)) report.skipped.push({ from: r.from, to: r.to, reason: `another heading is renamed to '${r.to}' too` });
     else todo.push({ ...r, line: ids.get(r.from) });
   }
   const pages = locales.map((x) => ({ ...x, lines: x.text.split('\n'), heads: new Set(parse(x.text).headings.map((h) => h.line - 1)) }));

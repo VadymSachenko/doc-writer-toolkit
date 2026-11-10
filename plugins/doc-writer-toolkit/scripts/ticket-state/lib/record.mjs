@@ -119,6 +119,11 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
     addAll(l.posted.pr, (posted.pr ?? []).map((p) => (typeof p === 'object' ? p.id : p)));
   }
   if (pr && Array.isArray(result.commits)) addAll(pr.pipelineCommits, result.commits);
+  // The id step's pushed commit, on a record that isn't done too (the branch moved after the push, a refused record):
+  // still the runner's, ids only, so never a hand commit nor a UA change (`done` adds it above).
+  if (pr && stage === 'idSync' && status !== 'done' && Array.isArray(result.commits)) {
+    for (const c of result.commits) if (/^[0-9a-f]{7,40}$/.test(String(c)) && !(pr.idCommits ??= []).some((x) => x.sha === String(c))) pr.idCommits.push({ sha: String(c), at });
+  }
   for (const f of result.files ?? []) addFile(f.path, f.kind, stage, f.bytes);
   if (startedBy && stage === 'start') l.startedBy = startedBy;
   // The group a start runs with, whatever its status: the runner's record before the session puts the ticket under the
@@ -514,6 +519,18 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         record.head = pushed;
         pr.lastSeenHead = st.headCommit;
         addAll((pr.idChecked ??= []), (result.checked ?? []).map(String));
+        // A hand commit with a page whose ids can't be kept in step (`blocked`): read, so not read again, and holding a
+        // ready PR until a later check of that page passes (`clear`, the pages checked with nothing blocked).
+        const clear = new Set((Array.isArray(result.clear) ? result.clear : []).map(String));
+        if (pr.idBlocked?.length && clear.size) {
+          const gone = pr.idBlocked.filter((b) => (b.pages ?? []).every((p) => clear.has(p)));
+          addAll(pr.idChecked, gone.map((b) => b.sha));
+          pr.idBlocked = pr.idBlocked.filter((b) => !gone.includes(b));
+        }
+        for (const b of Array.isArray(result.blocked) ? result.blocked : []) {
+          if (!/^[0-9a-f]{7,40}$/.test(String(b?.sha)) || !Array.isArray(b.pages)) throw new CliError('idSync: "blocked" is a list of { sha, pages }', { code: 2 });
+          if (!(pr.idBlocked ??= []).some((x) => x.sha === String(b.sha))) pr.idBlocked.push({ sha: String(b.sha), pages: b.pages.map(String), at });
+        }
         for (const c of result.commits ?? []) if (!(pr.idCommits ??= []).some((x) => x.sha === String(c))) pr.idCommits.push({ sha: String(c), at });
         for (const c of result.comments ?? []) if (!(pr.idComments ??= []).some((x) => c.commentId !== null && String(x.commentId) === String(c.commentId))) pr.idComments.push({ ...c, at });
         for (const id of result.renamed ?? []) {
@@ -582,7 +599,11 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         }
         // The translations match this head (the chain done, or the re-sync of what UA changed): the translated label goes
         // on, for this head (lib/pr-labels.mjs). A UA change since takes it off (`untranslated`).
-        if ((stage === 'readyForMerge' || stage === 'resync') && settings.forge.translatedLabel) pr.translated = { head: st.headCommit, at, seq: l.seq + 1 };
+        if ((stage === 'readyForMerge' || stage === 'resync') && settings.forge.translatedLabel) {
+          pr.translated = { head: st.headCommit, at, seq: l.seq + 1 };
+          // A translation for this head: the ids blocked before it are read again from here, not held.
+          delete pr.idBlocked;
+        }
         // The re-sync no longer makes the PR ready by itself: the rule checks the images, then `readyForMerge` does. A
         // chain stage finished after a person moved the card back changes no PR stage: the move stands.
       }

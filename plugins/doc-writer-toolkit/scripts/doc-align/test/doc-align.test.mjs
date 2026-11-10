@@ -1017,3 +1017,29 @@ test('renameIds: the UA comment, the same comment on every further locale page, 
   assert.deepEqual(r.written.length, 4);
 });
 
+test('renameIds: a chain of renames is made whole, the targets checked against the ids once every rename is made', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'doc-align-chain-'));
+  const put = async (rel, text) => {
+    await fs.mkdir(path.dirname(path.join(dir, rel)), { recursive: true });
+    await fs.writeFile(path.join(dir, rel), text);
+    return path.join(dir, rel);
+  };
+  const UA = '# Сторінка\n\n## Приклад {/* #example */}\n\nТекст.\n\n## Приклад {/* #example-1 */}\n\nДив. [перший](#example) і [другий](#example-1).\n\n## Інше {/* #other */}\n';
+  const EN = '# Page\n\n## Sample\n\nText.\n\n## Example\n\nSee [first](#example) and [second](#example-1).\n\n## Other\n';
+  const ua = await put('docs/x/page.md', UA);
+  const en = await put('i18n/en/current/x/page.md', EN);
+  const roots = [{ dir: path.join(dir, 'docs'), prefix: '/' }, { dir: path.join(dir, 'i18n/en/current'), prefix: '/' }];
+  const r = await renameIds(UA, EN, { uaPath: ua, enPath: en, roots, renames: [{ from: 'example', to: 'sample' }, { from: 'example-1', to: 'example' }], write: true });
+  assert.deepEqual(r.skipped, []);
+  assert.deepEqual(r.renamed.map((x) => [x.from, x.to]), [['example', 'sample'], ['example-1', 'example']]);
+  assert.equal(await fs.readFile(ua, 'utf8'), UA.replace('{/* #example */}', '{/* #sample */}').replace('{/* #example-1 */}', '{/* #example */}').replace('(#example) і [другий](#example-1)', '(#sample) і [другий](#example)'));
+  assert.equal(await fs.readFile(en, 'utf8'), EN.replace('(#example) and [second](#example-1)', '(#sample) and [second](#example)'));
+  // A target a heading keeps: skipped. One that two renames take: both skipped.
+  const kept = await renameIds(UA, EN, { uaPath: ua, enPath: en, renames: [{ from: 'example', to: 'other' }] });
+  assert.deepEqual(kept.skipped.map((x) => [x.from, x.to]), [['example', 'other']]);
+  assert.deepEqual(kept.renamed, []);
+  const twins = await renameIds(UA, EN, { uaPath: ua, enPath: en, renames: [{ from: 'example', to: 'twin' }, { from: 'example-1', to: 'twin' }] });
+  assert.deepEqual(twins.skipped.map((x) => [x.from, x.to]), [['example', 'twin'], ['example-1', 'twin']]);
+  assert.deepEqual(twins.renamed, []);
+});
+
