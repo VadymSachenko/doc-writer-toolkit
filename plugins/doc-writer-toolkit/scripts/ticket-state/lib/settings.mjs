@@ -6,6 +6,7 @@ import { validateForge } from '../../forge/lib/settings.mjs';
 import { CliError } from './errors.mjs';
 import { DEFAULT_KEEP } from './cleanup.mjs';
 import { validateJobs } from './jobs.mjs';
+import { DEFAULT_LABELS } from './pr-description.mjs';
 
 // The ticket flow settings: the shared file the host commits (`.claude/ticket-flow.json`, or the `Ticket flow
 // settings:` field of CLAUDE.md, or --settings), read at HEAD (`trustedShared`), and the owner's local file next to it
@@ -123,6 +124,33 @@ function validateAppRepos(raw) {
   });
 }
 
+// The words an owner's PR comment starts with when it is for the pipeline (`forge.triggerWords`, D-142): `word:` at the
+// start, any case. None (the default): every comment of the owner's is for the pipeline, as before.
+function validateTriggerWords(raw) {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw) || raw.some((w) => typeof w !== 'string' || !w.trim() || /[\s:]/.test(w.trim()))) fail('forge.triggerWords must be a list of words, each with no space or colon (a comment for the pipeline starts with "<word>:")');
+  return raw.map((w) => w.trim());
+}
+
+// The review rounds (`forge.reviewRounds`, D-142): a round is two commits and one review with line comments, and the
+// runner keeps the PR description's open questions, places and rounds from the ledger, settles the pipeline's own place
+// threads and removes its own superseded summaries. `labels` are the words of the description's sections, in the team's
+// language (lib/pr-description.mjs, `DEFAULT_LABELS`). Absent or false: the summary comments as before.
+function validateReviewRounds(raw) {
+  if (raw === undefined || raw === null || raw === false) return null;
+  if (raw === true) raw = {};
+  if (!isObject(raw)) fail('forge.reviewRounds must be { "labels": { … } } (or true for the default words)');
+  const given = raw.labels ?? {};
+  if (!isObject(given)) fail('forge.reviewRounds.labels must be an object of texts');
+  const labels = deepMerge(DEFAULT_LABELS, given);
+  for (const [k, v] of Object.entries(labels)) {
+    if (k === 'readers' || k === 'stages') {
+      if (!isObject(v) || Object.values(v).some((x) => typeof x !== 'string' || !x.trim())) fail(`forge.reviewRounds.labels.${k} must be { <key>: <text> }`);
+    } else if (typeof v !== 'string' || !v.trim()) fail(`forge.reviewRounds.labels.${k} must be a text`);
+  }
+  return { labels };
+}
+
 function validateBuild(raw) {
   if (raw === undefined || raw === null) return { ...BUILD_DEFAULTS, command: [...BUILD_DEFAULTS.command] };
   if (!isObject(raw)) fail('build must be { command, outDir, timeoutMinutes, waitMinutes }');
@@ -187,6 +215,8 @@ export function validateSettings(merged, { root, stateRootDefault }) {
   const rawReview = merged.forge?.reviewComment;
   if (rawReview !== undefined && rawReview !== null && (typeof rawReview !== 'string' || !rawReview.includes('<files>'))) fail('forge.reviewComment must be a text with <files> in it (the PR\'s Files changed link)');
   const reviewComment = rawReview ?? DEFAULT_REVIEW_COMMENT;
+  const triggerWords = validateTriggerWords(merged.forge?.triggerWords);
+  const reviewRounds = validateReviewRounds(merged.forge?.reviewRounds);
 
   const mode = merged.mode ?? LOCAL_DEFAULTS.mode;
   if (!MODES.includes(mode)) fail(`mode must be one of ${MODES.join(', ')}`);
@@ -262,6 +292,8 @@ export function validateSettings(merged, { root, stateRootDefault }) {
     appRepos: validateAppRepos(merged.appRepos ?? []),
     readyComment,
     reviewComment,
+    triggerWords,
+    reviewRounds,
     hostRules: merged.hostRules ?? {},
     hostJobs: validateJobs(merged.hostJobs ?? [], root),
     styleCheck,
@@ -339,6 +371,6 @@ export function printable(s) {
   return {
     ...rest,
     tracker: { ...tracker, credentials: { ...tracker.credentials } },
-    forge: { kind: forge.kind, owner: forge.owner, self: forge.self, assignee: forge.assignee, checkLabel: forge.checkLabel, expertLabel: forge.expertLabel ?? null, readyLabel: forge.readyLabel ?? null, repos: forge.repos },
+    forge: { kind: forge.kind, owner: forge.owner, self: forge.self, assignee: forge.assignee, checkLabel: forge.checkLabel, expertLabel: forge.expertLabel ?? null, readyLabel: forge.readyLabel ?? null, repos: forge.repos, triggerWords: s.triggerWords ?? [], reviewRounds: s.reviewRounds ? true : false },
   };
 }

@@ -1,6 +1,6 @@
 import { CARD_STATUS_OF, CHAIN, IN_PROGRESS, PR_ORDER, PR_STAGE_OF_STATUS, ROLE_OF, WAITING } from './stages.mjs';
 import { prId } from './ledger.mjs';
-import { editsOf, mergedEdits, nextEditNumber, parseReply, resolveReply, suggestionOf } from './edits.mjs';
+import { editsOf, mergedEdits, nextEditNumber, parseReply, parseThreadReply, resolveReply, resolveThreadReply, suggestionOf } from './edits.mjs';
 
 // The next-step rule of the ticket flow (context/ticket-flow.md, "The rule"). A pure function of a ledger and what the
 // tracker, the forge, git and the files show now: the world wins over the ledger. First match wins:
@@ -263,6 +263,13 @@ function handCommits(pr, head, w) {
   return onBranch.filter((sha) => !mine(sha));
 }
 
+// A colleague's comment the trigger words keep from the pipeline (lib/world.mjs `sortComments`): for the owner, with a
+// link to it, to hand on or leave.
+const ANCHOR = { comment: 'issuecomment', 'review-comment': 'discussion_r', review: 'pullrequestreview' };
+function othersEntry(c, url) {
+  return { id: c.id, kind: c.kind, author: c.author ?? null, at: c.updatedAt ?? null, link: url ? `${String(url).replace(/\/+$/, '')}#${ANCHOR[c.kind] === 'discussion_r' ? `discussion_r${c.id}` : `${ANCHOR[c.kind]}-${c.id}`}` : null };
+}
+
 function derive(l, w) {
   const out = { state: null, steps: [], gate: null, mismatch: [], notes: [], prs: [] };
   const card = w.card;
@@ -273,7 +280,7 @@ function derive(l, w) {
     const merged = Boolean(pr.merged) || world?.state === 'merged';
     return { pr, world, merged, closed: world?.state === 'closed', stage: merged ? 'merged' : pr.stage };
   });
-  out.prs = prs.map((p) => ({ id: prId(p.pr), repo: p.pr.repo, number: p.pr.number, url: p.pr.url ?? p.world?.url ?? null, review: p.pr.review, stage: p.stage, state: p.merged ? 'merged' : p.world?.state ?? null, labels: p.world?.labels ?? null, head: p.world?.headCommit ?? null, expertReview: p.pr.expertReview ?? null, smeSince: p.pr.smeSince ?? (l.left?.status === 'smeReview' && p.stage === 'smeReview' ? l.left.at ?? null : null), reviewerAt: p.world?.reviewerAt ?? null, expertApproval: p.pr.expertApproval ?? null, next: null }));
+  out.prs = prs.map((p) => ({ id: prId(p.pr), repo: p.pr.repo, number: p.pr.number, url: p.pr.url ?? p.world?.url ?? null, review: p.pr.review, stage: p.stage, state: p.merged ? 'merged' : p.world?.state ?? null, labels: p.world?.labels ?? null, head: p.world?.headCommit ?? null, expertReview: p.pr.expertReview ?? null, smeSince: p.pr.smeSince ?? (l.left?.status === 'smeReview' && p.stage === 'smeReview' ? l.left.at ?? null : null), reviewerAt: p.world?.reviewerAt ?? null, expertApproval: p.pr.expertApproval ?? null, ...(p.world?.others?.length ? { others: p.world.others.map((c) => othersEntry(c, p.pr.url ?? p.world.url)) } : {}), next: null }));
   const view = (p) => out.prs.find((x) => x.id === prId(p.pr));
 
   if (l.stages?.close?.status === 'done') {
@@ -517,7 +524,7 @@ function prStep(l, p, w, out, prs) {
     const ask = p.stage === 'smeReview' && reviewer && !approved && files ? { askApprove: files } : {};
     // The questions to the owner still open from the PR's last summaries: the session says which are left (lib/pr-labels.mjs).
     const asked = pr.openQuestions?.items?.length ? { openQuestions: pr.openQuestions.items } : {};
-    return step('answerComments', { pr: id, comments: world.newComments.length, owner: owner.length, reviewer, ...ownerForms(pr, owner, w), ...ask, ...asked });
+    return step('answerComments', { pr: id, comments: world.newComments.length, owner: owner.length, reviewer, ...ownerForms(l, pr, world.newComments, w), ...ask, ...asked });
   }
   // Row 11b, the style check: hand commits that changed UA and no style check read are reviewed while the PR is in the
   // owner's queue (D-081, D-082), each once, whatever the head (the check records the shas it read). A ready PR went
@@ -619,13 +626,37 @@ const newReviewRequests = (pr, world) => (world.reviewRequests ?? []).map((r) =>
 // The owner's comments in the two forms the writer takes as they are: a reply by number to the PR's lists of edits
 // (only once the PR has a list: before that a numbered comment is an ordinary instruction), resolved item by item
 // against the lists; and a review comment with a `suggestion` block, its block to be put in verbatim.
-function ownerForms(pr, owner, w) {
+//
+// A reply in a thread the pipeline opened is read against that thread: in the thread of an item's line comment
+// (`edits[].commentId`), the owner's reply is a reply by number with the number taken from the thread (lib/edits.mjs,
+// `parseThreadReply`); in a place's thread (`places[].commentId`), the owner's reply is the answer to that place. Both
+// only with review rounds. A suggestion block is a suggestion wherever it is.
+function ownerForms(l, pr, comments, w) {
+  const owner = comments.filter((c) => c.by === 'owner');
   const edits = mergedEdits(w.editsByPr?.get(prId(pr)) ?? [editsOf(pr)]);
   const replies = edits.length
     ? owner.filter((c) => c.kind !== 'review-comment').map((c) => ({ id: c.id, parsed: parseReply(c.body) })).filter((x) => x.parsed).map((x) => ({ id: x.id, items: resolveReply(x.parsed, edits), ...(x.parsed.rest ? { rest: x.parsed.rest } : {}) }))
     : [];
   const suggestions = owner.filter((c) => c.kind === 'review-comment').map((c) => ({ c, s: suggestionOf(c.body) })).filter((x) => x.s).map(({ c, s }) => ({ id: c.id, path: c.path ?? null, line: c.line ?? null, ...(s.several ? { several: s.several } : { text: s.text, note: s.note }) }));
-  return { nextEdit: nextEditNumber({ edits }), ...(replies.length ? { replies } : {}), ...(suggestions.length ? { suggestions } : {}) };
+  const suggested = new Set(suggestions.map((s) => String(s.id)));
+  const inThread = (c) => c.kind === 'review-comment' && c.root !== null && c.root !== undefined && String(c.root) !== String(c.id) && !suggested.has(String(c.id));
+  // Only with review rounds (the host's `forge.reviewRounds`): without them a reply in a thread is an ordinary comment,
+  // as before, and no runner settles a place's thread.
+  const rounds = Boolean(w.settings?.reviewRounds);
+  const threadReplies = !rounds ? [] : owner.filter(inThread).flatMap((c) => {
+    const item = edits.find((e) => e.commentId !== undefined && e.commentId !== null && String(e.commentId) === String(c.root));
+    return item ? [{ id: c.id, n: item.n, ...resolveThreadReply(item, parseThreadReply(c.body), edits) }] : [];
+  });
+  const places = (l.places ?? []).filter((p) => p.repo === pr.repo && Number(p.pr) === Number(pr.number) && p.commentId !== undefined && p.commentId !== null);
+  // The owner's replies only (decision 3): an expert's in a place's thread is for people (lib/world.mjs).
+  const placeReplies = !rounds ? [] : owner.filter(inThread).flatMap((c) => {
+    const place = places.find((p) => String(p.commentId) === String(c.root));
+    return place ? [{ id: c.id, place: place.id, by: c.by, author: c.author ?? null, page: place.page ?? null, line: place.line ?? null, state: place.state ?? 'open', text: String(c.body ?? '').trim() }] : [];
+  });
+  // With the trigger words, the comments the step takes, each with the text the session reads (the word cut off): the
+  // session acts on these and on no other comment of the PR.
+  const take = w.settings?.triggerWords?.length ? comments.map((c) => ({ id: c.id, kind: c.kind, by: c.by, author: c.author ?? null, ...(c.path ? { path: c.path, line: c.line ?? null } : {}), text: String(c.body ?? '').trim() })) : [];
+  return { nextEdit: nextEditNumber({ edits }), ...(replies.length ? { replies } : {}), ...(suggestions.length ? { suggestions } : {}), ...(threadReplies.length ? { threadReplies } : {}), ...(placeReplies.length ? { placeReplies } : {}), ...(take.length ? { take } : {}) };
 }
 
 // After ready for merge, once the owner moved the card to In translation: the blocks changed since the ready head

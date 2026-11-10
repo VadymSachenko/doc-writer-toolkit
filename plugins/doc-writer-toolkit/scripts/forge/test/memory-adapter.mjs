@@ -31,6 +31,9 @@ export function memoryAdapter() {
     reviewComment: async () => {
       throw new Refusal('unknown', 'no such comment');
     },
+    issueComment: async () => {
+      throw new Refusal('unknown', 'no such comment');
+    },
     events: async () => ({ events: [], truncated: false }),
     diffLines: async () => [{ path: 'docs/a.md', lines: [1, 2, 3] }],
     createPr: async (a) => {
@@ -45,6 +48,8 @@ export function memoryAdapter() {
     reply: async (a) => (log.push(['reply', a.comment]), { id: 90 }),
     comment: async (a) => (log.push(['comment', a.body]), { id: 91 }),
     createLabel: async (a) => void log.push(['createLabel', a.name]),
+    resolveThread: async (a) => void log.push(['resolveThread', a.thread]),
+    deleteComment: async (a) => void log.push(['deleteComment', a.id]),
     changeLabels: async (a) => {
       log.push(['changeLabels', a.add, a.remove]);
       const p = get(a.number);

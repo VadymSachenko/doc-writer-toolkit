@@ -28,6 +28,7 @@
 //   issueComments({repo, number})         -> [Comment], the PR's conversation comments
 //   reviewComments({repo, number})        -> [Comment], every review comment, flat, with `inReplyTo`
 //   reviewComment({repo, id})             -> Comment & { number }, one review comment and the PR it is on
+//   issueComment({repo, id})              -> Comment & { number }, one conversation comment and the PR it is on
 //   events({repo, since})                 -> { events: [Event], truncated }, newest first, only PRs
 //   diffLines({repo, number})             -> [{ path, lines: [numbers]|null }]; the new-side lines the diff shows,
 //                                            null when the forge gave no diff text for the file
@@ -45,13 +46,17 @@
 //   createLabel({repo, name})
 //        a label on the repository; one already there (in any case) is no error. The module calls it only for the
 //        settings' `readyLabel`.
+//   resolveThread({repo, thread})                 settles one review thread (`thread`: a Thread's `id`). The module
+//        calls it only for a thread whose first comment the pipeline posted.
+//   deleteComment({repo, id})                     removes one conversation comment. The module calls it only for a
+//        comment of the pipeline's own (posted by it, from `self`, with the comment header).
 //
-// An adapter has no operation that settles a discussion, withdraws a review, gives a verdict, joins the branch into
-// its base, closes a PR or removes a branch, and none that a caller could add: those rules are held by what the
-// interface does not contain.
+// An adapter has no operation that withdraws a review, gives a verdict, joins the branch into its base, closes a PR or
+// removes a branch, and none that a caller could add: those rules are held by what the interface does not contain.
+// It settles a thread and removes a conversation comment only as the module asks, under the module's checks.
 
-export const READS = ['pr', 'prByHead', 'openPrByHead', 'changedPrs', 'reviews', 'threads', 'issueComments', 'reviewComments', 'reviewComment', 'events', 'diffLines'];
-export const WRITES = ['createPr', 'updatePr', 'addAssignees', 'requestReviewers', 'createReview', 'reply', 'comment', 'changeLabels', 'createLabel'];
+export const READS = ['pr', 'prByHead', 'openPrByHead', 'changedPrs', 'reviews', 'threads', 'issueComments', 'reviewComments', 'reviewComment', 'issueComment', 'events', 'diffLines'];
+export const WRITES = ['createPr', 'updatePr', 'addAssignees', 'requestReviewers', 'createReview', 'reply', 'comment', 'changeLabels', 'createLabel', 'resolveThread', 'deleteComment'];
 
 export function assertAdapter(adapter) {
   const missing = [...READS, ...WRITES].filter((m) => typeof adapter?.[m] !== 'function');

@@ -30,9 +30,16 @@ export function addEdits(pr, items, { list, stage, at, seq }) {
     if (!text(e.page) || !e.page.trim() || !text(e.before) || !text(e.after)) throw new CliError(`edits: item ${n} needs "page" and the exact "before" and "after" texts`, { code: 2 });
     if (e.en !== undefined && e.en !== null && !(text(e.en.page) && text(e.en.before) && text(e.en.after))) throw new CliError(`edits: item ${n}'s "en" needs "page", "before" and "after"`, { code: 2 });
     if ((e.rule !== undefined && e.rule !== null && !text(e.rule)) || (e.reason !== undefined && e.reason !== null && !text(e.reason))) throw new CliError(`edits: item ${n}'s "rule" and "reason" are texts`, { code: 2 });
+    if (e.restores !== undefined && e.restores !== null && !(Number.isInteger(Number(e.restores)) && Number(e.restores) >= 1)) throw new CliError(`edits: item ${n}'s "restores" is the number of the item it undoes`, { code: 2 });
     // A style fix names its rule; an edit whose comment or commit message gave a reason keeps it (the learning from
-    // the owner's edits reads it).
-    const item = { n, list: String(list), stage, page: e.page, block: text(e.block) ? e.block : null, before: e.before, after: e.after, ...(e.en ? { en: { page: e.en.page, before: e.en.before, after: e.en.after } } : {}), ...(text(e.rule) && e.rule.trim() ? { rule: e.rule } : {}), ...(text(e.reason) && e.reason.trim() ? { reason: e.reason } : {}), at, seq };
+    // the owner's edits reads it). A round's item (D-142) keeps the line comment it was posted with (`commentId`), and
+    // a mechanical fix says so; a restore names the item it undoes (`restores`).
+    const item = { n, list: String(list), stage, page: e.page, block: text(e.block) ? e.block : null, before: e.before, after: e.after, ...(e.en ? { en: { page: e.en.page, before: e.en.before, after: e.en.after } } : {}), ...(text(e.rule) && e.rule.trim() ? { rule: e.rule } : {}), ...(text(e.reason) && e.reason.trim() ? { reason: e.reason } : {}), ...(e.commentId !== undefined && e.commentId !== null ? { commentId: e.commentId } : {}), ...(e.mechanical === true ? { mechanical: true } : {}), ...(e.restores !== undefined && e.restores !== null ? { restores: Number(e.restores) } : {}), at, seq };
+    // A restore of a style fix: that fix's rule is rejected for its block, the learning from the owner's edits.
+    if (item.restores) {
+      const undone = pr.edits.findLast((x) => x.n === item.restores);
+      if (undone?.rule) undone.rejected = { at, seq, by: n };
+    }
     const same = pr.edits.findIndex((x) => x.n === n && x.list === item.list);
     if (same >= 0) {
       pr.edits[same] = item;
@@ -218,6 +225,32 @@ export function resolveReply(parsed, edits) {
   });
 }
 
+// ------------------------------------------------------------------ a reply in the pipeline's own thread
+
+// The owner's reply in the thread of an item's line comment (D-142): the reply by number's forms, with the number taken
+// from the thread, so its words are read as one item's (`kindOf`, the same grammar). A quoted line is not the owner's
+// words. A restore or an assent followed by its reason («поверни як було, тут наголос на …») is that restore or assent,
+// the rest kept as its `reason`: in a thread the whole reply is about the one item, so the first words decide.
+export function parseThreadReply(body) {
+  const s = String(body ?? '').replace(/\r\n?/g, '\n').split('\n').filter((line) => !/^\s*>/.test(line)).join('\n').trim();
+  const whole = kindOf(s);
+  if (whole.kind !== 'describe') return whole;
+  const m = /^([^,.;:—–\n]+)[,.;:—–\n]\s*([\s\S]+)$/u.exec(s);
+  if (m) {
+    const head = kindOf(m[1]);
+    if (['restore', 'keep'].includes(head.kind)) return { ...head, reason: m[2].trim() };
+  }
+  return whole;
+}
+
+// That reply against the PR's items, as `resolveReply` reads a reply by number: the thread names its item exactly, so
+// an item of the same number in another list is no question here.
+export function resolveThreadReply(item, parsed, edits) {
+  const pool = edits.filter((e) => e === item || e.n !== item.n);
+  const out = resolveReply({ items: [{ n: item.n, ...parsed }], rest: '' }, pool)[0];
+  return { ...out, ...(parsed.reason ? { reason: parsed.reason } : {}) };
+}
+
 // A review comment of the owner's with a `suggestion` block: the block exactly, and the words outside it. Two blocks
 // in one comment can't both replace the comment's lines: `several`, asked back.
 export function suggestionOf(body) {
@@ -236,20 +269,52 @@ export function suggestionOf(body) {
 const q = (s) => JSON.stringify(s);
 const at = (x) => `${x.page}${x.block ? `, ${x.block}` : ''}`;
 
+// One resolved item as the brief spells it out.
+function itemLine(x) {
+  if (x.do === 'restore') return `- ${x.n}, restore: ${at(x)}: put back ${q(x.put)} where it reads ${q(x.now)}.${x.en ? ` EN ${x.en.page}: put back ${q(x.en.put)} where it reads ${q(x.en.now)}.` : ''}`;
+  if (x.do === 'verbatim') return `- ${x.n}, the owner's text: ${at(x)}: replace ${q(x.now)}${x.later ? ` (or what items ${x.later.join(', ')} made of it)` : ''} with exactly ${q(x.put)}.`;
+  if (x.do === 'rewrite') return `- ${x.n}, rewrite as the owner describes (${q(x.how)}): ${at(x)}, which reads ${q(x.now)}${x.later ? ` (or what items ${x.later.join(', ')} made of it)` : ''}.`;
+  if (x.do === 'keep') return `- ${x.n}, keep: the owner agrees, change nothing.`;
+  return `- ${x.n}, ask back, change nothing: ${x.why}.`;
+}
+
 export function replyLines(replies) {
   const out = [];
   for (const r of replies ?? []) {
     out.push(`The owner's reply by number (comment ${r.id}): do exactly this, item by item; the items it doesn't name stay as they are. Texts are JSON strings: put them in exactly as given. Where the block doesn't read as the line says, change nothing for that item and ask back. If an item's words point at another place than that item's block (the owner numbered their own instructions, not the list), change nothing for it and ask back.`);
-    for (const x of r.items) {
-      if (x.do === 'restore') out.push(`- ${x.n}, restore: ${at(x)}: put back ${q(x.put)} where it reads ${q(x.now)}.${x.en ? ` EN ${x.en.page}: put back ${q(x.en.put)} where it reads ${q(x.en.now)}.` : ''}`);
-      else if (x.do === 'verbatim') out.push(`- ${x.n}, the owner's text: ${at(x)}: replace ${q(x.now)}${x.later ? ` (or what items ${x.later.join(', ')} made of it)` : ''} with exactly ${q(x.put)}.`);
-      else if (x.do === 'rewrite') out.push(`- ${x.n}, rewrite as the owner describes (${q(x.how)}): ${at(x)}, which reads ${q(x.now)}${x.later ? ` (or what items ${x.later.join(', ')} made of it)` : ''}.`);
-      else if (x.do === 'keep') out.push(`- ${x.n}, keep: the owner agrees, change nothing.`);
-      else out.push(`- ${x.n}, ask back, change nothing: ${x.why}.`);
-    }
+    for (const x of r.items) out.push(itemLine(x));
     if (r.rest) out.push(`  Words of the reply outside its items (not tied to one item; an instruction for the PR, or a remark): ${q(r.rest)}.`);
   }
   return out;
+}
+
+// The owner's replies in the threads of the pipeline's line comments (D-142, decision 3): each about the item its thread
+// was posted for. Answered in that thread; the owner settles it.
+export function threadReplyLines(replies) {
+  if (!replies?.length) return [];
+  return [
+    "The owner's replies in the threads of your line comments (the trigger word is cut off): each is about the one item its thread was posted for. Do exactly what the line says, with the texts put in exactly as given (JSON strings); where the block doesn't read as the line says, change nothing and ask back in the thread. Then answer in that thread (`forge.mjs reply --comment <the reply's id>`): what you did and the commit, in a line. Never settle (resolve) such a thread: the owner does. Record each reply in `handled` with its `replyId`; a restore is an edit of its own with `restores` (the item's number) and the owner's reason, when the reply gives one, as its `reason`.",
+    ...replies.map((r) => `${itemLine({ ...r, n: r.n })} (reply ${r.id})${r.reason ? `; the owner's reason: ${q(r.reason)}` : ''}`),
+  ];
+}
+
+// With the trigger words (`forge.triggerWords`, D-142, decision 3): the comments the step takes, and only these. The
+// owner's start with the word (cut off here), an expert's need none; every other new comment of the PR is for people.
+export function takeLines(take) {
+  if (!take?.length) return [];
+  return [
+    "The comments this step takes, and only these (the owner's start with the trigger word, cut off below; the PR's experts' need none). Every other new comment on the PR, the owner's without the word, a colleague's, a reply in your own threads by anyone but the owner, is for people: don't act on it, don't answer it, and don't record it in `handled`, even when `pr-activity` shows it.",
+    ...take.map((c) => `- ${c.kind} ${c.id} by ${c.by === 'owner' ? 'the owner' : `the expert ${c.author}`}${c.path ? ` on ${c.path}${c.line ? `:${c.line}` : ''}` : ''}: ${q(c.text)}`),
+  ];
+}
+
+// The owner's replies in the threads of the places to check: the answer to that place (D-142, item 6).
+export function placeReplyLines(replies) {
+  if (!replies?.length) return [];
+  return [
+    "The owner's replies in the threads of the places to check (the trigger word cut off): each answers its place. Anyone else's reply there (an expert the owner tagged) is for people: the owner hands its answer on with the word. A reply that confirms the place: change nothing, and record the place `confirmed`. One that asks for a change: make it like any instruction; a block you delete takes its place with it (`deleted`). For a place you record `confirmed` or `deleted`, answer in its thread first (`forge.mjs reply`) in one line, why, and record that reply's id as the place's `replyId`: the runner then settles the thread. Never settle a thread yourself. A reply that neither confirms nor asks (a tag of someone, a remark) leaves the place open.",
+    ...replies.map((r) => `- reply ${r.id}, place ${r.place} (${r.page ?? '?'}${r.line ? `, line ${r.line}` : ''}, now ${r.state}): ${q(r.text)}`),
+  ];
 }
 
 export function suggestionLines(suggestions) {
@@ -271,15 +336,75 @@ export function resyncItemLines(items) {
 // A session that ran the style check as a skill took its report for the answer and ended there, with nothing
 // recorded or pushed, whenever the review found nothing to fix (TASK-096).
 const STYLE_GOES_ON = "The style check's report is a step of the stage, never its end, whatever it found (no finding, suggestions only, fixes): after it, record, commit, push and post the summary as the stage says.";
+const STYLE_GOES_ON_ROUND = "The style check's report is a step of the stage, never its end, whatever it found (no finding, suggestions only, fixes): after it, commit, push, post the round's review and record, as the stage says.";
 
 // After the review comments are applied: the style check over the blocks they changed (D-081). A plain comment that
 // quotes a sentence of the page with words removed or changed is the reviewer's replacement for that sentence.
-export function styleAfterCommentsLines() {
+export function styleAfterCommentsLines({ rounds = false } = {}) {
   return [
     'A plain comment (no `suggestion` block, no reply by number) that quotes a sentence of the page with words removed or changed is the reviewer\'s replacement for that sentence: put it in as quoted, the words outside the quote being an instruction.',
-    'Once the comments are applied, the style check runs over the UA blocks they changed (the writer role, "The style check"), and over no other block: a block an item of the reply restores or keeps stays as the owner chose it. Its fixes go on the summary\'s numbered list after your edits, each with its `rule`; a fix that would change what the edit meant is not applied and is a note after the list, never numbered.',
-    STYLE_GOES_ON,
+    rounds
+      ? 'Once the comments are applied, the style check runs over the UA blocks they changed (the writer role, "The style check"), and over no other block: a block an item of a reply restores or keeps stays as the owner chose it. Its fixes are items after your edits, each with its `rule`; a fix that would change what the edit meant is not applied: a line comment «not applied», never an item.'
+      : 'Once the comments are applied, the style check runs over the UA blocks they changed (the writer role, "The style check"), and over no other block: a block an item of the reply restores or keeps stays as the owner chose it. Its fixes go on the summary\'s numbered list after your edits, each with its `rule`; a fix that would change what the edit meant is not applied and is a note after the list, never numbered.',
+    rounds ? STYLE_GOES_ON_ROUND : STYLE_GOES_ON,
   ];
+}
+
+// ------------------------------------------------------------------ the review round (D-142)
+
+// What a line comment of a round says, and where one goes: the same for the comments' round, a hand commit's style
+// check and the EN review, each over its own blocks.
+const LINE_COMMENTS = [
+  "A line comment only where the owner has something to decide, in the host's templates, and with no number in any posted text (the numbers stay in the ledger):",
+  '- under each substantive style fix: the changed fragment as «before» → «after» when it fits on one line (only the fragment, never the paragraph), then the rule (the guide and the rule) and why, in one sentence; a longer fragment gets only the rule and why, since the diff above shows it;',
+  "- under a fix not applied (it would change what the person's edit meant, or the finding is judgment-required): the rule, what the guide would want, and why it is left;",
+  "- under a deleted block: one line, its heading and its line count, the reason, and a link to the diff; never the block's text;",
+  "- under a block added that nobody asked for: one line, what was added and where the fact came from.",
+  'A mechanical fix (the words stay the same: quotes, dashes, spaces, an apostrophe, a list item\'s full stop) gets no line comment: it is folded in the review\'s text, its line and what changed (`line 240 · quotes "…" → «…»`).',
+];
+
+// The review that ends a round, and its record.
+const REVIEW_POST = 'Then one review (`forge.mjs review-on-lines --commit <the head after your push> --comments-file <file> --body-file <file> --outside-in-body`, a comments file of `[]` when no line needs one): its text is the round\'s header in the host\'s template and two or three lines, each commit with its short sha and what it holds, how many line comments and how many questions, and the mechanical fixes folded with their lines. A comment on a line outside the diff goes into that text (`--outside-in-body`). Never a summary comment in the conversation: the runner removes the old ones.';
+
+function roundRecord(roles) {
+  return `Record the round: \`review\`: { "id": <the review's id>, "commits": [{ "sha", "role": ${roles.map((r) => `"${r}"`).join(' | ')} }] }, each sha also in \`commits\`; \`edits\` as before, each with \`commentId\` (the id \`review-on-lines\` gave its line comment, from its \`comments\`) when it has one, a mechanical fix with \`"mechanical": true\` and no \`commentId\`; \`notes\` (the fixes not applied) each with its \`commentId\`, or none when it is in the review's text; every id \`review-on-lines\` printed in \`posted\`. A description question the round answered goes in \`answered\`: [{ "n", "answer": "<a few words, and who>", "link": "<the answer's URL, or the commit's sha>" }]; a new question for a reader of the description in \`asked\`: [{ "text", "reader", "place", "why", "proposal" }]. The runner writes the description's sections from these.`;
+}
+
+// The brief's lines for a PR that takes review rounds (the host's `forge.reviewRounds`), by stage.
+export function roundLines(step) {
+  const s = step.stage;
+  if (s === 'answerComments') {
+    return [
+      'This PR takes review rounds (the host\'s `forge.reviewRounds`): the round is two commits and one review with line comments, never a summary comment.',
+      "Commit 1 holds the edits the comments asked for (the host's commit message for them); push it. Then the style check over the blocks they changed, its fixes in commit 2 (the host's message for the style review); no fix, no commit 2. Push.",
+      "Under commit 1's changes, a line comment only where you interpreted an instruction, couldn't carry it out, or changed more than was asked: what you did, and how to ask for the other reading (a reply in that thread that starts with the trigger word). An instruction carried out word for word gets none: the diff shows it. A reviewer's (not the owner's) comment is answered in its own thread as before.",
+      ...LINE_COMMENTS,
+      REVIEW_POST,
+      roundRecord(['comments', 'style']),
+    ];
+  }
+  if (s === 'styleCheck') {
+    return [
+      "This PR takes review rounds (the host's `forge.reviewRounds`): the style check's fixes are one commit (the host's message for the style review), and one review with line comments over them, never a summary comment. No fix and no note: no commit and no review.",
+      ...LINE_COMMENTS,
+      REVIEW_POST,
+      roundRecord(['style']),
+    ];
+  }
+  if (s === 'enReview') {
+    return [
+      "This PR takes review rounds (the host's `forge.reviewRounds`): the EN review's fixes are one commit (the host's message for the EN style review), and one review with line comments over the EN lines, as a round of the UA's. The review's text names the translation commit (role `translation`, the translator's, already recorded) and yours (role `style`). EN fixes no longer go on the description's list, and you don't edit the description: what stays open goes in `asked`, by its reader, and the runner writes it there.",
+      ...LINE_COMMENTS,
+      REVIEW_POST,
+      roundRecord(['translation', 'style']),
+    ];
+  }
+  if (s === 'pr') {
+    return [
+      "This PR takes review rounds (the host's `forge.reviewRounds`): the description's open questions, places and rounds are the runner's, between the markers the host's template has (`<!-- ticket-flow:questions -->` … `<!-- /ticket-flow:questions -->`, and `places`, `rounds` the same way). Keep the markers as the template has them; write the questions between them as usual, and record each PR's questions in `prs[].questions`: [{ \"n\", \"text\", \"reader\", \"place\", \"why\", \"proposal\" }], numbered from 1 (\"reader\" the key of the template's group), and the review of the places' line comments as `prs[].review`: { \"id\" }. The first version gets no line comment per style fix: only the places on their lines, and the questions in the description.",
+    ];
+  }
+  return [];
 }
 
 // The questions to the owner the PR's earlier summaries left open (`openQuestions`): the session lists again, in
@@ -294,11 +419,11 @@ export function openQuestionLines(items) {
 
 // The hand commits a style check reviews: the commits on the branch the pipeline didn't make that changed UA, with
 // the UA pages each changed, oldest first.
-export function styleCheckLines(commits, fixes) {
+export function styleCheckLines(commits, fixes, { rounds = false } = {}) {
   if (!commits?.length) return [];
   return [
     'Commits on this PR\'s branch the pipeline didn\'t make (hand edits) changed UA, and no style check has reviewed them. Run the style check (the writer role, "The style check") over the UA blocks each one changed (`git -C <worktree> show <sha> -- <page>`), and over no other block. Record every sha below in `reviewed`, fixed or not, with the reason its commit message gives, if any.',
-    STYLE_GOES_ON,
+    rounds ? STYLE_GOES_ON_ROUND : STYLE_GOES_ON,
     ...commits.map((c) => `- ${c.sha}: ${c.pages.join(', ')}`),
     ...(fixes?.length ? ['Style fixes already on this PR\'s lists, on these pages: a block whose hand edit puts one\'s «було» back is the owner undoing that fix; leave the block out.', ...fixes.map((x) => `- ${x.n}: ${at(x)}: ${q(x.before)}`)] : []),
   ];

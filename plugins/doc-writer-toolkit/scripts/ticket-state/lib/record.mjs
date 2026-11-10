@@ -300,7 +300,17 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
           p.expertReview = expertOf(e);
           // The numbered change list of the description (the UA review's fixes), from 1.
           warnings.push(...addEdits(p, e.edits, { list: 'description', stage, at, seq: l.seq + 1 }).map((x) => `${prId(p)}: ${x}`));
-          const asked = (st.reviewRequests ?? []).map((r) => r.login ?? r.team ?? r).filter((r) => !p.reviewersRequested.map(String).includes(String(r)));
+          // The description's questions (D-142), numbered from 1, and the first round: the draft and the UA review's
+          // commits, and the review of the places' line comments. The runner writes the description's sections from them.
+          // Only with review rounds (the host's `forge.reviewRounds`); there the questions are required (`[]` when none),
+          // so the runner's section never replaces questions the session wrote with "none".
+          if (settings.reviewRounds) {
+            if (!Array.isArray(e.questions)) throw new CliError(`pr: ${e.repo} ${e.branch}: "questions" is required with review rounds: the description's questions, [{ "text", "reader", "place"?, "why"?, "proposal"? }], or [] when there are none`, { code: 2 });
+            p.questions = (p.questions ?? []).filter((q) => q.stage !== 'pr');
+            addQuestions(p, e.questions);
+            firstRound(p, e);
+          }
+          const asked =(st.reviewRequests ?? []).map((r) => r.login ?? r.team ?? r).filter((r) => !p.reviewersRequested.map(String).includes(String(r)));
           if (asked.length) warnings.push(`${p.repo}#${p.number} has review requests (${asked.join(', ')}): every PR opens with no reviewer, and the expert is called by a person's move`);
         }
         // The places' comments are posted before this record, so a place from the code with no reference at a commit is
@@ -398,6 +408,17 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         return;
       }
       case 'answerComments': {
+        // A review round (D-142): two commits and one review with line comments instead of the summary.
+        if (result.review !== undefined) {
+          const round = roundOf(['comments', 'style']);
+          for (const c of result.handled ?? []) l.reviewComments.push({ repo: pr.repo, pr: pr.number, at, ...c });
+          warnings.push(...addEdits(pr, result.edits, { list: String(result.review.id), stage, at, seq: l.seq + 1 }));
+          pr.openQuestions = { items: questionsOf(result, stage, { required: true }), stage, at, seq: l.seq + 1 };
+          placesOf();
+          descriptionOf();
+          addRound(round);
+          return;
+        }
         for (const c of result.handled ?? []) l.reviewComments.push({ repo: pr.repo, pr: pr.number, at, ...c });
         // The notes are the style check's fixes left undone (they would change what an edit meant): in the summary
         // after its numbered list, never numbered.
@@ -421,15 +442,27 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         const reviewed = result.reviewed;
         if (!Array.isArray(reviewed) || !reviewed.length || reviewed.some((r) => !/^[0-9a-f]{7,40}$/.test(String(r?.sha ?? '')))) throw new CliError('styleCheck: "reviewed" lists every hand commit the check read: [{ "sha", "reason"? }], each sha as hex', { code: 2 });
         if (result.notes !== undefined && !Array.isArray(result.notes)) throw new CliError('styleCheck: "notes" is a list of { "page", "block", "text" }', { code: 2 });
-        if ((result.edits?.length || result.notes?.length) && !result.summary?.id) throw new CliError('styleCheck: "edits" and "notes" are in the summary comment: give "summary": { "id" } too', { code: 2 });
-        // A fix is a commit pushed, and its list a comment posted: neither is recorded without the other.
-        if (result.edits?.length && !result.commits?.length) throw new CliError('styleCheck: "edits" are fixes: give the "commits" that pushed them', { code: 2 });
-        // And the other way: a commit pushed is a fix the owner reads on the summary's list, posted.
-        if (result.commits?.length && (!result.edits?.length || !result.summary?.id)) throw new CliError('styleCheck: "commits" pushed fixes: give their "edits" and the "summary" that listed them', { code: 2 });
-        const postedIds = (Array.isArray(result.posted) ? result.posted : []).map((p) => String(typeof p === 'object' ? p?.id : p));
-        if (result.summary?.id && !postedIds.includes(String(result.summary.id))) throw new CliError('styleCheck: the summary comment goes in "posted" too, so the pipeline never answers it', { code: 2 });
-        if (result.summary) l.summaries.push({ repo: pr.repo, pr: pr.number, at, ...result.summary, ...(result.notes?.length ? { notes: result.notes } : {}) });
-        warnings.push(...addEdits(pr, result.edits, { list: result.summary?.id, stage, at, seq: l.seq + 1 }));
+        // A review round (D-142): the fixes in one commit and one review with line comments instead of the summary.
+        const round = result.review !== undefined ? roundOf(['style']) : null;
+        if (round) {
+          if (result.summary) throw new CliError('styleCheck: a round posts its review, not a summary: give "review" or "summary", not both', { code: 2 });
+          if (result.edits?.length && !result.commits?.length) throw new CliError('styleCheck: "edits" are fixes: give the "commits" that pushed them', { code: 2 });
+          if (result.commits?.length && !result.edits?.length) throw new CliError('styleCheck: "commits" pushed fixes: give their "edits", the items of the round\'s review', { code: 2 });
+          warnings.push(...addEdits(pr, result.edits, { list: String(result.review.id), stage, at, seq: l.seq + 1 }));
+          placesOf();
+          descriptionOf();
+          addRound(round);
+        } else {
+          if ((result.edits?.length || result.notes?.length) && !result.summary?.id) throw new CliError('styleCheck: "edits" and "notes" are in the summary comment: give "summary": { "id" } too', { code: 2 });
+          // A fix is a commit pushed, and its list a comment posted: neither is recorded without the other.
+          if (result.edits?.length && !result.commits?.length) throw new CliError('styleCheck: "edits" are fixes: give the "commits" that pushed them', { code: 2 });
+          // And the other way: a commit pushed is a fix the owner reads on the summary's list, posted.
+          if (result.commits?.length && (!result.edits?.length || !result.summary?.id)) throw new CliError('styleCheck: "commits" pushed fixes: give their "edits" and the "summary" that listed them', { code: 2 });
+          const postedIds = (Array.isArray(result.posted) ? result.posted : []).map((p) => String(typeof p === 'object' ? p?.id : p));
+          if (result.summary?.id && !postedIds.includes(String(result.summary.id))) throw new CliError('styleCheck: the summary comment goes in "posted" too, so the pipeline never answers it', { code: 2 });
+          if (result.summary) l.summaries.push({ repo: pr.repo, pr: pr.number, at, ...result.summary, ...(result.notes?.length ? { notes: result.notes } : {}) });
+          warnings.push(...addEdits(pr, result.edits, { list: result.summary?.id, stage, at, seq: l.seq + 1 }));
+        }
         // A style check answers no question: the ones still open stay, with any its summary asks. The skip (the card was
         // moved on) changes none.
         const asked = questionsOf(result, stage);
@@ -445,7 +478,9 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         if (result.commits?.length) {
           const card = await cardNow(ref);
           if (card.status !== 'finalReview') {
-            const moved = `style fixes landed after the card was moved on (${card.list?.name ?? card.status}): they are on the summary's numbered list (comment ${result.summary?.id}) and can be undone by number`;
+            const moved = round
+              ? `style fixes landed after the card was moved on (${card.list?.name ?? card.status}): they are in the round's review (${result.review.id}) and can be undone in their threads`
+              : `style fixes landed after the card was moved on (${card.list?.name ?? card.status}): they are on the summary's numbered list (comment ${result.summary?.id}) and can be undone by number`;
             record.note = record.note ? `${record.note}; ${moved}` : moved;
             warnings.push(moved);
           }
@@ -481,8 +516,14 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         record.head = st.headCommit;
         pr.lastSeenHead = st.headCommit;
         // The EN review's posted rewrites go on the description's list; the re-sync gives the EN side of the items it
-        // re-synced, so a restore later puts EN back too.
-        if (stage === 'enReview') warnings.push(...addEdits(pr, result.edits, { list: 'description', stage, at, seq: l.seq + 1 }));
+        // re-synced, so a restore later puts EN back too. In a review round (D-142) the EN review posts its own review
+        // with line comments, as a UA round does: its items are that review's, and the description's list stays the UA's.
+        if (stage === 'enReview' && result.review !== undefined) {
+          const round = roundOf(['translation', 'style']);
+          warnings.push(...addEdits(pr, result.edits, { list: String(result.review.id), stage, at, seq: l.seq + 1 }));
+          descriptionOf();
+          addRound(round);
+        } else if (stage === 'enReview') warnings.push(...addEdits(pr, result.edits, { list: 'description', stage, at, seq: l.seq + 1 }));
         if (stage === 'resync') warnings.push(...addEnSides(pr, result.edits));
         if (stage === 'readyForMerge') {
           const missing = CHAIN.filter((s) => pr.chain[s]?.status !== 'done');
@@ -532,8 +573,113 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
       return [];
     }
     if (!Array.isArray(q) || q.some((x) => !x || typeof x.text !== 'string' || !x.text.trim() || (x.n !== undefined && x.n !== null && !Number.isInteger(Number(x.n))))) throw new CliError(`${st}: "questions" is a list of { "text", "n"? }`, { code: 2 });
-    if (q.length && !res.summary?.id) throw new CliError(`${st}: "questions" are asked in the summary comment: give "summary": { "id" } too`, { code: 2 });
+    if (q.length && !res.summary?.id && !res.review?.id) throw new CliError(`${st}: "questions" are asked in the summary comment: give "summary": { "id" } too`, { code: 2 });
     return q.map((x) => ({ text: x.text, ...(x.n !== undefined && x.n !== null ? { n: Number(x.n) } : {}) }));
+  }
+
+  // ---------------------------------------------------------------- a review round (D-142)
+
+  // The round's review and commits, checked: `review`: { id, commits: [{ sha, role }] }, the review's id in `posted`,
+  // each commit's sha among `commits` and its role one of `roles` (each at most once). Each item's line comment is a
+  // comment the record posts (`commentId` in `posted`); a substantive style fix has one, a mechanical fix none. A
+  // malformed round is a usage error: what was posted stays, and the session fixes its `--result`.
+  function roundOf(roles) {
+    const rv = result.review;
+    if (!rv || typeof rv !== 'object' || rv.id === undefined || rv.id === null) throw new CliError(`${stage}: "review" is the round's review: { "id", "commits": [{ "sha", "role" }] }`, { code: 2 });
+    const postedIds = new Set((Array.isArray(result.posted) ? result.posted : []).map((p) => String(typeof p === 'object' ? p?.id : p)));
+    if (!postedIds.has(String(rv.id))) throw new CliError(`${stage}: the round's review ${rv.id} goes in "posted" too, so the pipeline never answers it`, { code: 2 });
+    const commits = rv.commits ?? [];
+    if (!Array.isArray(commits) || commits.some((c) => !/^[0-9a-f]{7,40}$/.test(String(c?.sha ?? '')) || !roles.includes(c?.role))) throw new CliError(`${stage}: "review.commits" is [{ "sha", "role" }], each role one of ${roles.join(', ')}`, { code: 2 });
+    for (const r of roles) if (commits.filter((c) => c.role === r).length > 1) throw new CliError(`${stage}: one "${r}" commit a round, not ${commits.filter((c) => c.role === r).length}`, { code: 2 });
+    const shas = (result.commits ?? []).map(String);
+    const same = (s, c) => s.startsWith(c.sha) || c.sha.startsWith(s);
+    // The EN round names the translation commit too, which the translation stage recorded (the PR's pipeline commits).
+    const earlier = (c) => c.role === 'translation' && (pr.pipelineCommits ?? []).map(String).some((s) => same(s, c));
+    for (const c of commits) if (!shas.some((s) => same(s, c)) && !earlier(c)) throw new CliError(`${stage}: the round's commit ${c.sha} is not among "commits"${c.role === 'translation' ? " nor the PR's recorded commits" : ''}`, { code: 2 });
+    for (const e of result.edits ?? []) {
+      const n = e?.n ?? '?';
+      const has = e?.commentId !== undefined && e?.commentId !== null;
+      if (has && !postedIds.has(String(e.commentId))) throw new CliError(`${stage}: item ${n}'s line comment ${e.commentId} is not in "posted"`, { code: 2 });
+      if (e?.mechanical === true && has) throw new CliError(`${stage}: item ${n} is a mechanical fix: it is folded in the review's text, with no line comment`, { code: 2 });
+      if (e?.mechanical === true && !e.rule) throw new CliError(`${stage}: item ${n} is a mechanical fix: give the "rule" it applies`, { code: 2 });
+      if (e?.rule && e?.mechanical !== true && !has) throw new CliError(`${stage}: item ${n} is a substantive style fix: give the "commentId" of its line comment (the rule and why)`, { code: 2 });
+    }
+    const byRole = (r) => commits.find((c) => c.role === r);
+    if ((result.edits ?? []).some((e) => e?.rule) && roles.includes('style') && !byRole('style')) throw new CliError(`${stage}: the style fixes are the "style" commit: name it in "review.commits"`, { code: 2 });
+    if ((result.edits ?? []).some((e) => !e?.rule) && roles.includes('comments') && !byRole('comments')) throw new CliError(`${stage}: the edits the comments asked for are the "comments" commit: name it in "review.commits"`, { code: 2 });
+    if (result.notes !== undefined && !Array.isArray(result.notes)) throw new CliError(`${stage}: "notes" is a list of { "page", "block", "text", "commentId"? }`, { code: 2 });
+    for (const x of result.notes ?? []) if (x?.commentId !== undefined && x?.commentId !== null && !postedIds.has(String(x.commentId))) throw new CliError(`${stage}: a note's line comment ${x.commentId} is not in "posted"`, { code: 2 });
+    const lineComments = (result.edits ?? []).filter((e) => e?.commentId !== undefined && e?.commentId !== null).length + (result.notes ?? []).filter((x) => x?.commentId !== undefined && x?.commentId !== null).length;
+    return { review: rv.id, commits: commits.map((c) => ({ sha: String(c.sha), role: c.role })), comments: lineComments, notes: result.notes ?? [] };
+  }
+
+  // The round in the PR's list, numbered on (the description's "rounds" section reads it).
+  function addRound(round) {
+    pr.rounds ??= [];
+    pr.rounds.push({ n: pr.rounds.length + 1, stage, at, seq: l.seq + 1, commits: round.commits, review: round.review, comments: round.comments, ...(round.notes.length ? { notes: round.notes } : {}) });
+  }
+
+  // The places a round changed: `places`: [{ id, state, replyId?, answer? }]. A place confirmed or whose block went
+  // (`confirmed`, `deleted`) has the reply that says why in its thread (`replyId`, in `posted`): the runner then settles
+  // the thread (lib/pr-rounds.mjs).
+  function placesOf() {
+    const postedIds = new Set((Array.isArray(result.posted) ? result.posted : []).map((p) => String(typeof p === 'object' ? p?.id : p)));
+    for (const u of result.places ?? []) {
+      if (!u || !u.id) throw new CliError(`${stage}: "places" is a list of { "id", "state", "replyId"? }`, { code: 2 });
+      if (u.state !== undefined && !['open', 'confirmed', 'deleted'].includes(u.state)) throw new CliError(`${stage}: place ${u.id}'s state is open, confirmed or deleted`, { code: 2 });
+      if (['confirmed', 'deleted'].includes(u.state) && (u.replyId === undefined || u.replyId === null || !postedIds.has(String(u.replyId)))) throw new CliError(`${stage}: place ${u.id} is ${u.state}: give "replyId", the reply in its thread that says why (in "posted" too)`, { code: 2 });
+      const place = l.places.find((p) => p.id === u.id && p.repo === pr.repo && Number(p.pr) === pr.number);
+      if (!place) {
+        warnings.push(`no place ${u.id} on ${prId(pr)}: not changed`);
+        continue;
+      }
+      // Only what a round may change: the place's id, page, claim and comment stay as the `pr` record wrote them.
+      for (const k of ['state', 'replyId', 'answer']) if (u[k] !== undefined) place[k] = u[k];
+      place.at = at;
+    }
+  }
+
+  // The description's questions a round answered (`answered`: [{ n, answer, link? }]) and the new ones it asks for a
+  // reader (`asked`: [{ text, reader, place?, why?, proposal? }], numbered on). The runner writes the section from them.
+  function descriptionOf() {
+    pr.questions ??= [];
+    if (result.answered !== undefined && !Array.isArray(result.answered)) throw new CliError(`${stage}: "answered" is a list of { "n", "answer", "link"? }`, { code: 2 });
+    for (const a of result.answered ?? []) {
+      if (!Number.isInteger(Number(a?.n)) || typeof a?.answer !== 'string' || !a.answer.trim()) throw new CliError(`${stage}: "answered" is a list of { "n", "answer", "link"? }`, { code: 2 });
+      const q = pr.questions.find((x) => x.n === Number(a.n));
+      if (!q) {
+        warnings.push(`no description question ${a.n} on ${prId(pr)}: its answer is not kept`);
+        continue;
+      }
+      q.answer = { text: a.answer.trim(), ...(a.link ? { link: String(a.link) } : {}), ...(a.by ? { by: String(a.by) } : {}), at, seq: l.seq + 1 };
+    }
+    addQuestions(pr, result.asked);
+  }
+
+  // The `pr` stage's round: the commits the write and the UA review recorded for this PR's branch, and the places'
+  // review when the entry names it. Recorded again, it replaces itself.
+  function firstRound(p, e) {
+    const of = (st, role) => (l.stages?.[st]?.result?.prs ?? []).filter((x) => x.branch === p.branch && (!x.repo || x.repo === p.repo)).flatMap((x) => x.commits ?? []).map((sha) => ({ sha: String(sha), role }));
+    const commits = [...of('write', 'draft'), ...of('uaReview', 'style')];
+    const review = e.review?.id ?? null;
+    const comments = (result.places ?? []).filter((x) => Number(x.pr) === p.number && x.commentId !== undefined && x.commentId !== null).length;
+    p.rounds = (p.rounds ?? []).filter((r) => r.stage !== 'pr');
+    p.rounds.unshift({ n: 1, stage: 'pr', at, seq: l.seq + 1, commits, review, comments });
+    p.rounds.forEach((r, i) => (r.n = i + 1));
+  }
+
+  // Questions of the description, numbered on from the PR's last: a question's number never changes.
+  function addQuestions(p, items) {
+    if (items === undefined || items === null) return;
+    if (!Array.isArray(items) || items.some((x) => !x || typeof x.text !== 'string' || !x.text.trim())) throw new CliError(`${stage}: the description's questions are a list of { "n"?, "text", "reader", "place"?, "why"?, "proposal"? }`, { code: 2 });
+    p.questions ??= [];
+    let next = p.questions.reduce((m, x) => Math.max(m, x.n), 0) + 1;
+    for (const x of items) {
+      const n = Number.isInteger(Number(x.n)) && Number(x.n) >= next ? Number(x.n) : next;
+      const fields = Object.fromEntries(['reader', 'place', 'why', 'proposal'].filter((k) => typeof x[k] === 'string' && x[k].trim()).map((k) => [k, x[k].trim()]));
+      p.questions.push({ n, text: x.text.trim(), ...fields, stage, at });
+      next = n + 1;
+    }
   }
 
   function targetOf(p) {

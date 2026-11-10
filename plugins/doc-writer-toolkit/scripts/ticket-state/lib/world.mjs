@@ -273,8 +273,11 @@ export async function readPrs({ settings, forge, ledgers }) {
       const entry = { state: st.state, url: st.url ?? null, headCommit: st.headCommit, reviewRequests: st.reviewRequests ?? [], reviewDecision: st.reviewDecision ?? null, labels: st.labels ?? [], mergeCommit: st.mergeCommit ?? null, mergedAt: st.mergedAt ?? null, newComments: [] };
       if (st.state === 'open') {
         const activity = await forge.prActivity({ repo: pr.repo, number: pr.number });
-        entry.newComments = unhandled(l, pr, activity, settings.forge.self, settings.commentHeader);
-        Object.assign(entry, reviewerSignals(activity, settings.forge.self, [...expertsOf(settings, pr).reviewers, ...(pr.reviewersRequested ?? [])]));
+        const experts = [...expertsOf(settings, pr).reviewers, ...(pr.reviewersRequested ?? [])];
+        const sorted = sortComments(l, pr, activity, settings.forge.self, settings.commentHeader, { words: settings.triggerWords, experts });
+        entry.newComments = sorted.items;
+        entry.others = sorted.others;
+        Object.assign(entry, reviewerSignals(activity, settings.forge.self, experts));
       }
       out.set(`${l.key}/${prId(pr)}`, entry);
     }
@@ -290,25 +293,89 @@ export async function readPrs({ settings, forge, ledgers }) {
 // person's reply opens a review of their own. Each carries its text (`body`): the rule reads the owner's reply by number
 // and suggestion blocks in it (lib/edits.mjs). With the settings' comment header, a comment that starts with it is the
 // pipeline's too, recorded or not: a summary whose id a session failed to record is never read as the owner's reply.
-export function unhandled(ledger, pr, activity, self, header = null) {
+// A line comment carries its thread's first comment (`root`): a reply in a thread the pipeline opened is read against
+// that thread's item (lib/edits.mjs).
+//
+// With the trigger words (`forge.triggerWords`, `opts.words`), who wrote it decides more (D-142, decision 3):
+//   - the owner's comment is for the pipeline only when it starts with a word and a colon (`word:`, any case, a space
+//     before the colon and leading space allowed), in the pipeline's own threads too; the word is cut off the text the
+//     rule reads. A submitted review whose text starts with it covers its line comments. Without it the owner's
+//     comment is a note for people and starts nothing;
+//   - the PR's experts (`opts.experts`: the targets' `reviewers` and the reviewers requested on it) are reviewers as
+//     before, with no word, in their own comments, reviews and threads;
+//   - a reply in a thread the pipeline opened, anyone's but the owner's (an expert the owner tagged there too), and
+//     anyone else's comment, start nothing: they are in `others`, for the owner to hand on with the word. One older than
+//     the owner's latest worded comment a record handled is no longer listed: it was handed on, or left.
+// With no words set, every comment that isn't the owner's is a reviewer's, as before.
+export function unhandled(ledger, pr, activity, self, header = null, opts = {}) {
+  return sortComments(ledger, pr, activity, self, header, opts).items;
+}
+
+// The trigger word at the start of a text: the text without it, or null when it doesn't start with one. A reply made
+// with the forge's "Quote reply" starts with the quoted lines (`> …`): the word is read on the first line after them,
+// and the quote is kept in front of the rest (the reply by number leaves quoted lines out).
+export function afterTrigger(body, words) {
+  const list = (words ?? []).map((w) => String(w).trim()).filter(Boolean);
+  if (!list.length) return null;
+  const text = String(body ?? '');
+  const lead = /^(?:[ \t]*(?:>[^\n]*)?\r?\n)*/.exec(text)[0];
+  const esc = list.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  const m = new RegExp(`^\\s*(?:${esc})\\s*:\\s*`, 'iu').exec(text.slice(lead.length));
+  return m ? `${lead}${text.slice(lead.length + m[0].length)}` : null;
+}
+
+export function sortComments(ledger, pr, activity, self, header = null, { words = [], experts = [] } = {}) {
   const posted = new Set((ledger.posted?.pr ?? []).map(String));
   const headed = (c) => Boolean(header) && withoutHeader(c.body, header) !== String(c.body ?? '');
   const ownReview = (c) => c.reviewId !== null && c.reviewId !== undefined && posted.has(String(c.reviewId));
   const handled = new Map((ledger.reviewComments ?? []).filter((c) => c.repo === pr.repo && Number(c.pr) === Number(pr.number)).map((c) => [String(c.id), c.updatedAt ?? c.at ?? '']));
   const isBot = (c) => c.authorBot === true || /\[bot\]$/.test(c.author ?? '');
   const fresh = (c) => !isBot(c) && !posted.has(String(c.id)) && !headed(c) && !(handled.has(String(c.id)) && (handled.get(String(c.id)) ?? '') >= (c.updatedAt ?? c.submittedAt ?? ''));
-  const who = (author) => (self && author === self ? 'owner' : 'reviewer');
-  const out = [];
+  const gated = (words ?? []).some((w) => String(w).trim());
+  const low = (x) => String(x ?? '').toLowerCase();
+  const expert = new Set((experts ?? []).map(low));
+  const isOwner = (author) => Boolean(self) && author === self;
+  const who = (author) => (isOwner(author) ? 'owner' : 'reviewer');
+  // The owner's reviews whose text starts with the word: their line comments are for the pipeline too.
+  const wordedReviews = new Set((activity.reviews ?? []).filter((r) => isOwner(r.author) && afterTrigger(r.body, words) !== null).map((r) => String(r.id)));
+  const worded = (c) => isOwner(c.author) && (afterTrigger(c.body, words) !== null || (c.reviewId !== null && c.reviewId !== undefined && wordedReviews.has(String(c.reviewId))));
+  const when = (c) => String(c.createdAt ?? c.updatedAt ?? c.submittedAt ?? '');
+  // A thread the pipeline opened (its first comment in `posted`, with the header, or of a review it posted).
+  const ours = (c) => Boolean(c) && (posted.has(String(c.id)) || headed(c) || ownReview(c));
+  // The latest of the owner's worded comments a record handled: a colleague's comment before it was handed on, or
+  // left, and is no longer listed for the owner.
+  const all = [...(activity.threads ?? []).flatMap((t) => t.comments ?? []), ...(activity.comments ?? []), ...(activity.reviews ?? [])];
+  const handedOn = gated ? all.filter((c) => handled.has(String(c.id)) && worded(c)).map(when).sort().at(-1) ?? '' : '';
+  const items = [];
+  const others = [];
+  // Where a fresh comment goes: the items (with the text the rule reads), the others, or nowhere (the owner's note).
+  const place = (c, item, inOurs = false) => {
+    if (!gated) return items.push(item);
+    if (isOwner(c.author)) {
+      const rest = afterTrigger(c.body, words);
+      if (rest !== null) return items.push({ ...item, body: rest, worded: true });
+      if (worded(c)) return items.push({ ...item, worded: true });
+      return null;
+    }
+    // An expert's own comment needs no word; a reply in the pipeline's thread, anyone's but the owner's, is for people
+    // (decision 3: the owner may tag the expert there, and hands an answer on with the word).
+    if (c.author && expert.has(low(c.author)) && !inOurs) return items.push(item);
+    if (handedOn && when(c) <= handedOn) return null;
+    const { body, ...seen } = item;
+    return others.push(seen);
+  };
   for (const t of activity.threads ?? []) {
-    for (const c of t.comments ?? []) if (fresh(c) && !ownReview(c)) out.push({ id: c.id, kind: 'review-comment', thread: t.id, author: c.author, by: who(c.author), path: c.path ?? t.path ?? null, line: c.line ?? t.line ?? null, updatedAt: c.updatedAt, body: c.body ?? '' });
+    const root = t.comments?.[0]?.id ?? null;
+    const inOurs = ours(t.comments?.[0]);
+    for (const c of t.comments ?? []) if (fresh(c) && !ownReview(c)) place(c, { id: c.id, kind: 'review-comment', thread: t.id, root, author: c.author, by: who(c.author), path: c.path ?? t.path ?? null, line: c.line ?? t.line ?? null, updatedAt: c.updatedAt, body: c.body ?? '' }, inOurs);
   }
-  for (const c of activity.comments ?? []) if (fresh(c)) out.push({ id: c.id, kind: 'comment', author: c.author, by: who(c.author), updatedAt: c.updatedAt, body: c.body ?? '' });
+  for (const c of activity.comments ?? []) if (fresh(c)) place(c, { id: c.id, kind: 'comment', author: c.author, by: who(c.author), updatedAt: c.updatedAt, body: c.body ?? '' });
   for (const r of activity.reviews ?? []) {
     if (!String(r.body ?? '').trim()) continue; // a verdict with no text asks nothing
     const c = { id: r.id, author: r.author, authorBot: r.authorBot, updatedAt: r.submittedAt, body: r.body };
-    if (fresh(c)) out.push({ id: r.id, kind: 'review', state: r.state, author: r.author, by: who(r.author), updatedAt: r.submittedAt, body: r.body ?? '' });
+    if (fresh(c)) place(c, { id: r.id, kind: 'review', state: r.state, author: r.author, by: who(r.author), updatedAt: r.submittedAt, body: r.body ?? '' });
   }
-  return out;
+  return { items, others };
 }
 
 // What the PR's experts did on it: only the logins in `experts` (the targets' `reviewers` and the reviewers requested on
