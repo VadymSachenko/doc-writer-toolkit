@@ -306,7 +306,7 @@ export async function readPrs({ settings, forge, ledgers }) {
       const st = await forge.prState({ repo: pr.repo, number: pr.number });
       const entry = { state: st.state, url: st.url ?? null, headCommit: st.headCommit, reviewRequests: st.reviewRequests ?? [], reviewDecision: st.reviewDecision ?? null, labels: st.labels ?? [], mergeCommit: st.mergeCommit ?? null, mergedAt: st.mergedAt ?? null, newComments: [] };
       // The base's tip and the head's CI, for keeping the branch up to date with its base (`forge.keepFresh`).
-      if (settings.keepFresh) Object.assign(entry, { baseCommit: st.baseCommit ?? null, checks: st.checks ?? null });
+      if (settings.keepFresh) Object.assign(entry, { baseCommit: st.baseCommit ?? null, checks: st.checks ?? null, updatedAt: st.updatedAt ?? null });
       if (st.state === 'open') {
         const activity = await forge.prActivity({ repo: pr.repo, number: pr.number });
         const experts = [...expertsOf(settings, pr).reviewers, ...(pr.reviewersRequested ?? [])];

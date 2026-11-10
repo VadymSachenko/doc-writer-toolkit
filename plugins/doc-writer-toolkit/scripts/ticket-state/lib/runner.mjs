@@ -1864,6 +1864,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
     if (m.conflict && !m.unresolvable?.length) {
       // What the session's resolution may stage: what the merge staged by itself, and the conflicting files.
       step.mergeAllowed = [...new Set([...(m.staged ?? []), ...m.conflict])];
+      step.mergeFiles = m.conflict;
       return null;
     }
     abortMerge(tree.path, step.head);
@@ -1896,7 +1897,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
       say({ kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, role: step.role, outcome: 'failed', note: note.slice(0, 300) });
       return 'failed';
     };
-    const f = (io.finishMerge ?? finishMerge)(tree.path, { head: step.head, allowed: step.mergeAllowed ?? null });
+    const f = (io.finishMerge ?? finishMerge)(tree.path, { head: step.head, allowed: step.mergeAllowed ?? null, files: step.mergeFiles ?? step.files ?? null });
     if (f.error) return fail(`the resolved merge was not committed: ${f.error}`);
     // The merge commit is the pipeline's own before the push (a `running` record, as in `runBaseMergeStep`). A push that
     // fails puts the conflict's record back, so the next step is this one again and its failures count.

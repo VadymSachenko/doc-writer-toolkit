@@ -58,12 +58,15 @@ const doneAfter = (l, stage, after) => l.stages?.[stage]?.status === 'done' && (
 
 // A chain stage or a re-sync left running on a PR that isn't at `translation` now (an old ledger, a person's move back,
 // a re-sync the earlier rule started at ready for merge) waits for a person's move like the rest of the chain: no
-// session starts for it.
+// session starts for it. So does a merge of the base, or its conflict's session, left running on a PR that isn't at
+// ready for merge now (D-127: the owner moved it back, and edits the branch there).
+const FRESH_STAGES = ['baseMerge', 'baseFix'];
 function runningStage(l) {
   for (const [stage, rec] of Object.entries(l.stages ?? {})) if (rec?.status === 'running') return { stage };
   for (const pr of l.prs ?? []) {
     for (const [stage, rec] of Object.entries({ ...(pr.chain ?? {}), ...(pr.steps ?? {}) })) {
-      if (rec?.status === 'running' && ((!CHAIN.includes(stage) && stage !== 'resync') || pr.stage === 'translation')) return { stage, pr: prId(pr) };
+      const resumes = FRESH_STAGES.includes(stage) ? pr.stage === 'readyForMerge' : (!CHAIN.includes(stage) && stage !== 'resync') || pr.stage === 'translation';
+      if (rec?.status === 'running' && resumes) return { stage, pr: prId(pr) };
     }
   }
   return null;

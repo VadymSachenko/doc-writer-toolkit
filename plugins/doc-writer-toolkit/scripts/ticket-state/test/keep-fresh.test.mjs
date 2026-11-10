@@ -586,7 +586,8 @@ test('while CI runs on the runner\'s last merge, a base that moved again is not 
 
 test('finishMerge commits the merge and its conflicting files only, with no conflict marker left, diff3\'s included', async () => {
   const t = freshTicket();
-  t.forgePr.baseCommit = t.baseMoves({ [PAGE]: CONFLICTING });
+  // The base also brings another page cleanly, with a heading underlined by seven `=`: not a marker of the session's.
+  t.forgePr.baseCommit = t.baseMoves({ [PAGE]: CONFLICTING, 'docs/y/other.md': 'Інша\n=======\n\nАбзац.\n' });
   ensureWorktree(t.w.settings, read(t.w, '1501').prs[0]);
   const start = () => {
     const m = mergeBaseIn(t.wt, { base: 'main', branch: 'ticket-71', commit: false });
@@ -600,21 +601,21 @@ test('finishMerge commits the merge and its conflicting files only, with no conf
   // A stray edit staged with the resolution.
   let allowed = start();
   fs.writeFileSync(path.join(t.wt, PAGE), RESOLVED);
-  fs.writeFileSync(path.join(t.wt, 'docs/y/other.md'), '# Інша, змінена сесією\n');
-  git(t.wt, 'add', PAGE, 'docs/y/other.md');
-  assert.equal(finishMerge(t.wt, { head: t.h1, allowed }).error, 'staged beyond the merge and its conflicting files: docs/y/other.md');
+  fs.writeFileSync(path.join(t.wt, 'docs/y/third.md'), '# Третя, від сесії\n');
+  git(t.wt, 'add', PAGE, 'docs/y/third.md');
+  assert.equal(finishMerge(t.wt, { head: t.h1, allowed, files: [PAGE] }).error, 'staged beyond the merge and its conflicting files: docs/y/third.md');
   clean();
   // A diff3 marker left alone.
   allowed = start();
   fs.writeFileSync(path.join(t.wt, PAGE), RESOLVED.replace('Другий абзац.', '||||||| merged common ancestors\nДругий абзац.'));
   git(t.wt, 'add', PAGE);
-  assert.equal(finishMerge(t.wt, { head: t.h1, allowed }).error, 'a conflict marker is still in a staged file');
+  assert.equal(finishMerge(t.wt, { head: t.h1, allowed, files: [PAGE] }).error, 'a conflict marker is still in a staged file');
   clean();
   // The resolution alone: committed, a merge of the two.
   allowed = start();
   fs.writeFileSync(path.join(t.wt, PAGE), RESOLVED);
   git(t.wt, 'add', PAGE);
-  const f = finishMerge(t.wt, { head: t.h1, allowed });
+  const f = finishMerge(t.wt, { head: t.h1, allowed, files: [PAGE] });
   assert.deepEqual(git(t.wt, 'rev-list', '--parents', '-n', '1', f.merged).split(' ').slice(1), [t.h1, t.forgePr.baseCommit]);
 });
 
@@ -651,4 +652,36 @@ test('with keepFresh, the re-sync and a stale stage are told the PR\'s own pages
   assert.ok(briefFor(step, on.w.settings).includes(`run it again on the current head; the PR's own pages that changed: ${PAGE}. Read only them: \`git diff ${'a'.repeat(40)}..${'b'.repeat(40)} -- <those pages>\``));
   const off = freshTicket({ keepFresh: false });
   assert.ok(briefFor(step, off.w.settings).includes('run it again on the current head.'));
+});
+
+test('the CI grace holds for any new head: a person\'s commit on a ready PR waits for CI on it, then a gate the report shows', async () => {
+  const t = freshTicket();
+  t.clone.g('checkout', '-q', 'ticket-71');
+  const h2 = t.clone.commit({ [EN_PAGE]: '# Page\n\nFirst paragraph, changed again.\n\nSecond paragraph.\n\nThird paragraph.\n' }, 'EN wording');
+  t.clone.g('push', '-q', 'origin', 'ticket-71');
+  t.clone.g('checkout', '-q', 'main');
+  t.forgePr.headCommit = h2;
+  // No record at the new head: the grace counts from the forge's last update of the PR (the push). The old head's
+  // checks are no pass for it.
+  t.forgePr.updatedAt = new Date(NOW).toISOString();
+  t.forgePr.checks = green(t.h1);
+  let tk = await t.status();
+  assert.equal(tk.next, null);
+  assert.ok(tk.notes.includes(`guide-docs#71: no CI check has reported on ${h2.slice(0, 7)} yet: ready for merge once it passes`));
+  const st = await t.w.status({ git: makeGit(t.w.settings), now: NOW + CI_GRACE_MS + 1 });
+  tk = st.tickets.find((x) => x.key === '1501');
+  assert.match(tk.gate.why, new RegExp(`^no CI check has reported on ${h2.slice(0, 7)} in 10 min on guide-docs#71`));
+  assert.match(renderReport({ settings: t.w.settings, st, date: localDate(NOW) }), /\): not ready for merge yet: no CI check has reported on [0-9a-f]{7} in 10 min/);
+  t.forgePr.checks = green(h2);
+  tk = await t.status();
+  assert.deepEqual([tk.next.stage, tk.next.head], ['readyForMerge', h2]);
+});
+
+test('D-127: a merge of the base left running on a PR the owner moved back to the queue is not resumed', async () => {
+  const t = freshTicket({ stage: 'finalReview' });
+  t.forgePr.baseCommit = t.baseMoves({ 'docs/y/other.md': '# Інша, змінена\n' });
+  await runRecord({ settings: t.w.settings, clients: t.w.clients(), key: '1501', stage: 'baseMerge', status: 'running', pr: 'guide-docs#71', result: { merged: { base: t.forgePr.baseCommit, commit: 'd'.repeat(40) }, commits: ['d'.repeat(40)] }, now: NOW });
+  assert.equal((await t.status()).next, null);
+  assert.deepEqual((await t.run()).ran, []);
+  assert.equal(t.branchHead(), t.h1);
 });

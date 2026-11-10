@@ -319,7 +319,7 @@ export function mergeBaseIn(wt, { base, branch, commit = true }) {
 // staged diff, so no text conversion hides one). Otherwise the merge is aborted and the worktree goes back to `head`. A
 // session that committed is refused too: only the runner commits a base merge. Returns { merged } (not pushed) or
 // { error }.
-export function finishMerge(wt, { head, allowed = null }) {
+export function finishMerge(wt, { head, allowed = null, files = null }) {
   const back = (why) => {
     abortMerge(wt, head);
     return { error: why };
@@ -335,15 +335,17 @@ export function finishMerge(wt, { head, allowed = null }) {
     const stray = zPaths(wt, ['diff', '--cached', '--name-only', '--no-renames']).filter((f) => !ok.has(f));
     if (stray.length) return back(`staged beyond the merge and its conflicting files: ${stray.join(', ')}`);
   }
-  // `--check` exits non-zero when it finds something; whitespace the base brought is not the session's, so only its
-  // markers count.
+  // Only the conflicting files (`files`) are read for markers: a page the base brought in cleanly may hold a line of
+  // seven `=` of its own (a heading's underline). `--check` exits non-zero when it finds something; whitespace is not
+  // the session's, so only its markers count.
+  const only = files?.length ? ['--', ...files] : [];
   let check = '';
   try {
-    execFileSync('git', ['-C', wt, 'diff', '--cached', '--check', '--no-textconv', '--no-color'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
+    execFileSync('git', ['-C', wt, 'diff', '--cached', '--check', '--no-textconv', '--no-color', ...only], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
   } catch (e) {
     check = String(e?.stdout ?? '');
   }
-  const staged = tryRun(wt, ['diff', '--cached', '--no-color', '--no-ext-diff', '--no-textconv', '-U0']) ?? '';
+  const staged = tryRun(wt, ['diff', '--cached', '--no-color', '--no-ext-diff', '--no-textconv', '-U0', ...only]) ?? '';
   if (/leftover conflict marker/.test(check) || /^\+(<{7}|={7}|>{7}|\|{7})(\s|$)/m.test(staged)) return back('a conflict marker is still in a staged file');
   try {
     run(wt, ['commit', '-q', '--no-edit']);
