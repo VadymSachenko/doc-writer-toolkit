@@ -32,6 +32,7 @@ import { followLabels, labelSnapshot } from './pr-labels.mjs';
 import { idCommentText, syncIds } from './id-sync.mjs';
 import { followRounds, roundSnapshot } from './pr-rounds.mjs';
 import { pickMarks, settleMarks } from './reactions.mjs';
+import { PLACE_SOURCES } from './gates.mjs';
 import { withoutHeader } from '../../tracker/lib/comment-header.mjs';
 
 // The daily run (design §7): finish first, then triage the quiet intake cards (mornings, and the watcher's start pass
@@ -43,6 +44,9 @@ import { withoutHeader } from '../../tracker/lib/comment-header.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const PLUGIN_ROOT = path.resolve(HERE, '../../..');
 const SCRIPT = path.join(PLUGIN_ROOT, 'scripts', 'ticket-state', 'ticket-state.mjs');
+// The ticket stages a session may end by asking, its `questions` record its whole result: the plan and the write, and,
+// with the host's marker gate on (`checks.markers`, TASK-048), the gate before a PR that found a marker.
+export const askingStages = (settings) => ['plan', 'write', ...(settings.checks?.markers ? ['pr'] : [])];
 export const ROLE_HOOK = path.join(PLUGIN_ROOT, 'scripts', 'ticket-state', 'role-hook.mjs');
 export const ROLE_DIR = path.join(PLUGIN_ROOT, 'context', 'ticket-roles');
 // A git allow rule in the `git -C <worktree>` spelling, for each worktree the runner made for the step: the literal
@@ -394,6 +398,7 @@ export function briefFor(step, settings) {
     rounds && settings.triggerWords?.length && ['answerComments', 'styleCheck', 'enReview', 'pr'].includes(step.stage) ? `The owner addresses the pipeline with a comment that starts with ${settings.triggerWords.map((w) => `\`${w}:\``).join(' or ')}: a line comment that tells the owner how to ask for something says so with that word.` : null,
     step.stale ? `The UA pages changed after this stage last ran (${step.stale} file(s)): run it again on the current head.` : null,
     ...buildLines(step),
+    ...gateLines(step, settings),
     step.cards ? `Cards, highest priority first:\n${step.cards.map((c) => `- ${c.key}: ${c.url ?? c.shortLink} (${c.priority})`).join('\n')}` : null,
     step.worktrees?.length ? worktreeLines(step.worktrees) : null,
     step.codeTrees?.length ? codeLines(step.codeTrees) : null,
@@ -413,6 +418,21 @@ export function briefFor(step, settings) {
   ]
     .filter((x) => x !== null)
     .join('\n');
+}
+
+// What the brief says about the host's questions-first gates (`checks`, lib/gates.mjs), each only while it is on: with
+// none on, the brief reads as before. The records they refuse, and how each is met.
+export function gateLines(step, settings) {
+  const c = settings.checks ?? {};
+  const out = [];
+  if (c.questionSources && step.role === 'writer' && ['plan', 'write', 'pr', 'videoGate', 'answerComments'].includes(step.stage)) {
+    out.push('A question is asked only once every source was checked (the ticket, its comments, attachments and linked cards, the existing pages, the code, the app, test API calls), all of them in one comment on the card with no one tagged. Each question\'s comment names its sources\' refs, or the question itself as recorded. The `questions` record gives each question its `sources` (`[{ "kind", "ref", "result" }]`, every one checked, with what it gave) and its `commentId`, a comment posted in this session: `record` refuses a question with no source or with a comment the card lacks, or one older than the ticket\'s last record. A fit-check stop is such a record too, with `sources` and `commentId`. An admin change the work needs (adding or editing something in an admin) is asked in the same comment, recorded with `"kind": "admin"` and its `"reason"` instead of sources.');
+    if (step.stage === 'videoGate') out.push('A video question names its source: `{ "kind": "video", "ref": "<the file, or the link>", "result": "<the script\'s message, or a link only, no file>" }`.');
+  }
+  if (c.markers && step.stage === 'write') out.push('An unknown left after every source is a question, not a marker: ask it on the card (stage `questions`, the card to Blocked) instead of writing a `NEEDS CONFIRMATION` or `ToDo` marker. A marker the page already had stays.');
+  if (c.markers && step.stage === 'pr') out.push('The gate before the PR: no `NEEDS CONFIRMATION` or `ToDo` marker the branch added to its UA pages (`git -C <worktree> diff` against the merge base with `origin/<base>`; a marker the page already had stays). One left is a question: settle it from a source and push, or ask it on the card (stage `questions`, at ticket level, the card to Blocked), open no PR, and record only `questions`; the answers bring the write back. `record pr` refuses a PR whose UA pages gained a marker.');
+  if (c.places && step.stage === 'pr') out.push(`Each place gives \`repo\`, \`pr\` (one of this record's PRs), \`page\`, \`claim\`, \`source\` (one of ${PLACE_SOURCES.map((k) => `\`${k}\``).join(', ')}) and \`why\` (why it isn't confirmed, in words), and a place on a changed line its \`commentId\`. ${settings.reviewRounds ? 'The runner writes the places in the description from the record.' : "The description lists each place with the link to its line comment (`#discussion_r<id>`), or, for one on an unchanged line, its `why`."} \`record pr\` refuses a place that lacks one.`);
+  return out;
 }
 
 // What the brief says about the site's build. A PR's chain builds the site once, at its `build` stage, which the runner
@@ -2013,7 +2033,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
           return null;
         }
       })() : l.stages?.[step.stage];
-      const asked = !step.pr && ['plan', 'write'].includes(step.stage) ? l?.stages?.questions : null;
+      const asked = !step.pr && askingStages(settings).includes(step.stage) ? l?.stages?.questions : null;
       return !(rec && rec.status !== 'running' && rec.seq > before) && !(asked && asked.seq > before);
     });
   }
@@ -2036,10 +2056,10 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         if (!busy) await runRecord({ settings, clients, key: k, stage: step.stage, status: 'failed', pr: step.pr, note: 'the session ended without recording the stage', now: clock() }).catch(() => {});
         ok = false;
       } else if (!rec || rec.status !== 'done' || rec.seq <= (seqBefore.get(k) ?? 0)) {
-        // A plan or a write may end by asking: the `questions` record is then the session's whole result, not a failure.
-        // A session that also recorded the stage, even as failed, ended on that record.
+        // A plan or a write (and a PR's marker gate, `askingStages`) may end by asking: the `questions` record is then the
+        // session's whole result, not a failure. A session that also recorded the stage, even as failed, ended on that record.
         const before = seqBefore.get(k) ?? 0;
-        const asked = !step.pr && ['plan', 'write'].includes(step.stage) && (!rec || rec.seq <= before) ? l?.stages?.questions : null;
+        const asked = !step.pr && askingStages(settings).includes(step.stage) && (!rec || rec.seq <= before) ? l?.stages?.questions : null;
         if (asked?.status !== 'done' || asked.seq <= before) ok = false;
       }
     }

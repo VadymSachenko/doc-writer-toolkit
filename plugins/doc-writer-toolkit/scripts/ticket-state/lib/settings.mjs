@@ -7,6 +7,7 @@ import { CliError } from './errors.mjs';
 import { DEFAULT_KEEP } from './cleanup.mjs';
 import { validateJobs } from './jobs.mjs';
 import { DEFAULT_LABELS } from './pr-description.mjs';
+import { CHECKS } from './gates.mjs';
 
 // The ticket flow settings: the shared file the host commits (`.claude/ticket-flow.json`, or the `Ticket flow
 // settings:` field of CLAUDE.md, or --settings), read at HEAD (`trustedShared`), and the owner's local file next to it
@@ -14,13 +15,18 @@ import { DEFAULT_LABELS } from './pr-description.mjs';
 // The tracker and forge scripts read the same files, as they stand and with no such limit.
 //
 // The shared file holds `state`, `workFolder`, `commentHeader`, `tracker`, `forge`, `targets`, `noReviewLabel`, `appRepos`, `hostRules`, `hostJobs`,
-// `build`, and each role's tool rules (`roles.<role>.allowedTools`, `disallowedTools`).
+// `build`, `checks`, and each role's tool rules (`roles.<role>.allowedTools`, `disallowedTools`).
 // The local file holds `mode`, `limits`, `schedule`, `roles` (no tool rules), `modelLadder`, `video`, `cleanup` and `progress`. Defaults below.
 
 export const MODES = ['off', 'observe', 'on'];
 export const ROLES = ['triage', 'writer', 'reviewer', 'translator'];
 export const SIZES = ['edit', 'newPage', 'newSection'];
 export const START_ORDERS = ['priority', 'easiest'];
+
+// The questions-first gates (lib/gates.mjs), each `true` to refuse a record that fails it. Off by default: records made
+// before them (a question with no sources, a place with no page) would be refused. Read only from the shared file, so a
+// session can't switch its own gate off.
+export const CHECK_DEFAULTS = Object.fromEntries(CHECKS.map((k) => [k, false]));
 
 // The comment on a PR entering the expert's review has no default: it is written to the team, in its language, so a host
 // that sets none gets no comment and no text to send.
@@ -315,6 +321,14 @@ export function validateSettings(merged, { root, stateRootDefault }) {
 
   const build = validateBuild(merged.build);
 
+  const rawChecks = merged.checks ?? {};
+  if (!isObject(rawChecks)) fail(`checks must be { ${CHECKS.map((k) => `"${k}": true|false`).join(', ')} }`);
+  for (const [k, v] of Object.entries(rawChecks)) {
+    if (!CHECKS.includes(k)) fail(`checks.${k} is not a check (${CHECKS.join(', ')})`);
+    if (typeof v !== 'boolean') fail(`checks.${k} must be true or false`);
+  }
+  const checks = { ...CHECK_DEFAULTS, ...rawChecks };
+
   const stateRel = typeof merged.state === 'string' && merged.state.trim() ? merged.state : stateRootDefault;
   return {
     root,
@@ -339,6 +353,7 @@ export function validateSettings(merged, { root, stateRootDefault }) {
     hostJobs: validateJobs(merged.hostJobs ?? [], root),
     styleCheck,
     build,
+    checks,
     limits,
     schedule,
     roles,
