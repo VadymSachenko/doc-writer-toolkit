@@ -389,7 +389,7 @@ export function createGithubAdapter(gh, { owner, pageSize = PAGE }) {
       }
       const idOf = (name) => {
         const id = ids.get(name.trim().toLowerCase());
-        if (!id) throw new Refusal('unknown', `the repository ${repo} has no label '${name}'; the module creates only the ready label`, { label: name });
+        if (!id) throw new Refusal('unknown', `the repository ${repo} has no label '${name}'; the module creates only the ready and translated labels`, { label: name });
         return id;
       };
       const addIds = add.map(idOf);

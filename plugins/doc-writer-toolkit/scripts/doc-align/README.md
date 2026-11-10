@@ -172,6 +172,15 @@ Exit codes are as above: `0` it ran (proposals or not), `2` bad usage (`--root` 
 
 `isIdOnlyChange(page, changeSet)` is the id-only change of `heading-anchors.md` ("Id-only changes"), the one implementation the scripts share (`section-state` uses it). `page` and every entry of `changeSet` are `{ path, before, after }`; a link to another page counts when its path (a relative `.md`/`.mdx` path, or a site-root route or file path matched against the end of a page path) reaches a page of `changeSet` whose heading got that id. It compares line by line; a difference in code or in the frontmatter is a real change. `--write` above produces exactly such a change.
 
+## The heading-id helpers (`lib/ids.mjs`)
+
+What the ticket flow's runner uses, with no model, after a person's edit of an EN heading on a translated PR (`scripts/ticket-state/README.md`, "The translated label"). No CLI flag reaches them.
+
+- `headingIdMismatches(ua, en)`: from two parsed pages, the headings whose ids differ, the same comparison as `HEADING-ID-MISMATCH` (Check 2, which uses it): `{ index, level, uaLine, uaHeading, uaId, enLine, enHeading, enId, explicit }`. Null when the heading counts differ.
+- `renameIds(uaText, enText, { uaPath, enPath, locales, roots, renames, write })`: each `{ from, to }` of `renames` turns the UA heading's `{/* #from */}` into `{/* #to */}`, on the UA page and on each further locale's page of it (`locales`: `[{ path, text }]`, which carry the comment verbatim, rule 7), and rewrites every link to `#from` that reaches the page, found as `--propose-ids` finds them (the locale pages count as the page itself for a bare fragment). A rename to an id that is not kebab-case, or that another UA heading has, or from an id no heading has, is in `skipped`. Returns `{ renamed: [{ from, to, line, locales }], links, unresolved, skipped, written }`. No word changes and no line is added or removed. A changed id is no id-only change (`heading-anchors.md`): the caller keeps such commits apart.
+- `withExplicitId(line, id)`: an EN heading line with `\{#id}` at its end, in place of an explicit id it had (rule 6).
+- `linksTo(...)`: the link search itself, shared by `--propose-ids` and `renameIds`.
+
 ## How the skill uses it
 
 `doc-translator` runs `--propose-ids --write` after it saves the EN page, so every UA heading gets its id from the EN anchor, with the links rewritten in the same change. `doc-alignment-checker` runs it as Step 1.5, after both files are loaded. It reads the JSON, treats each finding as a candidate (a difference may be intended), and supplies Checks 1, 2, 3, 6, 7 and 8 from it, the code-block part of Check 9, and the table part of Check 12 when the host's product kit has a names table. It still runs its semantic checks itself. When the script can't run, the skill counts by hand as each Check describes and says so in its report.
