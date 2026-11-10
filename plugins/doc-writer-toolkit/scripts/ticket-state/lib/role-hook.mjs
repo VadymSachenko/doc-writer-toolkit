@@ -46,6 +46,19 @@ function subcommandOf(words, booleans) {
   }
   return null;
 }
+// Records that are the runner's alone: the translated label coming off (`untranslated`) and its own heading-id commits
+// (`idSync`, which keeps commits apart from the UA changes the rule reads). A role that recorded one could hide a UA edit.
+export const RUNNER_STAGES = { 'ticket-state/ticket-state.mjs': ['idSync', 'untranslated'] };
+function runnerStage(rel, words) {
+  const denied = RUNNER_STAGES[rel];
+  if (!denied) return null;
+  for (let i = 0; i < words.length; i++) {
+    const v = words[i].value;
+    const stage = v === '--stage' ? words[i + 1]?.value : v.startsWith('--stage=') ? v.slice('--stage='.length) : null;
+    if (stage !== null && stage !== undefined && denied.includes(stage)) return stage;
+  }
+  return null;
+}
 const PLAYWRIGHT_FLAGS = ['--config', '-c', '--output', '-o', '--ui', '--ui-host', '--ui-port'];
 const DOCUSAURUS_RUNS = new Set(['build', 'write-translations', 'write-heading-ids', 'clear']);
 const DOCUSAURUS_FLAGS = ['--config', '--out-dir', '-o', '--bundle-analyzer'];
@@ -136,6 +149,8 @@ function checkNode(words, cfg, cwd) {
       const cmds = SCRIPT_COMMANDS[rel];
       const own = cmds ? subcommandOf(words.slice(2), cmds.booleans) : null;
       if (own && cmds.denied.includes(own.value)) return `${rel} ${own.value} (the runner's alone)`;
+      const stage = runnerStage(rel, words.slice(2));
+      if (stage) return `${rel} record --stage ${stage} (the runner's alone)`;
       const flags = SCRIPT_FLAGS[rel] ?? [];
       const bad = words.slice(2).find((w) => flags.some((f) => flagIs(w.value, f)));
       if (bad) return `${rel} ${bad.value.split('=')[0]} (it runs code)`;

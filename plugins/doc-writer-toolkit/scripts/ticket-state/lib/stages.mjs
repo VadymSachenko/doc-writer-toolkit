@@ -9,9 +9,10 @@ export const TICKET_STAGES = ['triage', 'start', 'plan', 'questions', 'planGate'
 export const CHAIN = ['translate', 'enReview', 'locales', 'align', 'labelSync', 'build', 'visualPack'];
 
 // PR-level stages: a record names the PR with --pr.
+// `untranslated` and `idSync` are the runner's own, with the translated label only (`forge.translatedLabel`).
 // `baseMerge` and `baseFix` keep a PR up to date with its base (`forge.keepFresh`): the runner's merge of the base into
 // the branch, and the session that resolves a merge that conflicted.
-export const PR_STAGES = ['move', 'follow', 'answerComments', 'styleCheck', 'questions', 'answers', ...CHAIN, 'readyForMerge', 'resync', 'baseMerge', 'baseFix'];
+export const PR_STAGES = ['move', 'follow', 'answerComments', 'styleCheck', 'questions', 'answers', ...CHAIN, 'readyForMerge', 'resync', 'untranslated', 'idSync', 'baseMerge', 'baseFix'];
 
 export const STATUSES = ['running', 'done', 'failed'];
 
@@ -46,6 +47,8 @@ export const ROLE_OF = {
   visualPack: 'reviewer',
   readyForMerge: null,
   resync: 'translator',
+  untranslated: null,
+  idSync: null,
   // The runner's own, like the build: `git merge` of the base in the PR's worktree, and the push.
   baseMerge: null,
   // The writer, or the translator when every conflicting file is outside the UA roots (lib/rule.mjs).
@@ -94,7 +97,7 @@ export const WAITING = ['questions', 'planGate', 'videoGate', 'ownerBlock', 'rew
 // The order a scheduled run finishes work in: merged first, writing last (design §7). Lower runs first.
 export function finishRank(step) {
   if (step.stage === 'close') return 0;
-  if (['readyForMerge', 'resync', 'baseMerge', 'baseFix'].includes(step.stage)) return 1;
+  if (['readyForMerge', 'resync', 'untranslated', 'idSync', 'baseMerge', 'baseFix'].includes(step.stage)) return 1;
   if (CHAIN.includes(step.stage) || (['move', 'follow'].includes(step.stage) && ['finalReview', 'translation'].includes(step.to))) return 2;
   if (step.stage === 'answerComments' || step.stage === 'styleCheck' || (step.stage === 'move' && step.to === 'smeReview') || step.stage === 'follow' || step.stage === 'move') return 3;
   if (['answers', 'planApproval', 'videoImport', 'videoTry', 'videoBlock'].includes(step.stage)) return 4;

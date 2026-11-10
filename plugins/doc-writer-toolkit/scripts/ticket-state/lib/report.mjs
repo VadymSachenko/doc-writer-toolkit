@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import { notReadyYet, prId, readAllLedgers } from './ledger.mjs';
 import { readFeed } from './feed.mjs';
 import { reviewCommentFor } from './experts.mjs';
-import { duration as spell } from './progress.mjs';
+import { duration as spell, mergedUntranslated } from './progress.mjs';
 
 // The morning report (design §7): a local file `<state>/reports/<date>.md`, written with no model call. Nothing goes to
 // the tracker or the forge. A separate skill reads it on demand.
@@ -75,7 +75,7 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
   // With `limits.open`, the tickets that hold its slots, by name.
   const open = typeof st.wip.limits.open === 'number' ? `, open ${st.wip.open} of ${st.wip.limits.open}${st.wip.openKeys?.length ? ` (${st.wip.openKeys.join(', ')})` : ''}` : '';
   out.push(`Mode \`${st.mode}\`. In progress ${st.wip.inProgress} of ${st.wip.limits.inProgress}, waiting ${st.wip.waiting} of ${st.wip.limits.waiting}${open}${st.wip.manual ? `, ${st.wip.manual} started by hand (not counted)` : ''}.`);
-  out.push(a ? `Allowance: day ${a.day} of the week window, ${a.used}% of the week used of ${a.cap}% allowed by now, ${a.remaining}% left today; finishing the tickets in work needs about ${a.inWork}%${a.inWorkUnknown?.length ? ` plus ${a.inWorkUnknown.length} ticket(s) with no estimate yet` : ''}.` : 'Allowance: no usage reading.');
+  out.push(a?.unlimited ? 'Usage guard off (`limits.usageGuard`): no allowance is read or kept.' : a ? `Allowance: day ${a.day} of the week window, ${a.used}% of the week used of ${a.cap}% allowed by now, ${a.remaining}% left today; finishing the tickets in work needs about ${a.inWork}%${a.inWorkUnknown?.length ? ` plus ${a.inWorkUnknown.length} ticket(s) with no estimate yet` : ''}.` : 'Allowance: no usage reading.');
   out.push('');
 
   const waitingOwner = st.tickets.filter((t) => t.held || ['questions', 'planGate', 'ownerBlock', 'paused', 'reworkWait', 'finalReview'].includes(t.state));
@@ -141,6 +141,9 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
   }
   out.push('## Videos waiting for transcripts', '', list(videos), '');
   out.push('## Ready for merge', '', list(ready), '');
+  // With the translated label: a PR merged without it today (the close record keeps whether it had it), whose
+  // translations may be behind its base.
+  if (settings.forge.translatedLabel) out.push(`## Merged without «${settings.forge.translatedLabel}»`, '', list(mergedUntranslated(ledgers, (iso) => Boolean(iso) && Number.isFinite(Date.parse(iso)) && localDate(Date.parse(iso)) === date).map((x) => `${x.url ? `[${x.id}](${x.url})` : x.id} (${x.key}): merged without the label: its translations may be behind ${x.base}`)), '');
 
   // With `forge.keepFresh`: today's merges of the base into the PRs' branches and their conflicts (the run log), and the
   // open PRs still behind their base.

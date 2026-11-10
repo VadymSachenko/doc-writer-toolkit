@@ -7,10 +7,10 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { compare } from '../lib/compare.mjs';
-import { cellCount } from '../lib/parse.mjs';
+import { cellCount, parse } from '../lib/parse.mjs';
 import { createSlugger, enHeadingIds, headingText, slugify, uaHeadingId } from '../lib/headings.mjs';
 import { findNames, looseKey, mergeRows, parseNamesTable, searchable } from '../lib/names.mjs';
-import { proposeIds } from '../lib/ids.mjs';
+import { headingIdMismatches, proposeIds, renameIds, withExplicitId } from '../lib/ids.mjs';
 import { isIdOnlyChange } from '../lib/idonly.mjs';
 import { codeDiff, fenceBlock, fenceParts } from '../lib/fences.mjs';
 
@@ -977,3 +977,69 @@ test('explicit ids: the texts that tell how to write one show the escaped form',
   }
   assert.ok(escaped >= 8, 'the escaped form is the one the texts show');
 });
+
+// ------------------------------------------------------------------ renaming ids (the ticket flow's id step)
+
+const RN_UA = '# Сторінка\n\n## Нові поля {/* #new-fields */}\n\nДив. [поля](#new-fields).\n\n## Статуси {/* #statuses */}\n';
+const RN_EN = '# Page\n\n## Added fields\n\nSee [fields](#new-fields).\n\n## Statuses\n';
+const RN_DE = '# Seite\n\n## Neue Felder {/* #new-fields */}\n\nSiehe [Felder](#new-fields).\n\n## Status {/* #statuses */}\n';
+
+test('headingIdMismatches: the UA and EN headings whose ids differ, with both lines; none when the counts differ', () => {
+  assert.deepEqual(headingIdMismatches(parse(RN_UA), parse(RN_EN)).map((x) => [x.index, x.uaLine, x.uaId, x.enLine, x.enId, x.explicit]), [[1, 3, 'new-fields', 3, 'added-fields', false]]);
+  assert.deepEqual(headingIdMismatches(parse(RN_UA), parse(RN_EN.replace('## Added fields', '## Added fields \\{#new-fields}'))), []);
+  assert.equal(headingIdMismatches(parse(RN_UA), parse('# Page\n')), null);
+});
+
+test('withExplicitId: the EN heading gets `\\{#id}` at its end, in place of another explicit id; no word changes', () => {
+  assert.equal(withExplicitId('## Added fields', 'new-fields'), '## Added fields \\{#new-fields}');
+  assert.equal(withExplicitId('## Added fields {#added}  \r', 'new-fields'), '## Added fields \\{#new-fields}\r');
+});
+
+test('renameIds: the UA comment, the same comment on every further locale page, and every link to the old id; no word changes', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'doc-align-rename-'));
+  const put = async (rel, text) => {
+    await fs.mkdir(path.dirname(path.join(dir, rel)), { recursive: true });
+    await fs.writeFile(path.join(dir, rel), text);
+    return path.join(dir, rel);
+  };
+  const ua = await put('docs/x/page.md', RN_UA);
+  const en = await put('i18n/en/current/x/page.md', RN_EN);
+  const de = await put('i18n/de/current/x/page.md', RN_DE);
+  const other = await put('docs/y/other.md', '# Інша\n\n[a](/x/page#new-fields) [b](/x/page#statuses) [c](/y/other#new-fields)\n');
+  const roots = [{ dir: path.join(dir, 'docs'), prefix: '/' }, { dir: path.join(dir, 'i18n/en/current'), prefix: '/' }, { dir: path.join(dir, 'i18n/de/current'), prefix: '/' }];
+  const r = await renameIds(RN_UA, RN_EN, { uaPath: ua, enPath: en, locales: [{ path: de, text: RN_DE }], roots, renames: [{ from: 'new-fields', to: 'added-fields' }, { from: 'gone', to: 'x' }, { from: 'statuses', to: 'Bad Id' }], write: true });
+  assert.deepEqual(r.renamed.map((x) => [x.from, x.to, x.line, x.locales.map((l) => l.line)]), [['new-fields', 'added-fields', 3, [3]]]);
+  assert.deepEqual(r.skipped.map((x) => x.from), ['gone', 'statuses']);
+  assert.equal(await fs.readFile(ua, 'utf8'), RN_UA.replaceAll('new-fields', 'added-fields'));
+  assert.equal(await fs.readFile(de, 'utf8'), RN_DE.replaceAll('new-fields', 'added-fields'), 'the locale carries the comment verbatim, and its own link');
+  assert.equal(await fs.readFile(en, 'utf8'), RN_EN.replace('#new-fields', '#added-fields'), 'EN: only the link it copied from UA');
+  assert.equal(await fs.readFile(other, 'utf8'), '# Інша\n\n[a](/x/page#added-fields) [b](/x/page#statuses) [c](/y/other#new-fields)\n', 'a link to another page keeps its fragment');
+  assert.deepEqual(r.written.length, 4);
+});
+
+test('renameIds: a chain of renames is made whole, the targets checked against the ids once every rename is made', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'doc-align-chain-'));
+  const put = async (rel, text) => {
+    await fs.mkdir(path.dirname(path.join(dir, rel)), { recursive: true });
+    await fs.writeFile(path.join(dir, rel), text);
+    return path.join(dir, rel);
+  };
+  const UA = '# Сторінка\n\n## Приклад {/* #example */}\n\nТекст.\n\n## Приклад {/* #example-1 */}\n\nДив. [перший](#example) і [другий](#example-1).\n\n## Інше {/* #other */}\n';
+  const EN = '# Page\n\n## Sample\n\nText.\n\n## Example\n\nSee [first](#example) and [second](#example-1).\n\n## Other\n';
+  const ua = await put('docs/x/page.md', UA);
+  const en = await put('i18n/en/current/x/page.md', EN);
+  const roots = [{ dir: path.join(dir, 'docs'), prefix: '/' }, { dir: path.join(dir, 'i18n/en/current'), prefix: '/' }];
+  const r = await renameIds(UA, EN, { uaPath: ua, enPath: en, roots, renames: [{ from: 'example', to: 'sample' }, { from: 'example-1', to: 'example' }], write: true });
+  assert.deepEqual(r.skipped, []);
+  assert.deepEqual(r.renamed.map((x) => [x.from, x.to]), [['example', 'sample'], ['example-1', 'example']]);
+  assert.equal(await fs.readFile(ua, 'utf8'), UA.replace('{/* #example */}', '{/* #sample */}').replace('{/* #example-1 */}', '{/* #example */}').replace('(#example) і [другий](#example-1)', '(#sample) і [другий](#example)'));
+  assert.equal(await fs.readFile(en, 'utf8'), EN.replace('(#example) and [second](#example-1)', '(#sample) and [second](#example)'));
+  // A target a heading keeps: skipped. One that two renames take: both skipped.
+  const kept = await renameIds(UA, EN, { uaPath: ua, enPath: en, renames: [{ from: 'example', to: 'other' }] });
+  assert.deepEqual(kept.skipped.map((x) => [x.from, x.to]), [['example', 'other']]);
+  assert.deepEqual(kept.renamed, []);
+  const twins = await renameIds(UA, EN, { uaPath: ua, enPath: en, renames: [{ from: 'example', to: 'twin' }, { from: 'example-1', to: 'twin' }] });
+  assert.deepEqual(twins.skipped.map((x) => [x.from, x.to]), [['example', 'twin'], ['example-1', 'twin']]);
+  assert.deepEqual(twins.renamed, []);
+});
+

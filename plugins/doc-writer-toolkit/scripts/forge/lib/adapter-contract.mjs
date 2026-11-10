@@ -35,6 +35,11 @@
 //   events({repo, since})                 -> { events: [Event], truncated }, newest first, only PRs
 //   diffLines({repo, number})             -> [{ path, lines: [numbers]|null }]; the new-side lines the diff shows,
 //                                            null when the forge gave no diff text for the file
+//   reactions({repo, number, kind, id})   -> { subject, number, reactions: [{ mark, login }] }; the reactions on one
+//                                            comment (`kind` 'comment'), line comment ('review-comment') or review
+//                                            ('review'), by its numeric id: `subject` what `react` takes, `number` the
+//                                            PR it is on, and only the reactions that stand for a mark (`MARKS` in
+//                                            lib/forge.mjs: 'seen', 'applied', 'asked'), each with who put it
 // Writes (each goes through the client's one `write`, which `--dry-run` stops)
 //   createPr({repo, head, base, title, body, draft})  -> { number, url, id, nodeId }
 //   updatePr({repo, number, title?, body?})
@@ -48,18 +53,20 @@
 //        one request; a name the repository doesn't have is a Refusal('unknown', …, { label }): it is not created here.
 //   createLabel({repo, name})
 //        a label on the repository; one already there (in any case) is no error. The module calls it only for the
-//        settings' `readyLabel`.
+//        settings' `readyLabel` and `translatedLabel`.
 //   resolveThread({repo, thread})                 settles one review thread (`thread`: a Thread's `id`). The module
 //        calls it only for a thread whose first comment the pipeline posted.
 //   deleteComment({repo, id})                     removes one conversation comment. The module calls it only for a
 //        comment of the pipeline's own (posted by it, from `self`, with the comment header).
+//   react({repo, subject, add: [marks], remove: [marks]})   one request: the caller's own reaction for each mark of
+//        `add` put on `subject`, and the caller's own for each of `remove` taken off. It can take off no one else's.
 //
 // An adapter has no operation that withdraws a review, gives a verdict, joins the branch into its base, closes a PR or
 // removes a branch, and none that a caller could add: those rules are held by what the interface does not contain.
 // It settles a thread and removes a conversation comment only as the module asks, under the module's checks.
 
-export const READS = ['pr', 'prByHead', 'openPrByHead', 'changedPrs', 'reviews', 'threads', 'issueComments', 'reviewComments', 'reviewComment', 'issueComment', 'events', 'diffLines'];
-export const WRITES = ['createPr', 'updatePr', 'addAssignees', 'requestReviewers', 'createReview', 'reply', 'comment', 'changeLabels', 'createLabel', 'resolveThread', 'deleteComment'];
+export const READS = ['pr', 'prByHead', 'openPrByHead', 'changedPrs', 'reviews', 'threads', 'issueComments', 'reviewComments', 'reviewComment', 'issueComment', 'events', 'diffLines', 'reactions'];
+export const WRITES = ['createPr', 'updatePr', 'addAssignees', 'requestReviewers', 'createReview', 'reply', 'comment', 'changeLabels', 'createLabel', 'resolveThread', 'deleteComment', 'react'];
 
 export function assertAdapter(adapter) {
   const missing = [...READS, ...WRITES].filter((m) => typeof adapter?.[m] !== 'function');

@@ -8,10 +8,11 @@ import { withHeader, withoutHeader } from '../../tracker/lib/comment-header.mjs'
 //
 // The rules held here, whatever the adapter:
 //   - it works only on the repositories the settings' targets name, and asks only the logins the settings name;
-//   - it adds only labels the settings name (the targets' stage labels, `checkLabel`, `expertLabel` and `readyLabel`)
-//     and removes only the stage labels, `checkLabel` and `readyLabel`, so a label the settings don't name (the owner's
+//   - it adds only labels the settings name (the targets' stage labels, `checkLabel`, `expertLabel`, `readyLabel` and
+//     `translatedLabel`) and removes only the stage labels, `checkLabel`, `readyLabel` and `translatedLabel`, so a label
+//     the settings don't name (the owner's
 //     merge label) can't be set and `expertLabel` is never removed;
-//   - it creates no label, but `readyLabel` on a repository that lacks it;
+//   - it creates no label, but `readyLabel` and `translatedLabel` on a repository that lacks them;
 //   - a review on lines only comments, and a line outside the PR's diff is refused before anything is sent (or, asked,
 //     its text goes into the review's own text);
 //   - the texts it is given are sent exactly, but for the settings' `commentHeader` in front of every comment, line
@@ -21,12 +22,21 @@ import { withHeader, withoutHeader } from '../../tracker/lib/comment-header.mjs'
 //     close a PR or delete a branch. Two touch what was posted, each only on the pipeline's own: `resolveThread`
 //     settles a thread whose first comment the caller posted (its id among the caller's own), and `deleteComment`
 //     removes a conversation comment the caller posted, written from `self` and starting with the comment header. A
-//     person's thread or comment is refused, and a submitted review can't be removed at all.
+//     person's thread or comment is refused, and a submitted review can't be removed at all;
+//   - `markComment` puts the pipeline's status mark (a reaction) on a comment, a line comment or a review and takes off
+//     only `self`'s reactions of the other marks: never a person's, and nothing but the marks in `MARKS`.
 
 export const OPERATIONS = [
   'openPr', 'editPr', 'prState', 'changedPrsSince', 'prActivity', 'eventsSince', 'requestReviewers',
   'reviewOnLines', 'reply', 'suggest', 'comment', 'addLabel', 'removeLabel', 'setStageLabel', 'resolveThread', 'deleteComment',
+  'markComment',
 ];
+
+// The status marks the ticket flow puts on a comment it took (its reactions): picked up, applied, asked back or not
+// done. The adapter says which reaction stands for each on its forge.
+export const MARKS = ['seen', 'applied', 'asked'];
+// What a mark goes on: a conversation comment, a line comment, a submitted review.
+export const MARKED_KINDS = ['comment', 'review-comment', 'review'];
 
 // What the event feed reads by default (`eventsSince`): the events that move a ticket.
 export const FEED_EVENTS = ['review_requested', 'review_request_removed', 'labeled', 'unlabeled', 'merged', 'closed', 'reopened'];
@@ -163,9 +173,10 @@ export function createForge({ adapter, forge, dryRun = false }) {
       const assignees = who ? loginsOf([who], 'assignee') : [];
       const asked = loginsOf(reviewers, 'reviewer');
       const wanted = labelsToAdd(labels);
-      // The check and ready labels follow the ticket flow's records (its runner adds and removes them), never a PR's opening.
-      const runners = wanted.filter((l) => [forge.checkLabel, forge.readyLabel].some((x) => x && same(x, l)));
-      if (runners.length) throw new Refusal('notNamed', `open-pr does not set ${runners.map((l) => `'${l}'`).join(', ')}: the check and ready labels are added on their own (add-label)`, { labels: runners });
+      // The check, ready and translated labels follow the ticket flow's records (its runner adds and removes them), never
+      // a PR's opening.
+      const runners = wanted.filter((l) => [forge.checkLabel, forge.readyLabel, forge.translatedLabel].some((x) => x && same(x, l)));
+      if (runners.length) throw new Refusal('notNamed', `open-pr does not set ${runners.map((l) => `'${l}'`).join(', ')}: the check, ready and translated labels are added on their own (add-label)`, { labels: runners });
       const existing = await adapter.openPrByHead({ repo, head: branch });
       if (existing) {
         return { repo, created: false, ...brief(existing), reason: 'an open PR for this head already exists', posted: [] };
@@ -410,8 +421,8 @@ export function createForge({ adapter, forge, dryRun = false }) {
       return { repo, number: n, commented: true, id: made.id, posted: [{ kind: 'comment', id: made.id }] };
     },
 
-    // The ready label is created on a repository that lacks it, then added; any other label the repository lacks is
-    // refused, as before.
+    // The ready and translated labels are created on a repository that lacks them, then added; any other label the
+    // repository lacks is refused, as before.
     async addLabel({ repo: repoIn, number, label }) {
       const repo = repoOf(repoIn);
       const n = needNumber(number);
@@ -421,7 +432,8 @@ export function createForge({ adapter, forge, dryRun = false }) {
       try {
         r = await swapLabels(repo, n, [name], []);
       } catch (e) {
-        if (!(e instanceof Refusal && e.refused === 'unknown' && forge.readyLabel && same(name, forge.readyLabel) && same(e.data?.label, name))) throw e;
+        const made = [forge.readyLabel, forge.translatedLabel].some((x) => x && same(name, x));
+        if (!(e instanceof Refusal && e.refused === 'unknown' && made && same(e.data?.label, name))) throw e;
         await adapter.createLabel({ repo, name });
         created = true;
         // A dry run created nothing, so the repository still lacks it: the add it would make is reported.
@@ -491,6 +503,27 @@ export function createForge({ adapter, forge, dryRun = false }) {
       if (!ownedText(found)) throw new Refusal('notOwn', `comment ${id} was not written from ${forge.self} with the comment header: it is a person's`, { comment: id, author: found.author ?? null });
       await adapter.deleteComment({ repo, id });
       return { repo, number: n, comment: id, deleted: true, posted: [] };
+    },
+
+    // The pipeline's mark on one comment, line comment or review of the PR: `self`'s reaction for `mark` put on it (one
+    // there already is no change), and `self`'s reactions for the other marks taken off. Reactions of anyone else, and
+    // `self`'s that stand for no mark, stay. Needs `self` in the settings: without it the pipeline's reactions can't be
+    // told from a person's. The ticket flow's runner calls it; the CLI has no command for it.
+    async markComment({ repo: repoIn, number, kind, id: idIn, mark }) {
+      const repo = repoOf(repoIn);
+      const n = needNumber(number);
+      if (!MARKED_KINDS.includes(kind)) throw new Refusal('unknown', `'${kind}' is not what a mark goes on. Known: ${MARKED_KINDS.join(', ')}.`, { kind: kind ?? null });
+      const id = needId(idIn, `a ${kind} id`);
+      if (!MARKS.includes(mark)) throw new Refusal('unknown', `'${mark}' is not a mark. Known: ${MARKS.join(', ')}.`, { mark: mark ?? null });
+      if (!forge.self) throw new Refusal('notOwn', "marking a comment needs forge.self in the settings: without it the pipeline's reactions can't be told from a person's", { comment: id });
+      const found = await adapter.reactions({ repo, number: n, kind, id });
+      if (found.number !== n) throw new Refusal('unknown', `${kind} ${id} is on #${found.number}, not #${n}`, { comment: id, number: found.number });
+      const low = (x) => String(x ?? '').toLowerCase();
+      const mine = new Set(found.reactions.filter((r) => low(r.login) === low(forge.self)).map((r) => r.mark));
+      const add = mine.has(mark) ? [] : [mark];
+      const remove = MARKS.filter((m) => m !== mark && mine.has(m));
+      if (add.length || remove.length) await adapter.react({ repo, subject: found.subject, add, remove });
+      return { repo, number: n, kind, id, mark, added: add, removed: remove, changed: Boolean(add.length || remove.length), posted: [] };
     },
   };
 

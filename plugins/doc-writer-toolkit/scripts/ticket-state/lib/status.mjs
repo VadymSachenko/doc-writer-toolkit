@@ -128,7 +128,7 @@ export async function computeStatus({ settings, clients, now = Date.now(), only 
   const repos = (t) => new Set((t.targets ?? []).map((id) => settings.targets.find((x) => x.id === id)?.repo).filter(Boolean));
   const groups = groupsOf(ready, settings).map((g) => ({ ...g, waitsFor: workView.filter((w) => g.members.some((m) => related(m, w, repos))).map((w) => w.key) }));
 
-  const allowance = usage ? allowanceOf(usage, settings.limits, new Date(now)) : null;
+  const allowance = usage || settings.limits.usageGuard === false ? allowanceOf(usage, settings.limits, new Date(now)) : null;
   const estimates = estimatesOf(ledgers, settings.limits);
   const inWork = ledgers.filter((l) => l.mode === 'pipeline' && inWorkTickets.some((t) => t.key === l.key));
   const lockedGroup = (g) => Boolean(locks.get(g.group)?.live) || g.keys.some((k) => tickets.find((t) => t.key === k)?.locked);
