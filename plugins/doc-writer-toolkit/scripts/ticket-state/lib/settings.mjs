@@ -9,13 +9,14 @@ import { validateJobs } from './jobs.mjs';
 import { DEFAULT_LABELS } from './pr-description.mjs';
 import { TRANSCRIBERS } from '../../transcriber/lib/index.mjs';
 import { CHECKS } from './gates.mjs';
+import { DEFAULT_EXCLUDE, DEFAULT_TICKET_FILES } from './doc-evidence.mjs';
 
 // The ticket flow settings: the shared file the host commits (`.claude/ticket-flow.json`, or the `Ticket flow
 // settings:` field of CLAUDE.md, or --settings), read at HEAD (`trustedShared`), and the owner's local file next to it
 // (`<name>.local.json`), merged key by key at any depth (a local key wins), for the local file's keys only (`localOnly`).
 // The tracker and forge scripts read the same files, as they stand and with no such limit.
 //
-// The shared file holds `state`, `workFolder`, `commentHeader`, `tracker`, `forge`, `targets`, `noReviewLabel`, `appRepos`, `relatedRepos`, `ticketCommits`, `hostRules`, `hostJobs`,
+// The shared file holds `state`, `workFolder`, `commentHeader`, `tracker`, `forge`, `targets`, `noReviewLabel`, `appRepos`, `relatedRepos`, `ticketCommits`, `docRepos`, `docEvidence`, `hostRules`, `hostJobs`,
 // `build`, `checks`, and each role's tool rules (`roles.<role>.allowedTools`, `disallowedTools`).
 // The local file holds `mode`, `limits`, `schedule`, `roles` (no tool rules), `modelLadder`, `video`, `cleanup` and `progress`. Defaults below.
 
@@ -215,6 +216,44 @@ function validateTicketCommits(raw) {
   }
   if (!Number.isInteger(t.limit) || t.limit < 1 || t.limit > 100) fail('ticketCommits.limit must be a whole number from 1 to 100');
   return { pattern: t.pattern, limit: t.limit };
+}
+
+// The sibling doc repos whose published pages are searched as evidence (`docRepos`, lib/doc-evidence.mjs), besides the
+// hub's own: { repo, path (the owner's clone, from the host root: read with `git grep` at `origin/<base>`, else HEAD,
+// never its working tree, never written), base, roots (the content roots, UA and EN, from the repo's top; none: its
+// CLAUDE.md's) }. None: the hub's pages and tickets only.
+const relPath = (p) => typeof p === 'string' && p.trim() !== '' && !path.isAbsolute(p) && !p.split(/[\\/]/).includes('..');
+function validateDocRepos(raw) {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) fail('docRepos must be a list of { repo, path, base, roots }');
+  const seen = new Set();
+  return raw.map((r, i) => {
+    if (!isObject(r)) fail(`docRepos[${i}] must be { repo, path, base, roots }`);
+    if (typeof r.repo !== 'string' || !/^[^/\\\s]+$/.test(r.repo) || r.repo === '.' || r.repo === '..') fail(`docRepos[${i}].repo must be the repo's plain name`);
+    if (seen.has(r.repo)) fail(`docRepos names '${r.repo}' twice`);
+    seen.add(r.repo);
+    if (typeof r.path !== 'string' || !r.path.trim()) fail(`docRepos[${i}].path is required: the repo's clone, from the host root`);
+    if (r.base !== undefined && (typeof r.base !== 'string' || !r.base.trim())) fail(`docRepos[${i}].base must be a branch name`);
+    if (r.roots !== undefined && (!Array.isArray(r.roots) || !r.roots.length || r.roots.some((x) => !relPath(x)))) fail(`docRepos[${i}].roots must be a list of content roots from the repo's top, such as "docs/"`);
+    return { repo: r.repo, path: r.path, base: r.base ?? 'main', roots: r.roots ? r.roots.map((x) => x.replace(/^\.\/+/, '').replace(/\/+$/, '')) : null };
+  });
+}
+
+// What the docs lookup leaves out and reads (`docEvidence`, lib/doc-evidence.mjs): `exclude`, paths from each doc
+// repo's top that are never searched (release notes by default); `ticketFiles`, the files of an earlier ticket's work
+// folder that are (a name ending in `/` is a folder, read with what is under it).
+export const DOC_EVIDENCE_DEFAULTS = { exclude: DEFAULT_EXCLUDE, ticketFiles: DEFAULT_TICKET_FILES };
+function validateDocEvidence(raw) {
+  if (raw === undefined || raw === null) return { exclude: [...DEFAULT_EXCLUDE], ticketFiles: [...DEFAULT_TICKET_FILES] };
+  if (!isObject(raw)) fail('docEvidence must be { "exclude", "ticketFiles" }');
+  const unknown = Object.keys(raw).filter((k) => !(k in DOC_EVIDENCE_DEFAULTS));
+  if (unknown.length) fail(`docEvidence.${unknown[0]} is not a setting (exclude, ticketFiles)`);
+  const list = (v, key, what) => {
+    if (v === undefined) return [...DOC_EVIDENCE_DEFAULTS[key]];
+    if (!Array.isArray(v) || v.some((x) => !relPath(x))) fail(`docEvidence.${key} must be a list of ${what}`);
+    return v.map((x) => x.replace(/^\.\/+/, ''));
+  };
+  return { exclude: list(raw.exclude, 'exclude', 'paths from a repo\'s top, such as "docs/release-notes/"'), ticketFiles: list(raw.ticketFiles, 'ticketFiles', 'file names in a work folder, such as "app-notes.md" or "api/"') };
 }
 
 // The words an owner's PR comment starts with when it is for the pipeline (`forge.triggerWords`, D-142): `word:` at the
@@ -421,6 +460,8 @@ export function validateSettings(merged, { root, stateRootDefault }) {
     noReviewLabel: merged.noReviewLabel ?? null,
     ...validateCodeRepos(merged),
     ticketCommits: validateTicketCommits(merged.ticketCommits),
+    docRepos: validateDocRepos(merged.docRepos),
+    docEvidence: validateDocEvidence(merged.docEvidence),
     readyComment,
     reviewComment,
     idComments,
