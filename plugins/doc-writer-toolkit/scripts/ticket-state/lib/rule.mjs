@@ -653,9 +653,9 @@ function ownerForms(l, pr, comments, w) {
     const place = places.find((p) => String(p.commentId) === String(c.root));
     return place ? [{ id: c.id, place: place.id, by: c.by, author: c.author ?? null, page: place.page ?? null, line: place.line ?? null, state: place.state ?? 'open', text: String(c.body ?? '').trim() }] : [];
   });
-  // With the trigger words, the comments the step takes, each with the text the session reads (the word cut off): the
-  // session acts on these and on no other comment of the PR.
-  const take = w.settings?.triggerWords?.length ? comments.map((c) => ({ id: c.id, kind: c.kind, by: c.by, author: c.author ?? null, ...(c.path ? { path: c.path, line: c.line ?? null } : {}), text: String(c.body ?? '').trim() })) : [];
+  // With the trigger words, the comments the step takes, each with the text the session reads (the word cut off) and,
+  // in a thread, the thread's earlier comments: the session acts on these and on no other comment of the PR.
+  const take = w.settings?.triggerWords?.length ? comments.map((c) => ({ id: c.id, kind: c.kind, by: c.by, author: c.author ?? null, ...(c.path ? { path: c.path, line: c.line ?? null } : {}), text: String(c.body ?? '').trim(), ...(c.context?.length ? { context: c.context } : {}) })) : [];
   return { nextEdit: nextEditNumber({ edits }), ...(replies.length ? { replies } : {}), ...(suggestions.length ? { suggestions } : {}), ...(threadReplies.length ? { threadReplies } : {}), ...(placeReplies.length ? { placeReplies } : {}), ...(take.length ? { take } : {}) };
 }
 
