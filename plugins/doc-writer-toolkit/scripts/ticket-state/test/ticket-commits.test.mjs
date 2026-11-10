@@ -10,6 +10,7 @@ import { DEFAULT_PATTERN, FILES_SHOWN, keyRegex, ticketCommits, ticketCommitsFor
 import { briefFor, codeLines, commandFor, runDaily } from '../lib/runner.mjs';
 import { codeTreePath, codeTreesRoot } from '../lib/worktree.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
+import { HOOK_VARIABLE, refusalOf } from '../lib/role-hook.mjs';
 
 // The org's other repos as evidence (`relatedRepos`) and the ticket's commits (lib/ticket-commits.mjs): scripted with no
 // model, in the runner's read-only checkouts, into the writer's brief.
@@ -40,27 +41,27 @@ function history() {
 
 test('the lookup: the commits whose message names the key as a whole word, newest first, with their files; none, and the others, are left out', () => {
   const h = history();
-  const a = h.commit('feat-1157 add url to update cardDetails', { 'api/routes.go': 'r', 'api/card.go': 'c' });
+  const a = h.commit('feat-4242 add the refund route', { 'api/routes.go': 'r', 'api/card.go': 'c' });
   h.commit('unrelated change', { 'x.go': 'x' });
-  h.commit('fix-11570 a different ticket', { 'y.go': 'y' });
-  h.commit('ticket a1157 is not it either', { 'z.go': 'z' });
-  const b = h.commit('queue: skip without the card number\n\nRefs #1157', { 'queue/skip.go': 's' }, 'Dev Two');
-  const c = h.commit('1157: the last one', { 'w.go': 'w' });
-  const r = ticketCommits(h.dir, '1157');
+  h.commit('fix-42420 a different ticket', { 'y.go': 'y' });
+  h.commit('ticket a4242 is not it either', { 'z.go': 'z' });
+  const b = h.commit('queue: skip a refund with no order\n\nRefs #4242', { 'queue/skip.go': 's' }, 'Dev Two');
+  const c = h.commit('4242: the last one', { 'w.go': 'w' });
+  const r = ticketCommits(h.dir, '4242');
   assert.equal(r.error, undefined);
   assert.deepEqual(r.commits.map((x) => x.sha), [c, b, a]);
-  assert.deepEqual(r.commits[1], { sha: b, date: '2026-10-05', author: 'Dev Two', subject: 'queue: skip without the card number', files: ['queue/skip.go'] }, 'the key in the body counts; the subject is the first line');
+  assert.deepEqual(r.commits[1], { sha: b, date: '2026-10-05', author: 'Dev Two', subject: 'queue: skip a refund with no order', files: ['queue/skip.go'] }, 'the key in the body counts; the subject is the first line');
   assert.deepEqual(r.commits[2].files.sort(), ['api/card.go', 'api/routes.go']);
   assert.equal(r.more, false);
-  assert.deepEqual(ticketCommits(h.dir, '4242').commits, [], 'no commit names it');
+  assert.deepEqual(ticketCommits(h.dir, '9999').commits, [], 'no commit names it');
   // From an earlier commit: only its history.
-  assert.deepEqual(ticketCommits(h.dir, '1157', { commit: a }).commits.map((x) => x.sha), [a]);
+  assert.deepEqual(ticketCommits(h.dir, '4242', { commit: a }).commits.map((x) => x.sha), [a]);
 });
 
 test('the whole-word rule: feat-, fix-, # and the bare key match, any case; a longer number or word does not', () => {
-  const re = keyRegex('1157');
-  for (const m of ['feat-1157 x', 'fix-1157', 'Refs #1157.', '1157', '(1157)', 'FEAT-1157']) assert.ok(re.test(m), m);
-  for (const m of ['11570', '21157', 'a1157', '1157b', '1157_x', 'feat_1157']) assert.ok(!re.test(m), m);
+  const re = keyRegex('4242');
+  for (const m of ['feat-4242 x', 'fix-4242', 'Refs #4242.', '4242', '(4242)', 'FEAT-4242']) assert.ok(re.test(m), m);
+  for (const m of ['42420', '24242', 'a4242', '4242b', '4242_x', 'feat_4242']) assert.ok(!re.test(m), m);
   assert.ok(keyRegex('aB3-x').test('fix-ab3-x done'), 'a short link, escaped, any case');
   assert.ok(!keyRegex('a.b').test('axb'), 'the key is escaped');
   assert.ok(DEFAULT_PATTERN.includes('<key>'));
@@ -95,7 +96,7 @@ test('the bound: at most the limit per repo, the newest, and `more` says there w
 });
 
 test('a git error is a note, never a throw: no repo there, a bad commit', () => {
-  const none = ticketCommits(path.join(tmp(), 'nothing'), '1157');
+  const none = ticketCommits(path.join(tmp(), 'nothing'), '4242');
   assert.deepEqual(none.commits, []);
   assert.match(none.error, /git log/);
   const h = history();
@@ -120,7 +121,7 @@ test('a group: a commit that names two keys is listed once, under the first', ()
 // ------------------------------------------------------------------ the brief
 
 const tree = (repo, extra = {}) => ({ repo, path: `/state/code/${repo}/c0ffee1c0ffe`, commit: 'c0ffee1c0ffee1c0ffee1c0ffee1c0ffee1c0ff', url: `https://code.example/org/${repo}`, notes: [], ...extra });
-const found = [{ key: '1157', more: false, commits: [{ sha: 'abcdef1234567890abcdef1234567890abcdef12', date: '2026-10-02', author: 'Dev One', subject: "feat-1157 don't take inbound without the card number", files: ['queue/skip.go'] }] }];
+const found = [{ key: '4242', more: false, commits: [{ sha: 'abcdef1234567890abcdef1234567890abcdef12', date: '2026-10-02', author: 'Dev One', subject: "feat-4242 skip a refund with no order", files: ['queue/skip.go'] }] }];
 
 test('the brief: the code repos alone read as before; related repos get their own lines; the ticket\'s commits get theirs', () => {
   const before = [
@@ -133,18 +134,18 @@ test('the brief: the code repos alone read as before; related repos get their ow
   const withCommits = codeLines([tree('backend', { ticket: found })]);
   assert.ok(withCommits.startsWith(before.split('\n').slice(0, 2).join('\n')));
   assert.match(withCommits, /The ticket's commits:/);
-  assert.match(withCommits, /- backend, 1157: 1\n {2}- abcdef123456 2026-10-02 Dev One: feat-1157 don't take inbound without the card number \(queue\/skip\.go\)/);
+  assert.match(withCommits, /- backend, 4242: 1\n {2}- abcdef123456 2026-10-02 Dev One: feat-4242 skip a refund with no order \(queue\/skip\.go\)/);
   assert.match(withCommits, /a place's `why` names the sources tried/);
   assert.match(withCommits, /cites the commit that shows the behaviour/);
   assert.ok(!withCommits.includes('Related repos'));
-  assert.match(codeLines([tree('backend', { ticket: [{ key: '1157', commits: [], more: false }] })]), /- backend, 1157: no commit's message names it\./);
+  assert.match(codeLines([tree('backend', { ticket: [{ key: '4242', commits: [], more: false }] })]), /- backend, 4242: no commit's message names it\./);
 
-  const related = codeLines([tree('backend', { ticket: found }), tree('widget', { related: true, ticket: [{ key: '1157', commits: [], more: false }] }), { repo: 'proxy', related: true, error: 'could not clone proxy' }]);
+  const related = codeLines([tree('backend', { ticket: found }), tree('widget', { related: true, ticket: [{ key: '4242', commits: [], more: false }] }), { repo: 'proxy', related: true, error: 'could not clone proxy' }]);
   assert.match(related, /Related repos \(the host's `relatedRepos`/);
   assert.match(related, /search these for it .* before you mark a place or ask a question/);
   assert.match(related, /- widget: \/state\/code\/widget\/c0ffee1c0ffe, commit c0ffee1/);
   assert.match(related, /- proxy: not available \(could not clone proxy\)\. Say so in a place's `why`/);
-  assert.match(related, /- widget, 1157: no commit's message names it\./);
+  assert.match(related, /- widget, 4242: no commit's message names it\./);
   assert.ok(related.indexOf('Related repos') > related.indexOf('Code repos') && related.indexOf("The ticket's commits") > related.indexOf('Related repos'));
   // Related repos only: no code repos heading.
   const alone = codeLines([tree('widget', { related: true })]);
@@ -190,6 +191,9 @@ test('a related repo\'s checkout is an added folder with the git reads, and its 
   assert.ok(after('--disallowedTools').includes(`Read(//${clone.replace(/^\/+/, '')}/**)`), 'the owner\'s clone is denied');
   assert.ok(after('--disallowedTools').includes(`Edit(//${codeTreesRoot(w.settings).replace(/^\/+/, '')}/**)`), 'the checkouts are read only, with no appRepos too');
   assert.match(briefOf(cmd), /Related repos/);
+  // The reads the brief names pass the role hook too, with no worktree on the step.
+  const hook = JSON.parse(cmd.env[HOOK_VARIABLE]);
+  for (const line of [`git -C ${at} show ${'a'.repeat(40)}`, `git -C ${at} show --stat ${'a'.repeat(12)}`, `git -C ${at} log -1 ${'a'.repeat(12)}`]) assert.equal(refusalOf(line, hook, { cwd: w.settings.root }), null, line);
 });
 
 // ------------------------------------------------------------------ the runner
