@@ -357,9 +357,9 @@ function staleFrom(st, previous = {}) {
   return next;
 }
 
-// Colleagues' PR comments the trigger words keep from the pipeline (lib/world.mjs `sortComments`), from the status:
-// { '<key>|<pr>': [{ id, author, link }] }, for the tickets the status covers. The owner hands one on or leaves it; it
-// goes once a session handled it.
+// PR comments the trigger words keep from the pipeline (lib/world.mjs `sortComments`: a colleague's, a reply in the
+// pipeline's or the owner's thread), from the status: { '<key>|<pr>': [{ id, author, link }] }, for the tickets the
+// status covers. The owner hands one on or leaves it; it goes once a session recorded it handled, or the PR is done.
 function othersFrom(st, previous = {}) {
   const next = { ...previous };
   for (const t of st?.tickets ?? []) {

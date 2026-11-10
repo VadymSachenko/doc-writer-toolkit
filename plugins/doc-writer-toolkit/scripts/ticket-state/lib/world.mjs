@@ -306,9 +306,11 @@ export async function readPrs({ settings, forge, ledgers }) {
 //   - a reply in anyone else's thread, the pipeline's or the owner's (an expert the owner tagged there too), and anyone
 //     else's comment, start nothing: they are in `others`, for the owner to hand on with the word. One goes off the list
 //     only when it was handed on: its id recorded in `handled` (a session took it with the owner's worded comment that
-//     pointed at it), or a worded reply of the owner's under it in its thread was handled.
+//     pointed at it). A later worded comment, in its thread or elsewhere, hands nothing on by itself: a forge thread is
+//     flat, so a reply after a comment needn't be about it.
 //   A comment in a thread carries the thread's earlier comments (`context`): the owner's worded reply under an
-//   expert's answer may only point at it ("do as the expert says").
+//   expert's answer may only point at it ("do as the expert says"). An expert opened a thread when its first comment
+//   is the expert's own and no reply (a thread whose first comment was deleted starts with a reply).
 // With no words set, every comment that isn't the owner's is a reviewer's, as before.
 export function unhandled(ledger, pr, activity, self, header = null, opts = {}) {
   return sortComments(ledger, pr, activity, self, header, opts).items;
@@ -337,19 +339,17 @@ export function sortComments(ledger, pr, activity, self, header = null, { words 
   const gated = (words ?? []).some((w) => String(w).trim());
   const low = (x) => String(x ?? '').toLowerCase();
   const expert = new Set((experts ?? []).map(low));
-  const isOwner = (author) => Boolean(self) && author === self;
+  const isOwner = (author) => Boolean(self) && low(author) === low(self); // logins are case-blind on the forge
   const who = (author) => (isOwner(author) ? 'owner' : 'reviewer');
   // The owner's reviews whose text starts with the word: their line comments are for the pipeline too.
   const wordedReviews = new Set((activity.reviews ?? []).filter((r) => isOwner(r.author) && afterTrigger(r.body, words) !== null).map((r) => String(r.id)));
   const worded = (c) => isOwner(c.author) && (afterTrigger(c.body, words) !== null || (c.reviewId !== null && c.reviewId !== undefined && wordedReviews.has(String(c.reviewId))));
-  const when = (c) => String(c.createdAt ?? c.updatedAt ?? c.submittedAt ?? '');
   // A thread the pipeline opened (its first comment in `posted`, with the header, or of a review it posted).
   const ours = (c) => Boolean(c) && (posted.has(String(c.id)) || headed(c) || ownReview(c));
   const items = [];
   const others = [];
   // Where a fresh comment goes: the items (with the text the rule reads), the others, or nowhere (the owner's note).
-  // `thread`: the thread it is in, whether an expert opened it, and when the owner's latest handled worded reply in it
-  // was written (a comment before that one was handed on).
+  // `thread`: the thread it is in, and whether an expert opened it.
   const place = (c, item, thread = null) => {
     if (!gated) return items.push(item);
     if (isOwner(c.author)) {
@@ -362,17 +362,24 @@ export function sortComments(ledger, pr, activity, self, header = null, { words 
     // else's thread, the pipeline's or the owner's, is for people (decision 3: the owner may tag the expert there, and
     // hands an answer on with the word).
     if (c.author && expert.has(low(c.author)) && (!thread || thread.byExpert)) return items.push(item);
-    if (thread?.handedAt && when(c) <= thread.handedAt) return null;
     const { body, context, ...seen } = item;
     return others.push(seen);
   };
-  // The thread's comments before one, for the session to read the owner's reply against: the pipeline's as `pipeline`,
-  // the owner's as `owner`.
-  const contextOf = (t, i) => (t.comments ?? []).slice(Math.max(0, i - 8), i).map((x) => ({ author: ours(x) ? 'pipeline' : isOwner(x.author) ? 'owner' : x.author ?? null, text: oneText(header ? withoutHeader(x.body, header) : x.body) }));
+  // The thread's comments before one, for the session to read the owner's reply against: its first one and the last 7
+  // before it, each `{ by: 'pipeline' | 'owner' | 'other', author, text }` (the owner's with the word cut off).
+  const contextOf = (t, i) => {
+    const list = t.comments ?? [];
+    const picked = i <= 8 ? list.slice(0, i) : [list[0], ...list.slice(i - 7, i)];
+    return picked.map((x) => {
+      const by = ours(x) ? 'pipeline' : isOwner(x.author) ? 'owner' : 'other';
+      const body = by === 'pipeline' && header ? withoutHeader(x.body, header) : by === 'owner' ? afterTrigger(x.body, words) ?? x.body : x.body;
+      return { by, author: x.author ?? null, text: oneText(body) };
+    });
+  };
   for (const t of activity.threads ?? []) {
     const first = t.comments?.[0];
     const root = first?.id ?? null;
-    const thread = { byExpert: !ours(first) && Boolean(first?.author) && expert.has(low(first.author)), handedAt: gated ? (t.comments ?? []).filter((c) => handled.has(String(c.id)) && worded(c)).map(when).sort().at(-1) ?? '' : '' };
+    const thread = { byExpert: Boolean(first?.author) && !ours(first) && !isOwner(first.author) && (first.inReplyTo === null || first.inReplyTo === undefined) && expert.has(low(first.author)) };
     (t.comments ?? []).forEach((c, i) => {
       if (!fresh(c) || ownReview(c)) return;
       const item = { id: c.id, kind: 'review-comment', thread: t.id, root, author: c.author, by: who(c.author), path: c.path ?? t.path ?? null, line: c.line ?? t.line ?? null, updatedAt: c.updatedAt, body: c.body ?? '' };
