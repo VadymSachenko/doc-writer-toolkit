@@ -37,6 +37,10 @@ import { PLACE_SOURCES } from './gates.mjs';
 import { FILES_SHOWN, ticketCommits, ticketCommitsFor } from './ticket-commits.mjs';
 import { BUDGET_MS as DOC_BUDGET_MS, DEFAULT_EXCLUDE, HITS_MAX, PER_FILE, docEvidence, extractTerms, ownTexts, skippedNote } from './doc-evidence.mjs';
 import { withoutHeader } from '../../tracker/lib/comment-header.mjs';
+import { companyReposOn, passRepos, resolveCompanyRepos } from './company-repos.mjs';
+import { inputStands, passInput, passLines, prLinesAfterPass, roundInput } from './answer-pass.mjs';
+import { markersAt } from './gates.mjs';
+import { renderAnswers, weekPath, weeklyAnswers, missesPath } from './misses.mjs';
 
 // The daily run (design §7): finish first, then triage the quiet intake cards (mornings, and the watcher's start pass
 // when a slot frees), then start ready groups while
@@ -415,6 +419,8 @@ export function briefFor(step, settings) {
     step.stale ? `The UA pages changed after this stage last ran (${step.stale} file(s)): run it again on the current head${pagesRead(step, settings)}.` : null,
     ...buildLines(step),
     ...videoImportLines(step),
+    ...(step.stage === 'answerPass' ? passLines(step, settings) : []),
+    ...(step.stage === 'pr' ? step.passLines ?? [] : []),
     ...gateLines(step, settings),
     // The places' language, on whatever `checks` say: the description's places section is written from the record.
     step.role === 'writer' && ['pr', 'answerComments'].includes(step.stage) ? "A place's `claim`, `why` and `reason` are in the language of the page the place is on, in the words of its line comment: the description's places are written from them. Code names (endpoints, functions, fields) stay as they are, in backticks. `record` refuses a `claim` or `why` with no letter of the page's script outside code. Missing test data is no place by itself: make the setup the host's rules allow first, on the owner's test accounts, and run the check; a place left after it names in `why` the requests tried and the setup made." : null,
@@ -568,13 +574,23 @@ const CODE_ROLES = new Set(['writer', 'reviewer']);
 // The writer's stages that gather the evidence (the start goes on to the plan, the answers to the plan or the write)
 // and answer review comments: only they get the related repos' checkouts and the ticket's commits, the two sources
 // their brief names. Every other stage reads the code repos alone, as before.
-const COMMIT_STAGES = new Set(['start', 'plan', 'answers', 'write', 'answerComments']);
+// The answer pass (TASK-105) is one too, with every company repo besides (`codeReposFor`).
+const COMMIT_STAGES = new Set(['start', 'plan', 'answers', 'write', 'answerComments', 'answerPass']);
 export const evidenceStage = (step) => step.role === 'writer' && COMMIT_STAGES.has(step.stage);
 // The repos a session reads code in: the code repos, then the related repos, each marked.
 const codeReposOf = (settings) => [...(settings.appRepos ?? []), ...(settings.relatedRepos ?? []).map((r) => ({ ...r, related: true }))];
 // The repos a step gets checkouts of: none for a role that reads no code; the code repos for a writer or a reviewer;
 // the related repos too on a writer's evidence stage.
-export const codeReposFor = (step, settings) => (CODE_ROLES.has(step.role) ? codeReposOf(settings).filter((a) => !a.related || evidenceStage(step)) : []);
+// The answer pass reads every company repo too (lib/company-repos.mjs `passRepos`): `company`, the list this run
+// resolved (none given: the host's list form; an org is resolved only by a live run), less `skip` (the hub, the step's
+// own PR repos, whose pages it reads in its worktrees).
+export const codeReposFor = (step, settings, { company, skip = [] } = {}) => {
+  if (!CODE_ROLES.has(step.role)) return [];
+  if (step.stage === 'answerPass' && step.role === 'writer' && companyReposOn(settings)) return passRepos(settings, company ?? settings.companyRepos?.list ?? [], { skip });
+  return codeReposOf(settings).filter((a) => !a.related || evidenceStage(step));
+};
+// The time the answer pass's checkouts may take in all: past it, a repo not made yet is said not checked out.
+export const PASS_CHECKOUT_BUDGET_MS = 30 * 60 * 1000;
 // The lookup's time across every repo and key of a step (lib/ticket-commits.mjs): what is left when it runs out is
 // said in the brief as not searched.
 export const COMMIT_LOOKUP_BUDGET_MS = 60 * 1000;
@@ -647,6 +663,8 @@ function termTexts(step, settings, io) {
       { text: card?.desc ?? '', plain: true },
       ...(l?.places ?? []).map((p) => p?.claim ?? ''),
       ...(l?.questions ?? []).map((q) => q?.text ?? ''),
+      // The answer pass's items, as frozen before its session (lib/answer-pass.mjs).
+      ...(step.stage === 'answerPass' ? (l?.answerInput?.items ?? []).map((x) => x?.text ?? x?.claim ?? '') : []),
     ];
   });
   return { texts, note: skippedNote(skipped, "not read for the terms in this ticket's own folder") };
@@ -755,9 +773,10 @@ export function docLines(d) {
 
 // Every role is denied the owner's clones of the code repos and the related repos (`path`), whose working tree may be
 // weeks old, and writing in the runner's own clones and checkouts.
-const codeDenied = (settings) => {
-  const apps = codeReposOf(settings);
-  const owners = apps.filter((a) => a.path).map((a) => abs(path.resolve(settings.root, a.path)));
+const codeDenied = (settings, step = {}) => {
+  // The company repos' owner clones too: the host's list, and those an org resolved for this step (`owner`).
+  const apps = [...codeReposOf(settings), ...(settings.companyRepos?.list ?? []), ...(step.codeTrees ?? []).filter((t) => t.owner).map((t) => ({ path: t.owner }))];
+  const owners = [...new Set(apps.filter((a) => a.path).map((a) => abs(path.resolve(settings.root, a.path))))];
   return [...new Set([...owners.flatMap((c) => [`Read(${c}/**)`, `Edit(${c}/**)`]), ...(apps.length ? [`Edit(${abs(codeTreesRoot(settings))}/**)`] : [])])];
 };
 
@@ -780,7 +799,7 @@ export function commandFor(step, settings, { model, agentsPath, claude = 'claude
   const allowed = [...new Set([...withGitC(roleRules, dirsOf), ...cloneReadRules(roleRules, readDirs), ...writeAllowedFor(step, settings), ...scriptRulesFor(roots, step.role), ...(fixing ? [] : pushRulesFor(trees)), ...fetchRulesFor(trees), ...lsRemoteRulesFor(trees)])];
   // A role that doesn't run Playwright doesn't get it from the hub's `npx playwright:*`.
   const noPlaywright = roleRules.some((r) => r.startsWith('Bash(npx playwright')) ? [] : ['Bash(npx playwright:*)'];
-  const disallowed = [...new Set([...def.disallowedTools, ...(role.disallowedTools ?? []), ...PUSH_DENIED_PLAIN, ...BRANCH_DENIED, ...deniedFor(dirsOf), ...dirsOf.flatMap((d) => [`Bash(git -C ${d} branch:*)`, `Bash(git -C ${d} grep:*)`]), ...ROLE_DENIED, ...noPlaywright, ...scriptFlagsDenied(roots), ...writeDeniedFor(settings, roots), ...(trees.length ? checkoutDeniedFor(settings) : []), ...SETUP_DENIED, ...codeDenied(settings), ...(fixing ? dirsOf.flatMap((d) => ['commit', 'merge', 'push'].map((c) => `Bash(git -C ${d} ${c}:*)`)) : [])])];
+  const disallowed = [...new Set([...def.disallowedTools, ...(role.disallowedTools ?? []), ...PUSH_DENIED_PLAIN, ...BRANCH_DENIED, ...deniedFor(dirsOf), ...dirsOf.flatMap((d) => [`Bash(git -C ${d} branch:*)`, `Bash(git -C ${d} grep:*)`]), ...ROLE_DENIED, ...noPlaywright, ...scriptFlagsDenied(roots), ...writeDeniedFor(settings, roots), ...(trees.length ? checkoutDeniedFor(settings) : []), ...SETUP_DENIED, ...codeDenied(settings, step), ...(fixing ? dirsOf.flatMap((d) => ['commit', 'merge', 'push'].map((c) => `Bash(git -C ${d} ${c}:*)`)) : [])])];
   // The folders a session may reach (`--add-dir`, and so `cd`): the step's worktrees; a step with none (triage, the plan)
   // works in the read checkouts (only their `.sources/` folders writable, `writeAllowedFor`), and reaches the target
   // clones too, for the Playwright spec it runs there and for what the `.sources/` links lead to.
@@ -1592,8 +1611,11 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
     }
     // The worktrees a live run would make or bring up to date: named, nothing made.
     const trees = prsForStep(step, step.keys.map((k) => readLedger(settings.state, k))).map((p) => ({ repo: p.repo, branch: p.branch, path: worktreePath(settings, p), push: `git -C ${worktreePath(settings, p)} push origin HEAD:refs/heads/${p.branch}` }));
-    const codeTrees = codeReposFor(step, settings).map((a) => ({ repo: a.repo, path: codeTreePath(settings, a, '<commit>'), commit: '<fetched at the run>', url: a.url, ...(a.related ? { related: true } : {}) }));
-    const cmd = commandFor({ ...step, worktrees: trees, codeTrees }, settings, { model: settings.roles[step.role].model, agentsPath: path.join(settings.state, 'roles', 'agents.json'), claude });
+    // The answer pass names its company repos from the host's list; an org is listed only by a live run.
+    const codeTrees = codeReposFor(step, settings, { skip: step.stage === 'answerPass' ? [docReposOf(settings)[0].repo, ...trees.map((t) => t.repo)] : [] }).map((a) => ({ repo: a.repo, path: codeTreePath(settings, a, '<commit>'), commit: '<fetched at the run>', url: a.url, ...(a.related ? { related: true } : {}) }));
+    const passNote = step.stage === 'answerPass' && settings.companyRepos?.org ? [`the repos of ${settings.companyRepos.org} are listed by \`gh repo list\` at the run`] : [];
+    const extra = step.stage === 'pr' ? { passLines: prLinesAfterPass(step.keys.map((k) => readLedger(settings.state, k)), settings) } : step.stage === 'answerPass' ? { answerItems: [], answerNotes: ['the items are frozen at the run', ...passNote] } : {};
+    const cmd = commandFor({ ...step, worktrees: trees, codeTrees, ...extra }, settings, { model: settings.roles[step.role].model, agentsPath: path.join(settings.state, 'roles', 'agents.json'), claude });
     const held = guardReason();
     return { ...pick(step), runs: `claude -p as ${agentName(step.role)}`, model: cmd.model, effort: cmd.effort, ...(trees.length ? { worktrees: trees.map((t) => t.path) } : {}), ...(held ? { guard: `a live run would not start it: ${held}` } : {}), command: [cmd.bin, ...cmd.args] };
   };
@@ -1751,7 +1773,8 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
     }
   }
   const proposal = weeklyProposal(settings, ledgers, clock(), !planOnly);
-  const report = renderReport({ settings, st, date, runLog: [...(dryRun ? [] : readRunLog(settings.state, date)), ...log], watched, proposal, ledgers });
+  const answers = answersWeek(settings, ledgers, clock(), !planOnly, date);
+  const report = renderReport({ settings, st, date, runLog: [...(dryRun ? [] : readRunLog(settings.state, date)), ...log], watched, proposal, answers, ledgers });
   if (dryRun) out.report = report;
   else {
     appendRunLog(settings.state, date, log);
@@ -2453,8 +2476,32 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
           say({ kind: 'readCheckout', group: step.group, keys: step.keys, stage: step.stage, repo: c.repo, outcome: 'failed', note: `no read checkout of ${c.repo}, so the session reads its clone: ${r.error}`.slice(0, 400) });
           return { ...c, readError: r.error };
         }).filter(Boolean);
-        let codeTrees = codeReposFor(step, settings).map((a) => ({ ...(io.ensureCodeTree ?? ensureCodeTree)(settings, a, { othersRunning }), ...(a.related ? { related: true } : {}) }));
+        // The answer pass (TASK-105): every company repo besides, resolved now (an org by `gh`), checked out within its
+        // budget with the lock renewed between repos; then its input frozen in a `running` record, before the session.
+        const pass = step.stage === 'answerPass' && companyReposOn(settings);
+        let repos = codeReposFor(step, settings);
+        const passNotes = [];
+        if (pass) {
+          const company = resolveCompanyRepos(settings, io);
+          passNotes.push(...company.notes);
+          repos = codeReposFor(step, settings, { company: company.repos, skip: [docReposOf(settings)[0].repo, ...trees.map((t) => t.repo)] });
+        }
+        const checkoutFrom = clock();
+        const budget = io.passCheckoutBudgetMs ?? PASS_CHECKOUT_BUDGET_MS;
+        let codeTrees = repos.map((a) => {
+          const extra = { ...(a.related ? { related: true } : {}), ...(a.company && a.path ? { owner: a.path } : {}) };
+          if (!pass) return { ...(io.ensureCodeTree ?? ensureCodeTree)(settings, a, { othersRunning }), ...extra };
+          const left = budget - (clock() - checkoutFrom);
+          if (left <= 0) return { repo: a.repo, url: a.url, path: null, commit: null, notes: [], error: "not checked out: the answer pass's checkout time ran out (it is made at the next pass)", ...extra };
+          for (const g of [step.group ?? step.keys[0], ...held].filter(Boolean)) if (allLocks(settings.state, clock()).some((x) => x.group === g && x.pid === process.pid)) renewLock(settings.state, g, { leaseMinutes: settings.limits.lockLeaseMinutes, now: clock() });
+          return { ...(io.ensureCodeTree ?? ensureCodeTree)(settings, a, { othersRunning, timeouts: { cloneMs: Math.min(10 * 60 * 1000, left), fetchMs: Math.min(2 * 60 * 1000, left), checkoutMs: Math.min(5 * 60 * 1000, left) } }), ...extra };
+        });
         if (evidenceStage(step)) codeTrees = withTicketCommits(codeTrees, step, settings, io);
+        if (pass) {
+          const frozen = await freezePass(step, trees);
+          step = { ...step, answerItems: frozen.items, answerNotes: [...passNotes, ...frozen.notes] };
+        }
+        if (step.stage === 'pr') step = { ...step, passLines: prLinesAfterPass(step.keys.map((k) => readLedger(settings.state, k)), settings) };
         // The host's own docs, on the same stages, with or without code repos (it never throws).
         // The card's text comes from this run's check of the board (`cardTexts`), with no tracker call of its own.
         const docs = evidenceStage(step) ? withDocEvidence({ ...step, worktrees: trees, clones }, settings, { cardText: (k) => st?.cardTexts?.get(k) ?? null, ...io }) : null;
@@ -2686,6 +2733,46 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
   // The runner's own record of a start, before its session: each ticket's start `running`, its origin, and the group it
   // runs with (so the group's lock covers the ticket at once). A ready card with no ledger gets one, with the triage
   // `status` read for it.
+  // The answer pass's input, frozen before its session in a `running` record of each ticket (lib/answer-pass.mjs): the
+  // write's open questions and places, the markers the branches added (read in their worktrees now), the UA review's
+  // open findings; on a PR, the questions a round asked and held. An input made for this same pass is kept, so a
+  // session that ran before and changed the pages can't shrink it. Returns the items for the brief.
+  async function freezePass(step, trees) {
+    const items = [];
+    const notes = [];
+    for (const k of step.keys) {
+      const l = readLedger(settings.state, k);
+      if (!l) continue;
+      let input;
+      if (step.pr) {
+        let pr = null;
+        try {
+          pr = findPr(l, step.pr);
+        } catch {
+          continue;
+        }
+        input = pr.answerInput && pr.answerInput.after === (pr.answerPassDue?.seq ?? null) ? pr.answerInput : roundInput(pr);
+      } else if (inputStands(l)) input = l.answerInput;
+      else {
+        const markers = new Map();
+        for (const p of l.prs ?? []) {
+          const t = trees.find((x) => x.repo === p.repo && x.branch === p.branch);
+          if (!t) continue;
+          try {
+            markers.set(`${p.repo}:${p.branch}`, (io.markersAt ?? markersAt)(settings, p, t.head ?? 'HEAD'));
+          } catch (e) {
+            markers.set(`${p.repo}:${p.branch}`, { found: [], error: String(e.message ?? e).slice(0, 200) });
+          }
+        }
+        input = passInput(l, { markers });
+      }
+      await runRecord({ settings, clients, key: k, stage: 'answerPass', status: 'running', pr: step.pr, result: JSON.stringify({ input: { items: input.items, notes: input.notes ?? [] } }), now: clock() });
+      items.push(...input.items.map((x) => (step.keys.length > 1 ? { ...x, ticket: k } : x)));
+      notes.push(...(input.notes ?? []));
+    }
+    return { items, notes };
+  }
+
   async function recordStart(step) {
     for (const k of step.keys) {
       const view = st.tickets.find((t) => t.key === k);
@@ -2752,6 +2839,20 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
       }
     }
     return ok ? 'done' : busy ? 'busy' : 'failed';
+  }
+}
+
+// The week's answers and misses (lib/misses.mjs), with the company repos set or a misses log there: made once in seven
+// days, and shown in every report of the day it was made.
+function answersWeek(settings, ledgers, now, write, date) {
+  if (!companyReposOn(settings) && !fs.existsSync(missesPath(settings.state))) return null;
+  try {
+    const fresh = weeklyAnswers(settings, ledgers, now, write);
+    if (fresh) return fresh;
+    const last = JSON.parse(fs.readFileSync(weekPath(settings.state), 'utf8'));
+    return localDate(Date.parse(last.at)) === date ? last : null;
+  } catch {
+    return null;
   }
 }
 

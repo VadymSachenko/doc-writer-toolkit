@@ -6,7 +6,7 @@ import { prId, readLedger } from './ledger.mjs';
 //     `readyForMerge` record), taken off when it leaves ready for merge (sent back to the owner's queue, taken into the
 //     chain again by a person's move, a question on it, the card moved back). The owner's own merge label is never
 //     touched: the settings don't name it.
-//   - `forge.checkLabel`, after each `answerComments` and `styleCheck` record, from the PR's open questions to the owner
+//   - `forge.checkLabel`, after each `answerComments`, `styleCheck` and PR `answerPass` record, from the PR's open questions to the owner
 //     (`openQuestions`, lib/record.mjs): any, the label is on, put back if the owner took it off; none, it comes off.
 //     Between two such records it stays as a person left it. A person's forward move takes it off (`follow`, D-128).
 //     The first record of a PR with none kept only puts it on, never takes it off (a PR from before the switch).
@@ -56,7 +56,9 @@ export function labelChanges(before, state, keys, forge) {
         if (now !== null && now !== was.translated) change(forge.translatedLabel, true);
         else if (now === null && (was.translated ?? null) !== null) change(forge.translatedLabel, false);
       }
-      if (forge.checkLabel && p.openQuestions && p.openQuestions.seq !== was.asked && ['answerComments', 'styleCheck'].includes(p.openQuestions.stage) && (open || was.asked !== null)) change(forge.checkLabel, open);
+      // A round's new questions wait for the answer pass (`answerPassDue`): the label waits with them, and the pass's
+      // record sets it from what it left open.
+      if (forge.checkLabel && !p.answerPassDue && p.openQuestions && p.openQuestions.seq !== was.asked && ['answerComments', 'styleCheck', 'answerPass'].includes(p.openQuestions.stage) && (open || was.asked !== null)) change(forge.checkLabel, open);
     }
   }
   return [...out.values()];

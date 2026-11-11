@@ -11,6 +11,9 @@ import { imagePairsAt } from './pairs.mjs';
 import { originHead, writtenIn } from './worktree.mjs';
 import { addEdits, addEnSides } from './edits.mjs';
 import { changedLines, commentProblems, languageMessage, markersAt, markersMessage, placeLanguageProblems, placeProblems, placesNotListed, questionProblems } from './gates.mjs';
+import { checkWriteOpen, docDirsOf, evidenceChecks, inputOf, passFor, passProblems, prAfterPass, refuse, settledOf } from './answer-pass.mjs';
+import { appendMisses, checkSource, missLine, sourceOfEvidence } from './misses.mjs';
+import { companyReposOn } from './company-repos.mjs';
 
 // `record <key> --stage <s> --status running|done|failed`: one stage result, written only when the tracker, the forge
 // and the files support it (context/ticket-flow.md, "When a record is accepted"). On any problem nothing is written.
@@ -95,8 +98,20 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
     const st = await clients.forge.prState({ repo: p.repo, number: p.number });
     return st;
   };
+  // The answer pass's input, frozen by the runner's `running` record before the session (lib/answer-pass.mjs): kept on
+  // the ticket (or the PR), so the done record is checked against what the session was given, whatever it changed since.
+  if (stage === 'answerPass' && status === 'running' && result.input) {
+    const input = result.input;
+    if (!Array.isArray(input.items)) throw new CliError('answerPass running: "input" is { "items": [...], "notes": [...] }', { code: 2 });
+    const frozen = { items: input.items, notes: input.notes ?? [], at, seq: l.seq + 1, after: pr ? pr.answerPassDue?.seq ?? null : l.stages?.uaReview?.seq ?? null };
+    if (pr) pr.answerInput = frozen;
+    else l.answerInput = frozen;
+    delete result.input;
+  }
   const record = { status, seq: l.seq + 1, at, ...(note ? { note } : {}), ...(Object.keys(result).length ? { result } : {}) };
   const warnings = [];
+  // The misses this record settles (lib/misses.mjs), written once the ledger is.
+  const misses = [];
 
   if (status === 'done') await applyDone();
   else if (status === 'running' && pr && (CHAIN.includes(stage) || ['answerComments', 'styleCheck', 'resync', 'readyForMerge'].includes(stage))) {
@@ -134,6 +149,13 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
   if (stage === 'start' && result.group) l.group = String(result.group);
 
   const file = writeLedger(settings.state, l);
+  if (misses.length) {
+    try {
+      appendMisses(settings.state, misses);
+    } catch (e) {
+      warnings.push(`the misses log was not written: ${e.message}`);
+    }
+  }
   const lock = renewLock(settings.state, l.group, { leaseMinutes: settings.limits.lockLeaseMinutes, stage: status === 'running' ? stage : undefined, now });
   return { file: path.relative(settings.root, file), key, stage, status, ...(pr ? { pr: prId(pr) } : {}), seq: l.seq, lockRenewed: Boolean(lock), ...(warnings.length ? { warnings } : {}) };
 
@@ -324,6 +346,9 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
       case 'uaReview': {
         for (const p of result.prs ?? []) upsertPr(p);
         if (stage === 'write') {
+          // What the write leaves for the PR (`open`: its questions and places), the answer pass's input (TASK-105).
+          const open = checkWriteOpen(result.open);
+          if (open) result.open = open;
           // The PRs the write names, each with commits in its worktree, pushed as they are: pages written into an owner's
           // checkout, or a worktree left untouched, are no write (lib/worktree.mjs, `writtenIn`).
           if (!(result.prs ?? []).length) throw new Refused('noPr', 'write done needs the PRs it wrote for: --result {"prs": [{ "repo", "targets", "review", "branch", "base", "commits" }]}');
@@ -332,6 +357,46 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
             if (w.error) throw new Refused('notWritten', `${e.repo} ${e.branch}: ${w.error}`);
           }
         }
+        return;
+      }
+      case 'answerPass': {
+        // The answer pass (TASK-105): every item of its frozen input answered (with its evidence), confirmed (a place
+        // seen working) or kept (with every source tried), checked against the files; a stage's own question was never
+        // an item, so it can't be touched here.
+        const input = inputOf(l, pr);
+        if (!input) throw new Refused('answers', `no input was frozen for this pass${pr ? ` on ${prId(pr)}` : ''}: the runner freezes it before the session; run the stage from the runner`);
+        const problems = passProblems(input, result, { settings, l, pr, checks: evidenceChecks(settings, { docRepos: docDirsOf(settings) }) });
+        if (problems.length) throw refuse(problems);
+        result.input = { items: input.items, notes: input.notes ?? [], at: input.at };
+        const byId = new Map(input.items.map((x) => [x.id, x]));
+        const done = result.items.filter((r) => r.outcome !== 'kept');
+        for (const r of done) {
+          const item = byId.get(r.id);
+          const source = sourceOfEvidence(r.evidence[0]);
+          if (source) misses.push(missLine({ at, ticket: key, pr: pr ? prId(pr) : null, item: { id: r.id, kind: item.kind, text: String(item.text ?? item.claim ?? '').slice(0, 300) }, source, settledBy: 'answerPass', missedBy: item.from, key: `${key}|answerPass|${pr ? prId(pr) : ''}|${r.id}|${input.at}` }));
+        }
+        if (!pr) {
+          for (const p of result.prs ?? []) upsertPr(p);
+          return;
+        }
+        // On a PR after a round: each held question answered or shown; the open questions without the answered ones;
+        // the pass's edits numbered on, in its review (one `answers` commit), as a round's are.
+        for (const r of result.items) {
+          const q = (pr.questions ?? []).find((x) => `d${x.n}` === r.id);
+          if (!q) continue;
+          delete q.held;
+          if (r.outcome !== 'kept') q.answer = { text: String(r.answer).trim(), by: 'answerPass', ...(r.evidence.find((e) => e?.url)?.url ? { link: String(r.evidence.find((e) => e?.url).url) } : {}), at, seq: l.seq + 1 };
+        }
+        const answered = new Set(result.items.filter((r) => r.outcome !== 'kept').map((r) => String(byId.get(r.id)?.text ?? '').replace(/\s+/g, ' ').trim().toLowerCase()));
+        const left = (pr.openQuestions?.items ?? []).filter((x) => !answered.has(String(x.text ?? '').replace(/\s+/g, ' ').trim().toLowerCase()));
+        pr.openQuestions = { items: left, stage, at, seq: l.seq + 1 };
+        if ((result.edits ?? []).length) {
+          const round = roundOf(['answers']);
+          warnings.push(...addEdits(pr, result.edits.map(({ item, repo, branch, ...e }) => ({ ...e, reason: `answer pass, item ${item}` })), { list: String(result.review.id), stage, at, seq: l.seq + 1 }));
+          addRound(round);
+        }
+        delete pr.answerPassDue;
+        delete pr.answerInput;
         return;
       }
       case 'pr': {
@@ -345,6 +410,12 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
           warnings.push(`${e.branch}: no "expertReview": { "recommended": true|false, "why": "<the open questions for the expert, or the facts not found in the code or the UI; or why none is needed>" }; recorded as null`);
           return null;
         };
+        // After an answer pass (TASK-105): its page edits are on the description's list, and, with review rounds, no
+        // question repeats an item it settled. The description is the session's, so a gap is fixed there and recorded
+        // again.
+        const after = prAfterPass(l, entries, { rounds: Boolean(settings.reviewRounds) });
+        if (after.problems.length) throw new Refused('answers', `${after.problems.join('; ')}`, { problems: after.problems });
+        warnings.push(...after.warnings);
         // Without review rounds the session wrote the description's places, so the places gate reads it (with them, the
         // runner writes them from this record).
         const bodies = new Map();
@@ -370,8 +441,13 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
           addAll(p.reviewersRequested, e.reviewersRequested);
           addAll(p.pipelineCommits, e.commits);
           p.expertReview = expertOf(e);
-          // The numbered change list of the description (the UA review's fixes), from 1.
+          // The numbered change list of the description (the UA review's fixes, then the answer pass's edits), from 1.
           warnings.push(...addEdits(p, e.edits, { list: 'description', stage, at, seq: l.seq + 1 }).map((x) => `${prId(p)}: ${x}`));
+          const pass = passFor(l);
+          for (const x of (pass?.result?.edits ?? []).filter((y) => y.repo === p.repo && (!y.branch || y.branch === p.branch))) {
+            const item = (p.edits ?? []).find((y) => y.list === 'description' && y.page === x.page && y.before === x.before && y.after === x.after);
+            if (item) item.answers = x.item;
+          }
           // The description's questions (D-142), numbered from 1, and the first round: the draft and the UA review's
           // commits, and the review of the places' line comments. The runner writes the description's sections from them.
           // Only with review rounds (the host's `forge.reviewRounds`); there the questions are required (`[]` when none),
@@ -409,6 +485,9 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         languageGate(result.places, entries.map((e) => l.prs.find((x) => x.branch === e.branch && (!e.repo || x.repo === e.repo))));
         // The places' comments are posted before this record, so a place from the code with no reference at a commit is
         // not refused (a retry would post them again): the record stands, the session is told, and `status` reports it.
+        // A place that repeats an item the answer pass settled: its comment is posted, so it stands, with a warning.
+        const settledIds = new Map([...settledOf(passFor(l)).entries()].filter(([, v]) => v.result.outcome !== 'kept'));
+        for (const place of result.places ?? []) if (settledIds.has(place.item)) warnings.push(`place ${place.id ?? '?'} repeats item ${place.item}, which the answer pass ${settledIds.get(place.item).result.outcome}`);
         for (const place of result.places ?? []) {
           const noRef = place.source === 'code' && !(Array.isArray(place.refs) && place.refs.length && place.refs.every((r) => r?.repo && r?.path && r?.lines && r?.commit));
           if (noRef) warnings.push(`place ${place.id ?? '?'} is from the code and has no reference with repo, path, lines and commit`);
@@ -823,6 +902,12 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
       }
       // Only what a round may change: the place's id, page, claim and comment stay as the `pr` record wrote them.
       for (const k of ['state', 'replyId', 'answer']) if (u[k] !== undefined) place[k] = u[k];
+      // The owner's answer in the place's thread from a source already in reach: a miss (TASK-105).
+      const source = checkSource(u.source, `${stage}: place ${u.id}`);
+      if (source) {
+        place.answerSource = source;
+        if (u.state === 'confirmed' || u.state === 'deleted' || u.answer) misses.push(missLine({ at, ticket: key, pr: prId(pr), item: { id: String(u.id), kind: 'place', text: String(place.claim ?? '').slice(0, 300) }, source, settledBy: 'owner', missedBy: 'pr', key: `${key}|${stage}|${prId(pr)}|${u.id}|${source.kind}:${source.ref ?? ''}` }));
+      }
       place.at = at;
     }
   }
@@ -839,16 +924,26 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         warnings.push(`no description question ${a.n} on ${prId(pr)}: its answer is not kept`);
         continue;
       }
-      q.answer = { text: a.answer.trim(), ...(a.link ? { link: String(a.link) } : {}), ...(a.by ? { by: String(a.by) } : {}), at, seq: l.seq + 1 };
+      const source = checkSource(a.source, `${stage}: answered ${a.n}`);
+      q.answer = { text: a.answer.trim(), ...(a.link ? { link: String(a.link) } : {}), ...(a.by ? { by: String(a.by) } : {}), ...(source ? { source } : {}), at, seq: l.seq + 1 };
+      // The owner's answer (an expert's the owner handed on too) from a source already in reach: a miss (TASK-105).
+      if (source) misses.push(missLine({ at, ticket: key, pr: prId(pr), item: { id: `d${q.n}`, kind: 'question', text: q.text.slice(0, 300) }, source, settledBy: a.by === 'expert' ? 'expert' : 'owner', missedBy: q.stage ?? 'pr', key: `${key}|${stage}|${prId(pr)}|d${q.n}|${source.kind}:${source.ref ?? ''}` }));
     }
+    const before = (pr.questions ?? []).length;
     addQuestions(pr, result.asked);
+    // With the company repos and review rounds, the questions a round asks wait for the answer pass on this PR before
+    // they are shown (TASK-105): held from the description, and the check label waits with them.
+    if (companyReposOn(settings) && settings.reviewRounds && pr.questions.length > before) {
+      for (const q of pr.questions.slice(before)) q.held = true;
+      pr.answerPassDue = { seq: l.seq + 1, at, stage };
+    }
   }
 
   // The `pr` stage's round: the commits the write and the UA review recorded for this PR's branch, and the places'
   // review when the entry names it. Recorded again, it replaces itself.
   function firstRound(p, e) {
     const of = (st, role) => (l.stages?.[st]?.result?.prs ?? []).filter((x) => x.branch === p.branch && (!x.repo || x.repo === p.repo)).flatMap((x) => x.commits ?? []).map((sha) => ({ sha: String(sha), role }));
-    const commits = [...of('write', 'draft'), ...of('uaReview', 'style')];
+    const commits = [...of('write', 'draft'), ...of('uaReview', 'style'), ...(passFor(l) ? of('answerPass', 'answers') : [])];
     const review = e.review?.id ?? null;
     const comments = (result.places ?? []).filter((x) => Number(x.pr) === p.number && x.commentId !== undefined && x.commentId !== null).length;
     p.rounds = (p.rounds ?? []).filter((r) => r.stage !== 'pr');

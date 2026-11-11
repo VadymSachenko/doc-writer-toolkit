@@ -25,9 +25,10 @@ const TICKET_ROWS = [
   ['videoImport', 'Importing the video transcripts'],
   ['write', 'Writing the UA pages'],
   ['uaReview', 'Reviewing the UA text'],
+  ['answerPass', 'Answering what is left open'],
   ['pr', 'Opening the PR'],
 ];
-const OPTIONAL_TICKET = new Set(['answers', 'videoImport']);
+const OPTIONAL_TICKET = new Set(['answers', 'videoImport', 'answerPass']);
 const CHAIN_LABELS = {
   translate: 'Translating into EN',
   enReview: 'Reviewing the EN text',

@@ -11,13 +11,14 @@ import { DEFAULT_LABELS } from './pr-description.mjs';
 import { TRANSCRIBERS } from '../../transcriber/lib/index.mjs';
 import { CHECKS } from './gates.mjs';
 import { DEFAULT_EXCLUDE, DEFAULT_TICKET_FILES } from './doc-evidence.mjs';
+import { validateCompanyRepos } from './company-repos.mjs';
 
 // The ticket flow settings: the shared file the host commits (`.claude/ticket-flow.json`, or the `Ticket flow
 // settings:` field of CLAUDE.md, or --settings), read at HEAD (`trustedShared`), and the owner's local file next to it
 // (`<name>.local.json`), merged key by key at any depth (a local key wins), for the local file's keys only (`localOnly`).
 // The tracker and forge scripts read the same files, as they stand and with no such limit.
 //
-// The shared file holds `state`, `workFolder`, `commentHeader`, `tracker`, `forge`, `targets`, `noReviewLabel`, `appRepos`, `relatedRepos`, `ticketCommits`, `docRepos`, `docEvidence`, `hostRules`, `hostJobs`,
+// The shared file holds `state`, `workFolder`, `commentHeader`, `tracker`, `forge`, `targets`, `noReviewLabel`, `appRepos`, `relatedRepos`, `companyRepos`, `ticketCommits`, `docRepos`, `docEvidence`, `hostRules`, `hostJobs`,
 // `build`, `checks`, and each role's tool rules (`roles.<role>.allowedTools`, `disallowedTools`).
 // The local file holds `mode`, `limits`, `schedule`, `roles` (no tool rules), `modelLadder`, `video`, `cleanup` and `progress`. Defaults below.
 
@@ -470,6 +471,8 @@ export function validateSettings(merged, { root, stateRootDefault }) {
     targets,
     noReviewLabel: merged.noReviewLabel ?? null,
     ...validateCodeRepos(merged),
+    // Every company repo the answer pass reads (lib/company-repos.mjs): unset, no answer pass, the flow as before.
+    companyRepos: validateCompanyRepos(merged.companyRepos),
     ticketCommits: validateTicketCommits(merged.ticketCommits),
     docRepos: validateDocRepos(merged.docRepos),
     docEvidence: validateDocEvidence(merged.docEvidence),
