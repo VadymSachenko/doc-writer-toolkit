@@ -30,6 +30,7 @@ import { transcriptDirs } from './trace.mjs';
 import { runsGoingIn, startsInFlight } from './forge-state.mjs';
 import { openQuestionLines, placeReplyLines, replyLines, resyncItemLines, roundLines, styleAfterCommentsLines, styleCheckLines, suggestionLines, takeLines, threadReplyLines } from './edits.mjs';
 import { followLabels, labelSnapshot } from './pr-labels.mjs';
+import { authorsFrom, collectOnce, viewsFrom } from './learn-log.mjs';
 import { idCommentText, syncIds } from './id-sync.mjs';
 import { followRounds, roundSnapshot } from './pr-rounds.mjs';
 import { pickMarks, settleMarks } from './reactions.mjs';
@@ -176,6 +177,8 @@ export const ROLE_SCRIPTS = {
   writer: [...STATE_SCRIPTS, 'ticket-state/browser-lock.mjs', 'tracker/tracker.mjs', 'forge/forge.mjs', 'ui-labels/ui-labels.mjs', 'screenshot-locales/screenshot-locales.mjs', 'video-parts/video-parts.mjs'],
   reviewer: [...STATE_SCRIPTS, 'visual-pack/visual-pack.mjs', 'forge/forge.mjs pr-state', 'forge/forge.mjs edit-pr', 'forge/forge.mjs review-on-lines'],
   translator: [...STATE_SCRIPTS, 'locale-sync/locale-sync.mjs', 'ui-labels/ui-labels.mjs', 'doc-align/doc-align.mjs', 'screenshot-locales/screenshot-locales.mjs', 'forge/forge.mjs pr-state'],
+  // The learner reads and writes its one result file: no script at all (lib/learn.mjs does every change).
+  learner: [],
 };
 export const scriptRulesFor = (roots = [], role = null) => [...new Set(roots.flatMap((r) => (role ? ROLE_SCRIPTS[role] : NODE_SCRIPTS).map((s) => `Bash(node ${path.join(r, 'scripts', s)}:*)`)))];
 // Script flags that run code: ui-labels' `--source 'command <cmd>'` (a shell) and visual-pack's `--playwright-from
@@ -233,7 +236,7 @@ export function writeDeniedFor(settings, roots = []) {
     // The transcriber's browser profile holds the owner's sign-in: no session reads or writes it, nor its lock.
     ...(settings.video?.browserProfile ? [`Read(${abs(settings.video.browserProfile)}/**)`, `Edit(${abs(settings.video.browserProfile)}/**)`, `Edit(${abs(`${settings.video.browserProfile}.lock`)}/**)`, `Bash(mkdir ${settings.video.browserProfile}.lock:*)`, `Bash(mkdir -p ${settings.video.browserProfile}.lock:*)`] : []),
     ...roots.map((r) => `Edit(${abs(r)}/**)`),
-    ...['tickets', 'locks', 'roles', 'watch', 'jobs', 'runs', 'reports', 'code', LOCK_NAME, BUSY_NAME, BUILD_LOCK_NAME].map((d) => `Edit(${abs(path.join(state, d))}/**)`),
+    ...['tickets', 'locks', 'roles', 'watch', 'jobs', 'runs', 'reports', 'code', 'learning', LOCK_NAME, BUSY_NAME, BUILD_LOCK_NAME].map((d) => `Edit(${abs(path.join(state, d))}/**)`),
     // The browser lock and the busy notes go only through browser-lock.mjs: no holder-less lock, no forged holder. The
     // build lock only through the runner.
     ...[LOCK_NAME, BUSY_NAME, BUILD_LOCK_NAME].map((d) => `Edit(${abs(path.join(state, d))})`),
@@ -316,7 +319,8 @@ export function downloadDirsFor(step, settings) {
 // folders, which are the clone's (links; a new one is moved into the clone after the session): no rule names anything
 // else there, so its pages are not writable.
 export function writeAllowedFor(step, settings) {
-  const noTree = step.role !== 'triage' && !step.worktrees?.length;
+  // The learner writes only its result file under `<state>/tmp/`: no `.sources/` folder, no spec.
+  const noTree = step.role !== 'triage' && step.role !== 'learner' && !step.worktrees?.length;
   const clones = noTree ? [...new Set(settings.targets.map((t) => clonePath(settings, t)).filter(Boolean))] : [];
   const reads = noTree ? (step.clones ?? []).map((c) => c.read?.path).filter(Boolean) : [];
   return [...writableFor(step, settings).map((d) => `Edit(${abs(d)}/**)`), ...clones.flatMap((c) => [`Edit(${abs(c)}/**/.sources/**)`, ...plainKeys(step).map((k) => `Edit(${abs(c)}/screenshot-tests/_plan-${k}-*)`)]), ...reads.map((r) => `Edit(${abs(r)}/**/.sources/**)`)];
@@ -788,7 +792,7 @@ const codeDenied = (settings, step = {}) => {
   return [...new Set([...owners.flatMap((c) => [`Read(${c}/**)`, `Edit(${c}/**)`]), ...(apps.length ? [`Edit(${abs(codeTreesRoot(settings))}/**)`] : [])])];
 };
 
-export function commandFor(step, settings, { model, agentsPath, claude = 'claude', roleDir = ROLE_DIR, roots = scriptRoots(settings) }) {
+export function commandFor(step, settings, { model, agentsPath, claude = 'claude', roleDir = ROLE_DIR, roots = scriptRoots(settings), brief = null }) {
   const role = settings.roles[step.role];
   const def = readRole(step.role, roleDir);
   // Every git rule in both spellings, plain and `git -C <worktree>` for each worktree of the step (lib/worktree.mjs); the
@@ -816,7 +820,7 @@ export function commandFor(step, settings, { model, agentsPath, claude = 'claude
   const dirs = [...new Set([...(trees.length ? dirsOf : [...readCheckouts, ...settings.targets.map((t) => (t.path ? path.resolve(settings.root, t.path) : null))]), ...codeDirs, ...roots].filter((d) => d && d !== settings.root))];
   const args = [
     '-p',
-    briefFor(step, settings),
+    brief ?? briefFor(step, settings),
     '--agents', agentsPath,
     '--agent', agentName(step.role),
     '--model', model ?? role.model,
@@ -1766,6 +1770,20 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
   st = planOnly ? st : await computeStatus({ settings, clients, usage, git: runGit(), now: clock(), ignoreLocks: own, inFlight: inFlight() });
   out.after = summary(st);
   out.notStarted = st.notStarted;
+
+  // The owner's edits into the learning log (TASK-054, lib/learn-log.mjs): no model; nothing in a dry run or observe.
+  if (!planOnly && settings.learning) {
+    try {
+      // The run's own tickets, as its status read them: no forge call of its own. What this pass can't see (a ticket
+      // another run follows, a PR merged since) the next run of that ticket, or the weekly pass, reads.
+      const keys = new Set(st.tickets.map((t) => t.key));
+      const r = await collectOnce(settings, { ledgers: readAllLedgers(settings.state).filter((l) => keys.has(l.key)), viewOf: viewsFrom(st, null), authorsOf: authorsFrom(clients.forge), ...(io.learnReader ? { git: io.learnReader } : {}), now: clock() });
+      if (r.added.length) say({ kind: 'learning', outcome: 'collected', note: `${r.added.length} edit(s) of the owner's logged from ${r.prs.filter((p) => p.added).map((p) => p.pr).join(', ')}` });
+      for (const n of r.notes) out.notes.push(n);
+    } catch (e) {
+      say({ kind: 'learning', outcome: 'failed', note: `the collection of the owner's edits: ${String(e.message ?? e).split('\n')[0]}` });
+    }
+  }
   out.guard = log.filter((e) => e.kind === 'guard');
 
   // The report and the run log. A dry run writes neither and prints the report.

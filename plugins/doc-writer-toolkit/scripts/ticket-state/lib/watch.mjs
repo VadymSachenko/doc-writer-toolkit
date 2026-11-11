@@ -20,6 +20,8 @@ import { dropHandOnStep, handOnLive, liveHandOnKeys, runsGoingIn, startsInFlight
 import { makeDispatcher } from './dispatch.mjs';
 import { videoFetchDue } from './rule.mjs';
 import { hubDrain, hubLine } from './hub-update.mjs';
+import { learningCheck, learnWanted, unsentNotes } from './learn.mjs';
+import { learnArgs, spawnDetached } from './dispatch.mjs';
 
 // One check of the watcher (design §5, D-048), started by launchd every few minutes. No model call of its own:
 //   1. read every source since its cursor; a check that finds nothing ends here, with no status, no runner, no claude;
@@ -187,6 +189,44 @@ function groupOfKey(state) {
       return k;
     }
   };
+}
+
+// Why a learner session waits for the tickets (D-131), or null: a ticket run going (a live group lock, or a run a check
+// handed on that holds none yet).
+function busyNow(settings, now, io = {}) {
+  const going = runsGoingIn(settings.state, { locks: allLocks(settings.state, now), now, ...(io.isAlive ? { isAlive: io.isAlive } : {}), groupOf: groupOfKey(settings.state) }).size;
+  return going ? `${going} ticket run(s) going` : null;
+}
+
+// The learning pass's lock (a watcher lock: its folder holds the pid; a dead holder or one older than 12 hours is stale).
+export const LEARN_LOCK = 'learn-active';
+
+// One learning pass, in a process of its own (`watcher.mjs --learn`, handed on by the full check's step 5c): the rule
+// PRs, the toolkit PRs and the week (lib/learn.mjs `learningCheck`), its sessions under this process's lock only, so the
+// full check never waits for one. The gate (morning run, tickets, start hours) is read again here, at the pass's start.
+// Each notification goes once (`unsentNotes`); progress.md is written after.
+export async function runLearnPass({ settings, clients, io = {}, options = {} }) {
+  const clock = io.now ?? Date.now;
+  const dryRun = Boolean(options.dryRun);
+  const lock = dryRun ? { taken: true, release: () => {} } : takeWatchLock(settings.state, { name: LEARN_LOCK, now: clock(), ...(io.isAlive ? { isAlive: io.isAlive } : {}) });
+  if (!lock.taken) return { skipped: `another learning pass runs (pid ${lock.held?.pid ?? '?'})` };
+  try {
+    const now = clock();
+    const today = localDate(now);
+    const claude = options.claude ?? 'claude';
+    const readUsage = io.readUsage ?? (async () => (await readUsageTried(claude, io.claudeEnv, io.sleep ? { sleep: io.sleep } : {})).usage);
+    const out = await (io.learningCheck ?? learningCheck)({ settings, clients, io: { claude, claudeEnv: io.claudeEnv, readUsage, ...(io.learn ?? {}) }, now, morningDone: readFeed(settings.state).morning?.lastDate === today, busy: busyNow(settings, now, io), dryRun });
+    out.notified = [];
+    if (!dryRun) {
+      for (const n of unsentNotes(settings, out.notify ?? [], now)) out.notified.push({ key: n.key, ...(io.notify ?? notify)(n, io.notifyIo ?? {}) });
+      const done = [out.proposed.length ? `rule PRs ${out.proposed.map((p) => `${p.repo}#${p.number}`).join(', ')}` : null, out.replied.length ? `replied on ${out.replied.map((r) => r.pr).join(', ')}` : null, out.toolkit.length ? `toolkit ${out.toolkit.map((t) => t.url ?? t.failed).join(', ')}` : null, out.week?.error ? `the week: ${out.week.error}` : null].filter(Boolean);
+      if (done.length) appendRunLog(settings.state, today, [{ at: iso(clock()), kind: 'learning', outcome: out.week?.error ? 'failed' : 'done', note: done.join('; ') }]);
+      progressAfterCheck({ settings, now: clock(), notify: io.notify, notifyIo: io.notifyIo ?? {} });
+    }
+    return out;
+  } finally {
+    lock.release();
+  }
 }
 
 // Whether a start handed on got its cards into work: each ticket's start recorded done since the hand-on.
@@ -576,6 +616,28 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
         failed('the start pass', e);
       }
       if (!out.startPass) delete out.startPass;
+    }
+
+    // 5c. Learning from the owner's edits (lib/learn.mjs, TASK-054), after the hand-ons: the check never waits for a
+    // learning session. When there is something to do (`learnWanted`: open rule or toolkit PRs to read, a queued toolkit
+    // rule or the week, these two only while the session gate is open) and no learning pass runs, it hands one on to a
+    // process of its own (`watcher.mjs --learn`, `runLearnPass` below), which takes its own lock.
+    if (settings.learning) {
+      try {
+        const busy = busyNow(settings, clock(), io);
+        const holder = watchLockHolder(settings.state, { now: clock(), name: LEARN_LOCK, ...(io.isAlive ? { isAlive: io.isAlive } : {}) });
+        const want = holder ? [] : await learnWanted({ settings, clients, io: io.learn ?? {}, now: clock(), morningDone: next.morning?.lastDate === today, busy });
+        if (holder) out.learning = { running: holder.pid ?? null };
+        else if (!want.length) out.learning = { idle: true };
+        else if (dryRun) out.learning = { would: want };
+        else {
+          const p = (io.spawnLearn ?? ((a) => spawnDetached(a, { settings, env: io.claudeEnv ?? process.env })))(learnArgs(settings, { claude }));
+          out.learning = { handed: p.pid ?? null, why: want };
+          say({ kind: 'learning', outcome: 'handed', note: `a learning pass (pid ${p.pid ?? '?'}): ${want.join(', ')}` });
+        }
+      } catch (e) {
+        failed('the learning from the owner\'s edits', e);
+      }
     }
 
     // 6. Host jobs. A watch job whose board wasn't read in this check neither runs nor changes: it hasn't seen the list.

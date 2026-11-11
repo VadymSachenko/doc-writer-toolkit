@@ -66,7 +66,7 @@ test('--dry-run, --from and --size belong to import only: any other command refu
   for (const argv of [['set', 'mode', 'off', '--dry-run'], ['set', 'limits.open', '1', '--from', 'x'], ['status', '--size', 'a=edit'], ['report', '--dry-run'], ['handover', '5', '--dry-run']]) {
     const r = run(CLI, [...argv, '--root', root]);
     assert.equal(r.code, 2, argv.join(' '));
-    assert.match(r.json.error, new RegExp(`^--(dry-run|from|size) is an option of import only, not of ${argv[0]}$`));
+    assert.match(r.json.error, new RegExp(`^--(dry-run|from|size) is an option of import(, learn)? only, not of ${argv[0]}$`));
   }
   assert.deepEqual(snapshot(root), before, 'the local settings file was not written');
   assert.equal(fs.existsSync(path.join(root, '.claude', 'ticket-flow.local.json')), false);

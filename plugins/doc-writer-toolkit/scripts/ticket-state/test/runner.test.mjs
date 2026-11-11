@@ -321,7 +321,7 @@ test('finishing comes first: merged, ready for merge, the chain, comments, answe
 
 test('the roles: every role file has its frontmatter and allows no compound shell call; the shared rules go to every role', () => {
   const agents = agentsFile();
-  assert.deepEqual(Object.keys(agents), ['ticket-triage', 'ticket-writer', 'ticket-reviewer', 'ticket-translator']);
+  assert.deepEqual(Object.keys(agents), ['ticket-triage', 'ticket-writer', 'ticket-reviewer', 'ticket-translator', 'ticket-learner']);
   for (const [name, a] of Object.entries(agents)) {
     assert.ok(a.description.length > 40, name);
     assert.match(a.prompt, /One command per Bash call/);
@@ -334,6 +334,10 @@ test('the roles: every role file has its frontmatter and allows no compound shel
     for (const deny of ['Bash(git checkout:*)', 'Bash(git pull:*)', 'Bash(gh:*)', 'Bash(curl:*)', 'Bash(rm:*)']) assert.ok(r.disallowedTools.includes(deny), `${role} denies ${deny}`);
     assert.ok(!r.allowedTools.some((x) => /^Bash\((rm|gh|curl)\b/.test(x)), role);
   }
+  // The learner runs nothing: it reads, and writes its one result file (lib/learn.mjs).
+  const learner = readRole('learner', ROLE_DIR);
+  assert.equal(learner.name, 'ticket-learner');
+  assert.ok(learner.disallowedTools.includes('Bash') && !learner.allowedTools.some((x) => x.startsWith('Bash')));
 });
 
 // The CLI's file rule forms, as the probes showed them: `**/` any folders, `**` anything, `*` within one name, and a
