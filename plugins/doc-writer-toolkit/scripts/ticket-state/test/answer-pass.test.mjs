@@ -497,6 +497,11 @@ test('replay, a state no screen gives, reached through a backend route (AC-4): t
   assert.equal(l.stages.questions, undefined, 'nothing was asked on the card');
   assert.deepEqual(l.questions.map((q) => [q.id, q.answer?.by]), [['c1', 'answerPass']]);
   assert.deepEqual(readMisses(w.settings.state).map((x) => [x.item.id, x.source.kind, x.settledBy, x.missedBy]), [['c1', 'live', 'answerPass', 'plan']]);
+  // The same question held again after the pass answered it: refused, the plan uses the answer.
+  await assert.rejects(runRecord({ settings: w.settings, clients: w.clients(), now: NOW, key: '2701', stage: 'questions', status: 'done', result: { hold: true, from: 'plan', questions: [{ kind: 'fact', text: question.text }] } }), (e) => e.refused === 'answers' && /the answer pass answered it already \(c1\)/.test(e.message));
+  // The company repos have their own heading in the pass's brief.
+  assert.match(seen[1].brief, /Company repos \(the host's `companyRepos`/);
+  assert.ok(seen[1].brief.indexOf('- cabinet-web:') > seen[1].brief.indexOf('Company repos'));
   // A fit stop is the stage's own: never held.
   await assert.rejects(runRecord({ settings: w.settings, clients: w.clients(), now: NOW, key: '2701', stage: 'questions', status: 'done', result: { hold: true, from: 'plan', questions: [{ kind: 'fit', text: 'The table lists cards: add a row?' }] } }), (e) => e.exitCode === 2 && /a fit question is the stage's own/.test(e.message));
 });

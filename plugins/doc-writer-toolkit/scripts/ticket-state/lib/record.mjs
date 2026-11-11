@@ -226,6 +226,11 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
           const own = qs.filter((q) => OWN_KINDS.includes(q.kind));
           if (own.length) throw new CliError(`questions: a ${own[0].kind} question is the stage's own: ask it on the card, never held`, { code: 2 });
           if (heldPending(l)) throw new Refused('answers', 'questions are held already and no answer pass has settled them');
+          // A question a pass already answered is no question: held again, the plan and the pass would go round.
+          const norm = (t) => String(t ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+          const settled = new Map((l.questions ?? []).filter((q) => q.answer?.by === 'answerPass').map((q) => [norm(q.text), q]));
+          const again = qs.filter((q) => settled.has(norm(q.text)));
+          if (again.length) throw new Refused('answers', `${again.map((q) => `"${String(q.text).slice(0, 80)}"`).join(', ')}: the answer pass answered it already (${again.map((q) => settled.get(norm(q.text)).id).join(', ')}); use that answer, from the brief`);
           l.heldQuestions = { items: qs.map((q) => ({ ...q })), from: result.from, at, seq: l.seq + 1 };
           return;
         }
@@ -418,6 +423,7 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
             thenAsked = { status: 'done', result: { questions: asked, from: 'answerPass' } };
             l.left = { ...brief(card), at };
           }
+          l.questions ??= [];
           for (const q of questions) l.questions.push({ ...q, askedAt: at, ...(q.answer ? {} : { commentId: result.asked.commentId }) });
           l.heldQuestions.passSeq = l.seq + 1;
           return;

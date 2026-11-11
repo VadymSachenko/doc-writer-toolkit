@@ -530,7 +530,8 @@ function cloneLines(clones) {
 // repo and no commit lookup (a reviewer's step), the lines are the code repos' alone.
 export function codeLines(trees) {
   const code = trees.filter((t) => !t.related);
-  const related = trees.filter((t) => t.related);
+  const related = trees.filter((t) => t.related && !t.company);
+  const company = trees.filter((t) => t.company);
   const at = (t) => `${t.path}, commit ${t.commit}${t.url ? `; a link to lines: ${t.url}/blob/${t.commit}/<path>#L<from>-L<to>` : ''}.${t.notes?.length ? ` Note: ${t.notes.join('; ')}.` : ''}`;
   const out = [];
   if (code.length) {
@@ -543,6 +544,12 @@ export function codeLines(trees) {
     out.push(
       `Related repos (the host's \`relatedRepos\`: the org's other repos, such as frontends, widgets and proxies), each a read-only checkout at the commit the runner fetched for this session, read like the code repos: with Read and Grep, never in a clone. When a claim names an endpoint, a field, a status or a component whose caller or implementation ${code.length ? 'the code repos above don\'t show' : 'you can\'t see'}, search these for it (its path, its name, its field names) before you mark a place or ask a question, and cite what you find like any code reference: repo, path, lines and the commit below.`,
       ...related.map((t) => (t.error ? `- ${t.repo}: not available (${t.error}). Say so in a place's \`why\` when it was a source to try.` : `- ${t.repo}: ${at(t)}`)),
+    );
+  }
+  if (company.length) {
+    out.push(
+      `Company repos (the host's \`companyRepos\`: the org's repos, for the answer pass only), each a read-only checkout at the commit the runner fetched for this session, read like the code repos: with Read and Grep, never in a clone or the owner's own checkout. Search them all for an item's names (its endpoint, field, status, component, label), and cite what you find like any code reference: repo, path, lines and the commit below.`,
+      ...company.map((t) => (t.error ? `- ${t.repo}: not available (${t.error}). Name it among the sources tried of an item it could have answered.` : `- ${t.repo}: ${at(t)}`)),
     );
   }
   const looked = trees.filter((t) => t.ticket);
@@ -2490,7 +2497,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         const checkoutFrom = clock();
         const budget = io.passCheckoutBudgetMs ?? PASS_CHECKOUT_BUDGET_MS;
         let codeTrees = repos.map((a) => {
-          const extra = { ...(a.related ? { related: true } : {}), ...(a.company && a.path ? { owner: a.path } : {}) };
+          const extra = { ...(a.related ? { related: true } : {}), ...(a.company ? { company: true } : {}), ...(a.company && a.path ? { owner: a.path } : {}) };
           if (!pass) return { ...(io.ensureCodeTree ?? ensureCodeTree)(settings, a, { othersRunning }), ...extra };
           const left = budget - (clock() - checkoutFrom);
           if (left <= 0) return { repo: a.repo, url: a.url, path: null, commit: null, notes: [], error: "not checked out: the answer pass's checkout time ran out (it is made at the next pass)", ...extra };
