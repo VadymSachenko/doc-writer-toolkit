@@ -6,8 +6,8 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { forgeAdapter, gitRepo, pr as forgePr, settingsFor, tmp } from './fakes.mjs';
 import { newLedger, newPr, writeLedger, readAllLedgers } from '../lib/ledger.mjs';
-import { blocksOf, changedBlocks, collectEdits, logPath, readLog } from '../lib/learn-log.mjs';
-import { checkPatterns, editKit, kindOf, learningCheck, learnStatus, markerOf, namesIn, namesOf, readLearning, renderBody, resolveRuleReply, trendOf, weekDue, weekOf } from '../lib/learn.mjs';
+import { blocksOf, changedBlocks, collectEdits, entriesOf, logPath, readLog } from '../lib/learn-log.mjs';
+import { checkPatterns, editKit, kindOf, learningCheck, learnStatus, learnWanted, markerOf, namesIn, namesOf, readLearning, renderBody, resolveRuleReply, trendOf, weekDue, weekOf } from '../lib/learn.mjs';
 import { formOf, insertRule, ruleFiles, scriptOf } from '../lib/rule-insert.mjs';
 import { commandFor } from '../lib/runner.mjs';
 import { main } from '../ticket-state.mjs';
@@ -84,21 +84,28 @@ test('point 1: on a PR merged with a merge commit, the collector logs the applie
   const root = tmp();
   const settings = settingsFor(root, { learning: LEARN });
   const { draft, round, hand, ready, final, mergeCommit } = editedPr(root);
-  edited(settings, '857', 57, {
+  const l857 = edited(settings, '857', 57, {
     pipelineCommits: [draft.slice(0, 7), ready],
     rounds: [{ stage: 'answerComments', commits: [{ sha: round, role: 'comments' }] }],
     readyForMerge: [{ head: ready, at: new Date(MONDAY - 3 * 86400000).toISOString(), seq: 9 }],
     styleChecked: [{ sha: hand, reason: 'читач поливає щодня, не лише після пересадки' }],
     edits: [
       { n: 1, list: 'description', stage: 'pr', page: PAGE, block: 'Пауза', before: 'до заходу сонця', after: 'до самого заходу сонця', at: 'x', seq: 1 },
-      { n: 2, list: '7001', stage: 'answerComments', page: PAGE, block: 'Пауза', before: 'Полив можна зупинити.', after: 'Полив можна зупинити до заходу сонця.', reason: 'без умови читач не знає меж', by: 'owner-login', at: '2026-11-10T10:00:00Z', seq: 2 },
+      { n: 2, list: '7001', stage: 'answerComments', page: PAGE, block: 'Пауза', before: 'Полив можна зупинити.', after: 'Полив можна зупинити до заходу сонця.', reason: 'без умови читач не знає меж', at: '2026-11-10T10:00:00Z', seq: 2 },
       { n: 3, list: '7001', stage: 'answerComments', page: PAGE, block: 'Ранковий полив', before: 'Натисніть Почати.', after: 'Натисніть **Почати**.', rule: 'gdsg: ui-elements', at: '2026-11-10T10:00:00Z', seq: 2, rejected: { at: '2026-11-11T10:00:00Z', seq: 3, by: 4 } },
       { n: 4, list: '7002', stage: 'answerComments', page: PAGE, block: 'Ранковий полив', before: 'Натисніть **Почати**.', after: 'Натисніть Почати.', restores: 3, at: '2026-11-11T10:00:00Z', seq: 3 },
-      { n: 5, list: '7002', stage: 'answerComments', page: PAGE, block: 'Пауза', before: 'зупинити', after: 'призупинити', reason: 'так точніше', by: 'expert-one', at: '2026-11-11T10:00:00Z', seq: 3 },
+      { n: 5, list: '7002', stage: 'answerComments', page: PAGE, block: 'Пауза', before: 'зупинити', after: 'призупинити', reason: 'так точніше', at: '2026-11-11T10:00:00Z', seq: 3 },
     ],
   });
+  // The comments each round handled, as the record keeps them; their authors come from the forge, never a model.
+  l857.reviewComments = [{ repo: 'guide-docs', pr: 57, at: '2026-11-10T10:00:00Z', id: 9001, result: 'applied' }, { repo: 'guide-docs', pr: 57, at: '2026-11-11T10:00:00Z', id: 9002, replyId: 9003, result: 'applied' }];
+  writeLedger(settings.state, l857);
+  const authorsOf = async () => new Map([['9001', 'owner-login'], ['9002', 'expert-one'], ['9003', 'owner-login-bot']]);
+  // Without the forge (it can't be read): the applied comments wait, the PR is read again.
+  const blind = await collectEdits({ settings, ledgers: readAllLedgers(settings.state), viewOf: async () => ({ head: final, state: 'merged', mergedAt: '2026-11-13T12:00:00Z', mergeCommit }), authorsOf: async () => { throw new Error('offline'); }, now: MONDAY, dryRun: true });
+  assert.ok(!blind.added.some((e) => e.source === 'comment') && blind.prs[0].deferred, 'no comment entry while the authors are unknown');
   const views = async () => ({ head: final, state: 'merged', mergedAt: '2026-11-13T12:00:00Z', mergeCommit });
-  const r1 = await collectEdits({ settings, ledgers: readAllLedgers(settings.state), viewOf: views, now: MONDAY });
+  const r1 = await collectEdits({ settings, ledgers: readAllLedgers(settings.state), viewOf: views, authorsOf, now: MONDAY });
   const log = readLog(settings.state);
   assert.deepEqual(log.map((e) => e.source).sort(), ['comment', 'final', 'hand', 'restore'], 'not the pipeline\'s fix (1), the restore item itself (4), the expert\'s comment (5), the round\'s commit or the expert\'s push');
   const byS = Object.fromEntries(log.map((e) => [e.source, e]));
@@ -151,7 +158,7 @@ test('the backfill, on real repos: a PR merged with a merge commit in the window
   const merge60 = r.g('rev-parse', 'HEAD');
   r.g('push', '-q', 'origin', 'main');
   r.g('fetch', '-q', 'origin');
-  const item = (n, at) => ({ n, list: '7100', stage: 'answerComments', page: PAGE, block: 'Пауза', before: `було ${n}`, after: `стало ${n}`, by: 'owner-login', at, seq: n });
+  const item = (n, at) => ({ n, list: '7100', stage: 'answerComments', page: PAGE, block: 'Пауза', before: `було ${n}`, after: `стало ${n}`, at, seq: n });
   edited(settings, '901', 61, { stage: 'merged', merged: { at: '2026-11-12T10:00:00Z', commit: merge61 }, edits: [item(1, '2026-11-06T10:00:00Z')] });
   edited(settings, '902', 62, { stage: 'merged', merged: { at: '2026-11-06T10:00:00Z', commit: 'f'.repeat(40) }, edits: [item(2, '2026-11-05T10:00:00Z')] });
   edited(settings, '903', 63, { stage: 'finalReview', edits: [item(3, '2026-11-10T10:00:00Z')] });
@@ -188,11 +195,19 @@ test('the backfill, on real repos: a PR merged with a merge commit in the window
   assert.deepEqual([st.log.entries, st.log.prs, st.log.bySource], [5, 3, { comment: 2, hand: 3 }]);
 });
 
-test('an applied comment\'s edit keeps its comment\'s author (`by`), so the log takes the owner\'s only', async () => {
-  const { addEdits } = await import('../lib/edits.mjs');
-  const pr = { edits: [] };
-  addEdits(pr, [{ n: 1, page: PAGE, block: 'Пауза', before: 'a', after: 'b', by: 'owner-login' }, { n: 2, page: PAGE, block: 'Пауза', before: 'c', after: 'd' }], { list: '9', stage: 'answerComments', at: 'x', seq: 1 });
-  assert.deepEqual(pr.edits.map((e) => e.by ?? null), ['owner-login', null]);
+test('N1: the comment authors come from the forge by the handled comments\' ids, a model\'s `by` is never read', async () => {
+  const { authorsFrom } = await import('../lib/learn-log.mjs');
+  const forge = { prActivity: async () => ({ reviews: [{ id: 1, author: 'a' }], threads: [{ comments: [{ id: 2, author: 'b' }] }], comments: [{ id: 3, author: 'c' }] }) };
+  assert.deepEqual([...(await authorsFrom(forge)({ repo: 'guide-docs', number: 1 })).entries()], [['1', 'a'], ['2', 'b'], ['3', 'c']]);
+  const settings = settingsFor(tmp(), { learning: LEARN });
+  const l = { key: 'k', reviewComments: [{ repo: 'guide-docs', pr: 5, at: 't1', id: 11 }, { repo: 'guide-docs', pr: 5, at: 't2', id: 12 }] };
+  const pr = { repo: 'guide-docs', number: 5, review: 'sme', edits: [
+    { n: 1, list: 'r', stage: 'answerComments', page: PAGE, before: 'a', after: 'b', at: 't1', by: 'expert-one' },
+    { n: 2, list: 'r', stage: 'answerComments', page: PAGE, before: 'c', after: 'd', at: 't2', by: 'owner-login' },
+    { n: 3, list: 'r', stage: 'answerComments', page: PAGE, before: 'e', after: 'f', at: 't0' },
+  ] };
+  const got = entriesOf({ settings, ledger: l, pr, view: null, git: null, authors: new Map([['11', 'owner-login'], ['12', 'expert-one']]) });
+  assert.deepEqual(got.entries.map((e) => e.n), [1, 3], 'the forge\'s authors decide (1 the owner\'s, 2 the expert\'s, whatever `by` says); an old round with no handled record, on an sme PR too, counts');
 });
 
 test('blocks: headings, paragraphs and fences apart; a change in whitespace only is none', () => {
@@ -273,6 +288,10 @@ test('the kit: a rule is a marked line under the section, made when missing; rep
   assert.ok(b.includes(`- Правило А, нове. Чому: Причина А. ${markerOf('W1-1')}`) && !b.includes('W1-2'));
   const c = editKit(b, { add: [{ rid: 'W2-1', kind: 'general', rule: 'В.', why: 'Г.' }], section: '## Правила з правок', labels });
   assert.match(c, /W1-1 -->\n- В\. Чому: Г\. <!-- learned:W2-1 -->\n$/, 'added after the section\'s last line');
+  // N2: «N — "текст"» for a rule whose line the owner took out puts the line back, once.
+  const d = editKit(c, { replace: [{ rid: 'W1-2', kind: 'product', rule: 'Правило Б, знову.', why: 'Причина Б.' }], section: '## Правила з правок', labels });
+  assert.equal(d.split(markerOf('W1-2')).length, 2);
+  assert.ok(d.includes(`- Правило Б, знову. Чому: Причина Б. ${markerOf('W1-2')}`));
 });
 
 test('point 3: the description starts with the trend line and the numbered rules, then the host\'s PR structure, and names no tool', async () => {
@@ -300,9 +319,12 @@ test('point 4: the reply by number on a rule PR: yes, no, the owner\'s text, a k
   ]);
   assert.equal(resolveRuleReply('2 — виняток із загального', items)[0].do, 'ask', 'an exception needs the rule it overrides');
   assert.equal(resolveRuleReply('Дякую, гляну пізніше', items), null, 'no number: no reply by number');
-  // A leading no is a no, whatever follows; a kind by its stem is a kind; a longer text is a rewording.
-  const m = resolveRuleReply('1 — ні, це факт\n2 — не додавай це\n3 — тільки для цього проєкту\n4 — продуктове\n5 — прибери, бо дублює Ж3\n6 — загальне, але коротше й без прикладу з таблиці', items);
-  assert.deepEqual(m.map((x) => [x.n, x.do, x.kind ?? null]), [[1, 'reject', null], [2, 'reject', null], [3, 'kind', 'product'], [4, 'kind', 'product'], [5, 'reject', null], [6, 'rewrite', null]]);
+  // A no-word followed by punctuation, or a no-phrase, is a no; the kind alone is a kind change; a kind and more is a
+  // kind change and a rewording; a no-word followed by more words is asked back.
+  const m = resolveRuleReply('1 — ні, це факт\n2 — не додавай це\n3 — тільки для цього проєкту\n4 — продуктове\n5 — прибери, бо дублює Ж3\n6 — загальне, але коротше й без прикладу з таблиці\n7 — no problem', items.map((x) => ({ ...x, state: 'open' })));
+  assert.deepEqual(m.map((x) => [x.n, x.do, x.kind ?? null]), [[1, 'reject', null], [2, 'reject', null], [3, 'kind', 'product'], [4, 'kind', 'product'], [5, 'reject', null], [6, 'rewrite', 'general'], [7, 'ask', null]]);
+  assert.equal(m[5].how, 'загальне, але коротше й без прикладу з таблиці', 'the rewording keeps the whole reply');
+  assert.deepEqual(resolveRuleReply('1 — no.\n2 — ні в якому разі не міняй\n3 — не проблема', items).map((x) => x.do), ['reject', 'ask', 'rewrite']);
 });
 
 // ------------------------------------------------------------------ AC-3: the toolkit file's own form
@@ -556,10 +578,19 @@ test('the loop: Monday\'s session proposes in a PR, nothing reaches the kit befo
   assert.equal(w.adapter.log.filter((x) => x[0] === 'comment').length, 1);
 
   // The merge is the yes: the general rule is queued for the toolkit, and the toolkit PR is made in the file's own form.
+  // The owner reworded the line by hand before merging (its marker kept): the merged text is the rule.
+  g(w.host.dir, 'fetch', '-q', 'origin');
+  g(w.host.dir, 'checkout', '-q', '-B', 'merge-it', 'origin/rules-from-edits-2026-w47');
+  const handKit = fs.readFileSync(path.join(w.host.dir, 'doc-kit/product-rules.md'), 'utf8').replace('Крок рецепта називає налаштування приладу перед часом.', 'Крок рецепта називає налаштування приладу перед часом приготування.');
+  w.host.commit({ 'doc-kit/product-rules.md': handKit }, 'Уточнення');
+  g(w.host.dir, 'push', '-q', 'origin', 'HEAD:refs/heads/main');
+  g(w.host.dir, 'checkout', '-q', 'main');
+  g(w.host.dir, 'reset', '-q', '--hard', 'origin/main');
   w.prs[0].state = 'merged';
   const r3 = await check();
   const d3 = readLearning(settings.state);
   assert.deepEqual(d3.prs[0].items.map((x) => x.state), ['rejected', 'accepted']);
+  assert.equal(d3.rules.find((r) => r.rid === '2026-W47-2').toolkit.rule, 'Крок рецепта називає налаштування приладу перед часом приготування.', 'the merged line read back before the toolkit queue');
   assert.equal(r3.toolkit[0].number, 7);
   const tk = w.tprs[0];
   assert.match(tk.title, /^Add a rule learned from the owner's edits to formatting-conventions\.md$/);
@@ -576,8 +607,6 @@ test('the loop: Monday\'s session proposes in a PR, nothing reaches the kit befo
   const installed = tmp();
   fs.mkdirSync(path.dirname(path.join(installed, FC)), { recursive: true });
   fs.writeFileSync(path.join(installed, FC), fcNow);
-  g(w.host.dir, 'fetch', '-q', 'origin');
-  g(w.host.dir, 'push', '-q', 'origin', 'origin/rules-from-edits-2026-w47:refs/heads/main');
   fs.appendFileSync(logPath(settings.state), [entry('f', 6), entry('g', 7)].map((e) => JSON.stringify(e)).join('\n') + '\n');
   const next = Date.parse('2026-11-23T09:00:00+02:00');
   io.pluginRoot = installed;
@@ -614,7 +643,8 @@ test('M3: a rule PR that could not be opened keeps nothing (no rule, no used edi
   const r1 = await pass(MONDAY);
   const d1 = readLearning(settings.state);
   assert.deepEqual([r1.proposed.length, d1.rules.length, d1.consumed, d1.attempts['2026-W47'].n, d1.weeks['2026-W47']], [0, 0, [], 1, undefined]);
-  assert.equal(g(w.host.origin, 'branch', '--list', 'rules-from-edits-*'), '', 'the pushed branch is deleted');
+  assert.equal(g(w.host.origin, 'branch', '--list', 'rules-from-edits-*'), 'rules-from-edits-2026-w47', 'the pushed branch stays: the pipeline never deletes a branch');
+  const firstTry = g(w.host.origin, 'rev-parse', 'rules-from-edits-2026-w47');
   assert.ok(!fs.existsSync(path.join(settings.state, 'learning', 'trees', 'guide-docs')) || !fs.readdirSync(path.join(settings.state, 'learning', 'trees', 'guide-docs')).length, 'no worktree left');
   // At once: the backoff. Two hours later: the PR, the rules, the used edits.
   assert.match((await pass(MONDAY + 60000)).week.why, /the next one two hours after it/);
@@ -623,6 +653,21 @@ test('M3: a rule PR that could not be opened keeps nothing (no rule, no used edi
   const r2 = await pass(MONDAY + 2 * HOUR + 60000);
   const d2 = readLearning(settings.state);
   assert.deepEqual([r2.proposed.length, d2.rules.map((r) => r.rid), d2.consumed.sort(), d2.attempts['2026-W47']], [1, ['2026-W47-1', '2026-W47-2'], ['a', 'b', 'c', 'd'], undefined]);
+  // The retry went on from the branch the first try left: a fast-forward, each rule's line once.
+  const onBranch = kitOn(w.host, 'rules-from-edits-2026-w47');
+  assert.deepEqual([onBranch.split('learned:2026-W47-1').length - 1, onBranch.split('learned:2026-W47-2').length - 1], [1, 1]);
+  assert.doesNotThrow(() => g(w.host.origin, 'merge-base', '--is-ancestor', firstTry, 'rules-from-edits-2026-w47'), 'the first try\'s commit is still on the branch: nothing forced');
+  // A PR the forge opened though its answer was lost: found by its head, used, not opened twice.
+  const w3 = loopWorld();
+  seedLog(w3.settings, [entry('a', 1), entry('b', 2)]);
+  const f3 = await forgeOf(w3.settings, w3.adapter);
+  const real = w3.adapter.createPr;
+  w3.adapter.createPr = async (a) => {
+    await real(a);
+    throw new Error('timed out');
+  };
+  const r3 = await learningCheck({ settings: w3.settings, clients: { forge: f3 }, io: { spawnClaude: fakeClaude((mode) => (mode === 'week' ? { patterns: [TWO.patterns[0]] } : null)), viewOf: async () => null }, now: MONDAY, morningDone: true });
+  assert.deepEqual([r3.proposed.map((p) => p.number), w3.prs.length, readLearning(w3.settings.state).weeks['2026-W47'] !== undefined], [[100], 1, true]);
   // A session that fails: three tries, then the next week.
   const w2 = loopWorld();
   seedLog(w2.settings, [entry('a', 1), entry('b', 2)]);
@@ -632,7 +677,7 @@ test('M3: a rule PR that could not be opened keeps nothing (no rule, no used edi
   assert.match((await learningCheck({ settings: w2.settings, clients: { forge: f2 }, io: failing, now: MONDAY + 7 * HOUR, morningDone: true })).week.why, /failed 3 times .*next week's/);
 });
 
-test('M2, H3, M7: a reply whose push fails changes nothing; a rewording waits for the gate and may come back as a kind; a rule line the owner removed is a no; observe changes nothing', async () => {
+test('M2, N2, H3, M7: a reply whose push fails changes nothing; a rewording waits for the gate and may come back as a kind; a hand change on the branch is asked about, never decided; observe changes nothing', async () => {
   const w = loopWorld();
   const { settings } = w;
   seedLog(settings, [entry('a', 1), entry('b', 2), entry('c', 3), entry('d', 4)]);
@@ -664,18 +709,35 @@ test('M2, H3, M7: a reply whose push fails changes nothing; a rewording waits fo
   answerResult = { rules: [{ n: 2, kind: 'product' }] };
   const r4 = await pass();
   assert.deepEqual([r4.replied[0].items, items()[1]], [[{ n: 2, do: 'kind' }], [2, 'open', 'product']]);
-  // The owner takes rule 2's line out of the branch by hand: a no.
+  // The owner rewords rule 2's line by hand and drops its marker, and puts rule 1's line (rejected, its removal pushed)
+  // back: nothing is decided for the owner. Rule 2 stays open and is asked about; rule 1's line stays.
   const h = w.host;
   h.g('fetch', '-q', 'origin');
   h.g('checkout', '-q', '-B', 'by-hand', 'origin/rules-from-edits-2026-w47');
   const kit = fs.readFileSync(path.join(h.dir, 'doc-kit/product-rules.md'), 'utf8');
-  const head = h.commit({ 'doc-kit/product-rules.md': kit.split('\n').filter((l) => !l.includes('learned:2026-W47-2')).join('\n') }, 'Без цього правила');
+  const back = '- Кроки рецепта називають температуру перед часом. Чому: Читач спершу вмикає піч. <!-- learned:2026-W47-1 -->';
+  const head = h.commit({ 'doc-kit/product-rules.md': `${kit.split('\n').map((l) => (l.includes('learned:2026-W47-2') ? '- Крок рецепта завжди називає налаштування першим.' : l)).join('\n').trimEnd()}\n${back}\n` }, 'Своїми словами');
   h.g('push', '-q', 'origin', 'HEAD:rules-from-edits-2026-w47');
   h.g('checkout', '-q', 'main');
   w.prs[0].headCommit = head;
   await pass();
-  assert.deepEqual(items()[1], [2, 'rejected', 'product']);
-  assert.ok(readLearning(settings.state).rules.find((r) => r.rid === '2026-W47-2').rejected.length);
+  assert.deepEqual(items(), [[1, 'rejected', 'product'], [2, 'open', 'product']], 'nothing rejected by itself');
+  const pr0 = readLearning(settings.state).prs[0];
+  assert.deepEqual(pr0.missing.map((m) => [m.n, m.back ?? false]), [[2, false], [1, true]]);
+  assert.ok(kitOn(w.host, 'rules-from-edits-2026-w47').includes(back), 'the line the owner put back stays');
+  const { renderProgress } = await import('../lib/progress.mjs');
+  assert.match(renderProgress({ rulePrs: [{ repo: 'guide-docs', number: 100, rules: 1, missing: pr0.missing }] }), /❓ rule 2: its line is not on the branch — reply «2 — ні» to drop it/);
+  // A hand rewording that keeps the marker: the rule's text follows it.
+  h.g('fetch', '-q', 'origin');
+  h.g('checkout', '-q', '-B', 'by-hand', 'origin/rules-from-edits-2026-w47');
+  const kit2 = fs.readFileSync(path.join(h.dir, 'doc-kit/product-rules.md'), 'utf8').replace('- Крок рецепта завжди називає налаштування першим.', '- Крок рецепта завжди називає налаштування першим. Чому: Читач спершу налаштовує прилад. <!-- learned:2026-W47-2 -->');
+  const head2 = h.commit({ 'doc-kit/product-rules.md': kit2 }, 'Маркер назад');
+  h.g('push', '-q', 'origin', 'HEAD:rules-from-edits-2026-w47');
+  h.g('checkout', '-q', 'main');
+  w.prs[0].headCommit = head2;
+  await pass();
+  const it2 = readLearning(settings.state).prs[0].items[1];
+  assert.deepEqual([it2.state, it2.rule], ['open', 'Крок рецепта завжди називає налаштування першим.']);
   // Observe: the PR merged on the forge, nothing recorded, the worktree stays.
   const before = fs.readFileSync(path.join(settings.state, 'learning', 'proposals.json'), 'utf8');
   const tree = readLearning(settings.state).prs[0].tree;
@@ -684,6 +746,47 @@ test('M2, H3, M7: a reply whose push fails changes nothing; a rewording waits fo
   assert.match(obs.notes.join('\n'), /merged; recorded at a live pass/);
   assert.equal(fs.readFileSync(path.join(settings.state, 'learning', 'proposals.json'), 'utf8'), before);
   assert.ok(fs.existsSync(tree), 'observe removes no worktree');
+});
+
+test('N5: a pass is wanted only for real work: a week due, a rule PR the forge shows changed since the last pass, a rewording that waited, a queued toolkit rule; nothing in observe', async () => {
+  const w = loopWorld();
+  const { settings } = w;
+  const save = (d) => {
+    fs.mkdirSync(path.join(settings.state, 'learning'), { recursive: true });
+    fs.writeFileSync(path.join(settings.state, 'learning', 'proposals.json'), JSON.stringify(d));
+  };
+  const WED = Date.parse('2026-11-18T12:00:00+02:00');
+  const LAST = '2026-11-18T08:00:00.000Z';
+  const changed = { 'guide-docs': [] };
+  const forge = await forgeOf(settings, forgeAdapter({ changed }));
+  const want = (over = {}) => learnWanted({ settings, clients: { forge }, now: WED, morningDone: true, ...over });
+  // The week W47 done, one open rule PR, the last pass two hours ago: nothing changed, nothing to do.
+  const data = { startWeek: '2026-W46', weeks: { '2026-W47': { at: LAST } }, prs: [{ repo: 'guide-docs', number: 100, state: 'open', items: [] }], rules: [], lastPass: LAST };
+  save(data);
+  assert.deepEqual(await want(), []);
+  // A comment on the PR moves its `updatedAt`: wanted.
+  changed['guide-docs'].push({ ...forgePr({ repo: 'guide-docs', number: 100 }), updatedAt: '2026-11-18T09:30:00.000Z' });
+  assert.deepEqual(await want(), ['rule PR(s) changed: guide-docs#100']);
+  // A PR changed before the last pass is not.
+  changed['guide-docs'][0].updatedAt = '2026-11-18T07:00:00.000Z';
+  assert.deepEqual(await want(), []);
+  // A forge read that fails: the pass reads the PR itself.
+  const failing = await forgeOf(settings, forgeAdapter({ changed, fail: { 'guide-docs': 'HTTP 502' } }));
+  assert.deepEqual(await want({ clients: { forge: failing } }), ['rule PR(s) changed: guide-docs#100']);
+  // A rewording that waited for the gate: wanted once the gate is open, not while it is closed.
+  save({ ...data, prs: [{ ...data.prs[0], waiting: true }] });
+  assert.deepEqual(await want(), ['a rewording that waited for the gate']);
+  assert.deepEqual(await want({ morningDone: false }), []);
+  // A queued toolkit rule, and the week not done: wanted with the gate open, not with a ticket run going.
+  save({ ...data, weeks: {}, rules: [{ rid: '2026-W47-1', toolkit: { state: 'queued' } }] });
+  assert.deepEqual(await want(), ['the week 2026-W47', 'a queued toolkit rule']);
+  assert.deepEqual(await want({ busy: 'a ticket run' }), []);
+  // Observe: nothing, whatever there is.
+  assert.deepEqual(await learnWanted({ settings: { ...settings, mode: 'observe' }, clients: { forge }, now: WED, morningDone: true }), []);
+  // A pass records its time, and the next read keeps it.
+  save({ startWeek: '2026-W46', weeks: { '2026-W47': { at: LAST } }, prs: [], rules: [] });
+  await learningCheck({ settings, clients: { forge }, io: { spawnClaude: fakeClaude(() => null) }, now: WED, morningDone: true });
+  assert.equal(readLearning(settings.state).lastPass, new Date(WED).toISOString());
 });
 
 test('the loop in observe or a dry run: nothing runs and nothing is written', async () => {

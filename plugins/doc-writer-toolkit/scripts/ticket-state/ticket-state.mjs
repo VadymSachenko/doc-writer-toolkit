@@ -18,7 +18,7 @@ import { setLocal } from './lib/setlocal.mjs';
 import { runImport } from './lib/import.mjs';
 import { renderTrace } from './lib/trace.mjs';
 import { ROLE_SESSION_VARIABLE } from './lib/env.mjs';
-import { collectOnce, viewsFrom } from './lib/learn-log.mjs';
+import { authorsFrom, collectOnce, viewsFrom } from './lib/learn-log.mjs';
 import { learnStatus } from './lib/learn.mjs';
 
 const USAGE = `ticket-state <command> [<key>] [options]
@@ -246,7 +246,7 @@ export async function main(argv, io = {}) {
       }
       if (values.since !== undefined && (!ISO.test(values.since) || Number.isNaN(Date.parse(values.since)))) throw new CliError('--since must be an ISO date-time with its zone, such as 2026-11-09T00:00:00+02:00', { code: 2 });
       const since = values.since ?? settings.learning.since ?? null;
-      const r = await collectOnce(settings, { ledgers: readAllLedgers(settings.state), viewOf: viewsFrom(null, clients.forge), since, dryRun: Boolean(values['dry-run']), now, ...(io.learnReader ? { git: io.learnReader } : {}) });
+      const r = await collectOnce(settings, { ledgers: readAllLedgers(settings.state), viewOf: viewsFrom(null, clients.forge), authorsOf: authorsFrom(clients.forge), since, dryRun: Boolean(values['dry-run']), now, ...(io.learnReader ? { git: io.learnReader } : {}) });
       result = { since, dryRun: Boolean(values['dry-run']), ...(r.skipped ? { skipped: r.skipped } : {}), added: r.added.length, prs: r.prs, notes: r.notes, ...(values['dry-run'] ? { entries: r.added } : {}) };
       break;
     }

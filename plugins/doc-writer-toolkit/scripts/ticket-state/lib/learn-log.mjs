@@ -250,21 +250,50 @@ const byOwner = (settings, c) => {
   return who.includes(String(c.email ?? '').toLowerCase()) || who.includes(String(c.name ?? '').toLowerCase());
 };
 
-// An applied comment's edit is the owner's: its `by` (the comment's author, when the writer gave it) is `forge.self`;
-// with no `by` (a ledger written before it), only on a PR with no expert's review (`review: places`), where the owner is
-// the one who comments.
-const ownerComment = (settings, pr, e) => (e.by ? e.by === settings.forge?.self : pr.review !== 'sme');
+// The comments an `answerComments` round handled (`ledger.reviewComments`, recorded with the round's `at`, as its edits
+// are): the edits of that round answer them.
+const roundComments = (ledger, pr, at) => (ledger.reviewComments ?? []).filter((c) => c.repo === pr.repo && Number(c.pr) === Number(pr.number) && c.at === at);
+const commentEdit = (e) => e.stage === 'answerComments' && !e.rule && !e.restores;
+
+// Whether an applied comment's edit is the owner's, by the authors the forge gives for the comments its round handled
+// (never a model's word): yes when one of them is `forge.self` (or the round recorded none to check); no when all are
+// someone else's; null when an author isn't known here (read again at a later pass, with the forge).
+function ownerComment(settings, ledger, pr, e, authors) {
+  const handled = roundComments(ledger, pr, e.at);
+  if (!handled.length) return true;
+  if (!authors) return null;
+  const who = handled.flatMap((c) => [c.id, c.replyId].filter((x) => x !== undefined && x !== null)).map((x) => authors.get(String(x))).filter(Boolean);
+  if (!who.length) return null;
+  return who.includes(settings.forge?.self);
+}
+
+// Every comment author of a PR on the forge, by comment id (the reviews, the line comments, the PR's comments).
+export function authorsFrom(forge) {
+  return async (pr) => {
+    const act = await forge.prActivity({ repo: pr.repo, number: pr.number });
+    const m = new Map();
+    for (const r of act.reviews ?? []) if (r?.id !== undefined) m.set(String(r.id), r.author ?? null);
+    for (const t of act.threads ?? []) for (const c of t.comments ?? []) if (c?.id !== undefined) m.set(String(c.id), c.author ?? null);
+    for (const c of act.comments ?? []) if (c?.id !== undefined) m.set(String(c.id), c.author ?? null);
+    return m;
+  };
+}
 
 // The entries one PR gives now. `view`: { head, state ('open' | 'merged' | 'closed'), mergedAt, mergeCommit }.
-export function entriesOf({ settings, ledger, pr, view, git }) {
+// `authors`: the PR's comment authors by id (`authorsFrom`), or null when the forge isn't read here.
+export function entriesOf({ settings, ledger, pr, view, git, authors = null }) {
   const id = prId(pr);
   const common = { key: ledger.key, repo: pr.repo, pr: pr.number, url: pr.url ?? null };
   const out = [];
   const notes = [];
+  let deferred = false;
   for (const e of pr.edits ?? []) {
     if (e.rule && e.rejected) {
       out.push({ id: `restore:${id}:${e.list}:${e.n}`, at: e.rejected.at ?? e.at ?? null, ...common, page: e.page, block: e.block ?? null, before: e.after, after: e.before, source: 'restore', rule: e.rule, n: e.n });
-    } else if (e.stage === 'answerComments' && !e.rule && !e.restores && ownerComment(settings, pr, e)) {
+    } else if (commentEdit(e)) {
+      const own = ownerComment(settings, ledger, pr, e, authors);
+      if (own === null) deferred = true;
+      if (!own) continue;
       out.push({ id: `comment:${id}:${e.list}:${e.n}`, at: e.at ?? null, ...common, page: e.page, block: e.block ?? null, before: e.before, after: e.after, source: 'comment', n: e.n, ...(e.reason ? { comment: e.reason } : {}) });
     }
   }
@@ -305,7 +334,7 @@ export function entriesOf({ settings, ledger, pr, view, git }) {
       }
     }
   }
-  return { entries: out, notes };
+  return { entries: out, notes, deferred };
 }
 
 // Whether a PR is the collector's: open, or merged at or after `since` (no `since`: every merged one).
@@ -321,7 +350,7 @@ export function inWindow(view, since) {
 // One pass over the ledgers. `viewOf(ledger, pr)`: the PR's { head, state, mergedAt }, or null when it can't be read
 // (async: the runner's status gives it for open tickets, the forge for a merged one). Appends the new lines and
 // returns { added, prs, notes }. `dryRun`: writes nothing, returns what it would add.
-export async function collectEdits({ settings, ledgers, viewOf, git = learnGit(settings), since = settings.learning?.since ?? null, dryRun = false, now = Date.now() }) {
+export async function collectEdits({ settings, ledgers, viewOf, git = learnGit(settings), since = settings.learning?.since ?? null, dryRun = false, now = Date.now(), authorsOf = null }) {
   if (!since) throw new Error('the collection needs `since` (learning.since or --since): it never reads the whole history');
   const state = settings.state;
   const seen = new Set(readLog(state).map((e) => e.id));
@@ -361,14 +390,25 @@ export async function collectEdits({ settings, ledgers, viewOf, git = learnGit(s
       const edits = (pr.edits ?? []).length;
       const rejected = (pr.edits ?? []).filter((e) => e.rejected).length;
       if (was && was.head === view.head && was.edits === edits && was.rejected === rejected && view.state === 'open') continue;
-      const r = entriesOf({ settings, ledger: l, pr, view, git });
+      // The comment authors from the forge, only for a PR with an applied comment's edit not logged yet.
+      let authors = null;
+      const pending = (pr.edits ?? []).some((e) => commentEdit(e) && !seen.has(`comment:${id}:${e.list}:${e.n}`) && roundComments(l, pr, e.at).length);
+      if (pending && authorsOf) {
+        try {
+          authors = await authorsOf(pr);
+        } catch (e) {
+          notes.push(`${id}: its comment authors can't be read (${String(e.message ?? e).split('\n')[0]}): its applied comments are read at a later pass`);
+        }
+      }
+      const r = entriesOf({ settings, ledger: l, pr, view, git, authors });
       notes.push(...r.notes);
       const fresh = r.entries.filter((e) => !seen.has(e.id));
       for (const e of fresh) seen.add(e.id);
       added.push(...fresh.map((e) => ({ ...e, logged: new Date(now).toISOString() })));
-      prs.push({ pr: id, key: l.key, added: fresh.length, state: view.state });
-      // A PR whose commits git couldn't read here is read again at the next run, whatever its head.
-      if (!r.notes.length) cursor[ck] = { head: view.head, edits, rejected, ...(view.state !== 'open' ? { final: true } : {}), at: new Date(now).toISOString() };
+      prs.push({ pr: id, key: l.key, added: fresh.length, state: view.state, ...(r.deferred ? { deferred: 'comment authors' } : {}) });
+      // A PR whose commits git couldn't read here, or whose comment authors this pass couldn't read, is read again at a
+      // later pass, whatever its head.
+      if (!r.notes.length && !r.deferred) cursor[ck] = { head: view.head, edits, rejected, ...(view.state !== 'open' ? { final: true } : {}), at: new Date(now).toISOString() };
     }
   }
   if (!dryRun) {

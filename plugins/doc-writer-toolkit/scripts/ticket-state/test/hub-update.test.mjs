@@ -257,6 +257,10 @@ test('a run going on or another full check: the hub waits for a check with none,
   assert.equal(other.taken, true);
   assert.match(busyHub(state), /a full check running \(pid 1\)/);
   other.release();
+  // A learning pass (TASK-054) commits in worktrees of the clones: the hub waits for it too.
+  const learning = takeWatchLock(state, { pid: 1, isAlive: () => true, name: 'learn-active' });
+  assert.match(busyHub(state), /a learning pass running \(pid 1\)/);
+  learning.release();
   assert.equal(busyHub(state), null);
   r = await settingsForCheck({ root: h.hub, values: { full: true } });
   assert.deepEqual([r.hub.outcome, git(h.hub, 'rev-parse', 'HEAD')], ['moved', merged]);

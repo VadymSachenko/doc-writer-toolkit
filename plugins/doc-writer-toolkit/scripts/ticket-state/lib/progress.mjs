@@ -313,6 +313,8 @@ export function renderProgress({ ledgers = [], bad = [], memory = {}, run = null
     out.push(`- 📏 Rules from your edits — ${r.repo}#${r.number}: ${r.rules} rule(s) to read; reply by number, or merge${r.url ? ` (${r.url})` : ''}`);
     // The owner's comments on it that read as no reply by number: never dropped silently.
     for (const c of r.unclear ?? []) out.push(`  - ❓ a comment of yours not read as a reply by number${c.url ? ` (${c.url})` : ''}: «${c.text}» — write it again as «N — …»`);
+    // A rule line changed by hand in a way the runner won't guess at: asked, never decided for the owner.
+    for (const m of r.missing ?? []) out.push(`  - ❓ rule ${m.n}: ${m.why} — ${m.back ? 'the runner leaves your line as it is' : `reply «${m.n} — ні» to drop it, or «${m.n} — "the text"» to put it back`}`);
   }
   for (const c of others) out.push(`- 💬 ${c.key} — ${c.pr}: a comment of ${c.author ?? 'a colleague'}'s the pipeline doesn't take${c.link ? ` (${c.link})` : ''}: hand it on with a comment that starts with the trigger word, or leave it`);
   out.push('', live ? '## The current run' : '## The last run', '', ...runSection(run, flights, now, live, { starts, startHours, ledgers }), '', '## Tickets in work', '');
@@ -460,7 +462,7 @@ export function writeProgress({ settings, now = Date.now(), st = null, run = nul
 function rulePrsOf(state) {
   try {
     const d = JSON.parse(fs.readFileSync(path.join(state, 'learning', 'proposals.json'), 'utf8'));
-    return (d.prs ?? []).filter((p) => p.state === 'open' && p.number).map((p) => ({ repo: p.repo, number: p.number, url: p.url ?? null, rules: (p.items ?? []).filter((x) => x.state === "open").length, unclear: p.unclear ?? [] }));
+    return (d.prs ?? []).filter((p) => p.state === 'open' && p.number).map((p) => ({ repo: p.repo, number: p.number, url: p.url ?? null, rules: (p.items ?? []).filter((x) => x.state === "open").length, unclear: p.unclear ?? [], missing: p.missing ?? [] }));
   } catch {
     return [];
   }

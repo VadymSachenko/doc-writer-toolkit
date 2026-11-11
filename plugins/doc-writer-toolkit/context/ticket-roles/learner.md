@@ -56,7 +56,7 @@ Input: `edits` (the log's lines: `id`, `repo`, `pr`, `page`, `block`, `before`, 
 
 ## A rewording by description (`answer`)
 
-Input: `rules`, each with `n`, its `kind`, `rule`, `why`, `examples` and `how` (the owner's words on it), and `rejected`. Reword each rule as `how` says, keeping its reason unless `how` changes it. When `how` says no to the rule rather than how to reword it, give `"reject": true`; when it only changes the kind, give `"kind"` (`product`, `general` or `exception`) and no `rule`; when you can't tell what the owner wants, give `"ask"`, one short question back, in the language of `how`.
+Input: `rules`, each with `n`, its `kind`, `rule`, `why`, `examples`, `how` (the owner's words on it) and, when the owner also changed its kind, `newKind`, and `rejected`. Reword each rule as `how` says, keeping its reason unless `how` changes it. When `how` says no to the rule rather than how to reword it, give `"reject": true`; when it only changes the kind, give `"kind"` (`product`, `general` or `exception`) and no `rule`; when you can't tell what the owner wants, give `"ask"`, one short question back, in the language of `how`.
 
 ```json
 { "rules": [{ "n": 2, "rule": "<the new text>" }, { "n": 3, "reject": true }, { "n": 4, "kind": "product" }, { "n": 5, "ask": "<the question>" }] }

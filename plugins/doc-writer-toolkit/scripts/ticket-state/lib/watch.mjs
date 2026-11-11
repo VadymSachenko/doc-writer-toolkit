@@ -626,7 +626,7 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
       try {
         const busy = busyNow(settings, clock(), io);
         const holder = watchLockHolder(settings.state, { now: clock(), name: LEARN_LOCK, ...(io.isAlive ? { isAlive: io.isAlive } : {}) });
-        const want = learnWanted({ settings, now: clock(), morningDone: next.morning?.lastDate === today, busy });
+        const want = holder ? [] : await learnWanted({ settings, clients, io: io.learn ?? {}, now: clock(), morningDone: next.morning?.lastDate === today, busy });
         if (holder) out.learning = { running: holder.pid ?? null };
         else if (!want.length) out.learning = { idle: true };
         else if (dryRun) out.learning = { would: want };

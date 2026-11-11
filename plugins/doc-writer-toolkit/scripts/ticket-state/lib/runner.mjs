@@ -30,7 +30,7 @@ import { transcriptDirs } from './trace.mjs';
 import { runsGoingIn, startsInFlight } from './forge-state.mjs';
 import { openQuestionLines, placeReplyLines, replyLines, resyncItemLines, roundLines, styleAfterCommentsLines, styleCheckLines, suggestionLines, takeLines, threadReplyLines } from './edits.mjs';
 import { followLabels, labelSnapshot } from './pr-labels.mjs';
-import { collectOnce, viewsFrom } from './learn-log.mjs';
+import { authorsFrom, collectOnce, viewsFrom } from './learn-log.mjs';
 import { idCommentText, syncIds } from './id-sync.mjs';
 import { followRounds, roundSnapshot } from './pr-rounds.mjs';
 import { pickMarks, settleMarks } from './reactions.mjs';
@@ -1777,7 +1777,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
       // The run's own tickets, as its status read them: no forge call of its own. What this pass can't see (a ticket
       // another run follows, a PR merged since) the next run of that ticket, or the weekly pass, reads.
       const keys = new Set(st.tickets.map((t) => t.key));
-      const r = await collectOnce(settings, { ledgers: readAllLedgers(settings.state).filter((l) => keys.has(l.key)), viewOf: viewsFrom(st, null), ...(io.learnReader ? { git: io.learnReader } : {}), now: clock() });
+      const r = await collectOnce(settings, { ledgers: readAllLedgers(settings.state).filter((l) => keys.has(l.key)), viewOf: viewsFrom(st, null), authorsOf: authorsFrom(clients.forge), ...(io.learnReader ? { git: io.learnReader } : {}), now: clock() });
       if (r.added.length) say({ kind: 'learning', outcome: 'collected', note: `${r.added.length} edit(s) of the owner's logged from ${r.prs.filter((p) => p.added).map((p) => p.pr).join(', ')}` });
       for (const n of r.notes) out.notes.push(n);
     } catch (e) {

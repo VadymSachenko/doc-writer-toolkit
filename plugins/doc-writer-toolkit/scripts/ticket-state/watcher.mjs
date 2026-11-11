@@ -6,7 +6,7 @@ import { CliError } from './lib/errors.mjs';
 import { loadSettings, sharedProblemAt, stateFolderOf, tickSecondsOf } from './lib/settings.mjs';
 import { allLocks } from './lib/locks.mjs';
 import { runsGoingIn } from './lib/forge-state.mjs';
-import { runLearnPass, watchLockHolder } from './lib/watch.mjs';
+import { LEARN_LOCK, runLearnPass, watchLockHolder } from './lib/watch.mjs';
 import { hubLine, updateHub } from './lib/hub-update.mjs';
 import { makeClients } from './lib/world.mjs';
 import { prepareEnv } from './lib/env.mjs';
@@ -147,7 +147,9 @@ export async function settingsForCheck({ root, values = {}, update = updateHub, 
 export function busyHub(state, now = Date.now()) {
   const runs = runsGoingIn(state, { locks: allLocks(state, now), now }).size;
   const check = watchLockHolder(state, { now });
-  const bits = [...(runs ? [`${runs} run(s) going`] : []), ...(check && check.pid !== process.pid ? [`a full check running (pid ${check.pid})`] : [])];
+  // A learning pass commits in worktrees of the hub's clones (lib/learn.mjs): the hub never moves under one.
+  const learn = watchLockHolder(state, { now, name: LEARN_LOCK });
+  const bits = [...(runs ? [`${runs} run(s) going`] : []), ...(check && check.pid !== process.pid ? [`a full check running (pid ${check.pid})`] : []), ...(learn && learn.pid !== process.pid ? [`a learning pass running (pid ${learn.pid})`] : [])];
   return bits.length ? bits.join(' and ') : null;
 }
 
