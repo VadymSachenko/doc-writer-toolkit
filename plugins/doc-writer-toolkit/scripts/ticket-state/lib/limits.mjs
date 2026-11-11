@@ -1,5 +1,5 @@
 import { PRIORITY_RANK } from './stages.mjs';
-import { groupId, sortKeys } from './ledger.mjs';
+import { groupId, prId, sortKeys } from './ledger.mjs';
 import { SIZES } from './settings.mjs';
 
 // The limits (design §7, D-042, D-066, D-067, D-071):
@@ -130,14 +130,64 @@ export function pageKey(p) {
 export const together = (a, b, repos) => (names(a.together, b) || names(b.together, a)) && shareRepo(a, b, repos);
 
 // Overlap: the triage named the other (and they share a target repo), the card's text names the other's number, or the
-// triage found the same page.
-export function related(a, b, repos) {
-  if ((names(a.relations, b) || names(b.relations, a)) && shareRepo(a, b, repos)) return true;
-  if (together(a, b, repos)) return true;
+// two have a page in common.
+export const related = (a, b, repos) => overlapOf(a, b, repos) !== null;
+
+// Which test of `related` holds: { by: 'relation' | 'together' | 'named' } or { by: 'page', page, from, pr? }, the page
+// as `b` has it and where it came from (`workPages`: a page with no `from` is the triage's). Null when none holds.
+export function overlapOf(a, b, repos) {
+  if ((names(a.relations, b) || names(b.relations, a)) && shareRepo(a, b, repos)) return { by: 'relation' };
+  if (together(a, b, repos)) return { by: 'together' };
   const named = (t, n) => n !== null && n !== undefined && new RegExp(`#${n}\\b`).test(`${t.name ?? ''}\n${t.desc ?? ''}`.replace(/^\s*(#\d+\s*[-–—:]?\s*)+/, ''));
-  if (named(a, b.number) || named(b, a.number)) return true;
+  if (named(a, b.number) || named(b, a.number)) return { by: 'named' };
   const pa = new Set((a.pages ?? []).map(pageKey).filter(Boolean));
-  return (b.pages ?? []).map(pageKey).some((k) => k && pa.has(k));
+  const hit = (b.pages ?? []).find((p) => {
+    const k = pageKey(p);
+    return k && pa.has(k);
+  });
+  if (hit === undefined) return null;
+  return { by: 'page', page: pageKey(hit), from: hit?.from ?? 'triage', ...(hit?.pr ? { pr: hit.pr } : {}) };
+}
+
+// The page a not-started reason names, and where it came from: "a page 1157's PR #61 changes (<repo> <path>)", or "a
+// page 1157's triage names, no PR yet (…)" (for a ticket starting now, its triage is all there is). Null for another test.
+export function overlapText(key, o, { starting = false } = {}) {
+  if (o?.by !== 'page') return null;
+  const where = o.from === 'pr' ? `a page ${key}'s PR${o.pr ? ` #${o.pr}` : ''} changes` : `a page ${key}'s triage names${starting ? '' : ', no PR yet'}`;
+  return `${where} (${o.page})`;
+}
+
+// The pages a ticket in work holds, each `{ repo, path, from }` (the triage's as `pageKey` reads them), per repo:
+//   - a repo where it has an open PR whose files the forge gave (lib/world.mjs `readPrs`): the paths that PR changes,
+//     `from: 'pr'` with its number. The triage's guess for that repo no longer counts: the PR says what it changes;
+//   - a repo where its PR has no number yet (a branch the plan or the write named, no PR opened), or where an open PR's
+//     files are unknown (a forge read that failed, more files than one read gives): the triage's pages of that repo,
+//     `from: 'triage'`;
+//   - a repo where its PRs are merged: none, the change is on the base;
+//   - a repo of the triage's with no PR: the triage's pages while the ticket hasn't opened its PRs (its `pr` stage not
+//     done), none after: a ticket that opened its PRs and none in that repo changes nothing there.
+// A ready ticket keeps its triage's pages: it has no PR.
+export function workPages(l, prWorld = new Map()) {
+  const prs = (l.prs ?? []).map((p) => ({ p, world: p.number ? prWorld.get(`${l.key}/${prId(p)}`) ?? null : null }));
+  const opened = l.stages?.pr?.status === 'done';
+  const out = [];
+  const triageFor = new Set();
+  for (const { p, world } of prs) {
+    if (p.merged || world?.state === 'merged') continue;
+    if (!p.number || !world || world.error || !Array.isArray(world.files)) {
+      triageFor.add(p.repo);
+      continue;
+    }
+    if (world.state === 'open') for (const f of world.files) out.push({ repo: p.repo, path: f, from: 'pr', pr: p.number });
+  }
+  const withPr = new Set(prs.map(({ p }) => p.repo));
+  for (const page of l.triage?.pages ?? []) {
+    const k = pageKey(page);
+    if (!k) continue;
+    const repo = k.split(' ')[0];
+    if (triageFor.has(repo) || (!withPr.has(repo) && !opened)) out.push({ repo, path: k.slice(repo.length + 1), from: 'triage' });
+  }
+  return out;
 }
 
 // The WIP counts and the groups a scheduled run may start now, with the reason each other group doesn't.
@@ -213,9 +263,12 @@ export function startable({ tickets, groups, settings, allowance, estimates, inW
     if (!easiest && blockedLevel !== null && PRIORITY_RANK[g.priority] > blockedLevel) why.push(`waits behind a ${['high', 'medium', 'low'][blockedLevel]} priority group`);
     if (easiest && blockedBy !== null) why.push(`waits behind the easier group ${blockedBy}`);
     if (g.keys.some((k) => locked.has(k))) why.push('locked by a run');
-    if (g.waitsFor?.length) why.push(`related to ${g.waitsFor.join(', ')}, still in work`);
-    const startingRelated = startingMembers.filter((s) => g.members.some((m) => related(m, s, repos))).map((s) => s.key);
-    if (startingRelated.length) why.push(`related to ${startingRelated.join(', ')}, starting now`);
+    // A page that holds the group back is named, with where it came from (`overlapText`): no `;` in it, the report
+    // and the progress file join the reasons with one.
+    const workPageWhy = (g.waitsWhy ?? []).map((x) => overlapText(x.key, x)).filter(Boolean);
+    if (g.waitsFor?.length) why.push(`related to ${g.waitsFor.join(', ')}, still in work${workPageWhy.length ? `: ${workPageWhy.join(', ')}` : ''}`);
+    const startingRelated = startingMembers.map((s) => ({ key: s.key, o: g.members.map((m) => overlapOf(m, s, repos)).find(Boolean) ?? null })).filter((x) => x.o);
+    if (startingRelated.length) why.push(`related to ${startingRelated.map((x) => x.key).join(', ')}, starting now${startingRelated.some((x) => x.o.by === 'page') ? `: ${startingRelated.map((x) => overlapText(x.key, x.o, { starting: true })).filter(Boolean).join(', ')}` : ''}`);
     if (waiting >= limits.waiting) why.push(`${waiting} waiting (limit ${limits.waiting})`);
     if (limits.open !== null && open + g.size > limits.open && !(g.size > limits.open && open === 0)) why.push(`${open} open (${holders()}) + ${g.size} > ${limits.open}`);
     if (inProgress + g.size > limits.inProgress && !(g.size > limits.inProgress && inProgress === 0)) {

@@ -149,8 +149,9 @@ export function trackerAdapter({ cards = [], comments = {}, release = [], action
   };
 }
 
-// A PR in the forge adapter's shape.
-export function pr({ repo = 'guide-docs', number, head, base = 'main', state = 'open', headCommit = 'a'.repeat(40), labels = [], reviewRequests = [], reviewDecision = null }) {
+// A PR in the forge adapter's shape. `files`: the paths it changes, as a read by number gives them; left out by default,
+// as from an adapter that can't tell.
+export function pr({ repo = 'guide-docs', number, head, base = 'main', state = 'open', headCommit = 'a'.repeat(40), labels = [], reviewRequests = [], reviewDecision = null, files, filesTruncated }) {
   return {
     repo,
     number,
@@ -175,6 +176,8 @@ export function pr({ repo = 'guide-docs', number, head, base = 'main', state = '
     reviewRequests: reviewRequests.map((login) => ({ login })),
     labels,
     assignees: [],
+    ...(files ? { files } : {}),
+    ...(filesTruncated ? { filesTruncated } : {}),
   };
 }
 

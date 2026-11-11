@@ -6,7 +6,7 @@ import { LISTS, NOW, ago, card, host, pr, rawSettings, settingsFor, tmp } from '
 import { ledger, world } from './helpers.mjs';
 import { parseUsage, allowanceOf, parseReset } from '../lib/allowance.mjs';
 import { loadSettings, validateSettings } from '../lib/settings.mjs';
-import { estimatesOf, pageKey, related, remainingOf } from '../lib/limits.mjs';
+import { estimatesOf, pageKey, related, remainingOf, workPages } from '../lib/limits.mjs';
 import { takeLock } from '../lib/locks.mjs';
 import { renderReport } from '../lib/report.mjs';
 import { digestRun, renderProgress } from '../lib/progress.mjs';
@@ -469,6 +469,108 @@ test('together joins in either direction, as #N or N, and not across repos; a ca
   const st = await w.status({ usage: usage(5) });
   const groups = st.groups.map((g) => g.group).sort();
   assert.deepEqual(groups, ['701-702', '703', '704', '705', '706']);
+  // One page, two ready tickets: the second waits for the first's start, and the reason names the page.
+  const w2 = world({ extra: estimates });
+  ready(w2, 705, { pages: ['guide-docs docs/b.md — Перший'] });
+  ready(w2, 706, { pages: ['guide-docs docs/b.md — Другий'] });
+  const st2 = await w2.status({ usage: usage(5) });
+  assert.deepEqual(st2.notStarted.map((n) => [n.group, n.reasons]), [['706', ["related to 705, starting now: a page 705's triage names (guide-docs docs/b.md)"]]]);
+});
+
+// ------------------------------------------------------------------ the pages of a ticket in work (TASK-106)
+
+// A ticket in work, in two target repos by its triage, and its PRs as the ledger has them: `prs` [{ repo, number, files }],
+// a number null for a branch with no PR yet, `files` undefined for a PR whose files the forge didn't give.
+const PAYMENT = 'api-docs docs/api-reference/create-payment/create-payment.md';
+const workTriage = { verdict: 'docs-required', targets: ['api', 'guide'], size: 'edit', relations: ['#1194'], pages: [`${PAYMENT} — the card details paragraphs`, 'guide-docs docs/methods/cash/cash.md — Lifecycle', 'guide-docs docs/routing/queue/queue.md — Queue handling'] };
+const inWorkWith = (w, number, prs, { status = 'finalReview', opened = true, triage = workTriage } = {}) => {
+  const c = card({ number, status });
+  w.tracker.cards.push(c);
+  for (const p of prs) if (p.number) w.forge.prs.push(pr({ repo: p.repo, number: p.number, files: p.files }));
+  const stages = { triage: 'done', start: 'done', plan: 'done', write: opened ? 'done' : 'running', ...(opened ? { uaReview: 'done', pr: 'done' } : {}) };
+  ledger(w, c, { startedBy: 'schedule', stages, triage, prs: prs.map((p) => ({ repo: p.repo, number: p.number ?? null, targets: [p.repo === 'api-docs' ? 'api' : 'guide'], review: p.repo === 'api-docs' ? 'places' : 'sme', branch: `${number}-docs`, stage: p.number ? status : 'writing' })) });
+};
+const readyOn = (w) => ready(w, 1193, { targets: ['api'], relations: ['1254', '1258'], size: 'newPage', pages: ['api-docs docs/api-reference/ — a new page (GET /banks)', `${PAYMENT} — Request body`] });
+
+test('AC-1: a ticket in work whose PR changes other pages holds no ready ticket back, though both triages named one page', async () => {
+  // As on the morning in question: 1157 in final review, its one PR in the guide repo only; its triage also guessed the
+  // payment page of the API repo, which 1193 will edit.
+  const w = world({ extra: estimates });
+  inWorkWith(w, 1157, [{ repo: 'guide-docs', number: 61, files: ['docs/methods/cash/cash.md', 'docs/routing/queue/queue.md'] }]);
+  readyOn(w);
+  const st = await w.status({ usage: usage(5) });
+  assert.deepEqual(st.groups.find((g) => g.keys.includes('1193')).waitsFor, []);
+  assert.deepEqual(st.startable.map((g) => g.group), ['1193']);
+});
+
+test('a PR that changes the shared page holds the ready ticket back, and the reason names the page and where it came from', async () => {
+  const w = world({ extra: estimates });
+  inWorkWith(w, 1157, [{ repo: 'guide-docs', number: 61, files: ['docs/methods/cash/cash.md'] }, { repo: 'api-docs', number: 62, files: ['docs/api-reference/create-payment/create-payment.md', 'i18n/en/docusaurus-plugin-content-docs/current/api-reference/create-payment/create-payment.md'] }]);
+  readyOn(w);
+  const st = await w.status({ usage: usage(5) });
+  const g = st.groups.find((x) => x.keys.includes('1193'));
+  assert.deepEqual(g.waitsFor, ['1157']);
+  assert.deepEqual(g.waitsWhy, [{ key: '1157', by: 'page', page: PAYMENT, from: 'pr', pr: 62 }]);
+  const reason = `related to 1157, still in work: a page 1157's PR #62 changes (${PAYMENT})`;
+  assert.deepEqual(st.notStarted.map((n) => n.reasons), [[reason]]);
+  assert.ok(!reason.includes(';'), 'the report and the progress file join reasons with "; "');
+  // The morning report and the progress file show it.
+  assert.ok(renderReport({ settings: w.settings, st, date: '2026-11-10', ledgers: [] }).includes(`1193 (medium) didn't start: ${reason}`));
+  assert.ok(renderProgress({ ledgers: [], now: NOW, mode: 'on', run: digestRun({ out: {}, st, now: NOW }) }).includes(reason));
+});
+
+test('no PR yet: the triage pages decide, as before, and the reason says so; a relation decides first and keeps its words', async () => {
+  // Writing, its branch named but no PR opened: every repo of its triage counts.
+  const w = world({ extra: estimates });
+  inWorkWith(w, 1157, [{ repo: 'guide-docs', number: null }], { status: 'inProgress', opened: false });
+  readyOn(w);
+  let st = await w.status({ usage: usage(5) });
+  assert.deepEqual(st.notStarted.map((n) => n.reasons), [[`related to 1157, still in work: a page 1157's triage names, no PR yet (${PAYMENT})`]]);
+  // No PR entry at all, before the PRs are opened: the same.
+  const w2 = world({ extra: estimates });
+  inWorkWith(w2, 1157, [], { status: 'inProgress', opened: false });
+  readyOn(w2);
+  st = await w2.status({ usage: usage(5) });
+  assert.deepEqual(st.groups.find((g) => g.keys.includes('1193')).waitsFor, ['1157']);
+  // A relation named by the triage holds it whatever the pages, with the words it had.
+  const w3 = world({ extra: estimates });
+  inWorkWith(w3, 1157, [{ repo: 'guide-docs', number: 61, files: ['docs/methods/cash/cash.md'] }], { triage: { ...workTriage, relations: ['#1193'] } });
+  readyOn(w3);
+  st = await w3.status({ usage: usage(5) });
+  assert.deepEqual(st.notStarted.map((n) => n.reasons), [['related to 1157, still in work']]);
+  assert.deepEqual(st.groups.find((g) => g.keys.includes('1193')).waitsWhy, [{ key: '1157', by: 'relation' }]);
+});
+
+test('a PR in one target, none yet in the other: the second target\'s triage pages count; a PR whose files the forge did not give keeps its repo\'s triage pages', async () => {
+  const w = world({ extra: estimates });
+  inWorkWith(w, 1157, [{ repo: 'guide-docs', number: 61, files: ['docs/methods/cash/cash.md'] }, { repo: 'api-docs', number: null }], { status: 'inProgress' });
+  readyOn(w);
+  let st = await w.status({ usage: usage(5) });
+  assert.deepEqual(st.notStarted.map((n) => n.reasons), [[`related to 1157, still in work: a page 1157's triage names, no PR yet (${PAYMENT})`]]);
+  const w2 = world({ extra: estimates });
+  inWorkWith(w2, 1157, [{ repo: 'guide-docs', number: 61, files: ['docs/methods/cash/cash.md'] }, { repo: 'api-docs', number: 62 }]);
+  readyOn(w2);
+  st = await w2.status({ usage: usage(5) });
+  assert.deepEqual(st.groups.find((g) => g.keys.includes('1193')).waitsFor, ['1157'], 'unknown files: the guess stays');
+});
+
+test('workPages: per repo, the open PR\'s files, the triage where no PR is opened yet or its files are unknown, nothing where it is merged', () => {
+  const l = (prs, opened) => ({ key: '7', stages: opened ? { pr: { status: 'done' } } : {}, triage: { pages: ['guide-docs docs/a.md — A', 'api-docs docs/b.md — B', 'docs/c.md', { repo: 'api-docs', path: 'docs/d.md' }] }, prs });
+  const at = (entries) => new Map(entries.map(([n, e]) => [`7/${n}`, e]));
+  const keys = (pages) => pages.map((p) => `${p.from} ${p.repo} ${p.path}${p.pr ? ` #${p.pr}` : ''}`);
+  // No PR, not opened: the triage's, the pages with no repo left out.
+  assert.deepEqual(keys(workPages(l([], false))), ['triage guide-docs docs/a.md', 'triage api-docs docs/b.md', 'triage api-docs docs/d.md']);
+  // Opened, one PR in the guide repo with its files: those files; the API repo has no PR and gets none.
+  const one = [{ repo: 'guide-docs', number: 5 }];
+  assert.deepEqual(keys(workPages(l(one, true), at([['guide-docs#5', { state: 'open', files: ['docs/x.md'] }]]))), ['pr guide-docs docs/x.md #5']);
+  // Its files unknown (no files, a failed read, no read): the guide repo's triage page instead.
+  for (const world of [{ state: 'open' }, { error: 'HTTP 502' }, undefined]) assert.deepEqual(keys(workPages(l(one, true), at(world ? [['guide-docs#5', world]] : []))), ['triage guide-docs docs/a.md']);
+  // A branch with no PR yet in the API repo: its triage pages count beside the guide PR's files.
+  const two = [{ repo: 'guide-docs', number: 5 }, { repo: 'api-docs', number: null, branch: 'b' }];
+  assert.deepEqual(keys(workPages(l(two, false), at([['guide-docs#5', { state: 'open', files: ['docs/x.md'] }]]))), ['pr guide-docs docs/x.md #5', 'triage api-docs docs/b.md', 'triage api-docs docs/d.md']);
+  // Merged in the guide repo: nothing there, before the stage is recorded too.
+  assert.deepEqual(keys(workPages(l([{ repo: 'guide-docs', number: 5, merged: { at: 'x' } }], true))), []);
+  assert.deepEqual(keys(workPages(l([{ repo: 'guide-docs', number: 5 }], true), at([['guide-docs#5', { state: 'merged', files: ['docs/x.md'] }]]))), []);
 });
 
 test('open: a ticket locked at a scheduled start is open while its card is still in the ready status', async () => {

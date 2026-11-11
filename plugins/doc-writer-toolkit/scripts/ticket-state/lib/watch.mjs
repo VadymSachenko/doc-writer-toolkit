@@ -19,6 +19,7 @@ import { commentWait } from './quiet.mjs';
 import { dropHandOnStep, handOnLive, liveHandOnKeys, runsGoingIn, startsInFlight, takeHandOn } from './forge-state.mjs';
 import { makeDispatcher } from './dispatch.mjs';
 import { videoFetchDue } from './rule.mjs';
+import { hubLine } from './hub-update.mjs';
 
 // One check of the watcher (design §5, D-048), started by launchd every few minutes. No model call of its own:
 //   1. read every source since its cursor; a check that finds nothing ends here, with no status, no runner, no claude;
@@ -233,6 +234,12 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
   const checkStart = clock();
   const today = localDate(checkStart);
   const out = { kind: 'full', mode: settings.mode, dryRun, at: iso(checkStart), sources: [], events: 0, unmapped: 0, tickets: [], handed: [], waiting: [], pending: [], morning: null, run: null, jobs: [], errors: [], capped: [], notified: [], notes: [...(options.notes ?? [])] };
+  // The hub brought up to its origin before this check (watcher.mjs, lib/hub-update.mjs): a note when it moved, or is
+  // behind and couldn't.
+  if (options.hub) {
+    out.hub = options.hub;
+    if (hubLine(options.hub)) out.notes.push(hubLine(options.hub));
+  }
   if (settings.mode === 'off') {
     out.stopped = 'mode off: nothing runs';
     return out;
@@ -256,6 +263,11 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
     next.awakeSince = iso(awakeSince);
     // When the last full check began: the watcher's tick runs the next one `watchMinutes` after it (checkKindOf).
     next.fullAt = iso(checkStart);
+    // The hub's state at this check, for the report; a move goes to the run log once.
+    if (out.hub) {
+      next.hub = { at: iso(checkStart), outcome: out.hub.outcome, base: out.hub.base, ...(out.hub.commits ? { commits: out.hub.commits } : {}), ...(out.hub.note ? { note: out.hub.note } : {}) };
+      if (out.hub.outcome === 'moved') say({ kind: 'hub', outcome: 'moved', base: out.hub.base, from: out.hub.from, to: out.hub.to, note: hubLine(out.hub) });
+    }
     const isAlive = io.isAlive ? { isAlive: io.isAlive } : {};
 
     // 0. The runs earlier checks handed on (lib/dispatch.mjs). One that ended leaves its result: its notifications (a
@@ -616,7 +628,7 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
       progressAfterCheck({ settings, now: clock(), notify: io.notify, notifyIo: io.notifyIo ?? {} });
     }
     out.log = log;
-    out.quiet = !fresh.length && !wanted.length && !ended.length && !started.length && !out.waiting.length && !out.morning && !out.startPass && !out.errors.length && !out.jobs.some((j) => j.due !== false) && out.sources.every((s) => s.outcome !== 'failed' && s.outcome !== 'gap');
+    out.quiet = !hubLine(out.hub) && !fresh.length && !wanted.length && !ended.length && !started.length && !out.waiting.length && !out.morning && !out.startPass && !out.errors.length && !out.jobs.some((j) => j.due !== false) && out.sources.every((s) => s.outcome !== 'failed' && s.outcome !== 'gap');
     return out;
 
     // Whether a ticket whose next step answers comments waits for them to be quiet (then it is in `out.waiting`). A

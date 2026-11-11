@@ -14,6 +14,7 @@ import { readRunLog, renderReport } from '../lib/report.mjs';
 import { PUSH_DENIED, runDaily } from '../lib/runner.mjs';
 import { notificationsOf } from '../lib/notify.mjs';
 import { setLocal } from '../lib/setlocal.mjs';
+import { oneLine } from '../watcher.mjs';
 
 // The watcher (design §5, D-048, D-054): one check reads every event since its cursor and makes no model call when it
 // finds nothing (AC-1); after a sleep the first check reads every event since the last one and each changed ticket
@@ -109,6 +110,29 @@ test('AC-1: a quiet check reads only the event sources and makes no status, runn
   assert.ok(actionReads.every((r) => r[2] === iso(NOW - 5 * MIN - WINDOW_MS)));
   assert.ok(Object.values(readFeed(w.settings.state).sources).every((s) => s.lastCheck === iso(NOW)));
   assert.deepEqual([w.tracker.log, w.forge.log], [[], []]);
+});
+
+test('the hub before the check: a move is in the run log and the line, a hub left behind is in the line, the notes and the report', async () => {
+  const w = world();
+  seed(w, NOW - 5 * MIN);
+  const { check } = checker(w);
+  const moved = { outcome: 'moved', base: 'main', from: 'a'.repeat(40), to: 'b'.repeat(40), commits: 2 };
+  let out = await check(NOW, { hub: moved });
+  assert.equal(out.quiet, false, 'a quiet check that moved the hub still prints its line');
+  assert.match(oneLine(out), /the hub fast-forwarded 2 commit\(s\) to origin\/main \(bbbbbbb\)/);
+  assert.deepEqual(readRunLog(w.settings.state, '2026-11-10').filter((e) => e.kind === 'hub').map((e) => [e.outcome, e.to]), [['moved', 'b'.repeat(40)]]);
+  assert.equal(readFeed(w.settings.state).hub.outcome, 'moved');
+  const note = 'the hub is 3 commit(s) behind origin/main and was not updated: it has uncommitted changes to tracked files. Its settings are read as they were until a person updates it';
+  out = await check(NOW + 5 * MIN, { hub: { outcome: 'behind', base: 'main', commits: 3, note } });
+  assert.ok(out.notes.includes(note));
+  assert.ok(oneLine(out).includes(note));
+  assert.deepEqual(readFeed(w.settings.state).hub, { at: iso(NOW + 5 * MIN), outcome: 'behind', base: 'main', commits: 3, note });
+  const st = await w.status({ usage: usageAt(5) });
+  assert.ok(renderReport({ settings: w.settings, st, date: '2026-11-10', ledgers: [] }).includes(`the hub at ${iso(NOW + 5 * MIN)}: ${note}`));
+  // No hub update tried (a forge tick's, a dry run's): nothing about it.
+  out = await check(NOW + 10 * MIN);
+  assert.equal(out.hub, undefined);
+  assert.equal(out.quiet, true);
 });
 
 test('AC-1: events on tickets with no next step call status, and start no runner and no model', async () => {

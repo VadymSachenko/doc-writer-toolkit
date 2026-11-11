@@ -41,6 +41,17 @@
             }
           ]
         },
+        "files": {
+          "totalCount": 2,
+          "nodes": [
+            {
+              "path": "docs/export/export.md"
+            },
+            {
+              "path": "i18n/en/docusaurus-plugin-content-docs/current/export/export.md"
+            }
+          ]
+        },
         "reviewRequests": {
           "nodes": [
             {

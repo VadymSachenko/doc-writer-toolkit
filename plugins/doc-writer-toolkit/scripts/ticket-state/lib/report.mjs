@@ -176,7 +176,9 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
     const s = feed.starts;
     const pass = s?.by === 'watcher' && s.date === date ? ` The last start pass when a slot freed: ${s.at}, ${!s.outcome || s.outcome === 'running' ? 'the run that wrote this report' : s.outcome}.` : '';
     const kept = s?.deferred ? ` A change waits for the start hours (${s.deferred}).` : '';
-    out.push('## The watcher', '', `Last check ${checks.at(-1) ?? 'never'}; the morning run ${feed.morning?.lastDate === date ? `ran at ${feed.morning.at ?? date}` : 'has not run on this date'}.${pass}${kept}`, '', list([...failing, ...jobs], 'no source failing, no host job'), '');
+    // The hub as the last full check left it (lib/hub-update.mjs): behind its origin and not updated, or not fetched.
+    const hub = feed.hub?.note && feed.hub.outcome !== 'moved' ? [`the hub at ${feed.hub.at}: ${feed.hub.note}`] : [];
+    out.push('## The watcher', '', `Last check ${checks.at(-1) ?? 'never'}; the morning run ${feed.morning?.lastDate === date ? `ran at ${feed.morning.at ?? date}` : 'has not run on this date'}.${pass}${kept}`, '', list([...hub, ...failing, ...jobs], 'no source failing, no host job'), '');
   }
 
   out.push('## Starting and finishing', '');

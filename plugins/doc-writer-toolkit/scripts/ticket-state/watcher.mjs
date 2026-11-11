@@ -3,7 +3,8 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { CliError } from './lib/errors.mjs';
-import { loadSettings } from './lib/settings.mjs';
+import { loadSettings, tickSecondsOf } from './lib/settings.mjs';
+import { hubLine, updateHub } from './lib/hub-update.mjs';
 import { makeClients } from './lib/world.mjs';
 import { prepareEnv } from './lib/env.mjs';
 import { runHandOn, runTick } from './lib/forge-watch.mjs';
@@ -79,6 +80,7 @@ export function oneLine(out) {
   const failed = out.sources.filter((s) => s.outcome === 'failed' || s.outcome === 'gap');
   if (failed.length) bits.push(`${failed.length} source(s) failing`);
   if (out.morning) bits.push('morning run');
+  if (hubLine(out.hub)) bits.push(hubLine(out.hub));
   if (out.errors?.length) bits.push(`${out.errors.length} part(s) failed: ${out.errors.map((e) => e.part).join(', ')}`);
   for (const f of out.finished ?? []) bits.push(`run ${f.id} of ${f.keys.join(', ')} ended`);
   if (out.run?.handedOn) {
@@ -106,6 +108,18 @@ export function forgeLine(out) {
   return bits.join('; ');
 }
 
+// The settings this process runs with. A process that runs the full check first brings the hub up to its origin
+// (lib/hub-update.mjs), so a merged hub PR counts at this check with no person's pull, and reads the settings again when
+// it moved. Not a tick that only starts the full check, a forge check or a hand-on (it reads what the full check left),
+// a dry run or mode off. Returns { settings, hub }, `hub` null when no update was tried.
+export async function settingsForCheck({ root, values = {}, update = updateHub }) {
+  const settings = await loadSettings({ root, settings: values.settings });
+  const runsFull = Boolean(values.full) || (!values.forge && values['hand-on'] === undefined && tickSecondsOf(settings) >= settings.schedule.watchMinutes * 60);
+  if (!runsFull || values['dry-run'] || settings.mode === 'off') return { settings, hub: null };
+  const hub = update(root);
+  return { settings: hub?.outcome === 'moved' ? await loadSettings({ root, settings: values.settings }) : settings, hub };
+}
+
 export async function main(argv, io = {}) {
   const { stdout = process.stdout, env = process.env } = io;
   const { values, positionals } = parseArgs({ args: argv, options: OPTIONS, allowPositionals: true });
@@ -123,9 +137,9 @@ export async function main(argv, io = {}) {
     return 0;
   }
   const root = path.resolve(values.root ?? process.cwd());
-  const settings = await loadSettings({ root, settings: values.settings });
-  const { notes, claudeEnv } = prepareEnv(settings, env);
   const dryRun = Boolean(values['dry-run']);
+  const { settings, hub } = await settingsForCheck({ root, values, update: io.updateHub });
+  const { notes, claudeEnv } = prepareEnv(settings, env);
   const clients = makeClients({ settings, env, dryRun, io: { ...io, ...(values.origin ? { trackerOrigin: values.origin } : {}) } });
   if (values['hand-on'] !== undefined) {
     const r = await runHandOn({ settings, clients, io: { ...io, claudeEnv }, options: { id: values['hand-on'], keys: values.ticket, dryRun, claude: values.claude ?? 'claude' } });
@@ -134,7 +148,7 @@ export async function main(argv, io = {}) {
     return 0;
   }
   const kind = values.full ? 'full' : values.forge ? 'forge' : null;
-  const out = await runTick({ settings, clients, io: { notify, ...io, claudeEnv }, options: { dryRun, claude: values.claude ?? 'claude', notes, ...(kind ? { kind } : {}) } });
+  const out = await runTick({ settings, clients, io: { notify, ...io, claudeEnv }, options: { dryRun, claude: values.claude ?? 'claude', notes, ...(kind ? { kind } : {}), ...(hub ? { hub } : {}) } });
   if (values.quiet) {
     if (!out.quiet) stdout.write(oneLine(out) + '\n');
   } else stdout.write(JSON.stringify({ ok: true, command: 'watch', ...out, requests: clients.requests(), caught: clients.caught() }, null, 2) + '\n');

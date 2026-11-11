@@ -5,7 +5,7 @@ import { allLocks } from './locks.mjs';
 import { deriveTicket, hasLabel, rebuiltState } from './rule.mjs';
 import { readCards, readPrs, prLinks, makeGit } from './world.mjs';
 import { intakeList, labelCheck, byPriorityThenAge } from './intake.mjs';
-import { estimatesOf, groupsOf, related, startable } from './limits.mjs';
+import { estimatesOf, groupsOf, overlapOf, startable, workPages } from './limits.mjs';
 import { allowanceOf } from './allowance.mjs';
 import { fileHash } from './record.mjs';
 import { readRearm, rearmedAt } from './setlocal.mjs';
@@ -118,15 +118,20 @@ export async function computeStatus({ settings, clients, now = Date.now(), only 
     ready.push({ ...t, number: card?.number ?? null, name: card?.name ?? l.card?.name, desc: card?.desc ?? '', targets: l.triage?.targets ?? [], relations: l.triage?.relations ?? [], together: l.triage?.together ?? [], pages: l.triage?.pages ?? [], size: l.triage?.size ?? null });
   }
 
-  // Groups, and the tickets in work a ready one waits for (the host's batch skill attaches it or waits; v1 waits).
+  // Groups, and the tickets in work a ready one waits for (the host's batch skill attaches it or waits; v1 waits), with
+  // the test that holds it (`waitsWhy`: lib/limits.mjs `overlapOf`). A ticket in work holds the pages its open PRs
+  // change, and the triage's only where it has no PR yet (`workPages`).
   const inWorkTickets = tickets.filter((t) => t.ledger === 'present' && !OPEN_STATES.has(t.state === 'locked' ? t.derivedState : t.state));
   const workView = inWorkTickets.map((t) => {
     const l = ledgers.find((x) => x.key === t.key);
     const card = cards.get(l.card?.id);
-    return { key: t.key, number: card?.number ?? null, name: card?.name ?? '', desc: card?.desc ?? '', targets: l.triage?.targets ?? [], relations: l.triage?.relations ?? [], together: l.triage?.together ?? [], pages: l.triage?.pages ?? [] };
+    return { key: t.key, number: card?.number ?? null, name: card?.name ?? '', desc: card?.desc ?? '', targets: l.triage?.targets ?? [], relations: l.triage?.relations ?? [], together: l.triage?.together ?? [], pages: workPages(l, prWorld) };
   });
   const repos = (t) => new Set((t.targets ?? []).map((id) => settings.targets.find((x) => x.id === id)?.repo).filter(Boolean));
-  const groups = groupsOf(ready, settings).map((g) => ({ ...g, waitsFor: workView.filter((w) => g.members.some((m) => related(m, w, repos))).map((w) => w.key) }));
+  const groups = groupsOf(ready, settings).map((g) => {
+    const why = workView.map((w) => ({ key: w.key, ...(g.members.map((m) => overlapOf(m, w, repos)).find(Boolean) ?? {}) })).filter((x) => x.by);
+    return { ...g, waitsFor: why.map((x) => x.key), waitsWhy: why };
+  });
 
   const allowance = usage || settings.limits.usageGuard === false ? allowanceOf(usage, settings.limits, new Date(now)) : null;
   const estimates = estimatesOf(ledgers, settings.limits);
