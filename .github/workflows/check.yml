@@ -15,14 +15,42 @@ concurrency:
 
 # Every step after the first runs even when an earlier one failed, so each check shows its own result.
 jobs:
+  # Which of the slower side jobs a pull request needs: each runs only when its own files (or this workflow) changed.
+  # A push to main and a manual run run them all.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      visual: ${{ steps.diff.outputs.visual }}
+      sme: ${{ steps.diff.outputs.sme }}
+      cli: ${{ steps.diff.outputs.cli }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            printf 'visual=true\nsme=true\ncli=true\n' >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          files=$(git diff --name-only "$BASE" HEAD)
+          has() { printf '%s\n' "$files" | grep -qE "$1" && echo true || echo false; }
+          wf='^\.github/workflows/check\.yml$'
+          echo "visual=$(has "$wf|^plugins/doc-writer-toolkit/scripts/(visual-pack|transcriber)/")" >> "$GITHUB_OUTPUT"
+          echo "sme=$(has "$wf|^plugins/doc-writer-toolkit/scripts/sme-video-context/")" >> "$GITHUB_OUTPUT"
+          echo "cli=$(has "$wf|^\.claude-plugin/|^plugins/doc-writer-toolkit/(\.claude-plugin|skills|commands|agents|hooks)/|^tools/check-visibility")" >> "$GITHUB_OUTPUT"
+
   checks:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        # 18.x is the floor the scripts declare (engines >= 18.3).
-        node: ['18.x', 'lts/*']
+        # 18.x is the floor the scripts declare (engines >= 18.3). One version only, to keep Actions minutes down: the
+        # side jobs below run on lts/*.
+        node: ['18.x']
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -99,6 +127,8 @@ jobs:
   # its own and loads Playwright from the folder VISUAL_PACK_PLAYWRIGHT_FROM names, so it is installed there, outside
   # the checkout. The version is the one the docs repos use. A missing browser would make `npm test` exit 2, which fails.
   visual-pack:
+    needs: changes
+    if: ${{ needs.changes.outputs.visual == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -124,6 +154,8 @@ jobs:
   # tests/requirements.txt, pinned as in sme-video-requirements.txt: no ffmpeg, no tesseract, no faster-whisper.
   # 3.9 is the Python the macOS venv of that skill runs on.
   sme-video-context:
+    needs: changes
+    if: ${{ needs.changes.outputs.sme == 'true' }}
     # Pinned: Python 3.9, the oldest version this job tests, isn't available on newer images.
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -142,6 +174,8 @@ jobs:
   # The two checks that need the Claude Code CLI. Neither needs credentials. The CLI needs Node 22 or later,
   # and is pinned so its token estimates don't move under the visibility check.
   cli:
+    needs: changes
+    if: ${{ needs.changes.outputs.cli == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
