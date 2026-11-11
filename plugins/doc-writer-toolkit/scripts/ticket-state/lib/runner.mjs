@@ -37,7 +37,7 @@ import { PLACE_SOURCES } from './gates.mjs';
 import { FILES_SHOWN, ticketCommits, ticketCommitsFor } from './ticket-commits.mjs';
 import { BUDGET_MS as DOC_BUDGET_MS, DEFAULT_EXCLUDE, HITS_MAX, PER_FILE, docEvidence, extractTerms, ownTexts, skippedNote } from './doc-evidence.mjs';
 import { withoutHeader } from '../../tracker/lib/comment-header.mjs';
-import { companyReposOn, passRepos, resolveCompanyRepos } from './company-repos.mjs';
+import { companyReposOn, passRepos, resolveCompanyRepos, safeUrl } from './company-repos.mjs';
 import { heldAnswerLines, heldInput, heldPending, holdLines, inputStands, passInput, passLines, prLinesAfterPass, roundInput } from './answer-pass.mjs';
 import { markersAt } from './gates.mjs';
 import { renderAnswers, weekPath, weeklyAnswers, missesPath } from './misses.mjs';
@@ -532,7 +532,7 @@ export function codeLines(trees) {
   const code = trees.filter((t) => !t.related);
   const related = trees.filter((t) => t.related && !t.company);
   const company = trees.filter((t) => t.company);
-  const at = (t) => `${t.path}, commit ${t.commit}${t.url ? `; a link to lines: ${t.url}/blob/${t.commit}/<path>#L<from>-L<to>` : ''}.${t.notes?.length ? ` Note: ${t.notes.join('; ')}.` : ''}`;
+  const at = (t) => `${t.path}, commit ${t.commit}${t.url ? `; a link to lines: ${safeUrl(t.url)}/blob/${t.commit}/<path>#L<from>-L<to>` : ''}.${t.notes?.length ? ` Note: ${t.notes.join('; ')}.` : ''}`;
   const out = [];
   if (code.length) {
     out.push(
@@ -2487,6 +2487,19 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         // The answer pass (TASK-105): every company repo besides, resolved now (an org by `gh`), checked out within its
         // budget with the lock renewed between repos; then its input frozen in a `running` record, before the session.
         const pass = step.stage === 'answerPass' && companyReposOn(settings);
+        // The input first: with nothing left open there is nothing to answer, so no repo is resolved or checked out and
+        // no session runs; the runner records the pass done with no item itself.
+        let frozen = null;
+        if (pass) {
+          frozen = await freezePass(step, trees);
+          if (!frozen.items.length) {
+            for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: 'answerPass', status: 'done', pr: step.pr, result: JSON.stringify({ items: [] }), now: clock() });
+            const note = 'nothing was left open: the pass is done with no item, and no session';
+            for (const k of step.keys) await runRecord({ settings, clients, key: k, run: JSON.stringify({ stage: step.stage, role: step.role, start: new Date(clock()).toISOString(), wallMs: 0, outcome: 'done', session: null, note }), pr: step.pr, now: clock() }).catch(() => {});
+            say({ kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, role: step.role, outcome: 'done', note });
+            return { ...pick(step), outcome: 'done', note };
+          }
+        }
         let repos = codeReposFor(step, settings);
         const passNotes = [];
         if (pass) {
@@ -2505,10 +2518,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
           return { ...(io.ensureCodeTree ?? ensureCodeTree)(settings, a, { othersRunning, timeouts: { cloneMs: Math.min(10 * 60 * 1000, left), fetchMs: Math.min(2 * 60 * 1000, left), checkoutMs: Math.min(5 * 60 * 1000, left) } }), ...extra };
         });
         if (evidenceStage(step)) codeTrees = withTicketCommits(codeTrees, step, settings, io);
-        if (pass) {
-          const frozen = await freezePass(step, trees);
-          step = { ...step, answerItems: frozen.items, answerNotes: [...passNotes, ...frozen.notes] };
-        }
+        if (pass) step = { ...step, answerItems: frozen.items, answerNotes: [...passNotes, ...frozen.notes] };
         if (step.stage === 'pr') step = { ...step, passLines: prLinesAfterPass(step.keys.map((k) => readLedger(settings.state, k)), settings) };
         if (['plan', 'write'].includes(step.stage)) step = { ...step, heldAnswers: heldAnswerLines(step.keys.map((k) => readLedger(settings.state, k))) };
         // The host's own docs, on the same stages, with or without code repos (it never throws).

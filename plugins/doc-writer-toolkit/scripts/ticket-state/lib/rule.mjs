@@ -4,7 +4,7 @@ import { editsOf, mergedEdits, nextEditNumber, parseReply, parseThreadReply, res
 import { IMAGE } from './world.mjs';
 import { parseStartHours } from './settings.mjs';
 import { companyReposOn } from './company-repos.mjs';
-import { heldPending } from './answer-pass.mjs';
+import { heldPending, passGaveUp } from './answer-pass.mjs';
 
 // The next-step rule of the ticket flow (context/ticket-flow.md, "The rule"). A pure function of a ledger and what the
 // tracker, the forge, git and the files show now: the world wins over the ledger. First match wins:
@@ -101,6 +101,15 @@ function preparationStep(l, settings, notes = []) {
   const writeRec = l.stages?.write;
   if (!writeRec || writeRec.status !== 'done' || writeRec.seq < lastResume) return step('write');
   if (!doneAfter(l, 'uaReview', 'write')) return step('uaReview');
+  if (companyReposOn(settings) && passGaveUp(l)) {
+    // The pass after this UA review failed (lib/answer-pass.mjs, `passFailed`): the PR follows the UA review with what
+    // the write left, as with no pass, so nothing waits on it.
+    if (!doneAfter(l, 'pr', 'uaReview')) {
+      notes.push('the answer pass failed after the UA review, so the PR follows the UA review with what the write left open');
+      return step('pr');
+    }
+    return null;
+  }
   if (companyReposOn(settings)) {
     if (!doneAfter(l, 'answerPass', 'uaReview')) return step('answerPass');
     if (!doneAfter(l, 'pr', 'answerPass')) return step('pr');

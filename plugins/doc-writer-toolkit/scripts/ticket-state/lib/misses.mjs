@@ -7,7 +7,7 @@ import { CliError } from './errors.mjs';
 // source already in reach, one line each in `<state>/misses.jsonl`. "Later" is the answer pass, or the owner's answer
 // in a review round (the trigger word), an expert's that the owner hands on included. Each line names the ticket, the
 // item, the source that answered it and the stage that missed it. The weekly summary groups them by the source's kind,
-// and proposes a kind seen twice, once, as one rule line for the role or the hub. No AI: the source is what the record
+// and proposes a kind seen in two tickets, once, as one rule line for the role or the hub. No AI: the source is what the record
 // said; the rule line is a template.
 
 export const missesPath = (state) => path.join(state, 'misses.jsonl');
@@ -17,12 +17,12 @@ export const proposedPath = (state) => path.join(state, 'misses-proposed.json');
 // The kinds of source an answer came from. `owner` is the owner's own word, which no system held: no miss.
 export const SOURCE_KINDS = ['code', 'docs', 'ticket', 'live', 'decision', 'owner'];
 
-// A `source` an answer in a round may carry: { kind, ref }, `ref` the repo and path, the earlier ticket, the check's
-// log, or the decision. A malformed one is a usage error (nothing was posted for it).
+// Where an answer in a round was found (`foundIn`, never a place's own `source`): { kind, ref }, `ref` the repo and path,
+// the earlier ticket, the check's log, or the decision. A malformed one is a usage error (nothing was posted for it).
 export function checkSource(s, where) {
   if (s === undefined || s === null) return null;
-  if (typeof s !== 'object' || !SOURCE_KINDS.includes(s.kind)) throw new CliError(`${where}: "source" is { "kind", "ref" }, the kind one of ${SOURCE_KINDS.join(', ')}`, { code: 2 });
-  if (s.kind !== 'owner' && (typeof s.ref !== 'string' || !s.ref.trim())) throw new CliError(`${where}: a "source" of kind ${s.kind} names its "ref" (the repo and path, the ticket, the log, the decision)`, { code: 2 });
+  if (typeof s !== 'object' || !SOURCE_KINDS.includes(s.kind)) throw new CliError(`${where}: "foundIn" is { "kind", "ref" }, where the answer was found, the kind one of ${SOURCE_KINDS.join(', ')}`, { code: 2 });
+  if (s.kind !== 'owner' && (typeof s.ref !== 'string' || !s.ref.trim())) throw new CliError(`${where}: a "foundIn" of kind ${s.kind} names its "ref" (the repo and path, the ticket, the log, the decision)`, { code: 2 });
   return { kind: s.kind, ...(typeof s.ref === 'string' && s.ref.trim() ? { ref: s.ref.trim() } : {}) };
 }
 
@@ -32,7 +32,7 @@ export function sourceOfEvidence(e) {
   if (e.kind === 'code') return { kind: 'code', ref: `${e.repo}:${e.path}${e.lines ? `#L${String(e.lines).replace(/^L/, '')}` : ''}` };
   if (e.kind === 'docs') return e.ticket !== undefined && e.ticket !== null ? { kind: 'ticket', ref: `${e.ticket}/${e.file}` } : { kind: 'docs', ref: `${e.repo}:${e.path}` };
   if (e.kind === 'live') return { kind: 'live', ref: String(e.log) };
-  if (e.kind === 'rule') return { kind: 'decision', ref: String(e.ref) };
+  // A rule of the role's or the host's is written already: the item it settled is no miss, and no rule line to propose.
   return null;
 }
 
@@ -118,7 +118,7 @@ const RULE_OF = {
   decision: (refs) => ({ for: 'hub rules', line: `Write the owner's standing decision into the host's rules, so the sessions read it: these were answered by it: ${refs}.` }),
 };
 
-// The week's misses grouped by the source's kind (most first), each with its lines; and the kinds seen twice or more
+// The week's misses grouped by the source's kind (most first), each with its lines; and the kinds seen in two tickets or more
 // that were never proposed, each as one rule line.
 export function weekOf(misses, { since, until, proposed = [] }) {
   const groups = new Map();
@@ -130,9 +130,10 @@ export function weekOf(misses, { since, until, proposed = [] }) {
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push(m);
   }
-  const list = [...groups.entries()].map(([kind, lines]) => ({ kind, count: lines.length, lines })).sort((a, b) => b.count - a.count || a.kind.localeCompare(b.kind));
+  const list = [...groups.entries()].map(([kind, lines]) => ({ kind, count: lines.length, tickets: new Set(lines.map((x) => String(x.ticket))).size, lines })).sort((a, b) => b.count - a.count || a.kind.localeCompare(b.kind));
   const done = new Set(proposed);
-  const proposals = list.filter((g) => g.count >= 2 && !done.has(g.kind)).map((g) => {
+  // Seen twice: in two tickets, not twice in one (one ticket's two items are one gap, not a pattern).
+  const proposals = list.filter((g) => g.tickets >= 2 && !done.has(g.kind)).map((g) => {
     const refs = [...new Set(g.lines.map((x) => `${x.ticket} ${x.item?.id ?? ''} (${x.source.ref ?? x.source.kind})`.replace(/\s+\(/, ' (')))].slice(0, 5).join('; ');
     return { kind: g.kind, count: g.count, ...RULE_OF[g.kind](refs) };
   });

@@ -29,8 +29,14 @@ export const OUTCOMES = ['answered', 'confirmed', 'kept'];
 export const EVIDENCE_KINDS = ['code', 'docs', 'live', 'rule'];
 // The questions a stage asks for itself, never held for the pass: a fit stop, an admin change, a video.
 export const OWN_KINDS = ['fit', 'admin', 'video'];
-// The role rules a `rule` evidence may quote (`ref: "role"`).
-const ROLE_FILES = ['writer.md', 'unattended.md'].map((f) => path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../context/ticket-roles', f));
+// The kinds of question the plan or the write may hold for the pass: a fact of the product or the code, or a choice of
+// the text. Any other kind (a stage's own, or one with no kind) is asked on the card as before: a question is held by
+// what it is, never by default.
+export const HOLD_KINDS = ['fact', 'code', 'behaviour', 'text'];
+// The role's rules a `rule` evidence may quote (`ref: "role"`): only the ones that decide a question by themselves.
+const ROLE_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../context/ticket-roles');
+const ROLE_FILES = ['writer.md', 'unattended.md'].map((f) => path.join(ROLE_DIR, f));
+export const ROLE_DECISIONS = ["If your own proposal would be to leave the page as it is, or the card's words already answer it, it is no question: decide it and leave it out."];
 
 const text = (v) => typeof v === 'string' && v.trim() !== '';
 const trimmed = (v) => (text(v) ? v.trim() : null);
@@ -94,8 +100,51 @@ export function heldInput(l) {
   return { kind: 'held', items: (h?.items ?? []).map((q, i) => ({ id: `c${i + 1}`, kind: 'question', from: h.from, ...pick(q, ['text', 'reader', 'why', 'proposal', 'sources']), ...(q.kind ? { asked: q.kind } : {}) })), notes: [] };
 }
 
-// Whether the plan or the write held questions no pass has settled yet.
-export const heldPending = (l) => Boolean(l.heldQuestions?.items?.length) && !(l.heldQuestions.passSeq > l.heldQuestions.seq);
+// Whether the plan or the write held questions no pass has settled yet (nor failed on: then they are asked on the card).
+export const heldPending = (l) => Boolean(l.heldQuestions?.items?.length) && !(l.heldQuestions.passSeq > l.heldQuestions.seq) && !(l.heldQuestions.failedSeq > l.heldQuestions.seq);
+
+// A pass that failed gives up what it held, so nothing waits on it (`record --status failed`, the runner's or the
+// session's): on a PR, its held questions are shown and the check label follows them; the questions the plan or the
+// write held go back to that stage, which asks them on the card; after the UA review, the PR follows it with what the
+// write left, as with no pass. Returns what it gave up, for the record's note.
+export function passFailed(l, pr, { at, seq }) {
+  if (pr) {
+    const held = (pr.questions ?? []).filter((q) => q.held && !q.answer);
+    for (const q of held) delete q.held;
+    if (!pr.answerPassDue && !held.length) return null;
+    delete pr.answerPassDue;
+    delete pr.answerInput;
+    pr.answerPassFailed = { at, seq };
+    // The check label reads `openQuestions`: the questions now shown are open for the owner.
+    const open = pr.openQuestions?.items ?? [];
+    const have = new Set(open.map((x) => plainWords(x.text)));
+    pr.openQuestions = { items: [...open, ...held.filter((q) => !have.has(plainWords(q.text))).map((q) => ({ text: q.text, ...(q.reader ? { reader: q.reader } : {}) }))], stage: 'answerPass', at, seq };
+    return `${held.length} held question(s) shown on ${prId(pr)}`;
+  }
+  if (heldPending(l)) {
+    l.heldQuestions.failedSeq = seq;
+    delete l.answerInput;
+    return `${l.heldQuestions.items.length} held question(s) back to the ${l.heldQuestions.from}, to ask on the card`;
+  }
+  const ua = l.stages?.uaReview;
+  if (ua && !passFor(l)) {
+    l.answerPassFailed = { after: ua.seq, at, seq };
+    delete l.answerInput;
+    return 'the PR follows the UA review with what the write left';
+  }
+  return null;
+}
+
+// Whether the ticket's pass after its last UA review failed: then the PR follows the UA review as with no pass.
+export const passGaveUp = (l) => Boolean(l.answerPassFailed && l.stages?.uaReview && l.answerPassFailed.after === l.stages.uaReview.seq);
+
+// The questions the plan or the write held that a failed pass gave back, still to ask on the card (none asked since).
+export function heldGivenBack(l) {
+  const h = l.heldQuestions;
+  if (!h?.failedSeq || !(h.failedSeq > h.seq) || h.passSeq > h.seq) return [];
+  if ((l.stages?.questions?.seq ?? 0) > h.failedSeq) return [];
+  return h.items;
+}
 
 // The items of a PR's pass after a review round: the description questions the round asked, held from the description
 // until the pass records (`held`).
@@ -119,11 +168,14 @@ export function inputStands(l) {
 
 // ------------------------------------------------------------------ the record's gate
 
-const git = (dir, args) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20000 });
-const blobAt = (dir, commit, file) => {
+// Git with no prompt and no lazy fetch: a partial clone (`--filter=blob:none`) has every tree but not every blob, and a
+// read that would fetch one fails offline, so the gate reads trees only.
+const git = (dir, args) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_NO_LAZY_FETCH: '1' } });
+// Whether a path is a file at a commit: its entry in the commit's tree (`ls-tree`), never its blob.
+export const blobAt = (dir, commit, file) => {
   try {
-    git(dir, ['cat-file', '-e', `${commit}:${String(file).replace(/^\.?\/+/, '')}`]);
-    return true;
+    const rel = String(file).replace(/^\.?\/+/, '');
+    return git(dir, ['ls-tree', String(commit), '--', rel]).split('\n').some((line) => / blob [0-9a-f]+\t/.test(line) && line.endsWith(`\t${rel}`));
   } catch {
     return false;
   }
@@ -137,9 +189,13 @@ export function docDirsOf(settings) {
 
 // The checks an evidence entry gets against the files, made by default with git on this machine: a code reference's
 // commit and path in the runner's clone of its repo (or a doc repo's clone); a page's commit and path in its doc repo;
-// an earlier ticket's file in its work folder; a live log under the host root or the state folder.
-export function evidenceChecks(settings, { docRepos = [] } = {}) {
-  const inside = (abs) => [settings.root, settings.state].some((r) => abs === r || abs.startsWith(r + path.sep));
+// an earlier ticket's file in its work folder (never this ticket's own); a live log written for this pass: in this
+// ticket's work folder or the state folder, not tracked by git, and written after the pass's input was frozen (`key`,
+// `since`).
+export function evidenceChecks(settings, { docRepos = [], key = null, since = null } = {}) {
+  const under = (abs, r) => abs === r || abs.startsWith(r + path.sep);
+  const workOf = (k) => (settings.workFolder ? path.resolve(settings.root, settings.workFolder.split('<key>').join(String(k))) : null);
+  const logDirs = [key !== null && key !== undefined ? workOf(key) : null, settings.state].filter(Boolean);
   const repoDir = (repo) => {
     const clone = codeClonePath(settings, { repo });
     if (fs.existsSync(path.join(clone, 'HEAD'))) return clone;
@@ -160,16 +216,19 @@ export function evidenceChecks(settings, { docRepos = [] } = {}) {
     ticket: (e) => {
       if (!settings.workFolder) return 'the host has no workFolder: an earlier ticket\'s file is not known';
       if (!/^[A-Za-z0-9._-]+$/.test(String(e.ticket)) || ['.', '..'].includes(String(e.ticket))) return `'${e.ticket}' is not a ticket key`;
-      const folder = path.resolve(settings.root, settings.workFolder.split('<key>').join(String(e.ticket)));
+      if (key !== null && key !== undefined && String(e.ticket) === String(key)) return `ticket ${e.ticket} is this ticket: its own notes are no earlier ticket's (a live check of this pass is evidence of kind live)`;
+      const folder = workOf(e.ticket);
       const file = path.resolve(folder, String(e.file));
       if (!file.startsWith(folder + path.sep)) return `${e.file} is not a file of ticket ${e.ticket}'s work folder`;
       return fs.existsSync(file) ? null : `ticket ${e.ticket} has no ${e.file}`;
     },
-    // A rule's words, quoted: found in the role's rules (`role`), or in the file the host's rule key names.
+    // A rule's words, quoted: one of the role's rules that decide a question by themselves (`role`), or a sentence of the
+    // file the host's rule key names (the owner's decisions written there).
     rule: (e) => {
       const files = e.ref === 'role' ? ROLE_FILES : [path.resolve(settings.root, String(settings.hostRules?.[e.ref] ?? ''))];
       const want = plainWords(e.text);
       if (want.length < 20) return `the rule's text is too short to find (${want.length} characters): quote the rule's sentence`;
+      if (e.ref === 'role' && !ROLE_DECISIONS.some((d) => plainWords(d).includes(want))) return "only the role's question rule decides a question by itself (\"" + ROLE_DECISIONS[0] + '"): quote it, or give the code, the page or the check that answers the item';
       for (const f of files) {
         try {
           if (plainWords(fs.readFileSync(f, 'utf8')).includes(want)) return null;
@@ -181,8 +240,24 @@ export function evidenceChecks(settings, { docRepos = [] } = {}) {
     },
     log: (e) => {
       const file = path.resolve(settings.root, String(e.log));
-      if (!inside(file)) return `the log ${e.log} is outside the host repo and the state folder`;
-      return fs.existsSync(file) ? null : `the log ${e.log} is not there`;
+      if (!logDirs.some((d) => under(file, d) && file !== d)) return `the log ${e.log} is not in ${key !== null && key !== undefined && settings.workFolder ? `ticket ${key}'s work folder or ` : ''}the state folder: a live check writes its log there`;
+      let stat;
+      try {
+        stat = fs.statSync(file);
+      } catch {
+        return `the log ${e.log} is not there`;
+      }
+      if (!stat.isFile()) return `the log ${e.log} is not a file`;
+      if (since && stat.mtimeMs < Date.parse(since) - 1000) return `the log ${e.log} was written before this pass began (${new Date(stat.mtimeMs).toISOString()}): a live check of this pass writes a new one`;
+      if (under(file, settings.root)) {
+        try {
+          git(settings.root, ['ls-files', '--error-unmatch', '--', path.relative(settings.root, file)]);
+          return `the log ${e.log} is a file git tracks: a live check's log is written for the pass, never committed`;
+        } catch {
+          /* not tracked (or no repo): a log */
+        }
+      }
+      return null;
     },
   };
 }
@@ -269,6 +344,11 @@ export function passProblems(input, result, { settings, l, pr = null, checks = e
       // A rule decides a choice (a question), never a fact: a marker, a place or a finding answered rests on the code, a
       // page, an earlier ticket or a check too.
       if (ev.length && ev.every((e) => e?.kind === 'rule') && item.kind !== 'question') out.push(`item ${id} is a ${item.kind}: a rule alone settles no fact; give the code, the page, the earlier ticket or the check that shows it`);
+      // The role's question rule decides a question that proposes to leave the page as it is: one with its proposal.
+      if (ev.some((e) => e?.kind === 'rule' && e.ref === 'role') && !text(item.proposal)) out.push(`item ${id} has no proposal: the role's question rule decides only a question whose proposal is to leave the page as it is`);
+      // Behaviour read from code stays a place (the place rule): a place is settled by a page, an earlier ticket or a
+      // check, never by the code alone.
+      if (item.kind === 'place' && ev.length && ev.every((e) => e?.kind === 'code')) out.push(`item ${id} is a place: code alone doesn't settle behaviour; check it on the test environment (evidence of kind live), or keep it citing that code`);
       if (r.outcome === 'confirmed' && item.kind !== 'place') out.push(`item ${id} is a ${item.kind}: only a place is confirmed (seen working); a ${item.kind} that is settled is answered`);
       if (r.outcome === 'confirmed' && !ev.some((e) => e?.kind === 'live')) out.push(`item ${id} is confirmed: a place is confirmed only when it was seen working, with that check's log (evidence of kind live)`);
       continue;
@@ -283,7 +363,12 @@ export function passProblems(input, result, { settings, l, pr = null, checks = e
     if (!text(r.why)) out.push(`item ${id} is kept: give the "why", why none of its sources answered it`);
     // A place behaviour decides is checked on the test environment first (missing test data is set up, never a reason
     // by itself): a kept place names that check, with the setup it made.
-    if (item.kind === 'place' && !sources.some((s) => s?.kind === 'live' && text(s.setup))) out.push(`item ${id} is a place kept: name the live check you ran for it, a source of kind "live" with its "setup" (the test data made, or why the test environment can't reach it)`);
+    if (item.kind === 'place') {
+      const lives = sources.filter((s) => s?.kind === 'live' && text(s.setup));
+      if (!lives.length) out.push(`item ${id} is a place kept: name the live check you ran for it, a source of kind "live" with its "setup" (the test data made, or why the test environment can't reach it)`);
+      // The check was run: its `ref` is its log, checked as a live evidence's is.
+      else if (!lives.some((s) => !checks.log({ log: s.ref }))) out.push(`item ${id} is a place kept: its live check's "ref" is the log that check wrote (${lives.map((s) => checks.log({ log: s.ref })).join('; ')})`);
+    }
     if (text(r.why) && text(item.page)) {
       const k = `${item.repo}\0${item.branch}\0${item.page}`;
       if (!scripts.has(k)) {
@@ -306,7 +391,13 @@ export function passProblems(input, result, { settings, l, pr = null, checks = e
     if (pr && !(Number.isInteger(Number(e?.n)) && Number(e.n) >= 1)) out.push(`${name} has no "n": a round's edits are numbered on from the number in the brief`);
     if (pr && (e?.commentId === undefined || e?.commentId === null)) out.push(`${name} has no "commentId": each edit of a round's pass gets its line comment in the pass's review`);
   }
-  if ((result.edits ?? []).length && !(Array.isArray(result.commits) && result.commits.length) && !(result.prs ?? []).some((p) => (p.commits ?? []).length)) out.push('the edits were pushed in commits: give them (`prs[].commits`, or `commits` on a PR)');
+  // Every edit pushed, and every commit pushed an edit the owner can undo by number: on a ticket, each PR's commits in
+  // `prs[].commits` (the PR stage takes them as the pipeline's); on a PR, `commits`.
+  const pushed = pr ? (Array.isArray(result.commits) ? result.commits : []) : (result.prs ?? []).flatMap((p) => p?.commits ?? []);
+  if (!pr && Array.isArray(result.commits) && result.commits.length) out.push('on a ticket, the pass\'s commits go in "prs": [{ "repo", "branch", "commits" }], each with its PR\'s branch');
+  if ((result.edits ?? []).length && !pushed.length) out.push(`the edits were pushed in commits: give them (${pr ? '`commits`' : '`prs[].commits`'})`);
+  if (pushed.length && !(result.edits ?? []).length) out.push('commits were pushed with no "edits": each change the pass pushed is an edit on the list, so the owner can undo it by number');
+  for (const p of pr ? [] : result.prs ?? []) if ((p?.commits ?? []).length && !(result.edits ?? []).some((e) => e?.repo === p.repo && (!e.branch || e.branch === p.branch))) out.push(`${p.repo} ${p.branch ?? ''}: commits with no edit on that PR`);
   if (pr && (result.edits ?? []).length && !result.review) out.push('a round\'s pass with edits posts one review with their line comments: give "review": { "id", "commits": [{ "sha", "role": "answers" }] }');
   return out;
 }
@@ -339,7 +430,8 @@ const itemLine = (x) => {
     marker: 'a marker the branch added',
     finding: 'a finding the UA review left open',
   }[x.kind];
-  const parts = [`- **${x.id}** (${what}${where ? `, ${where}` : ''}): ${oneLine(x.text ?? x.claim ?? '')}`];
+  // In a group, each ticket numbers its items from 1: the ticket says whose item it is, and whose record it goes in.
+  const parts = [`- **${x.id}**${x.ticket ? ` of ticket ${x.ticket}` : ''} (${what}${where ? `, ${where}` : ''}): ${oneLine(x.text ?? x.claim ?? '')}`];
   if (x.place) parts.push(`  - place: ${oneLine(x.place)}`);
   if (x.why) parts.push(`  - why: ${oneLine(x.why)}`);
   if (x.proposal) parts.push(`  - proposal: ${oneLine(x.proposal)}`);
@@ -358,10 +450,10 @@ export function passLines(step, settings) {
   const held = items.some((x) => /^c\d/.test(x.id));
   return [
     `The answer pass${onPr ? ` on ${step.pr}, after new questions were asked on it: they are held from the description until you record` : held ? ', on the questions the plan or the write held instead of asking them on the card' : ', between the UA review and the PR'}. Each item below has an answer in the company's systems. Find it. An item you can't answer stays, with every source you tried.`,
-    items.length ? `Items (answer each by its id, and no other; a stage's own question, such as a fit stop, a refused video, a conflict or a person's comment that needs the owner, is not here and stays as it is):\n${items.map(itemLine).join('\n')}` : 'No item was left open: record the stage done with `"items": []`.',
+    items.length ? `Items (answer each by its id${items.some((x) => x.ticket) ? ", in its own ticket's record" : ''}, and no other; a stage's own question, such as a fit stop, a refused video, a conflict or a person's comment that needs the owner, is not here and stays as it is):\n${items.map(itemLine).join('\n')}` : 'No item was left open: record the stage done with `"items": []`.',
     ...(step.answerNotes ?? []).map((n) => `Note: ${n}.`),
-    `Where the answers are: the code repos and the company repos below, each a read-only checkout at the commit the runner fetched (search them all for an item's names: its endpoint, field, status, component, label; the caller's side, a frontend or a widget, often holds what a screen shows); the ticket's commits in each; the host's own docs and the earlier tickets' notes (below: an earlier ticket's live check is what it saw on its date); and the test environment, by ${live}: a behaviour the test environment can reach is checked there, under the browser lock, after the setup those rules allow on the owner's test accounts (missing test data is made, never a reason). A state no screen gives (an action a cabinet hides for that status) is often set through the backend route the screens call (read it in the code), with the test accounts the host's rules name; then read the result the way the page's reader would (the client API, the cabinet). An API call is a Playwright spec run under the browser lock, its log written into the ticket's work folder, never committed with the pages.`,
-    "The bar for `answered`: a name, a path or a value read directly (cited with repo, path, lines and commit), a page or an earlier ticket's file that states it, behaviour seen working now (with the check's log), or a rule of the host's or the role's that decides it (a question whose proposal is to leave the page as it is, or that the card's words answer, is decided by the role's question rule: answered, with that rule). Behaviour read from code only stays a place: kept, citing that code. `confirmed` is for a place you saw working: it leaves the places.",
+    `Where the answers are: the code repos and the company repos below, each a read-only checkout at the commit the runner fetched (search them all for an item's names: its endpoint, field, status, component, label; the caller's side, a frontend or a widget, often holds what a screen shows); the ticket's commits in each; the host's own docs and the earlier tickets' notes (below: an earlier ticket's live check is what it saw on its date); and the test environment, by ${live}: a behaviour the test environment can reach is checked there, under the browser lock, after the setup those rules allow on the owner's test accounts (missing test data is made, never a reason). A state no screen gives (an action a cabinet hides for that status) is often set through the backend route the screens call (read it in the code), with the test accounts the host's rules name; then read the result the way the page's reader would (the client API, the cabinet). An API call is a Playwright spec run under the browser lock, its log written into the ticket's work folder (or the state folder) during this pass, never committed with the pages: a log written before the pass, or one git tracks, is no evidence.`,
+    `The bar for \`answered\`: a name, a path or a value read directly (cited with repo, path, lines and commit), a page or an earlier ticket's file that states it, behaviour seen working now (with the check's log), or a rule of the host's that decides it (quoted as written there), or, for a question whose proposal is to leave the page as it is, the role's question rule, quoted: "${ROLE_DECISIONS[0]}" (no other sentence of the role decides an item). Behaviour read from code only stays a place: kept, citing that code (a place answered by code alone is refused). \`kept\` on a place names the live check you ran: a source of kind \`live\` whose \`ref\` is the log it wrote and whose \`setup\` says the test data it made. \`confirmed\` is for a place you saw working: it leaves the places.`,
     `Never change a setting several accounts share unless the host's rules allow it by name; never drop or answer a stage's own question; never write to a company repo (the checkouts are read-only). ${onPr ? 'An answer that changes the page: the smallest edit that puts it in (replace the marker or the claim), one commit, pushed, then one review with a line comment under each such edit (`forge.mjs review-on-lines --outside-in-body`), numbered on from the number in the brief.' : "An answer that changes the page: the smallest edit that puts it in (replace the marker or the claim), in the worktree, committed and pushed. The PR stage lists your edits in the description's list of edits after the UA review's fixes, numbered on, so the owner can undo each by number."}`,
     ...(held ? ['What you keep is asked on the card as before: every kept question in one comment (naming what you tried), the card to Blocked, and that comment\'s id in your record as `"asked": { "commentId" }`. With none kept, the card stays where it is and the stage that held them runs again with your answers.'] : []),
     `Record: \`--result '{ "items": [{ "id", "outcome": "answered" | "confirmed" | "kept", "answer", "evidence": [{ "kind": "code", "repo", "path", "lines", "commit", "url" } | { "kind": "docs", "repo", "path", "commit" } | { "kind": "docs", "ticket", "file" } | { "kind": "live", "log", "setup" } | { "kind": "rule", "ref", "text" }], "sources": [{ "kind", "ref", "result", "setup" }], "why" }], "edits": [{ ${onPr ? '"n", "commentId", ' : '"repo", "branch", '}"page", "block", "before", "after", "item" }], ${onPr ? '"commits", "review": { "id", "commits": [{ "sha", "role": "answers" }] }, "posted"' : '"prs": [{ "repo", "branch", "commits" }]'} }'\`. \`answer\` is the answer in the page's language; \`evidence\` every source it rests on; a kept item's \`sources\` every source you tried (a place's live check among them, with its \`setup\`) and its \`why\` in the page's language. \`record\` checks each code reference's commit and path in the runner's clone, each page and earlier ticket's file, each log, each rule's key, and refuses an item with none.`,
@@ -374,7 +466,7 @@ export function holdLines(step, settings) {
   if (!settings.companyRepos) return [];
   const rec = (k) => `node <the toolkit's scripts folder>/ticket-state/ticket-state.mjs record ${k} --stage questions --status done --result '{ "hold": true, "from": "${step.stage}", "questions": [{ "id", "kind", "text", "reader", "why", "proposal", "sources" }] }'`;
   return [
-    `The host's company repos are set, so the answer pass comes before the owner: a question you would ask on the card about the product, the code or the text (not a fit stop, an admin change or a video, which you ask as before) is not posted. Hold it instead: ${step.keys.map(rec).join(' ; ')} (with the brief's --root and --settings), leave the card where it is, and end the session. The pass looks for each answer with every company repo and the test environment, and asks on the card only what it can't answer.`,
+    `The host's company repos are set, so the answer pass comes before the owner: a question you would ask on the card about the product, the code or the text is not posted. Hold it instead, with its \`kind\` one of ${HOLD_KINDS.join(', ')} (a fit stop, an admin change, a video, or a question of any other kind is asked on the card as before): ${step.keys.map(rec).join(' ; ')} (with the brief's --root and --settings), leave the card where it is, and end the session. The pass looks for each answer with every company repo and the test environment, and asks on the card only what it can't answer.`,
     ...(step.stage === 'write' ? ['Record what you leave for the PR as `open` in the write\'s result: every question and place you would post there, with the sources you tried (`{ "questions": [{ "text", "reader", "why", "proposal", "place", "sources" }], "places": [{ "repo", "branch", "page", "line", "claim", "why", "source", "refs" }] }`). The answer pass takes them before the PR.'] : []),
   ];
 }
@@ -384,6 +476,12 @@ export function heldAnswerLines(ledgers) {
   const out = [];
   for (const l of ledgers.filter(Boolean)) {
     const h = l.heldQuestions;
+    const back = heldGivenBack(l);
+    if (back.length) {
+      out.push(`The answer pass on the questions ${l.key}'s ${h.from} held failed, so they wait on no one: ask them on the card as before (one comment, the card to Blocked, a \`questions\` record with no "hold"), and don't hold them again:`);
+      for (const q of back) out.push(`- ${q.kind ? `(${q.kind}) ` : ''}${oneLine(q.text)}${(q.sources ?? []).length ? ` (tried: ${q.sources.map((s) => [s.kind, s.ref].filter(Boolean).join(' ')).join('; ')})` : ''}`);
+      continue;
+    }
     const rec = l.stages?.answerPass;
     if (!h || !(h.passSeq > h.seq) || rec?.status !== 'done' || rec.result?.input?.kind !== 'held') continue;
     const settled = [...settledOf(rec).values()].filter((s) => s.result.outcome !== 'kept');

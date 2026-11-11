@@ -18,7 +18,14 @@ const isObject = (v) => v && typeof v === 'object' && !Array.isArray(v);
 const plainName = (v) => typeof v === 'string' && /^[^/\\\s]+$/.test(v) && v !== '.' && v !== '..';
 const relPath = (p) => typeof p === 'string' && p.trim() !== '' && !path.isAbsolute(p);
 const LIST_KEYS = ['repo', 'url', 'base', 'path'];
-const ORG_KEYS = ['org', 'exclude', 'path'];
+const ORG_KEYS = ['org', 'exclude', 'path', 'max'];
+// The most repos an org gives the pass by default (`max`): more are a note, never a silent cut.
+export const ORG_MAX = 200;
+// An address with a user or a token in it: never cloned from, never put in a brief (the runner clones with the forge's
+// own sign-in).
+export const withCredentials = (url) => /^[a-z][a-z0-9+.-]*:\/\/[^/]*@/i.test(String(url ?? ''));
+// An address as a brief may show it: any user or token taken out.
+export const safeUrl = (url) => String(url ?? '').replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/]*@/i, '$1');
 
 // The setting, checked: `null` when unset (no answer pass), `{ list }` or `{ org, exclude, path }`. Any other shape stops
 // every command until it is fixed, as the other repo lists do.
@@ -35,6 +42,7 @@ export function validateCompanyRepos(raw) {
       if (seen.has(r.repo)) fail(`companyRepos names '${r.repo}' twice`);
       seen.add(r.repo);
       if (typeof r.url !== 'string' || !/^https:\/\//.test(r.url)) fail(`companyRepos[${i}].url is required: the repo's https address, which the runner clones it from`);
+      if (withCredentials(r.url)) fail(`companyRepos[${i}].url carries a user or a token: give the plain https address (the runner clones with the forge's own sign-in)`);
       if (r.base !== undefined && (typeof r.base !== 'string' || !r.base.trim())) fail(`companyRepos[${i}].base must be a branch name`);
       if (r.path !== undefined && r.path !== null && !relPath(r.path)) fail(`companyRepos[${i}].path must be the owner's clone, from the host root`);
       return { repo: r.repo, url: r.url.replace(/\/+$/, ''), base: r.base ?? 'main', path: r.path ?? null };
@@ -47,7 +55,8 @@ export function validateCompanyRepos(raw) {
   if (!plainName(raw.org)) fail('companyRepos.org must be the forge org\'s plain name');
   if (raw.exclude !== undefined && (!Array.isArray(raw.exclude) || raw.exclude.some((x) => !plainName(x)))) fail('companyRepos.exclude must be a list of repo names');
   if (raw.path !== undefined && raw.path !== null && !(relPath(raw.path) && raw.path.includes('<repo>'))) fail('companyRepos.path must be a path from the host root with <repo> in it, such as "../<repo>"');
-  return { org: raw.org, exclude: [...new Set(raw.exclude ?? [])], path: raw.path ?? null };
+  if (raw.max !== undefined && !(Number.isInteger(raw.max) && raw.max >= 1 && raw.max <= 1000)) fail('companyRepos.max must be a whole number from 1 to 1000: the most repos of the org the pass reads');
+  return { org: raw.org, exclude: [...new Set(raw.exclude ?? [])], path: raw.path ?? null, max: raw.max ?? ORG_MAX };
 }
 
 // Whether the host reads its company repos at all: unset, there is no answer pass and the flow is as before.
@@ -58,8 +67,8 @@ export const GH_TIMEOUT_MS = 60 * 1000;
 
 // The `gh repo list` of an org, as JSON: [{ name, url, isArchived, defaultBranchRef: { name } }]. The binary and the
 // environment are injectable, so a test passes a fake `gh`.
-export function ghRepoList(org, { gh = 'gh', env = process.env, timeoutMs = GH_TIMEOUT_MS } = {}) {
-  const out = execFileSync(gh, ['repo', 'list', org, '--limit', '1000', '--json', 'name,url,isArchived,defaultBranchRef'], {
+export function ghRepoList(org, { gh = 'gh', env = process.env, timeoutMs = GH_TIMEOUT_MS, limit = 1000 } = {}) {
+  const out = execFileSync(gh, ['repo', 'list', org, '--limit', String(limit), '--json', 'name,url,isArchived,defaultBranchRef'], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout: timeoutMs,
@@ -83,14 +92,17 @@ export function resolveCompanyRepos(settings, io = {}) {
   const timeoutMs = io.ghTimeoutMs ?? GH_TIMEOUT_MS;
   let raw;
   try {
-    raw = (io.ghRepoList ?? ghRepoList)(c.org, { gh: io.gh ?? 'gh', env: io.ghEnv ?? process.env, timeoutMs });
+    // One more than the most it reads: a list that long says the org has more than `max`.
+    raw = (io.ghRepoList ?? ghRepoList)(c.org, { gh: io.gh ?? 'gh', env: io.ghEnv ?? process.env, timeoutMs, limit: (c.max ?? ORG_MAX) + 1 });
   } catch (e) {
     return { repos: [], from: `org ${c.org}`, notes: [`the repos of ${c.org} were not listed (\`gh repo list\`: ${ghError(e, timeoutMs)}): only the repos the settings name are read`] };
   }
+  const max = c.max ?? ORG_MAX;
+  const cut = raw.length > max;
   const skipped = { archived: [], excluded: [] };
   const repos = [];
-  for (const r of raw) {
-    if (!plainName(r?.name) || typeof r?.url !== 'string' || !/^https:\/\//.test(r.url)) continue;
+  for (const r of raw.slice(0, max)) {
+    if (!plainName(r?.name) || typeof r?.url !== 'string' || !/^https:\/\//.test(r.url) || withCredentials(r.url)) continue;
     if (r.isArchived) {
       skipped.archived.push(r.name);
       continue;
@@ -103,6 +115,7 @@ export function resolveCompanyRepos(settings, io = {}) {
   }
   repos.sort((a, b) => a.repo.localeCompare(b.repo));
   const notes = [];
+  if (cut) notes.push(`${c.org} has more than ${max} repos: only the first ${max} \`gh repo list\` gave are read (raise \`companyRepos.max\`, or exclude the repos the docs never need)`);
   if (skipped.archived.length) notes.push(`archived, not read: ${skipped.archived.sort().join(', ')}`);
   return { repos, from: `org ${c.org}`, notes, excluded: skipped.excluded.sort() };
 }

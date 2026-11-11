@@ -382,7 +382,8 @@ fs.writeFileSync(${JSON.stringify(pidFile)}, String(c.pid));
 console.log('building');
 setInterval(() => {}, 1000);
 `);
-  const r = await runSiteBuild({ cwd: dir, command: [process.execPath, script], timeoutMs: 800, killGraceMs: 500 });
+  // Long enough for node to start the parent and its child under the parallel load of the regression set.
+  const r = await runSiteBuild({ cwd: dir, command: [process.execPath, script], timeoutMs: 5000, killGraceMs: 500 });
   assert.equal(r.timedOut, true);
   assert.notEqual(r.code, 0);
   assert.deepEqual(r.tail, ['building']);

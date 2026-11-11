@@ -11,7 +11,7 @@ import { imagePairsAt } from './pairs.mjs';
 import { originHead, writtenIn } from './worktree.mjs';
 import { addEdits, addEnSides } from './edits.mjs';
 import { changedLines, commentProblems, languageMessage, markersAt, markersMessage, placeLanguageProblems, placeProblems, placesNotListed, questionProblems } from './gates.mjs';
-import { OWN_KINDS, checkWriteOpen, docDirsOf, evidenceChecks, heldPending, inputOf, passFor, passProblems, prAfterPass, refuse, settledOf } from './answer-pass.mjs';
+import { HOLD_KINDS, OWN_KINDS, checkWriteOpen, docDirsOf, evidenceChecks, heldGivenBack, heldPending, inputOf, passFailed, passFor, passProblems, prAfterPass, refuse, settledOf } from './answer-pass.mjs';
 import { appendMisses, checkSource, missLine, sourceOfEvidence } from './misses.mjs';
 import { companyReposOn } from './company-repos.mjs';
 
@@ -117,6 +117,11 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
   let thenAsked = null;
 
   if (status === 'done') await applyDone();
+  else if (status === 'failed' && stage === 'answerPass') {
+    // A failed pass gives up what it held, so no question waits on it (lib/answer-pass.mjs, `passFailed`).
+    const gave = passFailed(l, pr, { at, seq: l.seq + 1 });
+    if (gave) record.note = `${record.note ? `${record.note}; ` : ''}given up: ${gave}`;
+  }
   else if (status === 'running' && pr && (CHAIN.includes(stage) || ['answerComments', 'styleCheck', 'resync', 'readyForMerge'].includes(stage))) {
     const st = pr.number ? await forgeHead(pr) : null;
     if (st) record.head = st.headCommit;
@@ -224,8 +229,18 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
           const qs = result.questions;
           if (!Array.isArray(qs) || !qs.length || qs.some((q) => !q || typeof q.text !== 'string' || !q.text.trim())) throw new CliError('questions: "hold" needs "questions", each with its "text"', { code: 2 });
           const own = qs.filter((q) => OWN_KINDS.includes(q.kind));
-          if (own.length) throw new CliError(`questions: a ${own[0].kind} question is the stage's own: ask it on the card, never held`, { code: 2 });
+          if (own.length) throw new CliError(`questions: a "${own[0].kind}" question is the stage's own: ask it on the card, never held`, { code: 2 });
+          // Held by what it is: a question of a kind the pass can answer; one with no kind, or any other, is asked.
+          const other = qs.filter((q) => !HOLD_KINDS.includes(q.kind));
+          if (other.length) throw new CliError(`questions: a held question's "kind" is one of ${HOLD_KINDS.join(', ')} (${other[0].kind ? `"${other[0].kind}"` : 'none'} given for "${String(other[0].text).slice(0, 60)}"): ask any other on the card`, { code: 2 });
+          // By its origin: the stage that holds it is the one running now, the plan before its approval, the write after.
+          if (result.from === 'plan' && l.stages?.plan?.status === 'done') throw new CliError('questions: "from": "plan", but the plan is done: a question of the write is held "from": "write"', { code: 2 });
+          if (result.from === 'write' && l.stages?.plan?.status !== 'done') throw new CliError('questions: "from": "write", but the plan is not done yet: hold it "from": "plan"', { code: 2 });
           if (heldPending(l)) throw new Refused('answers', 'questions are held already and no answer pass has settled them');
+          // A failed pass gave its questions back to be asked on the card: never held again.
+          const back = new Set(heldGivenBack(l).map((q) => String(q.text ?? '').toLowerCase().replace(/\s+/g, ' ').trim()));
+          const backAgain = qs.filter((q) => back.has(String(q.text).toLowerCase().replace(/\s+/g, ' ').trim()));
+          if (backAgain.length) throw new Refused('answers', `"${String(backAgain[0].text).slice(0, 80)}": the answer pass failed on it, so it is asked on the card (a questions record with no "hold")`);
           // A question a pass already answered is no question: held again, the plan and the pass would go round.
           const norm = (t) => String(t ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
           const settled = new Map((l.questions ?? []).filter((q) => q.answer?.by === 'answerPass').map((q) => [norm(q.text), q]));
@@ -392,14 +407,15 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         // an item, so it can't be touched here.
         const input = inputOf(l, pr);
         if (!input) throw new Refused('answers', `no input was frozen for this pass${pr ? ` on ${prId(pr)}` : ''}: the runner freezes it before the session; run the stage from the runner`);
-        const problems = passProblems(input, result, { settings, l, pr, checks: evidenceChecks(settings, { docRepos: docDirsOf(settings) }) });
+        const problems = passProblems(input, result, { settings, l, pr, checks: evidenceChecks(settings, { docRepos: docDirsOf(settings), key, since: input.at }) });
         if (problems.length) throw refuse(problems);
         result.input = { items: input.items, notes: input.notes ?? [], ...(input.kind ? { kind: input.kind } : {}), at: input.at };
         const byId = new Map(input.items.map((x) => [x.id, x]));
         const done = result.items.filter((r) => r.outcome !== 'kept');
         for (const r of done) {
           const item = byId.get(r.id);
-          const source = sourceOfEvidence(r.evidence.find((e) => e?.kind !== 'rule') ?? r.evidence[0]);
+          // A rule (the role's or the host's) is written already: an item it settled is no miss, and nothing to propose.
+          const source = sourceOfEvidence(r.evidence.find((e) => e?.kind !== 'rule'));
           if (source) misses.push(missLine({ at, ticket: key, pr: pr ? prId(pr) : null, item: { id: r.id, kind: item.kind, text: String(item.text ?? item.claim ?? '').slice(0, 300) }, source, settledBy: 'answerPass', missedBy: item.from, key: `${key}|answerPass|${pr ? prId(pr) : ''}|${r.id}|${input.at}` }));
         }
         if (!pr && input.kind === 'held') {
@@ -661,7 +677,7 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
           warnings.push(...addEdits(pr, result.edits, { list: String(result.review.id), stage, at, seq: l.seq + 1 }));
           pr.openQuestions = { items: questionsOf(result, stage, { required: true }), stage, at, seq: l.seq + 1 };
           placesOf();
-          descriptionOf();
+          await descriptionOf();
           addRound(round);
           return;
         }
@@ -701,7 +717,7 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
           if (result.commits?.length && !result.edits?.length) throw new CliError('styleCheck: "commits" pushed fixes: give their "edits", the items of the round\'s review', { code: 2 });
           warnings.push(...addEdits(pr, result.edits, { list: String(result.review.id), stage, at, seq: l.seq + 1 }));
           placesOf();
-          descriptionOf();
+          await descriptionOf();
           addRound(round);
         } else {
           if ((result.edits?.length || result.notes?.length) && !result.summary?.id) throw new CliError('styleCheck: "edits" and "notes" are in the summary comment: give "summary": { "id" } too', { code: 2 });
@@ -840,7 +856,7 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         if (stage === 'enReview' && result.review !== undefined) {
           const round = roundOf(['translation', 'style']);
           warnings.push(...addEdits(pr, result.edits, { list: String(result.review.id), stage, at, seq: l.seq + 1 }));
-          descriptionOf();
+          await descriptionOf();
           addRound(round);
         } else if (stage === 'enReview') warnings.push(...addEdits(pr, result.edits, { list: 'description', stage, at, seq: l.seq + 1 }));
         if (stage === 'resync') warnings.push(...addEnSides(pr, result.edits));
@@ -971,8 +987,9 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
       }
       // Only what a round may change: the place's id, page, claim and comment stay as the `pr` record wrote them.
       for (const k of ['state', 'replyId', 'answer']) if (u[k] !== undefined) place[k] = u[k];
-      // The owner's answer in the place's thread from a source already in reach: a miss (TASK-105).
-      const source = checkSource(u.source, `${stage}: place ${u.id}`);
+      // The owner's answer in the place's thread from a source already in reach: a miss (TASK-105). Its own key,
+      // `foundIn`: a place's `source` is where its claim came from (code, transcript, card), as the `pr` record wrote it.
+      const source = checkSource(u.foundIn, `${stage}: place ${u.id}`);
       if (source) {
         place.answerSource = source;
         if (u.state === 'confirmed' || u.state === 'deleted' || u.answer) misses.push(missLine({ at, ticket: key, pr: prId(pr), item: { id: String(u.id), kind: 'place', text: String(place.claim ?? '').slice(0, 300) }, source, settledBy: 'owner', missedBy: 'pr', key: `${key}|${stage}|${prId(pr)}|${u.id}|${source.kind}:${source.ref ?? ''}` }));
@@ -983,7 +1000,7 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
 
   // The description's questions a round answered (`answered`: [{ n, answer, link? }]) and the new ones it asks for a
   // reader (`asked`: [{ text, reader, place?, why?, proposal? }], numbered on). The runner writes the section from them.
-  function descriptionOf() {
+  async function descriptionOf() {
     pr.questions ??= [];
     if (result.answered !== undefined && !Array.isArray(result.answered)) throw new CliError(`${stage}: "answered" is a list of { "n", "answer", "link"? }`, { code: 2 });
     for (const a of result.answered ?? []) {
@@ -993,7 +1010,7 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         warnings.push(`no description question ${a.n} on ${prId(pr)}: its answer is not kept`);
         continue;
       }
-      const source = checkSource(a.source, `${stage}: answered ${a.n}`);
+      const source = checkSource(a.foundIn, `${stage}: answered ${a.n}`);
       q.answer = { text: a.answer.trim(), ...(a.link ? { link: String(a.link) } : {}), ...(a.by ? { by: String(a.by) } : {}), ...(source ? { source } : {}), at, seq: l.seq + 1 };
       // The owner's answer (an expert's the owner handed on too) from a source already in reach: a miss (TASK-105).
       if (source) misses.push(missLine({ at, ticket: key, pr: prId(pr), item: { id: `d${q.n}`, kind: 'question', text: q.text.slice(0, 300) }, source, settledBy: a.by === 'expert' ? 'expert' : 'owner', missedBy: q.stage ?? 'pr', key: `${key}|${stage}|${prId(pr)}|d${q.n}|${source.kind}:${source.ref ?? ''}` }));
@@ -1003,7 +1020,21 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
     // With the company repos and review rounds, the questions a round asks wait for the answer pass on this PR before
     // they are shown (TASK-105): held from the description, and the check label waits with them.
     if (companyReposOn(settings) && settings.reviewRounds && pr.questions.length > before) {
-      for (const q of pr.questions.slice(before)) q.held = true;
+      // Held only if not posted: the round's review body must not ask them already (it says only that the answer pass
+      // looks first). A body that can't be read is a warning: the description still waits.
+      const fresh = pr.questions.slice(before);
+      if (result.review?.id !== undefined && result.review?.id !== null && pr.number) {
+        let body = null;
+        try {
+          body = ((await clients.forge.prActivity({ repo: pr.repo, number: pr.number })).reviews ?? []).find((r) => String(r.id) === String(result.review.id))?.body ?? null;
+        } catch (e) {
+          warnings.push(`the round's review on ${prId(pr)} was not read (${String(e.message ?? e).slice(0, 120)}): its questions are held without that check`);
+        }
+        const flat = (t) => String(t ?? '').replace(/[`*_>]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+        const inBody = body === null ? [] : fresh.filter((q) => flat(body).includes(flat(q.text).slice(0, 80)));
+        if (inBody.length) throw new Refused('answers', `the round's review asks ${inBody.map((q) => `"${q.text.slice(0, 60)}"`).join(', ')} already: with the company repos, a round's new questions go in "asked" only, held for the answer pass; edit the review's text (no question in it), then record again`);
+      }
+      for (const q of fresh) q.held = true;
       pr.answerPassDue = { seq: l.seq + 1, at, stage };
     }
   }
