@@ -160,7 +160,7 @@ export async function computeStatus({ settings, clients, now = Date.now(), only 
 
   const order = (a, b) => byPriorityThenAge(a, b);
   const shown = only ? tickets.filter((t) => only.includes(t.key)) : tickets;
-  return {
+  const out = {
     now: new Date(now).toISOString(),
     mode: settings.mode,
     state: settings.stateRel,
@@ -176,4 +176,10 @@ export async function computeStatus({ settings, clients, now = Date.now(), only 
     locks: [...locks.values()],
     ...(only ? { only } : {}),
   };
+  // The cards' names and descriptions as this check read them, by ticket key: the runner's docs lookup takes its terms
+  // from them (lib/runner.mjs `withDocEvidence`) with no tracker call of its own. Not printed.
+  const texts = new Map(ledgers.map((l) => [l.key, l.card?.id ? cards.get(l.card.id) : null]));
+  for (const r of ready) if (!texts.get(r.key)) texts.set(r.key, { name: r.name, desc: r.desc });
+  Object.defineProperty(out, 'cardTexts', { value: new Map([...texts].filter(([, c]) => c).map(([k, c]) => [k, { name: c.name ?? '', desc: c.desc ?? '' }])) });
+  return out;
 }
