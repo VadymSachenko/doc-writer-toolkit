@@ -66,75 +66,7 @@ test('--dry-run, --from and --size belong to import only: any other command refu
   for (const argv of [['set', 'mode', 'off', '--dry-run'], ['set', 'limits.open', '1', '--from', 'x'], ['status', '--size', 'a=edit'], ['report', '--dry-run'], ['handover', '5', '--dry-run']]) {
     const r = run(CLI, [...argv, '--root', root]);
     assert.equal(r.code, 2, argv.join(' '));
-    assert.match(r.json.error, new RegExp(`^--(dry-run|from|size) is an option of import(, learn)? only, not of ${argv[0]}import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
-import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-import { NOW, ago, card, forgeAdapter, host, quietGit, trackerAdapter } from './fakes.mjs';
-import { snapshot } from './helpers.mjs';
-import { main as stateMain } from '../ticket-state.mjs';
-import { main as runnerMain } from '../runner.mjs';
-
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const CLI = path.join(ROOT, 'ticket-state.mjs');
-const RUNNER = path.join(ROOT, 'runner.mjs');
-
-const run = (file, args) => {
-  const r = spawnSync(process.execPath, [file, ...args], { encoding: 'utf8' });
-  return { code: r.status, out: r.stdout, err: r.stderr, json: (() => {
-    try {
-      return JSON.parse(r.stdout);
-    } catch {
-      return null;
-    }
-  })() };
-};
-
-async function inProcess(main, argv, io) {
-  let out = '';
-  const code = await main(argv, { stdout: { write: (s) => (out += s) }, env: {}, git: quietGit, now: () => NOW, ...io });
-  return { code, out, json: (() => {
-    try {
-      return JSON.parse(out);
-    } catch {
-      return null;
-    }
-  })() };
-}
-
-test('exit codes: 0 help, 2 bad usage (an unknown command too), 1 a refused record, with the JSON on stdout', () => {
-  const root = host();
-  const help = run(CLI, ['--help']);
-  assert.equal(help.code, 0);
-  assert.match(help.out, /^ticket-state <command>/);
-  const unknown = run(CLI, ['frobnicate', '--root', root]);
-  assert.equal(unknown.code, 2);
-  assert.deepEqual([unknown.json.ok, unknown.json.error], [false, "unknown command 'frobnicate'."]);
-  assert.equal(run(CLI, ['record', '--root', root]).code, 2, 'record needs the key');
-  assert.equal(run(CLI, ['status', 'extra', '--root', root]).code, 2);
-  assert.equal(run(CLI, ['status', '--bogus', '--root', root]).code, 2);
-  const refused = run(CLI, ['record', '999', '--stage', 'plan', '--status', 'done', '--root', root]);
-  assert.equal(refused.code, 1);
-  assert.deepEqual([refused.json.ok, refused.json.refused], [false, 'noLedger']);
-  assert.match(refused.json.error, /^nothing recorded: ticket 999 has no ledger/);
-  assert.equal(fs.existsSync(path.join(root, '.flow')), false, 'nothing written');
-  assert.equal(run(RUNNER, ['--help']).code, 0);
-  assert.equal(run(RUNNER, ['--ticket', '5', '--root', root]).code, 2, '--ticket goes with --manual');
-  assert.equal(run(RUNNER, ['now', '--root', root]).code, 2);
-  const noSettings = run(CLI, ['status', '--root', path.join(root, '.claude')]);
-  assert.equal(noSettings.code, 2);
-  assert.match(noSettings.json.error, /no settings file/);
-});
-
-test('--dry-run, --from and --size belong to import only: any other command refuses them (exit 2) and writes nothing', async () => {
-  const root = host();
-  const before = snapshot(root);
-  for (const argv of [['set', 'mode', 'off', '--dry-run'], ['set', 'limits.open', '1', '--from', 'x'], ['status', '--size', 'a=edit'], ['report', '--dry-run'], ['handover', '5', '--dry-run']]) {
-    const r = run(CLI, [...argv, '--root', root]);
-    assert.equal(r.code, 2, argv.join(' '));
-    assert.match(r.json.error, new RegExp(`^--(dry-run|from|size) ));
+    assert.match(r.json.error, new RegExp(`^--(dry-run|from|size) is an option of import(, learn)? only, not of ${argv[0]}$`));
   }
   assert.deepEqual(snapshot(root), before, 'the local settings file was not written');
   assert.equal(fs.existsSync(path.join(root, '.claude', 'ticket-flow.local.json')), false);
