@@ -308,7 +308,11 @@ export function renderProgress({ ledgers = [], bad = [], memory = {}, run = null
     out.push(`- 👉 ${g.key}${l?.card?.name ? ` · ${oneLine(l.card.name, 70)}` : ''} — ${g.pr ? `${g.pr}: ` : ''}${GATE_ACTION[g.kind] ?? g.why}${g.recommended ? ` (an expert review is recommended: ${g.recommended})` : ''}`);
   }
   // The rule PRs from the owner's edits (lib/learn.mjs): the owner answers by number, or merges.
-  for (const r of rulePrs) out.push(`- 📏 Rules from your edits — ${r.repo}#${r.number}: ${r.rules} rule(s) to read; reply by number, or merge${r.url ? ` (${r.url})` : ''}`);
+  for (const r of rulePrs) {
+    out.push(`- 📏 Rules from your edits — ${r.repo}#${r.number}: ${r.rules} rule(s) to read; reply by number, or merge${r.url ? ` (${r.url})` : ''}`);
+    // The owner's comments on it that read as no reply by number: never dropped silently.
+    for (const c of r.unclear ?? []) out.push(`  - ❓ a comment of yours not read as a reply by number${c.url ? ` (${c.url})` : ''}: «${c.text}» — write it again as «N — …»`);
+  }
   for (const c of others) out.push(`- 💬 ${c.key} — ${c.pr}: a comment of ${c.author ?? 'a colleague'}'s the pipeline doesn't take${c.link ? ` (${c.link})` : ''}: hand it on with a comment that starts with the trigger word, or leave it`);
   out.push('', live ? '## The current run' : '## The last run', '', ...runSection(run, flights, now, live, { starts, startHours, ledgers }), '', '## Tickets in work', '');
   if (!ledgers.length && !bad.length) out.push('No ledgers yet: nothing has started.');
@@ -455,7 +459,7 @@ export function writeProgress({ settings, now = Date.now(), st = null, run = nul
 function rulePrsOf(state) {
   try {
     const d = JSON.parse(fs.readFileSync(path.join(state, 'learning', 'proposals.json'), 'utf8'));
-    return (d.prs ?? []).filter((p) => p.state === 'open' && p.number).map((p) => ({ repo: p.repo, number: p.number, url: p.url ?? null, rules: (p.items ?? []).filter((x) => x.state === 'open').length }));
+    return (d.prs ?? []).filter((p) => p.state === 'open' && p.number).map((p) => ({ repo: p.repo, number: p.number, url: p.url ?? null, rules: (p.items ?? []).filter((x) => x.state === "open").length, unclear: p.unclear ?? [] }));
   } catch {
     return [];
   }

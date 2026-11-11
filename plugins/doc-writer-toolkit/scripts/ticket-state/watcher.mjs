@@ -6,7 +6,7 @@ import { CliError } from './lib/errors.mjs';
 import { loadSettings, sharedProblemAt, stateFolderOf, tickSecondsOf } from './lib/settings.mjs';
 import { allLocks } from './lib/locks.mjs';
 import { runsGoingIn } from './lib/forge-state.mjs';
-import { watchLockHolder } from './lib/watch.mjs';
+import { runLearnPass, watchLockHolder } from './lib/watch.mjs';
 import { hubLine, updateHub } from './lib/hub-update.mjs';
 import { makeClients } from './lib/world.mjs';
 import { prepareEnv } from './lib/env.mjs';
@@ -35,6 +35,7 @@ Options
   --forge                   run the forge check now, here, whatever the tick would run
   --hand-on <id>            a check's run for the tickets named with --ticket (a check starts this itself)
   --ticket <key>            with --hand-on: a ticket to finish (repeatable)
+  --learn                   a learning pass: the rule PRs, the toolkit PRs, the weekly session (a check starts this itself)
   --dry-run                 read and plan only: no runner step, no job, no cursor, no notification is written
   --quiet                   print nothing for a quiet check, one line otherwise (for launchd's log)
   --noop                    do nothing at all and exit 0 (for an install test of the LaunchAgent)
@@ -51,6 +52,7 @@ const OPTIONS = {
   forge: { type: 'boolean' },
   'hand-on': { type: 'string' },
   ticket: { type: 'string', multiple: true },
+  learn: { type: 'boolean' },
   quiet: { type: 'boolean' },
   noop: { type: 'boolean' },
   claude: { type: 'string' },
@@ -124,11 +126,11 @@ export async function settingsForCheck({ root, values = {}, update = updateHub, 
   try {
     settings = await load();
   } catch (e) {
-    if (values['hand-on'] !== undefined || values['dry-run']) throw e;
+    if (values['hand-on'] !== undefined || values.learn || values['dry-run']) throw e;
     broken = e;
   }
   if (!broken) {
-    const runsFull = Boolean(values.full) || (!values.forge && values['hand-on'] === undefined && tickSecondsOf(settings) >= settings.schedule.watchMinutes * 60);
+    const runsFull = Boolean(values.full) || (!values.forge && values['hand-on'] === undefined && !values.learn && tickSecondsOf(settings) >= settings.schedule.watchMinutes * 60);
     if (!runsFull || values['dry-run'] || settings.mode === 'off') return { settings, hub: null };
   }
   const state = settings?.state ?? (await stateFolderOf({ root, settings: values.settings }));
@@ -157,7 +159,7 @@ export async function main(argv, io = {}) {
     return 0;
   }
   if (positionals.length) throw new CliError(`unexpected argument '${positionals[0]}'.\n\n${USAGE}`, { code: 2 });
-  if ([values.full, values.forge, values['hand-on'] !== undefined].filter(Boolean).length > 1) throw new CliError('--full, --forge and --hand-on exclude each other', { code: 2 });
+  if ([values.full, values.forge, values['hand-on'] !== undefined, values.learn].filter(Boolean).length > 1) throw new CliError('--full, --forge, --hand-on and --learn exclude each other', { code: 2 });
   if (values['hand-on'] !== undefined && !/^[A-Za-z0-9-]+$/.test(values['hand-on'])) throw new CliError(`'${values['hand-on']}' is not a hand-on id`, { code: 2 });
   if (values['hand-on'] !== undefined && !values.ticket?.length) throw new CliError('--hand-on needs the tickets it finishes (--ticket)', { code: 2 });
   if (values.ticket?.length && values['hand-on'] === undefined) throw new CliError('--ticket goes with --hand-on', { code: 2 });
@@ -174,6 +176,14 @@ export async function main(argv, io = {}) {
     const r = await runHandOn({ settings, clients, io: { ...io, claudeEnv }, options: { id: values['hand-on'], keys: values.ticket, dryRun, claude: values.claude ?? 'claude' } });
     if (values.quiet) stdout.write(`${r.ended} hand-on ${r.id} of ${r.keys.join(', ')}: ${r.error ? `failed: ${r.error}` : 'ended'}\n`);
     else stdout.write(JSON.stringify({ ok: true, command: 'hand-on', ...r, requests: clients.requests(), caught: clients.caught() }, null, 2) + '\n');
+    return 0;
+  }
+  if (values.learn) {
+    if (!settings.learning) throw new CliError('--learn needs `learning` in the shared settings', { code: 2 });
+    const r = await runLearnPass({ settings, clients, io: { notify, ...io, claudeEnv }, options: { dryRun, claude: values.claude ?? 'claude' } });
+    const bits = [r.proposed?.length ? `${r.proposed.length} rule PR(s)` : null, r.replied?.length ? `${r.replied.length} reply(ies)` : null, r.toolkit?.length ? `${r.toolkit.length} toolkit step(s)` : null, r.week?.error ?? r.week?.why ?? null].filter(Boolean);
+    if (values.quiet) stdout.write(`learning pass: ${r.skipped ?? (bits.join('; ') || 'nothing to do')}\n`);
+    else stdout.write(JSON.stringify({ ok: true, command: 'learn', ...r, requests: clients.requests(), caught: clients.caught() }, null, 2) + '\n');
     return 0;
   }
   const kind = values.full ? 'full' : values.forge ? 'forge' : null;

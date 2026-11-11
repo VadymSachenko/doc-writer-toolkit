@@ -20,10 +20,13 @@ import { prId } from './ledger.mjs';
 //   not on the base: the hand commits TASK-076 reads), at any stage, block by block over the UA pages of the PR's own
 //   it changed (not an id-only change, not a page a merge of the base brought, never EN or a further locale: the owner
 //   writes UA). `final` when the commit came after the PR's first `readyForMerge` head (D-062: the final edit), else
-//   `hand`. The style check's `reason` for the commit, or else the commit's subject, is its `comment`.
+//   `hand`. The style check's `reason` for the commit, or else the commit's subject, is its `comment`. Only the owner's
+//   commits (`learning.authors`, the git author), never one the ledger records as the pipeline's anywhere. A merged PR's
+//   commits are those its merge commit's first parent doesn't hold.
 //
-// Each line has a stable `id`, so a second run adds nothing twice. Which PRs: every PR still open, and every merged PR
-// merged at or after `since` (`learning.since`, or the backfill's `--since`); a PR closed unmerged is outside the flow.
+// Each line has a stable `id` (a commit's lines by the commit, whatever their source), so a second run adds nothing
+// twice. Which PRs: every PR still open, and every merged PR merged at or after `since` (`learning.since`, or the
+// backfill's `--since`; required); a PR closed unmerged is outside the flow.
 // A cursor (`learning/cursor.json`) keeps each PR's head and its count of edits as last read, so a PR with neither
 // changed costs no git call; a merged PR is read once more at its final head, then never again.
 
@@ -180,18 +183,36 @@ export function learnGit(settings) {
     for (const r of [`refs/remotes/origin/${b}`, `refs/heads/${b}`]) if (out(cwd, ['rev-parse', '--verify', '-q', r]) !== null) return r;
     return null;
   };
+  const has = (cwd, rev) => out(cwd, ['cat-file', '-e', `${rev}^{commit}`]) !== null;
   return {
-    // The non-merge commits on the branch that are not on the base, oldest first: { sha, at, subject }.
-    commits(target, head, b) {
+    // The non-merge commits on the branch that are not on the base, oldest first: { sha, at, subject, email, name }.
+    // An open PR: against the base as fetched. A merged PR: against its merge commit's first parent (the base as it was
+    // just before the merge), since the base now holds the branch (a merge commit), and a squash or rebase merge leaves
+    // the branch's own commits off the base all the same. Null when git here can't tell: no head, no merge commit fetched,
+    // or a head the base already holds with no merge commit to tell where the branch began.
+    commits(target, head, b, { mergeCommit = null } = {}) {
       const cwd = base.repoPath(target);
-      if (!cwd || !head || out(cwd, ['cat-file', '-e', `${head}^{commit}`]) === null) return null;
-      const r = ref(cwd, b);
-      if (!r) return null;
-      const text = out(cwd, ['log', '--no-merges', '--reverse', '--format=%H%x09%cI%x09%s', head, '--not', r]);
+      if (!cwd || !head) return null;
+      // The merge is on the base, and with it the merged head: a clone that hasn't fetched them since gets the base once
+      // (the remote-tracking ref only).
+      if (mergeCommit && (!has(cwd, mergeCommit) || !has(cwd, head))) out(cwd, ['-c', 'core.hooksPath=/dev/null', 'fetch', '-q', 'origin', `+refs/heads/${b}:refs/remotes/origin/${b}`]);
+      if (!has(cwd, head)) return null;
+      let not;
+      if (mergeCommit) {
+        if (!has(cwd, mergeCommit)) return null;
+        not = has(cwd, `${mergeCommit}^1`) ? `${mergeCommit}^1` : null;
+        if (!not) return null;
+      } else {
+        not = ref(cwd, b);
+        if (!not) return null;
+        // The base holds the head: a merged branch whose merge commit isn't known. Nothing to list, and no way to tell.
+        if (out(cwd, ['merge-base', '--is-ancestor', head, not]) !== null) return null;
+      }
+      const text = out(cwd, ['log', '--no-merges', '--reverse', '--format=%H%x09%cI%x09%ae%x09%an%x09%s', head, '--not', not]);
       if (text === null) return null;
       return text.split('\n').filter(Boolean).map((line) => {
-        const [sha, at, ...subject] = line.split('\t');
-        return { sha, at, subject: subject.join('\t') };
+        const [sha, at, email, name, ...subject] = line.split('\t');
+        return { sha, at, email, name, subject: subject.join('\t') };
       });
     },
     pages: (target, sha, roots, b) => base.changedUnder(target, `${sha}^`, sha, roots, b)?.filter((f) => /\.mdx?$/.test(f)) ?? null,
@@ -210,9 +231,31 @@ const uaRootsOf = (settings, pr, target) => {
   const roots = (pr.targets ?? []).map((id) => settings.targets.find((t) => t.id === id)?.uaRoot).filter(Boolean);
   return roots.length ? [...new Set(roots)] : target ? [target.uaRoot] : [];
 };
-const mine = (pr, sha) => (pr.pipelineCommits ?? []).some((c) => c && (sha.startsWith(String(c)) || String(c).startsWith(sha)));
+// Every commit the ledger records as the pipeline's: `pipelineCommits`, and the commits its other records name (the
+// rounds' commits, the id step's), so a pipeline push missing from `pipelineCommits` is never taken for the owner's.
+// Not a stage's recorded head: a step that made no commit records the head it found, which may be the owner's.
+const SHA = /^[0-9a-f]{7,40}$/;
+export function pipelineShas(pr) {
+  const out = new Set((pr.pipelineCommits ?? []).map(String));
+  const add = (v) => typeof v === 'string' && SHA.test(v) && out.add(v);
+  for (const r of pr.rounds ?? []) for (const c of r?.commits ?? []) add(typeof c === 'string' ? c : c?.sha);
+  for (const c of pr.idCommits ?? []) add(typeof c === 'string' ? c : c?.sha ?? c?.commit);
+  return [...out];
+}
+const mineIn = (shas, sha) => shas.some((c) => c && (sha.startsWith(String(c)) || String(c).startsWith(sha)));
 
-// The entries one PR gives now. `view`: { head, state ('open' | 'merged' | 'closed'), mergedAt }.
+// The owner's commit: its author's email or name is one of `learning.authors` (case aside).
+const byOwner = (settings, c) => {
+  const who = (settings.learning?.authors ?? []).map((a) => a.toLowerCase());
+  return who.includes(String(c.email ?? '').toLowerCase()) || who.includes(String(c.name ?? '').toLowerCase());
+};
+
+// An applied comment's edit is the owner's: its `by` (the comment's author, when the writer gave it) is `forge.self`;
+// with no `by` (a ledger written before it), only on a PR with no expert's review (`review: places`), where the owner is
+// the one who comments.
+const ownerComment = (settings, pr, e) => (e.by ? e.by === settings.forge?.self : pr.review !== 'sme');
+
+// The entries one PR gives now. `view`: { head, state ('open' | 'merged' | 'closed'), mergedAt, mergeCommit }.
 export function entriesOf({ settings, ledger, pr, view, git }) {
   const id = prId(pr);
   const common = { key: ledger.key, repo: pr.repo, pr: pr.number, url: pr.url ?? null };
@@ -221,18 +264,21 @@ export function entriesOf({ settings, ledger, pr, view, git }) {
   for (const e of pr.edits ?? []) {
     if (e.rule && e.rejected) {
       out.push({ id: `restore:${id}:${e.list}:${e.n}`, at: e.rejected.at ?? e.at ?? null, ...common, page: e.page, block: e.block ?? null, before: e.after, after: e.before, source: 'restore', rule: e.rule, n: e.n });
-    } else if (e.stage === 'answerComments' && !e.rule && !e.restores) {
+    } else if (e.stage === 'answerComments' && !e.rule && !e.restores && ownerComment(settings, pr, e)) {
       out.push({ id: `comment:${id}:${e.list}:${e.n}`, at: e.at ?? null, ...common, page: e.page, block: e.block ?? null, before: e.before, after: e.after, source: 'comment', n: e.n, ...(e.reason ? { comment: e.reason } : {}) });
     }
   }
   const target = targetOf(settings, pr);
   if (target && view?.head) {
     const b = pr.base ?? target.base ?? 'main';
-    const commits = git.commits(target, view.head, b);
-    if (commits === null) notes.push(`${id}: git here can't list the branch's commits at ${String(view.head).slice(0, 7)}: its hand edits are read at a later run`);
+    const mergeCommit = view.state === 'merged' ? view.mergeCommit ?? pr.merged?.commit ?? null : null;
+    if (view.state === 'merged' && !mergeCommit) notes.push(`${id}: merged, with no merge commit known: its hand edits are read at a later run`);
+    const commits = view.state === 'merged' && !mergeCommit ? null : git.commits(target, view.head, b, { mergeCommit });
+    if (commits === null && !(view.state === 'merged' && !mergeCommit)) notes.push(`${id}: git here can't list the branch's commits at ${String(view.head).slice(0, 7)}: its hand edits are read at a later run`);
     const ready = pr.readyForMerge?.[0]?.head ?? null;
     const afterReady = ready ? git.between(target, ready, view.head) : null;
-    for (const c of (commits ?? []).filter((x) => !mine(pr, x.sha))) {
+    const shas = pipelineShas(pr);
+    for (const c of (commits ?? []).filter((x) => !mineIn(shas, x.sha) && byOwner(settings, x))) {
       const pages = git.pages(target, c.sha, uaRootsOf(settings, pr, target), b);
       if (pages === null) {
         notes.push(`${id}: the hand commit ${c.sha.slice(0, 7)} can't be diffed here`);
@@ -253,7 +299,8 @@ export function entriesOf({ settings, ledger, pr, view, git }) {
         changes.forEach((x, i) => {
           const bt = cut(x.before);
           const at = cut(x.after);
-          out.push({ id: `${source === 'final' ? 'final' : 'hand'}:${id}:${c.sha.slice(0, 12)}:${page}:${i}`, at: c.at ?? null, ...common, page, block: x.block, before: bt.text, after: at.text, ...(bt.cut || at.cut ? { cut: true } : {}), source, sha: c.sha, comment: reason ?? c.subject ?? null });
+          // Keyed by the commit, not the source: a commit read as `hand` once is never logged again as `final`.
+          out.push({ id: `commit:${id}:${c.sha.slice(0, 12)}:${page}:${i}`, at: c.at ?? null, ...common, page, block: x.block, before: bt.text, after: at.text, ...(bt.cut || at.cut ? { cut: true } : {}), source, sha: c.sha, comment: reason ?? c.subject ?? null });
         });
       }
     }
@@ -275,9 +322,15 @@ export function inWindow(view, since) {
 // (async: the runner's status gives it for open tickets, the forge for a merged one). Appends the new lines and
 // returns { added, prs, notes }. `dryRun`: writes nothing, returns what it would add.
 export async function collectEdits({ settings, ledgers, viewOf, git = learnGit(settings), since = settings.learning?.since ?? null, dryRun = false, now = Date.now() }) {
+  if (!since) throw new Error('the collection needs `since` (learning.since or --since): it never reads the whole history');
   const state = settings.state;
   const seen = new Set(readLog(state).map((e) => e.id));
   const cursor = readJson(cursorPath(state), {});
+  // The earliest `since` a pass used (`#since`): a pass with an earlier one reads again the PRs an earlier pass left
+  // outside its window, so a backfill run after the switch still finds them.
+  const was0 = cursor['#since'] ?? null;
+  if (was0 && Date.parse(since) < Date.parse(was0)) for (const [k, v] of Object.entries(cursor)) if (k !== '#since' && v?.outside) delete cursor[k];
+  if (!was0 || Date.parse(since) < Date.parse(was0)) cursor['#since'] = since;
   const added = [];
   const notes = [];
   const prs = [];
@@ -325,12 +378,14 @@ export async function collectEdits({ settings, ledgers, viewOf, git = learnGit(s
     }
     writeJson(cursorPath(state), cursor);
   }
-  return { added, prs, notes };
+  return { added, prs, notes, since };
 }
 
 // One collector at a time: the runs a check hands on end together, and two appends of the same PR would race. A run that
 // finds the lock taken skips the pass (the next run reads the same ledgers); a lock older than 10 minutes is stale.
+// A dry run takes no lock and writes nothing, the learning folder included.
 export async function collectOnce(settings, args) {
+  if (args.dryRun) return collectEdits({ settings, ...args });
   const lock = path.join(learningDir(settings.state), '.collect.lock');
   fs.mkdirSync(learningDir(settings.state), { recursive: true });
   try {
@@ -360,10 +415,10 @@ export function viewsFrom(st, forge) {
   for (const t of st?.tickets ?? []) for (const v of t.prs ?? []) if (v?.id) byId.set(`${t.key}|${v.id}`, v);
   return async (l, pr) => {
     const v = byId.get(`${l.key}|${prId(pr)}`);
-    if (v?.head && v.state) return { head: v.head, state: v.state, mergedAt: v.mergedAt ?? pr.merged?.at ?? null };
+    if (v?.head && v.state) return { head: v.head, state: v.state, mergedAt: v.mergedAt ?? pr.merged?.at ?? null, mergeCommit: v.mergeCommit ?? pr.merged?.commit ?? null };
     // With no forge (a run's own pass), a PR its status doesn't show waits for a pass that reads the forge.
     if (!forge) return null;
     const s = await forge.prState({ repo: pr.repo, number: pr.number });
-    return { head: s.headCommit ?? null, state: s.state === 'merged' || s.merged ? 'merged' : s.state === 'closed' ? 'closed' : 'open', mergedAt: s.mergedAt ?? pr.merged?.at ?? null };
+    return { head: s.headCommit ?? null, state: s.state === 'merged' || s.merged ? 'merged' : s.state === 'closed' ? 'closed' : 'open', mergedAt: s.mergedAt ?? pr.merged?.at ?? null, mergeCommit: s.mergeCommit ?? pr.merged?.commit ?? null };
   };
 }

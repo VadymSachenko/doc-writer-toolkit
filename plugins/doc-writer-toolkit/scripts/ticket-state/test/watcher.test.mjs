@@ -8,7 +8,7 @@ import { inProcess, ledger, read, snapshot, world } from './helpers.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
 import { takeLock, releaseLock } from '../lib/locks.mjs';
 import { WINDOW_MS, emptyFeed, readFeed, sourcesOf, ticketsOf, writeFeed, feedPath } from '../lib/feed.mjs';
-import { runCheck, takeWatchLock } from '../lib/watch.mjs';
+import { LEARN_LOCK, runCheck, runLearnPass, takeWatchLock } from '../lib/watch.mjs';
 import { jobCommand, listChanges, updateWatchState, jobDue } from '../lib/jobs.mjs';
 import { readRunLog, renderReport } from '../lib/report.mjs';
 import { PUSH_DENIED, runDaily } from '../lib/runner.mjs';
@@ -1053,14 +1053,10 @@ test('E6 and set retry job: a job that fails on its own (the network fine) stays
   assert.ok(t.state().disarmed, 'disarmed again after another hour');
 });
 
-test('the learning step (TASK-054): called on each full check only when `learning` is set, told whether the morning run is done and whether a ticket run goes; its notification goes out once', async () => {
-  const calls = [];
-  const learningCheck = async (a) => {
-    calls.push({ morningDone: a.morningDone, busy: a.busy, dryRun: a.dryRun });
-    return { notes: [], proposed: [{ repo: 'guide', number: 7, rules: 2 }], replied: [], toolkit: [], week: '2026-W46', notify: [{ key: 'learning:2026-W46', urgent: false, title: 'Ticket flow: rules from your edits', text: '2 rule(s) proposed' }] };
-  };
+test('the learning step (TASK-054): the full check never runs a learning session itself; with something to do and no pass running it hands one on to a process of its own, which reads the gate and notifies once', async () => {
+  const LEARNING = { since: '2026-11-09T00:00:00+02:00', authors: ['test@example.com'] };
   const run = async (w, at) => {
-    const notes = [];
+    const spawned = [];
     const out = await runCheck({
       settings: w.settings,
       clients: w.clients(),
@@ -1070,36 +1066,58 @@ test('the learning step (TASK-054): called on each full check only when `learnin
         runDaily: async (a) => ({ mode: w.settings.mode, named: a.options.named ?? [], ran: [], starts: [], guard: [] }),
         readUsage: () => assert.fail('no /usage'),
         spawnJob: async () => ({ code: 0, stdout: RESULT, stderr: '' }),
-        notify: (m) => (notes.push(m), { sent: true }),
-        learningCheck,
+        notify: () => ({ sent: true }),
+        learningCheck: () => assert.fail('the check runs no learning pass itself'),
+        spawnLearn: (args) => (spawned.push(args), { pid: 4242 }),
       },
       options: {},
     });
-    return { out, notes };
+    return { out, spawned };
   };
 
   const off = world();
   seed(off, NOW - MIN);
-  await run(off, NOW);
-  assert.equal(calls.length, 0, 'no learning settings: not called');
+  assert.deepEqual((await run(off, NOW)).spawned, [], 'no learning settings: nothing');
 
-  // Before schedule.morning: today's morning run has not run, so the week waits.
-  const early = world({ extra: { learning: {}, schedule: { morning: '12:00' } } });
-  seed(early, NOW - MIN, { morning: '2026-11-09' });
-  await run(early, NOW);
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].morningDone, false, 'the morning run of today is not done yet');
-  assert.equal(calls[0].busy, null);
-
-  const w = world({ extra: { learning: {} } });
-
+  // A first pass to record the start week: handed on, with the pass's own arguments.
+  const w = world({ extra: { learning: LEARNING } });
   seed(w, NOW - MIN);
+  const first = await run(w, NOW);
+  assert.equal(first.spawned.length, 1);
+  assert.ok(first.spawned[0].includes('--learn') && first.spawned[0].includes('--root'));
+  assert.deepEqual([first.out.learning.handed, first.out.learning.why], [4242, ['the start week to record']]);
+
+  // A pass running (its lock held by a live process): none handed on.
+  const held = takeWatchLock(w.settings.state, { name: LEARN_LOCK, now: NOW });
+  const busy = await run(w, NOW + MIN);
+  assert.deepEqual([busy.spawned.length, busy.out.learning.running], [0, process.pid]);
+  held.release();
+
+  // The start week recorded and nothing open: nothing to do, no process.
+  fs.mkdirSync(path.join(w.settings.state, 'learning'), { recursive: true });
+  fs.writeFileSync(path.join(w.settings.state, 'learning', 'proposals.json'), JSON.stringify({ startWeek: '2026-W46', weeks: {} }));
+  const idle = await run(w, NOW + 2 * MIN);
+  assert.deepEqual([idle.spawned.length, idle.out.learning.idle], [0, true]);
+
+  // The pass itself: the gate read at its start (today's morning run, the ticket runs), each notification once.
+  const calls = [];
+  const notes = [];
+  const pass = () => runLearnPass({
+    settings: w.settings,
+    clients: w.clients(),
+    io: {
+      now: () => NOW,
+      notify: (m) => (notes.push(m), { sent: true }),
+      learningCheck: async (a) => (calls.push({ morningDone: a.morningDone, busy: a.busy }), { notes: [], proposed: [{ repo: 'guide-docs', number: 7, rules: 2 }], replied: [], toolkit: [], week: null, notify: [{ key: 'learning:2026-W46:guide-docs#7', title: 'Ticket flow: rules from your edits', text: '2 rule(s)' }], unclear: [] }),
+    },
+  });
   takeLock(w.settings.state, { group: '601', kind: 'manual', leaseMinutes: 60, now: NOW });
-  const { out, notes } = await run(w, NOW + MIN);
-  assert.equal(calls.at(-1).morningDone, true);
-  assert.match(calls.at(-1).busy ?? '', /1 ticket run\(s\) going/);
-  assert.equal(out.learning.week, '2026-W46');
-  assert.ok(notes.some((n) => n.key === 'learning:2026-W46:2026-11-10'), 'the rule PR notification is sent');
-  const again = await run(w, NOW + 2 * MIN);
-  assert.ok(!again.notes.some((n) => n.key.startsWith('learning:')), 'once a day');
+  await pass();
+  await pass();
+  assert.deepEqual(calls, [{ morningDone: true, busy: '1 ticket run(s) going' }, { morningDone: true, busy: '1 ticket run(s) going' }]);
+  assert.equal(notes.length, 1, 'once');
+  // Two passes never run together.
+  const lock = takeWatchLock(w.settings.state, { name: LEARN_LOCK, now: NOW });
+  assert.match((await pass()).skipped, /another learning pass runs/);
+  lock.release();
 });

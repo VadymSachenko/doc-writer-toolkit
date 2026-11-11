@@ -39,10 +39,15 @@ const fail = (m) => {
 export function validateLearning(raw) {
   if (raw === undefined || raw === null) return null;
   if (!isObject(raw)) fail('learning must be an object');
-  const known = ['since', 'branch', 'section', 'labels', 'toolkit', 'names', 'horizonWeeks'];
+  const known = ['since', 'authors', 'branch', 'section', 'labels', 'toolkit', 'names', 'horizonWeeks'];
   for (const k of Object.keys(raw)) if (!known.includes(k)) fail(`learning.${k} is not a setting (${known.join(', ')})`);
+  // `since` is required: the collector never reads the whole history silently.
   const since = raw.since ?? null;
-  if (since !== null && (typeof since !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d(:\d\d(\.\d+)?)?(Z|[+-]\d\d:\d\d)$/.test(since) || Number.isNaN(Date.parse(since)))) fail('learning.since must be an ISO date-time with its zone, such as 2026-11-09T00:00:00+02:00');
+  if (!isIso(since)) fail('learning.since is required: an ISO date-time with its zone, such as 2026-11-09T00:00:00+02:00 (the merged PRs the log covers)');
+  // `authors`: the owner's git identities (author emails or names): a commit by anyone else (an expert's push) is not the
+  // owner's taste.
+  const authors = raw.authors;
+  if (!Array.isArray(authors) || !authors.length || authors.some((a) => typeof a !== 'string' || !a.trim())) fail("learning.authors is required: the owner's git author emails or names, such as [\"owner@example.com\"]");
   const branch = raw.branch ?? 'rules-from-edits-<week>';
   if (typeof branch !== 'string' || !branch.includes('<week>') || !/^[A-Za-z0-9._/<>-]+$/.test(branch)) fail('learning.branch must be a branch name with <week> in it');
   const section = raw.section ?? '## Other rules';
@@ -61,8 +66,12 @@ export function validateLearning(raw) {
   }
   const names = raw.names ?? [];
   if (!Array.isArray(names) || names.some((n) => typeof n !== 'string' || !n.trim())) fail('learning.names must be a list of names');
+  // The settings can't know the product's and the company's names: with a toolkit to write to, the host gives them.
+  if (toolkit && !names.length) fail("learning.names is required with learning.toolkit: the product's and the company's names, which never go into the toolkit");
   const horizonWeeks = raw.horizonWeeks ?? 12;
   if (!Number.isInteger(horizonWeeks) || horizonWeeks < 1) fail('learning.horizonWeeks must be a whole number of weeks');
   const merged = { ...LEARN_LABELS, ...labels, kinds: { ...LEARN_LABELS.kinds, ...(labels.kinds ?? {}) }, done: { ...LEARN_LABELS.done, ...(labels.done ?? {}) } };
-  return { since, branch, section, labels: merged, toolkit, names, horizonWeeks };
+  return { since, authors: authors.map((a) => a.trim()), branch, section, labels: merged, toolkit, names, horizonWeeks };
 }
+
+export const isIso = (s) => typeof s === 'string' && /^\d{4}-\d\d-\d\dT\d\d:\d\d(:\d\d(\.\d+)?)?(Z|[+-]\d\d:\d\d)$/.test(s) && !Number.isNaN(Date.parse(s));

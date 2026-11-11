@@ -11,8 +11,9 @@ import { validateForge } from '../../forge/lib/settings.mjs';
 import { createAdapter as createForgeAdapter } from '../../forge/adapters/index.mjs';
 import { spawnGh } from '../../forge/adapters/github/gh.mjs';
 import { learningDir, readLog, writeJson, collectOnce, viewsFrom } from './learn-log.mjs';
-import { CORPORA, insertRule, ruleFiles } from './rule-insert.mjs';
+import { CORPORA, formOf, insertRule, ruleFiles, scriptOf } from './rule-insert.mjs';
 import { LEARN_LABELS, validateLearning } from './learn-settings.mjs';
+import { parseStartHours } from './settings.mjs';
 
 export { LEARN_LABELS, validateLearning };
 
@@ -38,7 +39,20 @@ export { LEARN_LABELS, validateLearning };
 //    rule.
 
 export const KINDS = { product: ['product', 'продукт', 'тільки цей проєкт', 'only this project'], general: ['general', 'загальне'], exception: ['exception', 'виняток із загального', 'виняток'] };
-export const kindOf = (word) => Object.entries(KINDS).find(([, words]) => words.some((w) => w === String(word ?? '').trim().toLowerCase()))?.[0] ?? null;
+// A kind by its stem, so «продуктове», «тільки для цього проєкту», «загальне правило», «винятком» are kinds too: the whole
+// text (up to five words) starts with a kind's stem.
+const KIND_STEMS = {
+  product: /^(?:продукт\S*|(?:тільки|лише)\s+(?:для\s+)?(?:цього|цей|цьому)\s+проєкт\S*|product\S*|only\s+(?:for\s+)?this\s+project)/iu,
+  general: /^(?:загальн\S*|спільн\S*|general\S*|shared)/iu,
+  exception: /^(?:виняток\S*|винятк\S*|exception\S*)/iu,
+};
+export function kindOf(word) {
+  const w = String(word ?? '').trim().toLowerCase().replace(/[.!]+$/u, '');
+  const exact = Object.entries(KINDS).find(([, words]) => words.includes(w))?.[0];
+  if (exact) return exact;
+  if (!w || w.split(/\s+/u).length > 5) return null;
+  return Object.entries(KIND_STEMS).find(([, re]) => re.test(w))?.[0] ?? null;
+}
 
 // ------------------------------------------------------------------ the state
 
@@ -46,9 +60,9 @@ const statePath = (state) => path.join(learningDir(state), 'proposals.json');
 export function readLearning(state) {
   try {
     const d = JSON.parse(fs.readFileSync(statePath(state), 'utf8'));
-    return { startWeek: d.startWeek ?? null, weeks: d.weeks ?? {}, rules: d.rules ?? [], prs: d.prs ?? [], consumed: d.consumed ?? [], runs: d.runs ?? [] };
+    return { startWeek: d.startWeek ?? null, weeks: d.weeks ?? {}, attempts: d.attempts ?? {}, rules: d.rules ?? [], prs: d.prs ?? [], consumed: d.consumed ?? [], runs: d.runs ?? [], notified: d.notified ?? {} };
   } catch {
-    return { startWeek: null, weeks: {}, rules: [], prs: [], consumed: [], runs: [] };
+    return { startWeek: null, weeks: {}, attempts: {}, rules: [], prs: [], consumed: [], runs: [], notified: {} };
   }
 }
 const saveLearning = (state, d) => writeJson(statePath(state), d);
@@ -101,10 +115,12 @@ const normal = (s) => String(s ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, 
 // The session's patterns against the log: { kept, refused }. Kept: two examples or more, from two PRs or more, each a
 // line of the log no earlier proposal used and no other kept pattern cites, of a known kind, with the rule and its
 // reason, and not a rule the owner rejected before.
-export function checkPatterns(result, { log, consumed = [], rejected = [] }) {
+export function checkPatterns(result, { log, consumed = [], rejected = [], taken = [] }) {
   const byId = new Map(log.map((e) => [e.id, e]));
   const used = new Set(consumed);
   const gone = new Set(rejected.map(normal));
+  // A rule open on a PR or accepted already (any of its wordings): proposing it again would add a second kit line.
+  const have = new Set(taken.map(normal));
   const kept = [];
   const refused = [];
   for (const [i, p] of (Array.isArray(result?.patterns) ? result.patterns : []).entries()) {
@@ -138,11 +154,16 @@ export function checkPatterns(result, { log, consumed = [], rejected = [] }) {
       no('the owner rejected this rule before');
       continue;
     }
+    if (have.has(normal(p.rule))) {
+      no('this rule is open on a rule PR or accepted already');
+      continue;
+    }
     if (kind === 'exception' && !(typeof p.overrides === 'string' && p.overrides.trim())) {
       no('an exception names the general rule it overrides ("overrides")');
       continue;
     }
     for (const x of ids) used.add(x);
+    have.add(normal(p.rule));
     kept.push({ kind, rule: p.rule.trim(), why: p.why.trim(), examples: ids, ...(kind === 'exception' ? { overrides: p.overrides.trim(), ...(p.correct === true ? { correct: true } : {}) } : {}), ...(typeof p.question === 'string' && p.question.trim() ? { question: p.question.trim() } : {}) });
   }
   return { kept, refused };
@@ -228,9 +249,14 @@ export function renderBody({ pr, rules, log, trend, labels, kit }) {
 // The host's names: its repos, the logins of its people and its forge owner, the hub's folder, and `learning.names` (the
 // product's and the company's names, which the settings can't know). Not a target's id or app label: those are often
 // plain words («operator») that a general rule may well use.
+// A repo name's own words (split on - and _), the generic ones left out: «ACME-DOC-PORTAL» gives ACME.
+const GENERIC = new Set(['doc', 'docs', 'documentation', 'api', 'client', 'clients', 'operator', 'operators', 'developer', 'developers', 'dev', 'guide', 'guides', 'portal', 'site', 'web', 'www', 'app', 'apps', 'main', 'admin', 'user', 'users', 'public', 'internal', 'core', 'sdk', 'help', 'kb', 'wiki', 'content', 'hub', 'repo', 'service', 'services', 'platform', 'manual', 'reference', 'partner', 'partners']);
+const repoWords = (repo) => String(repo ?? '').split(/[-_.\s]+/u).filter((w) => w.length >= 3 && !GENERIC.has(w.toLowerCase()));
+
 export function namesOf(settings) {
   const n = [
-    ...settings.targets.flatMap((t) => [t.repo, ...(t.reviewers ?? []), ...(t.cardMembers ?? [])]),
+    ...settings.targets.flatMap((t) => [t.repo, ...repoWords(t.repo), ...(t.reviewers ?? []), ...(t.cardMembers ?? [])]),
+    ...repoWords(path.basename(settings.root)),
     settings.forge.owner, settings.forge.self, settings.forge.assignee, settings.tracker?.owner,
     path.basename(settings.root),
     ...(settings.learning?.names ?? []),
@@ -244,7 +270,8 @@ export function namesIn(text, names) {
 
 // ------------------------------------------------------------------ the owner's reply by number on a rule PR
 
-const NO = /^(?:ні|нi|no|nope|не\s+треба|не\s+потрібно|не\s+додавай|прибери|видали|відхил\S*|reject|drop|remove)[.!]?$/iu;
+// A reply that starts with a no-word is a no, whatever follows it («2 — ні, це факт», «2 — не додавай це»).
+const NO = /^(?:ні|нi|no|nope|не\s+треба|не\s+потрібно|не\s+додавай\S*|не\s+бери|прибери\S*|прибрати|видали\S*|відхил\S*|reject\S*|drop|remove)(?=$|[\s,.;:!?—–-])/iu;
 
 // Each item the reply names, against the PR's items: { n, do: keep | reject | verbatim | kind | rewrite | ask, … }.
 export function resolveRuleReply(body, items) {
@@ -281,16 +308,30 @@ const gitTry = (cwd, args) => {
   }
 };
 
-// A detached worktree of the clone at `ref`, beside nothing the owner uses: `<state>/learning/trees/<name>`.
+// A detached worktree of the clone at `ref`, beside nothing the owner uses: `<state>/learning/trees/<name>`. A tree made
+// before is put at `ref` clean (forced checkout, its untracked files removed: inside the tree only), so a step that
+// failed half way leaves nothing to the next.
 function treeAt(settings, clone, name, ref, git) {
   const tree = path.join(learningDir(settings.state), 'trees', name);
   if (fs.existsSync(path.join(tree, '.git'))) {
-    git(tree, ['checkout', '-q', '--detach', ref]);
+    git(tree, ['checkout', '-q', '-f', '--detach', ref]);
+    git(tree, ['clean', '-fdq']);
     return tree;
   }
   fs.mkdirSync(path.dirname(tree), { recursive: true });
   git(clone, ['worktree', 'add', '-q', '--detach', tree, ref]);
   return tree;
+}
+
+// A tree the step is done with, removed from its clone (merged, closed or failed). A tree that can't be removed stays,
+// with a note.
+function dropTree(clone, tree, git, out, what) {
+  if (!tree || !fs.existsSync(tree)) return;
+  try {
+    git(clone, ['worktree', 'remove', '--force', tree]);
+  } catch (e) {
+    out.notes.push(`${what}: its worktree ${tree} stays (${String(e.message ?? e).split('\n')[0]})`);
+  }
 }
 
 // ------------------------------------------------------------------ the session
@@ -343,8 +384,25 @@ export function toolkitForge(settings, io = {}) {
 
 // ------------------------------------------------------------------ the check
 
-// Whether the weekly session is due now: `learning` set, mode on, this week not done, today's morning run done, no
-// ticket run going (no live group lock, nothing the check handed on), the allowance left.
+// Whether a learner session (the week's, a rewording, the toolkit's) may start now, or why not: today's morning run
+// done, no ticket run going (D-131: the tickets first), and inside `limits.startHours` (D-109: no work at night or in
+// the early morning).
+export function sessionGate({ settings, now, morningDone, busy }) {
+  if (!morningDone) return "today's morning run hasn't run yet";
+  if (busy) return `the tickets first: ${busy}`;
+  const h = parseStartHours(settings.limits?.startHours) ?? parseStartHours('10-22');
+  const d = new Date(now);
+  const m = d.getHours() * 60 + d.getMinutes();
+  if (m < h.from || m >= h.to) return `outside the start hours (${settings.limits?.startHours ?? '10-22'})`;
+  return null;
+}
+
+// A weekly session that failed is tried again at most WEEK_TRIES times in its week, two hours apart.
+export const WEEK_TRIES = 3;
+const WEEK_BACKOFF_MS = 2 * 60 * 60 * 1000;
+
+// Whether the weekly session is due now: `learning` set, this week not done, not past its tries, and the session gate
+// open (`sessionGate`).
 export function weekDue({ settings, data, now, morningDone, busy }) {
   if (!settings.learning) return { due: false, why: 'no learning settings' };
   const week = weekOf(now);
@@ -352,8 +410,11 @@ export function weekDue({ settings, data, now, morningDone, busy }) {
   // and reads that week's edits too (the backfill's among them). Switched on mid-week, nothing runs at once.
   if (!data.startWeek || week <= data.startWeek) return { due: false, why: `the learning started in ${data.startWeek ?? week}: the first session is the next week's` };
   if (data.weeks[week]) return { due: false, why: `${week} is done` };
-  if (!morningDone) return { due: false, why: "today's morning run hasn't run yet" };
-  if (busy) return { due: false, why: `the tickets first: ${busy}` };
+  const tries = data.attempts?.[week];
+  if (tries?.n >= WEEK_TRIES) return { due: false, why: `${week}: the session failed ${tries.n} times (${tries.why}); the next one is next week's` };
+  if (tries?.last && now - Date.parse(tries.last) < WEEK_BACKOFF_MS) return { due: false, why: `${week}: the last try failed (${tries.why}); the next one two hours after it` };
+  const gate = sessionGate({ settings, now, morningDone, busy });
+  if (gate) return { due: false, why: gate };
   return { due: true, week };
 }
 
@@ -373,26 +434,36 @@ export function kitOf(settings, target, git = gitTry) {
   return kit ? kit.replace(/^\.\//, '').replace(/\/?$/, '/') : null;
 }
 
-// What the full check does for the learning, in order, each part with no model unless it says so:
-//   1. the open rule PRs: merged, closed, or the owner's reply by number (a rewording by description: one session);
-//   2. the toolkit PRs: a queued general rule (one session) and the open ones' merge;
+// What a learning pass does, in order, each part with no model unless it says so. It runs in a process of its own
+// (`watcher.mjs --learn`, handed on by the full check, lib/watch.mjs 5c), never inside the check, so no session holds the
+// check's lock.
+//   1. the open rule PRs: merged, closed, the branch's rule lines against the items' states, or the owner's reply by
+//      number (a rewording by description: one session, gated like the week's);
+//   2. the toolkit PRs: the open ones' merge or close, then a queued general rule (one session, gated, and only while
+//      no other toolkit PR is open, so two never take the same rule number);
 //   3. the weekly session when due, after one more collection (lib/learn-log.mjs), so it reads the latest edits.
-// Returns { notes, proposed, replied, toolkit, week, notify }. `dryRun` and a mode other than `on`: reads, plans, writes
-// nothing.
+// Returns { notes, proposed, replied, toolkit, week, notify, unclear }. `dryRun` and a mode other than `on`: reads and
+// plans; writes, removes and pushes nothing.
 export async function learningCheck({ settings, clients, io = {}, now = Date.now(), st = null, morningDone = false, busy = null, dryRun = false }) {
-  const out = { notes: [], proposed: [], replied: [], toolkit: [], week: null, notify: [] };
+  const out = { notes: [], proposed: [], replied: [], toolkit: [], week: null, notify: [], unclear: [] };
   if (!settings.learning) return out;
   const live = !dryRun && settings.mode === 'on';
   const git = io.git ?? gitRun;
   const data = readLearning(settings.state);
   const save = () => live && saveLearning(settings.state, data);
   let log = readLog(settings.state);
+  const gate = sessionGate({ settings, now, morningDone, busy });
 
   // 1. The open rule PRs.
   for (const pr of data.prs.filter((p) => p.state === 'open')) {
     try {
       const s = await clients.forge.prState({ repo: pr.repo, number: pr.number });
-      if (s.state === 'merged' || s.merged) {
+      const merged = s.state === 'merged' || s.merged;
+      if ((merged || s.state === 'closed') && !live) {
+        out.notes.push(`${pr.repo}#${pr.number}: ${merged ? 'merged' : 'closed'}; recorded at a live pass`);
+        continue;
+      }
+      if (merged) {
         pr.state = 'merged';
         pr.mergedAt = s.mergedAt ?? new Date(now).toISOString();
         for (const it of pr.items) {
@@ -418,46 +489,76 @@ export async function learningCheck({ settings, clients, io = {}, now = Date.now
         continue;
       }
       if (!live) continue;
+      // The branch moved (the owner pushed, or a reply's commit): its rule lines against the items' states.
+      if (s.headCommit && s.headCommit !== pr.head) {
+        reconcile({ settings, data, pr, git, out });
+        pr.head = s.headCommit;
+      }
       const act = await clients.forge.prActivity({ repo: pr.repo, number: pr.number });
       const fresh = (act.comments ?? []).filter((c) => !(pr.seen ?? []).includes(c.id) && !(pr.posted ?? []).includes(c.id));
-      // The owner's comments only (the pipeline posts from the owner's login: a comment with the header, or one it
-      // posted, is its own), with the trigger word when the host has one. A comment is seen once it was answered, so
-      // an answer that failed part way is tried again at the next check.
+      // The owner's comments only (`forge.self`; the pipeline posts from the owner's login, so a comment with the header,
+      // or one it posted, is its own), with the trigger word or without it: a rule PR is the owner's own thread. Another
+      // person's comment is never obeyed. A comment that reads as no reply by number is listed in progress.md, never
+      // dropped silently. A comment is seen once it was answered, so an answer that failed part way, or a rewording
+      // that waits for the gate, is tried again at a later pass (and the comments after it wait for it).
       for (const c of fresh) {
         const plain = withoutHeader(c.body ?? '', settings.commentHeader);
-        const text = c.author !== settings.forge.self || (settings.commentHeader && plain !== (c.body ?? '')) ? null : settings.triggerWords?.length ? afterTrigger(plain, settings.triggerWords) : plain;
-        const done = text === null ? null : resolveRuleReply(text, pr.items.map((it) => ({ ...it, overrides: data.rules.find((r) => r.rid === it.rid)?.overrides })));
-        if (done?.length) await answer({ settings, clients, io, data, pr, done, git, now, log, out });
-        pr.seen = [...(pr.seen ?? []), c.id];
+        const own = c.author === settings.forge.self && !(settings.commentHeader && plain !== (c.body ?? ''));
+        if (!own) {
+          pr.seen = [...(pr.seen ?? []), c.id];
+          continue;
+        }
+        const text = (settings.triggerWords?.length ? afterTrigger(plain, settings.triggerWords) : null) ?? plain;
+        const done = resolveRuleReply(text, pr.items.map((it) => ({ ...it, overrides: data.rules.find((r) => r.rid === it.rid)?.overrides })));
+        if (!done?.length) {
+          pr.unclear = [...(pr.unclear ?? []), { id: c.id, url: c.url ?? null, at: c.createdAt ?? null, text: short(plain, 120) }];
+          pr.seen = [...(pr.seen ?? []), c.id];
+          continue;
+        }
+        if (done.some((x) => x.do === 'rewrite') && gate) {
+          out.notes.push(`${pr.repo}#${pr.number}: a rewording by description waits: ${gate}`);
+          break;
+        }
+        if (!(await answer({ settings, clients, io, data, pr, done, git, now, log, out, comment: c.id }))) break;
       }
     } catch (e) {
       out.notes.push(`${pr.repo}#${pr.number}: ${String(e.message ?? e).split('\n')[0]}`);
     }
   }
+  for (const pr of data.prs.filter((p) => p.state === 'open' && p.unclear?.length)) out.unclear.push({ pr: `${pr.repo}#${pr.number}`, url: pr.url ?? null, comments: pr.unclear });
   save();
 
   // 2. The toolkit.
   if (settings.learning.toolkit) {
     const tf = toolkitForge(settings, io);
+    const tclone = path.resolve(settings.root, settings.learning.toolkit.path);
     for (const r of data.rules.filter((x) => x.toolkit?.state === 'open')) {
       try {
         const s = await tf.prState({ repo: settings.learning.toolkit.repo, number: r.toolkit.number });
-        if (s.state === 'merged' || s.merged) r.toolkit.state = 'merged';
-        else if (s.state === 'closed') r.toolkit.state = 'closed';
+        const ended = s.state === 'merged' || s.merged ? 'merged' : s.state === 'closed' ? 'closed' : null;
+        if (ended && live) {
+          r.toolkit.state = ended;
+          dropTree(tclone, r.toolkit.tree, git, out, `the toolkit PR of ${r.rid}`);
+        }
       } catch (e) {
         out.notes.push(`the toolkit PR of ${r.rid}: ${String(e.message ?? e).split('\n')[0]}`);
       }
     }
     const next = data.rules.find((x) => x.toolkit?.state === 'queued');
-    if (next && live && !busy) {
-      const held = await usageHeld(settings, io, now);
-      if (held) out.notes.push(`the toolkit rule ${next.rid} waits: ${held}`);
-      else await toolkitStep({ settings, io, data, rule: next, tf, git, now, log, out });
+    const openOne = data.rules.find((x) => x.toolkit?.state === 'open');
+    if (next && live) {
+      if (openOne) out.notes.push(`the toolkit rule ${next.rid} waits for the toolkit PR of ${openOne.rid} (#${openOne.toolkit.number}): one at a time, so two never take one rule number`);
+      else if (gate) out.notes.push(`the toolkit rule ${next.rid} waits: ${gate}`);
+      else {
+        const held = await usageHeld(settings, io, now);
+        if (held) out.notes.push(`the toolkit rule ${next.rid} waits: ${held}`);
+        else await toolkitStep({ settings, io, data, rule: next, tf, git, now, log, out });
+      }
     }
     save();
   }
 
-  // 3. The week. The first live check records the week the learning started in.
+  // 3. The week. The first live pass records the week the learning started in.
   if (!data.startWeek && live) {
     data.startWeek = weekOf(now);
     save();
@@ -484,14 +585,24 @@ export async function learningCheck({ settings, clients, io = {}, now = Date.now
   return out;
 }
 
-function removeTree(settings, pr, git, out) {
-  if (!pr.tree || !fs.existsSync(pr.tree)) return;
-  try {
-    git(pr.clone, ['worktree', 'remove', pr.tree]);
-  } catch (e) {
-    out.notes.push(`${pr.repo}#${pr.number}: its worktree ${pr.tree} stays (${String(e.message ?? e).split('\n')[0]})`);
-  }
+// The rule lines on a rule PR's branch against its items: a line still there for a rejected item (a push that failed
+// after the state was kept, by an older version) is removed; an open item whose line the owner took out by hand is
+// rejected, as a no.
+function reconcile({ settings, data, pr, git, out }) {
+  const file = path.posix.join(pr.kit, 'product-rules.md');
+  git(pr.clone, ['fetch', '-q', 'origin', `+refs/heads/${pr.branch}:refs/remotes/origin/${pr.branch}`]);
+  const text = gitTryWith(git, pr.clone, ['show', `origin/${pr.branch}:${file}`]);
+  if (text === null) return;
+  const onBranch = new Set([...String(text).matchAll(/<!-- learned:(\S+) -->/g)].map((m) => m[1]));
+  for (const it of pr.items.filter((x) => x.state === 'open' && !onBranch.has(x.rid))) reject(data, it, 'its line was removed from the branch');
+  const stale = pr.items.filter((x) => x.state === 'rejected' && onBranch.has(x.rid)).map((x) => x.rid);
+  if (!stale.length) return;
+  pr.tree = treeAt(settings, pr.clone, pr.treeName, `origin/${pr.branch}`, git);
+  commitKit({ settings, git, pr, edit: { remove: stale }, message: settings.learning.labels.answerCommit });
+  out.notes.push(`${pr.repo}#${pr.number}: the lines of rejected rules ${stale.join(', ')} removed from the branch`);
 }
+
+const removeTree = (settings, pr, git, out) => dropTree(pr.clone, pr.tree, git, out, `${pr.repo}#${pr.number}`);
 
 function reject(data, it, why) {
   it.state = 'rejected';
@@ -517,47 +628,72 @@ function commitKit({ settings, git, pr, edit, message }) {
   return git(pr.tree, ['rev-parse', 'HEAD']).trim();
 }
 
-async function answer({ settings, clients, io, data, pr, done, git, now, log, out }) {
+// The owner's reply on a rule PR, done: a rewording by description goes to one session (which may also say the owner
+// meant no, another kind, or ask back), then the kit's lines change on the branch, and only once that push went
+// through do the items' states change, so a failed push keeps nothing. The comment is seen from then on; the reply in
+// the thread and the description are posted after, a failure there only noted. Returns false when nothing was done
+// (the comment is read again at a later pass).
+async function answer({ settings, clients, io, data, pr, done, git, now, log, out, comment = null }) {
   const L = settings.learning.labels;
+  const overridesOf = (it) => data.rules.find((r) => r.rid === it.rid)?.overrides;
   const rewrites = done.filter((x) => x.do === 'rewrite');
   if (rewrites.length) {
     const held = await usageHeld(settings, io, now);
     const res = held ? { result: null, error: held } : await runSession({ settings, mode: 'answer', now, io, input: { rules: rewrites.map((x) => ({ n: x.n, ...pick(pr.items.find((it) => it.n === x.n)), how: x.how, examples: exampleTexts(data, log, pr.items.find((it) => it.n === x.n).rid) })), rejected: rejectedTexts(data) } });
     if (res.cost) data.runs.push(res.cost);
+    if (held) {
+      out.notes.push(`${pr.repo}#${pr.number}: a rewording by description waits: ${held}`);
+      return false;
+    }
     for (const x of rewrites) {
       const got = (res.result?.rules ?? []).find((r) => Number(r.n) === x.n);
-      if (got && typeof got.rule === 'string' && got.rule.trim()) Object.assign(x, { do: 'verbatim', rule: got.rule.trim(), described: true });
-      else Object.assign(x, { do: 'ask', why: res.error ? `the rewording waits: ${res.error}` : 'no rewording came back' });
+      const it = pr.items.find((i) => i.n === x.n);
+      const kind = got && !got.rule ? kindOf(got.kind) : null;
+      if (got?.reject === true) Object.assign(x, { do: 'reject' });
+      else if (kind) Object.assign(x, kind === 'exception' && !overridesOf(it) ? { do: 'ask', why: `rule ${x.n} as an exception: which general rule does it override?` } : { do: 'kind', kind });
+      else if (got && typeof got.rule === 'string' && got.rule.trim()) Object.assign(x, { do: 'verbatim', rule: got.rule.trim(), described: true });
+      else if (got && typeof got.ask === 'string' && got.ask.trim()) Object.assign(x, { do: 'ask', why: got.ask.trim() });
+      else Object.assign(x, { do: 'ask', why: res.error ? `the rewording failed: ${res.error}` : 'no rewording came back' });
     }
   }
+  const plan = done.map((x) => ({ x, it: pr.items.find((i) => i.n === x.n) })).filter((p) => p.it);
   const replace = [];
   const remove = [];
-  for (const x of done) {
-    const it = pr.items.find((i) => i.n === x.n);
-    if (!it) continue;
-    if (x.do === 'reject') {
-      reject(data, it, 'the owner said no');
-      remove.push(it.rid);
-    } else if (x.do === 'verbatim') {
-      if (normal(x.rule) !== normal(it.rule)) (data.rules.find((r) => r.rid === it.rid).wordings ??= []).push(it.rule);
-      it.rule = x.rule;
-      replace.push({ ...it, overrides: data.rules.find((r) => r.rid === it.rid)?.overrides });
-    } else if (x.do === 'kind') {
-      it.kind = x.kind;
-      replace.push({ ...it, overrides: data.rules.find((r) => r.rid === it.rid)?.overrides });
-    }
+  for (const { x, it } of plan) {
+    if (x.do === 'reject') remove.push(it.rid);
+    else if (x.do === 'verbatim') replace.push({ ...it, rule: x.rule, overrides: overridesOf(it) });
+    else if (x.do === 'kind') replace.push({ ...it, kind: x.kind, overrides: overridesOf(it) });
   }
   if (replace.length || remove.length) {
-    // The branch as the forge has it (the owner may have pushed to it): fetched, and the worktree put at it.
-    git(pr.clone, ['fetch', '-q', 'origin', `+refs/heads/${pr.branch}:refs/remotes/origin/${pr.branch}`]);
-    pr.tree = treeAt(settings, pr.clone, pr.treeName, `origin/${pr.branch}`, git);
-    commitKit({ settings, git, pr, edit: { replace, remove }, message: L.answerCommit });
+    try {
+      // The branch as the forge has it (the owner may have pushed to it): fetched, and the worktree put at it.
+      git(pr.clone, ['fetch', '-q', 'origin', `+refs/heads/${pr.branch}:refs/remotes/origin/${pr.branch}`]);
+      pr.tree = treeAt(settings, pr.clone, pr.treeName, `origin/${pr.branch}`, git);
+      const head = commitKit({ settings, git, pr, edit: { replace, remove }, message: L.answerCommit });
+      if (head) pr.head = head;
+    } catch (e) {
+      out.notes.push(`${pr.repo}#${pr.number}: the reply's change could not be pushed (${String(e.stderr || e.message || e).trim().split('\n')[0]}): read again at a later pass`);
+      return false;
+    }
   }
-  const lines = [L.replyTitle, '', ...done.map((x) => `**${x.n}** — ${L.done[x.do]}${x.do === 'ask' ? `: ${x.why}` : x.do === 'verbatim' ? `: «${pr.items.find((i) => i.n === x.n).rule}»` : x.do === 'kind' ? `: ${L.kinds[x.kind]}` : ''}`)];
-  const posted = await clients.forge.comment({ repo: pr.repo, number: pr.number, body: lines.join('\n') });
-  pr.posted = [...(pr.posted ?? []), ...(posted.posted ?? []).map((p) => p.id)];
-  await clients.forge.editPr({ repo: pr.repo, number: pr.number, body: renderBody({ pr, rules: data.rules, log, trend: pr.trend, labels: L, kit: path.join(pr.kit, 'product-rules.md') }) });
+  for (const { x, it } of plan) {
+    if (x.do === 'reject') reject(data, it, 'the owner said no');
+    else if (x.do === 'verbatim') {
+      if (normal(x.rule) !== normal(it.rule)) (data.rules.find((r) => r.rid === it.rid).wordings ??= []).push(it.rule);
+      it.rule = x.rule;
+    } else if (x.do === 'kind') it.kind = x.kind;
+  }
+  if (comment !== null) pr.seen = [...(pr.seen ?? []), comment];
   out.replied.push({ pr: `${pr.repo}#${pr.number}`, items: done.map((x) => ({ n: x.n, do: x.do })) });
+  try {
+    const lines = [L.replyTitle, '', ...done.map((x) => `**${x.n}** — ${L.done[x.do]}${x.do === 'ask' ? `: ${x.why}` : x.do === 'verbatim' ? `: «${pr.items.find((i) => i.n === x.n).rule}»` : x.do === 'kind' ? `: ${L.kinds[x.kind]}` : ''}`)];
+    const posted = await clients.forge.comment({ repo: pr.repo, number: pr.number, body: lines.join('\n') });
+    pr.posted = [...(pr.posted ?? []), ...(posted.posted ?? []).map((p) => p.id)];
+    await clients.forge.editPr({ repo: pr.repo, number: pr.number, body: renderBody({ pr, rules: data.rules, log, trend: pr.trend, labels: L, kit: path.join(pr.kit, 'product-rules.md') }) });
+  } catch (e) {
+    out.notes.push(`${pr.repo}#${pr.number}: the reply was done, its comment or description not posted (${String(e.message ?? e).split('\n')[0]})`);
+  }
+  return true;
 }
 
 const pick = (it) => ({ kind: it.kind, rule: it.rule, why: it.why });
@@ -567,57 +703,72 @@ const exampleTexts = (data, log, rid) => {
   return (r?.examples ?? []).map((id) => byId.get(id)).filter(Boolean).map((e) => ({ page: e.page, block: e.block, before: e.before, after: e.after, comment: e.comment ?? null }));
 };
 
+// The rule texts open on a rule PR or accepted, every wording of them: a pattern proposing one again is refused.
+const takenTexts = (data) => {
+  const live = new Set(data.prs.flatMap((p) => p.items.filter((it) => it.state === 'open' || it.state === 'accepted').map((it) => it.rid)));
+  return [...new Set(data.rules.filter((r) => live.has(r.rid)).flatMap((r) => [r.rule, ...(r.wordings ?? [])]).concat(data.prs.flatMap((p) => p.items.filter((it) => live.has(it.rid)).map((it) => it.rule))))];
+};
+
 async function weekStep({ settings, clients, io, data, week, git, now, log, out }) {
   const L = settings.learning.labels;
+  const at = new Date(now).toISOString();
   const consumed = new Set(data.consumed);
   const horizon = now - settings.learning.horizonWeeks * 7 * 86400000;
   const open = log.filter((e) => !consumed.has(e.id) && Date.parse(e.at ?? e.logged ?? '') >= horizon);
   const prsSeen = new Set(open.map((e) => `${e.repo}#${e.pr}`));
-  // The host copies of general rules the toolkit's own files hold now (the switch): removed in this week's PRs.
+  const tries = data.attempts?.[week] ?? { n: 0 };
+  const failTry = (why) => {
+    (data.attempts ??= {})[week] = { n: tries.n + 1, last: at, why };
+    out.notes.push(`the weekly session of ${week}: ${why}; try ${tries.n + 1} of ${WEEK_TRIES}`);
+    out.week = { due: false, week, error: why };
+  };
+  // The host copies of general rules the toolkit's own files hold now (the switch, by the rule's `learned:` id in the
+  // installed plugin's file): removed in this week's PRs.
   const { PLUGIN_ROOT } = await import('./runner.mjs');
   const root = io.pluginRoot ?? PLUGIN_ROOT;
   const pending = new Set(data.prs.filter((p) => p.state === 'open').flatMap((p) => (p.removes ?? []).map((rid) => `${p.repo}|${rid}`)));
   const removable = (r, repo) => !(r.removedFrom ?? []).includes(repo) && !pending.has(`${repo}|${r.rid}`);
-  const removes = data.rules.filter((r) => r.toolkit?.state === 'merged' && r.toolkit.file && (r.accepted ?? []).some((repo) => removable(r, repo)) && (() => {
+  const removes = data.rules.filter((r) => r.toolkit?.state === 'merged' && r.toolkit.kind === 'general' && r.toolkit.file && (r.accepted ?? []).some((repo) => removable(r, repo)) && (() => {
     try {
-      return fs.readFileSync(path.join(root, r.toolkit.file), 'utf8').includes(r.toolkit.heading);
+      return fs.readFileSync(path.join(root, r.toolkit.file), 'utf8').includes(markerOf(r.rid));
     } catch {
       return false;
     }
   })());
   let kept = [];
-  const record = { at: new Date(now).toISOString(), entries: open.length, prs: prsSeen.size };
+  let facts = [];
+  const record = { at, entries: open.length, prs: prsSeen.size };
   if (prsSeen.size >= 2) {
     const kits = {};
     for (const t of settings.targets) if (!kits[t.repo]) kits[t.repo] = kitText(settings, t, git);
     const res = await runSession({
       settings, mode: 'week', now, io,
-      input: { week, edits: open, rejected: rejectedTexts(data), kits, kinds: { product: KINDS.product[1], general: KINDS.general[1], exception: KINDS.exception[1] } },
+      input: { week, edits: open, rejected: rejectedTexts(data), taken: takenTexts(data), kits, kinds: { product: KINDS.product[1], general: KINDS.general[1], exception: KINDS.exception[1] } },
     });
     if (res.cost) data.runs.push(res.cost);
-    if (res.error) {
-      record.error = res.error;
-      out.notes.push(`the weekly session of ${week}: ${res.error}; it runs again at a later check`);
-      out.week = { due: true, week, error: res.error };
-      return;
-    }
-    const checked = checkPatterns(res.result, { log, consumed: data.consumed, rejected: rejectedTexts(data) });
+    if (res.error) return failTry(res.error);
+    const checked = checkPatterns(res.result, { log, consumed: data.consumed, rejected: rejectedTexts(data), taken: takenTexts(data) });
     kept = checked.kept;
     record.refused = checked.refused;
-    const facts = (Array.isArray(res.result?.dropped) ? res.result.dropped : []).filter((d) => d?.why === 'fact').flatMap((d) => (Array.isArray(d.ids) ? d.ids.map(String) : [])).filter((id) => log.some((e) => e.id === id));
-    data.consumed = [...new Set([...data.consumed, ...kept.flatMap((p) => p.examples), ...facts])];
+    facts = (Array.isArray(res.result?.dropped) ? res.result.dropped : []).filter((d) => d?.why === 'fact').flatMap((d) => (Array.isArray(d.ids) ? d.ids.map(String) : [])).filter((id) => log.some((e) => e.id === id));
     record.dropped = res.result?.dropped ?? [];
   } else record.skipped = `${prsSeen.size} PR(s) with new edits: no session`;
-  const n0 = data.rules.length;
-  kept.forEach((p, i) => data.rules.push({ rid: `${week}-${i + 1}`, week, ...p, at: new Date(now).toISOString() }));
-  const fresh = data.rules.slice(n0);
+  // The rules get their ids now (after the week's earlier ones, a retry's included) and are kept only once a PR carries
+  // them: a rule no PR could be opened for leaves its examples unused for the next try.
+  const n0 = data.rules.filter((r) => r.week === week).length;
+  const fresh = kept.map((p, i) => ({ rid: `${week}-${n0 + i + 1}`, week, ...p, at }));
+  const all = [...data.rules, ...fresh];
   const byId = new Map(log.map((e) => [e.id, e]));
   const trend = trendOf(log, now);
   const repos = [...new Set([...fresh.flatMap((r) => r.examples.map((id) => byId.get(id)?.repo)), ...removes.flatMap((r) => r.accepted)].filter(Boolean))];
   record.prs = [];
+  const carried = new Set();
+  let failed = 0;
   for (const repo of repos) {
     const target = settings.targets.find((t) => t.repo === repo && t.path);
     if (!target) continue;
+    // A retry never opens a second PR of the week in a repo.
+    if (data.prs.some((p) => p.week === week && p.repo === repo)) continue;
     const kit = kitOf(settings, target, (cwd, args) => gitTryWith(git, cwd, args));
     if (!kit) {
       out.notes.push(`${repo}: its CLAUDE.md declares no "Product kit:": no rule PR there`);
@@ -630,26 +781,39 @@ async function weekStep({ settings, clients, io, data, week, git, now, log, out 
     const branch = settings.learning.branch.replace('<week>', week.toLowerCase());
     const clone = path.resolve(settings.root, target.path);
     const pr = { repo, branch, base, kit, clone, treeName: `${repo}/${branch}`, week, state: 'open', items: mine.map((r, i) => ({ n: i + 1, rid: r.rid, kind: r.kind, rule: r.rule, why: r.why, state: 'open' })), removes: dropHere, trend, seen: [], posted: [] };
+    let pushed = false;
     try {
       git(clone, ['fetch', '-q', 'origin', `+refs/heads/${base}:refs/remotes/origin/${base}`]);
       pr.tree = treeAt(settings, clone, pr.treeName, `origin/${base}`, git);
-      const head = commitKit({ settings, git, pr, edit: { add: pr.items.map((it) => ({ ...it, overrides: data.rules.find((r) => r.rid === it.rid)?.overrides })), remove: dropHere }, message: L.commit });
+      const head = commitKit({ settings, git, pr, edit: { add: pr.items.map((it) => ({ ...it, overrides: fresh.find((r) => r.rid === it.rid)?.overrides })), remove: dropHere }, message: L.commit });
       if (!head) {
         out.notes.push(`${repo}: the kit already reads as proposed: no PR`);
+        dropTree(clone, pr.tree, git, out, repo);
         continue;
       }
-      const body = renderBody({ pr, rules: data.rules, log, trend, labels: L, kit: path.join(kit, 'product-rules.md') });
+      pushed = true;
+      pr.head = head;
+      const body = renderBody({ pr, rules: all, log, trend, labels: L, kit: path.join(kit, 'product-rules.md') });
       const made = await clients.forge.openPr({ repo, head: branch, base, title: fill(L.title, { week }), body });
-      Object.assign(pr, { number: made.number, url: made.url, at: new Date(now).toISOString() });
+      Object.assign(pr, { number: made.number, url: made.url, at });
       data.prs.push(pr);
+      for (const it of pr.items) carried.add(it.rid);
       record.prs.push(`${repo}#${made.number}`);
       out.proposed.push({ repo, number: made.number, url: made.url, rules: pr.items.length, removes: dropHere.length });
     } catch (e) {
-      out.notes.push(`${repo}: the rule PR could not be made (${String(e.message ?? e).split('\n')[0]})`);
+      failed++;
+      out.notes.push(`${repo}: the rule PR could not be made (${String(e.stderr || e.message || e).trim().split('\n')[0]})`);
+      // Nothing of it stays: the branch it pushed is deleted, its worktree removed.
+      if (pushed) gitTryWith(git, clone, ['push', '-q', 'origin', `:refs/heads/${branch}`]);
+      dropTree(clone, pr.tree, git, out, repo);
     }
   }
+  for (const r of fresh) if (carried.has(r.rid)) data.rules.push(r);
+  data.consumed = [...new Set([...data.consumed, ...fresh.filter((r) => carried.has(r.rid)).flatMap((r) => r.examples), ...facts])];
+  if (out.proposed.length) out.notify.push({ key: `learning:${week}:${out.proposed.map((p) => `${p.repo}#${p.number}`).join(',')}`, urgent: false, title: 'Ticket flow: rules from your edits', text: `${out.proposed.reduce((s, p) => s + p.rules, 0)} rule(s) proposed in ${out.proposed.map((p) => `${p.repo}#${p.number}`).join(', ')}: reply by number, or merge.` });
+  if (failed) return failTry(`${failed} rule PR(s) could not be made`);
   data.weeks[week] = record;
-  if (out.proposed.length) out.notify.push({ key: `learning:${week}`, urgent: false, title: 'Ticket flow: rules from your edits', text: `${out.proposed.reduce((s, p) => s + p.rules, 0)} rule(s) proposed in ${out.proposed.map((p) => `${p.repo}#${p.number}`).join(', ')}: reply by number, or merge.` });
+  delete data.attempts?.[week];
 }
 
 const gitTryWith = (git, cwd, args) => {
@@ -670,16 +834,18 @@ function kitText(settings, target, git) {
 async function toolkitStep({ settings, io, data, rule, tf, git, now, log, out }) {
   const t = settings.learning.toolkit;
   const correct = rule.toolkit.kind === 'exception';
+  const clone = path.resolve(settings.root, t.path);
+  const branch = `learned-rule-${rule.rid.toLowerCase()}`;
+  let tree = null;
+  // A step that fails leaves nothing: its worktree goes, and it waits for the owner (not tried again by itself).
   const failed = (why) => {
     rule.toolkit = { ...rule.toolkit, state: 'failed', why, at: new Date(now).toISOString() };
     out.toolkit.push({ rid: rule.rid, failed: why });
     out.notes.push(`the toolkit rule ${rule.rid}: ${why}`);
+    dropTree(clone, tree, git, out, `the toolkit rule ${rule.rid}`);
   };
   // The toolkit at its base, in a worktree of its clone that only the runner uses: the rule goes into the file as the
-  // base has it, so its number is the next free one there.
-  const clone = path.resolve(settings.root, t.path);
-  const branch = `learned-rule-${rule.rid.toLowerCase()}`;
-  let tree;
+  // base has it, so its number is the next free one there (and no other toolkit PR is open: learningCheck).
   try {
     git(clone, ['fetch', '-q', 'origin', `+refs/heads/${t.base}:refs/remotes/origin/${t.base}`]);
     tree = treeAt(settings, clone, `toolkit/${branch}`, `origin/${t.base}`, git);
@@ -698,21 +864,40 @@ async function toolkitStep({ settings, io, data, rule, tf, git, now, log, out })
   const abs = path.join(root, file);
   if (!file || file.includes('..') || path.isAbsolute(file) || !fs.existsSync(abs)) return failed(`no such toolkit file: ${JSON.stringify(r.file)}`);
   const inCorpus = CORPORA.some((c) => file.startsWith(c));
+  const ruleFile = files.find((f) => f.file === file);
   const text = fs.readFileSync(abs, 'utf8');
   let next;
   let heading;
   try {
     if (r.find !== undefined) {
       if (!correct) throw new Error('a general rule is added, never a correction');
+      // A correction goes to a rule file or a distilled corpus only: never a skill, a command, a script or anything else.
+      if (!ruleFile && !(inCorpus && file.endsWith('.md'))) throw new Error(`${file} is neither a rule file nor a distilled corpus file: a correction goes to the rules only`);
       if (inCorpus && !/^https?:\/\//.test(String(r.source ?? ''))) throw new Error('a correction of a distilled corpus cites its primary source ("source", a URL)');
-      const count = r.find ? text.split(String(r.find)).length - 1 : 0;
+      const find = String(r.find);
+      const replacement = String(r.replace ?? '');
+      const count = find ? text.split(find).length - 1 : 0;
       if (count !== 1) throw new Error(`the text to correct is found ${count} times in ${file}, not once`);
-      next = text.replace(String(r.find), String(r.replace ?? ''));
-      heading = String(r.replace ?? '').split('\n').find((l) => l.trim()) ?? '';
+      // The file's language: a replacement in another script is refused (a short one tells nothing).
+      const fileScript = scriptOf(text);
+      const newScript = scriptOf(replacement);
+      if (fileScript && newScript && fileScript !== newScript) throw new Error(`the correction is in ${newScript}, ${file} in ${fileScript}`);
+      // The file's form: a heading the correction touches keeps the form of the file's rule headings.
+      const f = formOf(text);
+      const oldHeads = find.split('\n').filter((l) => /^#{2,6}\s/.test(l));
+      const newHeads = replacement.split('\n').filter((l) => /^#{2,6}\s/.test(l));
+      if (f?.form === 'heading' && (oldHeads.length || newHeads.length)) {
+        if (oldHeads.length !== newHeads.length) throw new Error('the correction adds or removes a heading: a correction changes a rule\'s text, not the file\'s structure');
+        const re = new RegExp(`^#{${f.level}} ${f.prefix}\\d+[a-z]? ${f.sep} .+$`, 'u');
+        if (oldHeads.some((l) => re.test(l)) && !newHeads.every((l) => re.test(l))) throw new Error(`a rule heading keeps the file's form (\`${'#'.repeat(f.level)} ${f.prefix}N ${f.sep} …\`)`);
+      }
+      // A function, so a `$&` or `$1` in the text is the text, not a pattern.
+      next = text.replace(find, () => replacement);
+      heading = (newHeads[0] ?? replacement.split('\n').find((l) => l.trim()) ?? '').trim();
     } else {
       if (inCorpus) throw new Error('no rule from the owner\'s edits goes into a distilled corpus');
-      if (!files.some((f) => f.file === file)) throw new Error(`${file} is not a rule file this tool can extend`);
-      const ins = insertRule(text, r, { pluginRoot: root });
+      if (!ruleFile) throw new Error(`${file} is not a rule file this tool can extend`);
+      const ins = insertRule(text, r, { pluginRoot: root, marker: markerOf(rule.rid) });
       next = ins.text;
       heading = ins.heading;
     }
@@ -727,6 +912,7 @@ async function toolkitStep({ settings, io, data, rule, tf, git, now, log, out })
     const lint = path.join(tree, 'tools', 'lint-plugin.mjs');
     if (io.lint) io.lint(tree);
     else if (fs.existsSync(lint)) execFileSync(process.execPath, [lint], { cwd: tree, stdio: ['ignore', 'pipe', 'pipe'], timeout: 300000 });
+    else throw new Error('the toolkit has no tools/lint-plugin.mjs to check the rule with');
     git(tree, ['add', '--', path.join('plugins', 'doc-writer-toolkit', file)]);
     const title = correct ? `Correct ${path.basename(file)}: a rule the owner's edits reversed` : `Add a rule learned from the owner's edits to ${path.basename(file)}`;
     git(tree, ['commit', '-q', '-m', title]);
@@ -742,15 +928,9 @@ async function toolkitStep({ settings, io, data, rule, tf, git, now, log, out })
       '',
     ].join('\n');
     const made = await tf.openPr({ repo: t.repo, head: branch, base: t.base, title, body });
-    rule.toolkit = { ...rule.toolkit, state: 'open', number: made.number, url: made.url, file, heading, branch, at: new Date(now).toISOString() };
+    rule.toolkit = { ...rule.toolkit, state: 'open', number: made.number, url: made.url, file, heading, branch, tree, at: new Date(now).toISOString() };
     out.toolkit.push({ rid: rule.rid, number: made.number, url: made.url });
   } catch (e) {
-    // A lint that fails leaves the rule unpushed: its file is put back, and the step waits for the owner.
-    try {
-      git(tree, ['checkout', '-q', '--', path.join('plugins', 'doc-writer-toolkit', file)]);
-    } catch {
-      /* the next try puts the worktree at the base again */
-    }
     return failed(`the toolkit PR could not be made (${String(e.stdout || e.stderr || e.message || e).trim().split('\n').at(-1)})`);
   }
 }
@@ -765,8 +945,37 @@ export function learnStatus(settings) {
     log: { entries: log.length, prs: new Set(log.map((e) => `${e.repo}#${e.pr}`)).size, bySource, used: d.consumed.length },
     startWeek: d.startWeek,
     weeks: d.weeks,
-    openPrs: d.prs.filter((p) => p.state === 'open').map((p) => ({ pr: `${p.repo}#${p.number}`, url: p.url, items: p.items.map((x) => ({ n: x.n, kind: x.kind, state: x.state })) })),
+    attempts: d.attempts,
+    openPrs: d.prs.filter((p) => p.state === 'open').map((p) => ({ pr: `${p.repo}#${p.number}`, url: p.url, items: p.items.map((x) => ({ n: x.n, kind: x.kind, state: x.state })), unclear: p.unclear ?? [] })),
     rules: d.rules.map((r) => ({ rid: r.rid, kind: r.kind, rule: r.rule, accepted: r.accepted ?? [], rejected: Boolean(r.rejected?.length), toolkit: r.toolkit ? { state: r.toolkit.state, url: r.toolkit.url ?? null, why: r.toolkit.why ?? null } : null })),
     sessions: d.runs.length,
   };
+}
+
+// What a learning pass has to do now, read from the state with no forge call: the open rule PRs and toolkit PRs to read,
+// a queued toolkit rule, and the week (a first pass records the start week). Empty: the full check hands nothing on.
+// The week and a queued rule count only while the session gate is open, so a closed gate starts no process for them.
+export function learnWanted({ settings, now, morningDone = false, busy = null }) {
+  if (!settings.learning) return [];
+  const data = readLearning(settings.state);
+  const out = [];
+  const openPrs = data.prs.filter((p) => p.state === 'open').length;
+  if (openPrs) out.push(`${openPrs} open rule PR(s)`);
+  if (data.rules.some((r) => r.toolkit?.state === 'open')) out.push('an open toolkit PR');
+  const gate = sessionGate({ settings, now, morningDone, busy });
+  if (!data.startWeek) out.push('the start week to record');
+  else if (!gate && weekDue({ settings, data, now, morningDone, busy }).due) out.push(`the week ${weekOf(now)}`);
+  if (!gate && settings.learning.toolkit && data.rules.some((r) => r.toolkit?.state === 'queued')) out.push('a queued toolkit rule');
+  return out;
+}
+
+// The notifications of a pass not sent before, each key once: the keys go into the state as they are returned.
+export function unsentNotes(settings, notes, now) {
+  const data = readLearning(settings.state);
+  const fresh = notes.filter((n) => !data.notified[n.key]);
+  if (fresh.length) {
+    for (const n of fresh) data.notified[n.key] = new Date(now).toISOString();
+    saveLearning(settings.state, data);
+  }
+  return fresh;
 }

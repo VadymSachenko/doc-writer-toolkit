@@ -49,6 +49,8 @@ const common = (settings, claude) => ['--root', settings.root, ...(settings.file
 // environment (no API key; the sign-in token for its `claude` only), as the tick does.
 export const handOnArgs = (settings, { id, keys, claude = 'claude' }) => [WATCHER, '--hand-on', id, ...keys.flatMap((k) => ['--ticket', k]), ...common(settings, claude)];
 export const fullArgs = (settings, { claude = 'claude', dryRun = false }) => [WATCHER, '--full', ...common(settings, claude), ...(dryRun ? ['--dry-run'] : [])];
+// The learning pass (lib/learn.mjs, TASK-054): its sessions never run inside a check.
+export const learnArgs = (settings, { claude = 'claude' }) => [WATCHER, '--learn', ...common(settings, claude)];
 
 export const handOnId = (ms) => `${iso(ms).replace(/[-:.]/g, '')}-${crypto.randomBytes(3).toString('hex')}`;
 

@@ -126,7 +126,9 @@ function checkWords(f, rule, { language, pluginRoot }) {
 }
 
 // The file's text with the rule added: { text, number, heading }. `rule`: { name, english?, body, check?, loadRow? }.
-export function insertRule(text, rule, { language = null, pluginRoot = null } = {}) {
+// `marker`: an HTML comment (`<!-- learned:<id> -->`) on the line after the heading (at the end of a list item's first
+// line), by which the runner later finds the rule whatever its heading reads.
+export function insertRule(text, rule, { language = null, pluginRoot = null, marker = null } = {}) {
   const f = formOf(text);
   if (!f) fail('the file has no numbered rules this tool can extend (headings like `### Ж1 — …`, or a list like `1. **…** …`): pick another file by subject');
   if (typeof rule?.name !== 'string' || !rule.name.trim() || typeof rule.body !== 'string' || !rule.body.trim()) fail('the rule needs "name" and "body"');
@@ -140,7 +142,7 @@ export function insertRule(text, rule, { language = null, pluginRoot = null } = 
     while (end > last.i + 1 && lines[end - 1].trim() === '') end--;
     const name = f.dotted && !/[.:]$/.test(rule.name.trim()) ? `${rule.name.trim()}.` : rule.name.trim();
     const [first, ...rest] = rule.body.trim().split('\n');
-    const item = [`${number}. **${name}** ${first}`, ...rest.map((l) => (l.trim() ? `   ${l}` : ''))];
+    const item = [`${number}. **${name}** ${first}${marker ? ` ${marker}` : ''}`, ...rest.map((l) => (l.trim() ? `   ${l}` : ''))];
     lines.splice(end, 0, ...item);
     return { text: lines.join('\n'), number, heading: `${number}. **${name}**`, form: 'list' };
   }
@@ -159,7 +161,7 @@ export function insertRule(text, rule, { language = null, pluginRoot = null } = 
   })();
   const checklist = lines.slice(at, parentEnd).findIndex((l) => headingLevel(l) === f.level && /чекліст|checklist/i.test(l));
   if (checklist >= 0 && !(typeof rule.check === 'string' && rule.check.trim())) fail('the file has a checklist after its rules: give "check", the rule\'s line in it');
-  const block = [heading, '', ...rule.body.trim().split('\n'), ''];
+  const block = [heading, ...(marker ? [marker] : []), '', ...rule.body.trim().split('\n'), ''];
   // The load table: the first table above the rules.
   let tableAt = null;
   if (rule.loadRow) {
@@ -178,7 +180,15 @@ export function insertRule(text, rule, { language = null, pluginRoot = null } = 
     let last = -1;
     for (let j = cs + 1; j < sectionEnd(lines, cs); j++) if (/^- \[ \]/.test(lines[j])) last = j;
     if (last < 0) fail('the checklist after the rules has no `- [ ]` line to follow');
-    lines.splice(last + 1, 0, `- [ ] ${rule.check.trim()}`);
+    // The line names its rule as the line before it does: «… (Ж3)?» before it gives «… (Ж11)?».
+    let check = rule.check.trim();
+    const ref = new RegExp(`\\((?:${f.prefix}\\d+[a-z]?(?:,\\s*)?)+\\)\\??$`, 'u');
+    const own = new RegExp(`(?<![\\p{L}\\p{N}])${f.prefix}${number}(?![\\p{L}\\p{N}])`, 'u');
+    if (ref.test(lines[last]) && !own.test(check)) {
+      const q = check.endsWith('?') || lines[last].endsWith('?') ? '?' : '';
+      check = `${check.replace(/\?$/u, '')} (${f.prefix}${number})${q}`;
+    }
+    lines.splice(last + 1, 0, `- [ ] ${check}`);
   }
   lines.splice(at, 0, ...block);
   if (tableAt !== null) lines.splice(tableAt, 0, `| ${rule.loadRow.map((c) => c.trim()).join(' | ')} |`);

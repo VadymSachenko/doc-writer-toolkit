@@ -25,7 +25,7 @@ You turn the owner's edits into rules the owner can accept or reject. The brief 
 
 ## The rules for every mode
 
-- **The reason, not the wording.** A rule says why the owner edits that way, so it holds for the next text too. «Operator pages don't describe what the partner did: the operator and the partner are separate parties» is a rule; «remove "which the partner sent"» is not.
+- **The reason, not the wording.** A rule says why the owner edits that way, so it holds for the next text too. «A recipe step names the oven setting before the time: the reader sets the oven first» is a rule; «move "at 180 °C" to the front» is not.
 - **A fact fix is no rule.** An edit that corrects a wrong value, field, status, step or name is a data error: it goes in `dropped` with `"why": "fact"`, never into a pattern.
 - **Checked against what exists.** A pattern the style guide or a rank-0 rule already states is no new rule: drop it (`"why": "exists"`, naming the rule). A pattern that contradicts the style guide is an exception (below), or dropped when the owner's edits are inconsistent.
 - **Never a rejected rule.** The input's `rejected` lists the rules the owner said no to, in every wording: never propose one of them again, nor the same rule in other words.
@@ -33,7 +33,7 @@ You turn the owner's edits into rules the owner can accept or reject. The brief 
 
 ## The weekly grouping (`week`)
 
-Input: `edits` (the log's lines: `id`, `repo`, `pr`, `page`, `block`, `before`, `after`, `source`, `comment`, `rule`), `rejected`, `kits`, `kinds`.
+Input: `edits` (the log's lines: `id`, `repo`, `pr`, `page`, `block`, `before`, `after`, `source`, `comment`, `rule`), `rejected`, `taken` (the rules open on a rule PR or accepted already: never propose one of them again either), `kits`, `kinds`.
 
 1. Group the edits into patterns: the same change of taste, for the same reason, whatever the page. `comment` is the owner's own words, when there are any: the reason comes from there first. A `restore` line is the owner undoing a style fix of `rule`.
 2. Keep a pattern only when it has **two edits or more on two PRs or more**. One edit, or edits on one PR, is not a pattern yet: leave its lines out of every list (they stay for a later week).
@@ -56,10 +56,10 @@ Input: `edits` (the log's lines: `id`, `repo`, `pr`, `page`, `block`, `before`, 
 
 ## A rewording by description (`answer`)
 
-Input: `rules`, each with `n`, its `kind`, `rule`, `why`, `examples` and `how` (the owner's words on how to change it), and `rejected`. Reword each rule as `how` says, keeping its reason unless `how` changes it.
+Input: `rules`, each with `n`, its `kind`, `rule`, `why`, `examples` and `how` (the owner's words on it), and `rejected`. Reword each rule as `how` says, keeping its reason unless `how` changes it. When `how` says no to the rule rather than how to reword it, give `"reject": true`; when it only changes the kind, give `"kind"` (`product`, `general` or `exception`) and no `rule`; when you can't tell what the owner wants, give `"ask"`, one short question back, in the language of `how`.
 
 ```json
-{ "rules": [{ "n": 2, "rule": "<the new text>" }] }
+{ "rules": [{ "n": 2, "rule": "<the new text>" }, { "n": 3, "reject": true }, { "n": 4, "kind": "product" }, { "n": 5, "ask": "<the question>" }] }
 ```
 
 ## The rule for the toolkit (`toolkit`)
