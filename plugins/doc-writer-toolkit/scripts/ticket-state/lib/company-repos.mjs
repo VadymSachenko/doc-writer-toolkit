@@ -68,7 +68,7 @@ export const GH_TIMEOUT_MS = 60 * 1000;
 // The `gh repo list` of an org, as JSON: [{ name, url, isArchived, defaultBranchRef: { name } }]. The binary and the
 // environment are injectable, so a test passes a fake `gh`.
 export function ghRepoList(org, { gh = 'gh', env = process.env, timeoutMs = GH_TIMEOUT_MS, limit = 1000 } = {}) {
-  const out = execFileSync(gh, ['repo', 'list', org, '--limit', String(limit), '--json', 'name,url,isArchived,defaultBranchRef'], {
+  const out = execFileSync(gh, ['repo', 'list', org, '--no-archived', '--limit', String(limit), '--json', 'name,url,isArchived,defaultBranchRef'], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout: timeoutMs,
@@ -92,16 +92,16 @@ export function resolveCompanyRepos(settings, io = {}) {
   const timeoutMs = io.ghTimeoutMs ?? GH_TIMEOUT_MS;
   let raw;
   try {
-    // One more than the most it reads: a list that long says the org has more than `max`.
-    raw = (io.ghRepoList ?? ghRepoList)(c.org, { gh: io.gh ?? 'gh', env: io.ghEnv ?? process.env, timeoutMs, limit: (c.max ?? ORG_MAX) + 1 });
+    // Archived repos left out by gh; enough for `max` once the excluded ones go, and one more: a list that long, after
+    // the filter, says the org has more than `max`.
+    raw = (io.ghRepoList ?? ghRepoList)(c.org, { gh: io.gh ?? 'gh', env: io.ghEnv ?? process.env, timeoutMs, limit: (c.max ?? ORG_MAX) + c.exclude.length + 1 });
   } catch (e) {
     return { repos: [], from: `org ${c.org}`, notes: [`the repos of ${c.org} were not listed (\`gh repo list\`: ${ghError(e, timeoutMs)}): only the repos the settings name are read`] };
   }
   const max = c.max ?? ORG_MAX;
-  const cut = raw.length > max;
   const skipped = { archived: [], excluded: [] };
-  const repos = [];
-  for (const r of raw.slice(0, max)) {
+  let repos = [];
+  for (const r of raw) {
     if (!plainName(r?.name) || typeof r?.url !== 'string' || !/^https:\/\//.test(r.url) || withCredentials(r.url)) continue;
     if (r.isArchived) {
       skipped.archived.push(r.name);
@@ -113,6 +113,9 @@ export function resolveCompanyRepos(settings, io = {}) {
     }
     repos.push({ repo: r.name, url: r.url.replace(/\/+$/, ''), base: r.defaultBranchRef?.name || 'main', path: c.path ? c.path.split('<repo>').join(r.name) : null });
   }
+  // The cap, counted on what is read (archived and excluded repos never take a place): the first `max` gh gave.
+  const cut = repos.length > max;
+  repos = repos.slice(0, max);
   repos.sort((a, b) => a.repo.localeCompare(b.repo));
   const notes = [];
   if (cut) notes.push(`${c.org} has more than ${max} repos: only the first ${max} \`gh repo list\` gave are read (raise \`companyRepos.max\`, or exclude the repos the docs never need)`);

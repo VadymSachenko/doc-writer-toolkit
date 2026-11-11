@@ -117,8 +117,9 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
   let thenAsked = null;
 
   if (status === 'done') await applyDone();
-  else if (status === 'failed' && stage === 'answerPass') {
-    // A failed pass gives up what it held, so no question waits on it (lib/answer-pass.mjs, `passFailed`).
+  else if (status === 'failed' && stage === 'answerPass' && result.giveUp === true) {
+    // The runner's give-up after the pass's session failed (never a stuck worktree, nor a branch a person moved: those
+    // run again): what it held is let go, so no question waits on it (lib/answer-pass.mjs, `passFailed`).
     const gave = passFailed(l, pr, { at, seq: l.seq + 1 });
     if (gave) record.note = `${record.note ? `${record.note}; ` : ''}given up: ${gave}`;
   }
@@ -1032,10 +1033,16 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         }
         const flat = (t) => String(t ?? '').replace(/[`*_>]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
         const inBody = body === null ? [] : fresh.filter((q) => flat(body).includes(flat(q.text).slice(0, 80)));
-        if (inBody.length) throw new Refused('answers', `the round's review asks ${inBody.map((q) => `"${q.text.slice(0, 60)}"`).join(', ')} already: with the company repos, a round's new questions go in "asked" only, held for the answer pass; edit the review's text (no question in it), then record again`);
+        // A submitted review can't be edited: a question its body asks already is shown at once, not held.
+        if (inBody.length) {
+          warnings.push(`the round's review asks ${inBody.map((q) => `"${q.text.slice(0, 60)}"`).join(', ')} already, so ${inBody.length > 1 ? 'they are' : 'it is'} shown in the description at once, not held for the answer pass: with the company repos, put a round's new questions in "asked" only`);
+          for (const q of inBody) q.shownEarly = true;
+        }
       }
-      for (const q of fresh) q.held = true;
-      pr.answerPassDue = { seq: l.seq + 1, at, stage };
+      const held = fresh.filter((q) => !q.shownEarly);
+      for (const q of fresh) delete q.shownEarly;
+      for (const q of held) q.held = true;
+      if (held.length) pr.answerPassDue = { seq: l.seq + 1, at, stage };
     }
   }
 

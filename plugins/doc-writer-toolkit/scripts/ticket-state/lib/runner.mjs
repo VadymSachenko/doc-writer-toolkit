@@ -2492,10 +2492,12 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         let frozen = null;
         if (pass) {
           frozen = await freezePass(step, trees);
-          if (!frozen.items.length) {
+          // Only with no item and no note: a note says something wasn't read (a branch's markers), which the session reads.
+          if (!frozen.items.length && !frozen.notes.length) {
             for (const k of step.keys) await runRecord({ settings, clients, key: k, stage: 'answerPass', status: 'done', pr: step.pr, result: JSON.stringify({ items: [] }), now: clock() });
             const note = 'nothing was left open: the pass is done with no item, and no session';
-            for (const k of step.keys) await runRecord({ settings, clients, key: k, run: JSON.stringify({ stage: step.stage, role: step.role, start: new Date(clock()).toISOString(), wallMs: 0, outcome: 'done', session: null, note }), pr: step.pr, now: clock() }).catch(() => {});
+            // No `start`: no session ran, so the run counts in no session tally (`sessionsPerStageDay`).
+            for (const k of step.keys) await runRecord({ settings, clients, key: k, run: JSON.stringify({ stage: step.stage, role: step.role, wallMs: 0, outcome: 'done', session: null, note }), pr: step.pr, now: clock() }).catch(() => {});
             say({ kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, role: step.role, outcome: 'done', note });
             return { ...pick(step), outcome: 'done', note };
           }
@@ -2647,6 +2649,10 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         const moved = outcome === 'failed' ? movedEarly ?? (await movedUnder(step)) : null;
         if (moved) outcome = 'moved';
         if (outcome === 'failed') failures += 1;
+        // The answer pass is not retried on a bigger model: a failed session gives up what the pass held (a retry would
+        // keep the questions hidden, and its record could only be refused once the input is let go). Recorded before
+        // the ticket's mark is read, so the give-up is the pipeline's own write, never a person's.
+        if (outcome === 'failed' && step.stage === 'answerPass') for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, stage: 'answerPass', status: 'failed', pr: step.pr, note: 'the session failed: the pass gives up what it held', result: JSON.stringify({ giveUp: true }), now: clock() }).catch(() => {});
         // What the ticket looks like now the session is over, so its own unrecorded writes never count as a person's.
         const marks = outcome !== 'failed' || !ledgered ? {} : await marksOf(step);
         const run = { stage: step.stage, role: step.role, model, effort: cmd.effort, trigger: manual ? 'manual' : trigger, start, durationMs: r.durationMs, wallMs, turns: r.turns, costUsd: r.costUsd, tokens: r.tokens, weekPercent: { before, after }, session: r.session, ...(resumed ? { resumed: true, ...(resumed.session ? { resumedSession: resumed.session } : {}) } : {}), outcome, share: Number((1 / step.keys.length).toFixed(4)), ...(attempt ? { retryOf: settings.roles[step.role].model } : {}), ...(r.denials ? { denials: r.denials } : {}), ...(outcome === 'failed' ? { failures } : {}), ...(moved ? { note: moved.note.slice(0, 300) } : {}) };
@@ -2668,14 +2674,14 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
           return { ...pick(step), model, outcome };
         }
         const up = nextModelUp(model, settings.modelLadder);
-        if (failures < 2 && attempt === 0 && up && guard(`${step.stage} retry`, step.group)) {
+        if (failures < 2 && attempt === 0 && up && step.stage !== 'answerPass' && guard(`${step.stage} retry`, step.group)) {
           say({ kind: 'retry', group: step.group, stage: step.stage, from: model, to: up });
           model = up;
           continue;
         }
         // One line a pair in the report's failures: a first failure only waits (for a person, or the next morning run).
         const twice = failures >= 2;
-        const why = twice ? 'failed twice' : !up ? 'failed; no model above to retry with' : 'failed; the guard held the retry';
+        const why = twice ? 'failed twice' : step.stage === 'answerPass' ? 'failed; the answer pass is not retried: what it held goes on as with no pass' : !up ? 'failed; no model above to retry with' : 'failed; the guard held the retry';
         const waits = ledgered && !twice;
         say({ ...entry, outcome: waits ? 'waits' : 'failed', note: twice && ledgered ? 'failed twice: held for the owner until a person acts on the ticket or `ticket-state set retry` re-arms it' : waits ? `${why}: runs again after a person acts on the ticket, or once at the next morning run` : why });
         return { ...pick(step), model, outcome: 'failed', note: why };

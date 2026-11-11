@@ -190,12 +190,15 @@ export function docDirsOf(settings) {
 // The checks an evidence entry gets against the files, made by default with git on this machine: a code reference's
 // commit and path in the runner's clone of its repo (or a doc repo's clone); a page's commit and path in its doc repo;
 // an earlier ticket's file in its work folder (never this ticket's own); a live log written for this pass: in this
-// ticket's work folder or the state folder, not tracked by git, and written after the pass's input was frozen (`key`,
+// ticket's work folder or `<state>/live/<key>/` (never the ledgers and other state files), not tracked by git, and written after the pass's input was frozen (`key`,
 // `since`).
 export function evidenceChecks(settings, { docRepos = [], key = null, since = null } = {}) {
   const under = (abs, r) => abs === r || abs.startsWith(r + path.sep);
   const workOf = (k) => (settings.workFolder ? path.resolve(settings.root, settings.workFolder.split('<key>').join(String(k))) : null);
-  const logDirs = [key !== null && key !== undefined ? workOf(key) : null, settings.state].filter(Boolean);
+  // A live log is this ticket's: in its work folder, or `<state>/live/<key>/`, never elsewhere in the state folder (the
+  // ledgers, the locks, the misses log are rewritten by the pipeline itself).
+  const hasKey = key !== null && key !== undefined;
+  const logDirs = hasKey ? [workOf(key), path.join(settings.state, 'live', String(key))].filter(Boolean) : [];
   const repoDir = (repo) => {
     const clone = codeClonePath(settings, { repo });
     if (fs.existsSync(path.join(clone, 'HEAD'))) return clone;
@@ -240,8 +243,7 @@ export function evidenceChecks(settings, { docRepos = [], key = null, since = nu
     },
     log: (e) => {
       const file = path.resolve(settings.root, String(e.log));
-      if (!logDirs.some((d) => under(file, d) && file !== d)) return `the log ${e.log} is not in ${key !== null && key !== undefined && settings.workFolder ? `ticket ${key}'s work folder or ` : ''}the state folder: a live check writes its log there`;
-      let stat;
+      if (!logDirs.some((d) => under(file, d) && file !== d)) return `the log ${e.log} is not in ${hasKey && settings.workFolder ? `ticket ${key}'s work folder or ` : ''}${hasKey ? path.relative(settings.root, path.join(settings.state, 'live', String(key))) : "the ticket's live folder"}: a live check of this pass writes its log there`;      let stat;
       try {
         stat = fs.statSync(file);
       } catch {
@@ -344,8 +346,10 @@ export function passProblems(input, result, { settings, l, pr = null, checks = e
       // A rule decides a choice (a question), never a fact: a marker, a place or a finding answered rests on the code, a
       // page, an earlier ticket or a check too.
       if (ev.length && ev.every((e) => e?.kind === 'rule') && item.kind !== 'question') out.push(`item ${id} is a ${item.kind}: a rule alone settles no fact; give the code, the page, the earlier ticket or the check that shows it`);
-      // The role's question rule decides a question that proposes to leave the page as it is: one with its proposal.
+      // A rule (the role's question rule, or one of the host's) decides a choice: a question with its proposal, never an
+      // open fact.
       if (ev.some((e) => e?.kind === 'rule' && e.ref === 'role') && !text(item.proposal)) out.push(`item ${id} has no proposal: the role's question rule decides only a question whose proposal is to leave the page as it is`);
+      else if (ev.some((e) => e?.kind === 'rule' && e.ref !== 'role') && !text(item.proposal)) out.push(`item ${id} has no proposal: a host's rule decides a question that proposes a choice, never an open fact; give the code, the page or the check that answers it`);
       // Behaviour read from code stays a place (the place rule): a place is settled by a page, an earlier ticket or a
       // check, never by the code alone.
       if (item.kind === 'place' && ev.length && ev.every((e) => e?.kind === 'code')) out.push(`item ${id} is a place: code alone doesn't settle behaviour; check it on the test environment (evidence of kind live), or keep it citing that code`);
@@ -452,7 +456,7 @@ export function passLines(step, settings) {
     `The answer pass${onPr ? ` on ${step.pr}, after new questions were asked on it: they are held from the description until you record` : held ? ', on the questions the plan or the write held instead of asking them on the card' : ', between the UA review and the PR'}. Each item below has an answer in the company's systems. Find it. An item you can't answer stays, with every source you tried.`,
     items.length ? `Items (answer each by its id${items.some((x) => x.ticket) ? ", in its own ticket's record" : ''}, and no other; a stage's own question, such as a fit stop, a refused video, a conflict or a person's comment that needs the owner, is not here and stays as it is):\n${items.map(itemLine).join('\n')}` : 'No item was left open: record the stage done with `"items": []`.',
     ...(step.answerNotes ?? []).map((n) => `Note: ${n}.`),
-    `Where the answers are: the code repos and the company repos below, each a read-only checkout at the commit the runner fetched (search them all for an item's names: its endpoint, field, status, component, label; the caller's side, a frontend or a widget, often holds what a screen shows); the ticket's commits in each; the host's own docs and the earlier tickets' notes (below: an earlier ticket's live check is what it saw on its date); and the test environment, by ${live}: a behaviour the test environment can reach is checked there, under the browser lock, after the setup those rules allow on the owner's test accounts (missing test data is made, never a reason). A state no screen gives (an action a cabinet hides for that status) is often set through the backend route the screens call (read it in the code), with the test accounts the host's rules name; then read the result the way the page's reader would (the client API, the cabinet). An API call is a Playwright spec run under the browser lock, its log written into the ticket's work folder (or the state folder) during this pass, never committed with the pages: a log written before the pass, or one git tracks, is no evidence.`,
+    `Where the answers are: the code repos and the company repos below, each a read-only checkout at the commit the runner fetched (search them all for an item's names: its endpoint, field, status, component, label; the caller's side, a frontend or a widget, often holds what a screen shows); the ticket's commits in each; the host's own docs and the earlier tickets' notes (below: an earlier ticket's live check is what it saw on its date); and the test environment, by ${live}: a behaviour the test environment can reach is checked there, under the browser lock, after the setup those rules allow on the owner's test accounts (missing test data is made, never a reason). A state no screen gives (an action a cabinet hides for that status) is often set through the backend route the screens call (read it in the code), with the test accounts the host's rules name; then read the result the way the page's reader would (the client API, the cabinet). An API call is a Playwright spec run under the browser lock, its log written into the ticket's work folder (or \`<state>/live/<key>/\`) during this pass, never committed with the pages: a log written before the pass, or one git tracks, is no evidence.`,
     `The bar for \`answered\`: a name, a path or a value read directly (cited with repo, path, lines and commit), a page or an earlier ticket's file that states it, behaviour seen working now (with the check's log), or a rule of the host's that decides it (quoted as written there), or, for a question whose proposal is to leave the page as it is, the role's question rule, quoted: "${ROLE_DECISIONS[0]}" (no other sentence of the role decides an item). Behaviour read from code only stays a place: kept, citing that code (a place answered by code alone is refused). \`kept\` on a place names the live check you ran: a source of kind \`live\` whose \`ref\` is the log it wrote and whose \`setup\` says the test data it made. \`confirmed\` is for a place you saw working: it leaves the places.`,
     `Never change a setting several accounts share unless the host's rules allow it by name; never drop or answer a stage's own question; never write to a company repo (the checkouts are read-only). ${onPr ? 'An answer that changes the page: the smallest edit that puts it in (replace the marker or the claim), one commit, pushed, then one review with a line comment under each such edit (`forge.mjs review-on-lines --outside-in-body`), numbered on from the number in the brief.' : "An answer that changes the page: the smallest edit that puts it in (replace the marker or the claim), in the worktree, committed and pushed. The PR stage lists your edits in the description's list of edits after the UA review's fixes, numbered on, so the owner can undo each by number."}`,
     ...(held ? ['What you keep is asked on the card as before: every kept question in one comment (naming what you tried), the card to Blocked, and that comment\'s id in your record as `"asked": { "commentId" }`. With none kept, the card stays where it is and the stage that held them runs again with your answers.'] : []),

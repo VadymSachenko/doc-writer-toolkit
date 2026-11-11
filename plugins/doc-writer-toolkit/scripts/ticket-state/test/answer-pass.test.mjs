@@ -11,7 +11,7 @@ import { parseUsage } from '../lib/allowance.mjs';
 import { validateSettings } from '../lib/settings.mjs';
 import { ensureWorktree, codeClonePath } from '../lib/worktree.mjs';
 import { passRepos, resolveCompanyRepos, safeUrl, validateCompanyRepos } from '../lib/company-repos.mjs';
-import { blobAt, passInput, passLines, prLinesAfterPass, roundInput } from '../lib/answer-pass.mjs';
+import { blobAt, evidenceChecks, passInput, passLines, prLinesAfterPass, roundInput } from '../lib/answer-pass.mjs';
 import { markersAt } from '../lib/gates.mjs';
 import { DEFAULT_LABELS, renderSections } from '../lib/pr-description.mjs';
 import { labelChanges, labelSnapshot } from '../lib/pr-labels.mjs';
@@ -134,8 +134,8 @@ test('the org form: `gh repo list` at each run, archived and excluded repos left
   ]);
   const settings = { companyRepos: validateCompanyRepos({ org: 'acme', exclude: ['old-forms'], path: '../<repo>' }) };
   const r = resolveCompanyRepos(settings, { gh: gh.bin });
-  // One more than `max` (200 by default): a list that long says the org has more.
-  assert.equal(gh.args(), 'repo list acme --limit 201 --json name,url,isArchived,defaultBranchRef');
+  // Archived repos left out by gh; `max` (200 by default) plus the excluded names, and one more: a list that long says the org has more.
+  assert.equal(gh.args(), 'repo list acme --no-archived --limit 202 --json name,url,isArchived,defaultBranchRef');
   assert.ok(!r.notes.some((n) => /more than/.test(n)));
   assert.deepEqual(r.repos, [{ repo: 'cabinet-web', url: 'https://code.example/acme/cabinet-web', base: 'develop', path: '../cabinet-web' }, { repo: 'pay-widget', url: 'https://code.example/acme/pay-widget', base: 'master', path: '../pay-widget' }]);
   assert.deepEqual(r.excluded, ['old-forms']);
@@ -143,18 +143,24 @@ test('the org form: `gh repo list` at each run, archived and excluded repos left
   const bad = resolveCompanyRepos(settings, { gh: fakeGh(null, { fail: true }).bin });
   assert.deepEqual(bad.repos, []);
   assert.match(bad.notes[0], /the repos of acme were not listed \(`gh repo list`: HTTP 401: Bad credentials\)/);
-  // The cap: with `max` 2, gh is asked for 3; three come back, so two are read and a note says the org has more. An
-  // address gh gives with a token in it is never read.
-  const capped = { companyRepos: validateCompanyRepos({ org: 'acme', max: 2 }) };
+  // The cap, counted after the filter: with `max` 2 and one excluded name, gh is asked for 4. The excluded repo, an
+  // archived one and one whose address has a token take no place: two of the three left are read, with a note.
+  const capped = { companyRepos: validateCompanyRepos({ org: 'acme', max: 2, exclude: ['b-app'] }) };
   let limit = null;
-  const many = resolveCompanyRepos(capped, { ghRepoList: (org, o) => ((limit = o.limit), [
+  const listed = [
     { name: 'a-app', url: 'https://code.example/acme/a-app', isArchived: false },
-    { name: 'b-app', url: 'https://tok@code.example/acme/b-app', isArchived: false },
+    { name: 'b-app', url: 'https://code.example/acme/b-app', isArchived: false },
+    { name: 'old-app', url: 'https://code.example/acme/old-app', isArchived: true },
+    { name: 'tok-app', url: 'https://tok@code.example/acme/tok-app', isArchived: false },
     { name: 'c-app', url: 'https://code.example/acme/c-app', isArchived: false },
-  ]) });
-  assert.equal(limit, 3);
-  assert.deepEqual(many.repos.map((x) => x.repo), ['a-app']);
+    { name: 'd-app', url: 'https://code.example/acme/d-app', isArchived: false },
+  ];
+  const many = resolveCompanyRepos(capped, { ghRepoList: (org, o) => ((limit = o.limit), listed) });
+  assert.equal(limit, 4);
+  assert.deepEqual(many.repos.map((x) => x.repo), ['a-app', 'c-app']);
   assert.match(many.notes[0], /acme has more than 2 repos: only the first 2 `gh repo list` gave are read \(raise `companyRepos\.max`/);
+  // Exactly `max` after the filter: no note.
+  assert.ok(!resolveCompanyRepos(capped, { ghRepoList: () => listed.slice(0, 5) }).notes.some((n) => /more than/.test(n)));
   // The list form calls no gh at all.
   assert.deepEqual(resolveCompanyRepos({ companyRepos: validateCompanyRepos(COMPANY) }, { ghRepoList: () => assert.fail('gh called') }).repos.map((x) => x.repo), ['ledger-api', 'cabinet-web', 'pay-widget']);
 });
@@ -230,8 +236,11 @@ test('the runner: the pass resolves and checks out every company repo, freezes i
   assert.match(b, /\*\*f1\*\* \(a finding the UA review left open\)/);
   assert.match(b, /- cabinet-web: .*code\/cabinet-web\/c0ffee1c0ffe/);
   assert.match(b, /Never change a setting several accounts share unless the host's rules allow it by name/);
-  // The session failed: the pass gives up (nothing waits on it), and the PR follows the UA review.
+  // The session failed: no bigger model is tried (its record could only be refused once the input is let go); the
+  // runner's give-up record lets it go, and the PR follows the UA review.
+  assert.equal(briefs.filter((x) => /Stage `answerPass`/.test(x)).length, 1, 'one session of the pass, no retry');
   const l = read(t.w, '2101');
+  assert.ok(l.log.some((x) => x.stage === 'answerPass' && x.outcome === 'failed' && /given up: the PR follows the UA review/.test(x.note ?? '')), JSON.stringify(l.log.slice(-4)));
   assert.equal(l.answerPassFailed.after, l.stages.uaReview.seq);
   assert.equal(l.answerInput, undefined);
   assert.equal((await t.w.one('2101')).next.stage, 'pr');
@@ -297,7 +306,20 @@ test('the gate: an answered item needs evidence that holds, a kept one its sourc
   await refusedAs(t, passDone(t, { items: [{ id: 'q1', outcome: 'answered', answer: 'x', evidence: [{ kind: 'rule', ref: 'role', text: 'Never change a setting several accounts share unless the host' }] }, kept] }), /only the role's question rule decides a question by itself/);
   await refusedAs(t, passDone(t, { items: [{ id: 'q1', outcome: 'answered', answer: 'x', evidence: [RULE] }, kept] }), /item q1 has no proposal: the role's question rule decides only a question whose proposal is to leave the page as it is/);
   // A live log: in this ticket's work folder or the state folder, written during this pass.
-  await refusedAs(t, passDone(t, { items: [ok.items[0], { id: 'p1', outcome: 'confirmed', answer: 'x', evidence: [{ kind: 'live', log: 'CLAUDE.md', setup: 'x' }] }] }), /the log CLAUDE\.md is not in ticket 2101's work folder or the state folder/);
+  await refusedAs(t, passDone(t, { items: [ok.items[0], { id: 'p1', outcome: 'confirmed', answer: 'x', evidence: [{ kind: 'live', log: 'CLAUDE.md', setup: 'x' }] }] }), /the log CLAUDE\.md is not in ticket 2101's work folder or .*live\/2101: a live check of this pass writes its log there/);
+  // The state folder holds the ticket's own ledger, rewritten by the freeze: never a log. Only `<state>/live/<key>/` is.
+  const ledgerFile = path.relative(t.w.root, path.join(t.w.settings.state, 'tickets', '2101.json'));
+  await refusedAs(t, passDone(t, { items: [ok.items[0], { id: 'p1', outcome: 'confirmed', answer: 'x', evidence: [{ kind: 'live', log: ledgerFile, setup: 'x' }] }] }), /is not in ticket 2101's work folder or .*live\/2101/);
+  const liveDir = path.join(t.w.settings.state, 'live', '2101');
+  fs.mkdirSync(liveDir, { recursive: true });
+  fs.writeFileSync(path.join(liveDir, 'check.md'), 'GET /v1/limits → 200\n');
+  const checks = evidenceChecks(t.w.settings, { key: '2101', since: new Date(NOW).toISOString() });
+  assert.equal(checks.log({ log: path.relative(t.w.root, path.join(liveDir, 'check.md')) }), null);
+  assert.match(checks.log({ log: path.relative(t.w.root, path.join(t.w.settings.state, 'live', '2102', 'x.md')) }), /is not in ticket 2101's work folder/);
+  // A host's rule decides a question with a proposal, never an open fact.
+  fs.mkdirSync(path.join(t.w.root, '.claude/rules'), { recursive: true });
+  fs.writeFileSync(path.join(t.w.root, '.claude/rules/live.md'), 'Every amount on a page is the amount the partner is charged.\n');
+  await refusedAs(t, passDone(t, { items: [{ id: 'q1', outcome: 'answered', answer: 'x', evidence: [{ kind: 'rule', ref: 'liveChecks', text: 'Every amount on a page is the amount the partner is charged.' }] }, kept] }), /item q1 has no proposal: a host's rule decides a question that proposes a choice, never an open fact/);
   fs.mkdirSync(path.join(t.w.root, 'work/tickets/2001'), { recursive: true });
   fs.writeFileSync(path.join(t.w.root, 'work/tickets/2001/old-check.md'), 'an earlier ticket\'s check\n');
   await refusedAs(t, passDone(t, { items: [ok.items[0], { id: 'p1', outcome: 'confirmed', answer: 'x', evidence: [{ kind: 'live', log: 'work/tickets/2001/old-check.md', setup: 'x' }] }] }), /is not in ticket 2101's work folder/);
@@ -409,17 +431,22 @@ test('a review round\'s new questions are held from the description and the chec
   assert.equal(read(w2, '2202').prs[0].questions[0].held, undefined);
 });
 
-test('a round\'s question is held only if the round\'s review doesn\'t ask it already', async () => {
+test('a round\'s question is held only if the round\'s review doesn\'t ask it already: one the review asks is shown at once, with a warning (a submitted review can\'t be edited)', async () => {
   const c = card({ number: 2203, status: 'finalReview' });
   const extra = { companyRepos: COMPANY, forge: { ...rawSettings().forge, triggerWords: ['helper'], reviewRounds: true } };
   const activity = { 'guide-docs#33': { reviews: [{ id: 620, body: 'Fixed the two comments.\n\n**Question:** Is the fee charged twice?' }, { id: 621, body: 'Fixed the two comments. The answer pass looks into one question first.' }] } };
   const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 33, headCommit: 'b'.repeat(40) })], activity, extra });
   ledger(w, c, { key: '2203', stages: { start: 'done', plan: 'done', write: 'done', uaReview: 'done', answerPass: 'done', pr: 'done' }, prs: [{ repo: 'guide-docs', branch: 'ticket-2203', number: 33, targets: ['guide'], review: 'sme', stage: 'finalReview', questions: [] }] });
   const round = (id) => rec(w, { key: '2203', stage: 'answerComments', pr: 'guide-docs#33', status: 'done', result: { handled: [], review: { id, commits: [] }, questions: [{ text: 'Is the fee charged twice?' }], asked: [{ text: 'Is the fee charged twice?', reader: 'developer' }], posted: [id] } });
-  await assert.rejects(round(620), (e) => e.refused === 'answers' && /the round's review asks "Is the fee charged twice\?" already/.test(e.message));
-  assert.equal(read(w, '2203').prs[0].questions.length, 0, 'nothing recorded');
+  const shown = await round(620);
+  assert.ok(shown.warnings.some((x) => /the round's review asks "Is the fee charged twice\?" already, so it is shown in the description at once, not held/.test(x)), JSON.stringify(shown.warnings));
+  let p = read(w, '2203').prs[0];
+  assert.equal(p.questions[0].held, undefined);
+  assert.equal(p.answerPassDue, undefined, 'nothing waits for a pass');
   await round(621);
-  assert.equal(read(w, '2203').prs[0].questions[0].held, true);
+  p = read(w, '2203').prs[0];
+  assert.equal(p.questions[1].held, true);
+  assert.ok(p.answerPassDue);
 });
 
 test('a pass that fails gives up what it held: a round\'s questions are shown and the label follows them; held questions go back to the plan to ask on the card; after the UA review, the PR follows it', async () => {
@@ -431,7 +458,11 @@ test('a pass that fails gives up what it held: a round\'s questions are shown an
   await rec(w, { key: '2204', stage: 'answerComments', pr: 'guide-docs#34', status: 'done', result: { handled: [], review: { id: 630, commits: [] }, questions: [{ text: 'Is the fee charged twice?' }], asked: [{ text: 'Is the fee charged twice?', reader: 'developer' }], posted: [630] } });
   await rec(w, { key: '2204', stage: 'answerPass', pr: 'guide-docs#34', status: 'running', result: { input: roundInput(read(w, '2204').prs[0]) } });
   const before = labelSnapshot(w.settings.state, ['2204']);
-  await rec(w, { key: '2204', stage: 'answerPass', pr: 'guide-docs#34', status: 'failed', note: 'the session ended with no record' });
+  // A failed record that is not the runner's give-up (a stuck worktree, a branch a person moved): the pass runs again.
+  await rec(w, { key: '2204', stage: 'answerPass', pr: 'guide-docs#34', status: 'failed', note: 'the worktree: stuck' });
+  assert.ok(read(w, '2204').prs[0].answerPassDue, 'still held');
+  assert.deepEqual([(await w.one('2204')).next.stage, (await w.one('2204')).next.pr], ['answerPass', 'guide-docs#34']);
+  await rec(w, { key: '2204', stage: 'answerPass', pr: 'guide-docs#34', status: 'failed', note: 'the session failed', result: { giveUp: true } });
   let l = read(w, '2204');
   const p = l.prs[0];
   assert.equal(p.answerPassDue, undefined);
@@ -449,7 +480,7 @@ test('a pass that fails gives up what it held: a round\'s questions are shown an
   const q = { kind: 'fact', text: 'Which fee applies to a partial refund?', sources: [{ kind: 'code', ref: 'ledger-api fees/', result: 'full refunds only' }] };
   await rec(w2, { key: '2205', stage: 'questions', status: 'done', result: { hold: true, from: 'plan', questions: [q] } });
   await rec(w2, { key: '2205', stage: 'answerPass', status: 'running', result: { input: (await import('../lib/answer-pass.mjs')).heldInput(read(w2, '2205')) } });
-  await rec(w2, { key: '2205', stage: 'answerPass', status: 'failed', note: 'no session' });
+  await rec(w2, { key: '2205', stage: 'answerPass', status: 'failed', note: 'the session failed', result: { giveUp: true } });
   assert.equal((await w2.one('2205')).next.stage, 'plan');
   const lines = (await import('../lib/answer-pass.mjs')).heldAnswerLines([read(w2, '2205')]).join('\n');
   assert.match(lines, /The answer pass on the questions 2205's plan held failed, so they wait on no one: ask them on the card as before/);
@@ -459,7 +490,7 @@ test('a pass that fails gives up what it held: a round\'s questions are shown an
   // After the UA review: the pass fails, and the PR follows the UA review with a note.
   const t = passWorld({ key: '2206', open: { questions: [{ text: 'Which amount?', reader: 'developer' }] } });
   await freeze(t);
-  await rec(t.w, { key: '2206', stage: 'answerPass', status: 'failed', note: 'no session' });
+  await rec(t.w, { key: '2206', stage: 'answerPass', status: 'failed', note: 'the session failed', result: { giveUp: true } });
   const s = await t.w.one('2206');
   assert.equal(s.next.stage, 'pr');
   assert.ok(s.notes.some((n) => /the answer pass failed after the UA review, so the PR follows the UA review/.test(n)), s.notes.join('; '));
@@ -711,6 +742,28 @@ test('the runner: with nothing left open, the pass is recorded done with no item
   assert.deepEqual(out.ran.slice(0, 2).map((r) => [r.stage, r.outcome]), [['answerPass', 'done'], ['pr', 'failed']]);
   assert.match(out.ran[0].note, /nothing was left open: the pass is done with no item, and no session/);
   assert.equal(l.runs.find((r) => r.stage === 'answerPass')?.session, null);
+});
+
+test('the runner: markers that couldn\'t be read are a note, so the session runs and reads them; a worktree that can\'t be made fails the pass with nothing given up, and it runs again', async () => {
+  const t = passWorld({ key: '2803' });
+  apiClone(t.w).push({ 'docs/a.md': '# Сторінка\n\nАбзац. {/* NEEDS CONFIRMATION: the limit */}\n' }, 'draft');
+  const briefs = [];
+  const io = { readUsage: usage, now: () => NOW, spawnClaude: async (cmd) => (briefs.push(briefOf(cmd)), { code: 1, stdout: '', stderr: 'stop' }), ensureCodeTree: (s, app) => ({ repo: app.repo, path: '/x', commit: 'c'.repeat(40), url: app.url, notes: [] }), markersAt: () => { throw new Error('git diff failed'); }, ticketCommits: (dir, key) => ({ key, more: false, commits: [] }) };
+  await runDaily({ settings: t.w.settings, clients: t.w.clients(), io, options: { named: ['2803'] } });
+  const pass = briefs.filter((b) => /Stage `answerPass`/.test(b));
+  assert.equal(pass.length, 1, 'the session ran');
+  assert.match(pass[0], /No item was left open/);
+  assert.match(pass[0], /Note: the markers of api-docs ticket-1 were not read \(git diff failed\): read the branch's diff for them yourself\./);
+
+  const u = passWorld({ key: '2804', open: { questions: [{ text: 'Which amount?', reader: 'developer' }] } });
+  const spawned = [];
+  await runDaily({ settings: u.w.settings, clients: u.w.clients(), io: { ...io, spawnClaude: async (cmd) => (spawned.push(stageOf(cmd)), { code: 1, stdout: '', stderr: 'stop' }), ensureWorktree: () => { throw new Error('the worktree has work of a person on it'); } }, options: { named: ['2804'] } });
+  const l = read(u.w, '2804');
+  assert.ok(!spawned.includes('answerPass'));
+  assert.equal(l.stages.answerPass.status, 'failed');
+  assert.equal(l.answerPassFailed, undefined, 'nothing given up');
+  assert.ok(!l.log.some((x) => /given up/.test(x.note ?? '')));
+  assert.equal((await u.w.one('2804')).steps[0]?.stage ?? (await u.w.one('2804')).failed?.stage, 'answerPass');
 });
 
 test('a group\'s pass: each item says its ticket, since each ticket numbers its items from 1', () => {
