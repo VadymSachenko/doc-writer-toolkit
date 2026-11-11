@@ -46,9 +46,9 @@ const statePath = (state) => path.join(learningDir(state), 'proposals.json');
 export function readLearning(state) {
   try {
     const d = JSON.parse(fs.readFileSync(statePath(state), 'utf8'));
-    return { weeks: d.weeks ?? {}, rules: d.rules ?? [], prs: d.prs ?? [], consumed: d.consumed ?? [], runs: d.runs ?? [] };
+    return { startWeek: d.startWeek ?? null, weeks: d.weeks ?? {}, rules: d.rules ?? [], prs: d.prs ?? [], consumed: d.consumed ?? [], runs: d.runs ?? [] };
   } catch {
-    return { weeks: {}, rules: [], prs: [], consumed: [], runs: [] };
+    return { startWeek: null, weeks: {}, rules: [], prs: [], consumed: [], runs: [] };
   }
 }
 const saveLearning = (state, d) => writeJson(statePath(state), d);
@@ -348,6 +348,9 @@ export function toolkitForge(settings, io = {}) {
 export function weekDue({ settings, data, now, morningDone, busy }) {
   if (!settings.learning) return { due: false, why: 'no learning settings' };
   const week = weekOf(now);
+  // The week the learning was switched on gets no session of its own: the first one is the next week's, on its Monday,
+  // and reads that week's edits too (the backfill's among them). Switched on mid-week, nothing runs at once.
+  if (!data.startWeek || week <= data.startWeek) return { due: false, why: `the learning started in ${data.startWeek ?? week}: the first session is the next week's` };
   if (data.weeks[week]) return { due: false, why: `${week} is done` };
   if (!morningDone) return { due: false, why: "today's morning run hasn't run yet" };
   if (busy) return { due: false, why: `the tickets first: ${busy}` };
@@ -454,7 +457,11 @@ export async function learningCheck({ settings, clients, io = {}, now = Date.now
     save();
   }
 
-  // 3. The week.
+  // 3. The week. The first live check records the week the learning started in.
+  if (!data.startWeek && live) {
+    data.startWeek = weekOf(now);
+    save();
+  }
   const due = weekDue({ settings, data, now, morningDone, busy });
   out.week = due;
   if (due.due && live) {
@@ -756,6 +763,7 @@ export function learnStatus(settings) {
   for (const e of log) bySource[e.source] = (bySource[e.source] ?? 0) + 1;
   return {
     log: { entries: log.length, prs: new Set(log.map((e) => `${e.repo}#${e.pr}`)).size, bySource, used: d.consumed.length },
+    startWeek: d.startWeek,
     weeks: d.weeks,
     openPrs: d.prs.filter((p) => p.state === 'open').map((p) => ({ pr: `${p.repo}#${p.number}`, url: p.url, items: p.items.map((x) => ({ n: x.n, kind: x.kind, state: x.state })) })),
     rules: d.rules.map((r) => ({ rid: r.rid, kind: r.kind, rule: r.rule, accepted: r.accepted ?? [], rejected: Boolean(r.rejected?.length), toolkit: r.toolkit ? { state: r.toolkit.state, url: r.toolkit.url ?? null, why: r.toolkit.why ?? null } : null })),

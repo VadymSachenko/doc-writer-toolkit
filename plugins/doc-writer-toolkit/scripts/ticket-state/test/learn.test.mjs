@@ -377,6 +377,9 @@ test('the loop: Monday\'s session proposes in a PR, nothing reaches the kit befo
   const io = { spawnClaude: fakeClaude(week1, calls), viewOf: async () => null, toolkitForgeAdapter: w.tadapter, lint: () => {} };
   const check = (over = {}) => learningCheck({ settings, clients: { forge }, io, now: MONDAY, morningDone: true, busy: null, ...over });
 
+  // Switched on mid-week (the Wednesday before): the week is recorded, and no session runs before the next Monday.
+  assert.equal((await check({ now: MONDAY - 5 * 86400000 })).week.why, 'the learning started in 2026-W46: the first session is the next week\'s');
+  assert.equal(readLearning(settings.state).startWeek, '2026-W46');
   // Not before the morning run, not while a ticket run goes.
   assert.equal((await check({ morningDone: false })).week.why, "today's morning run hasn't run yet");
   assert.match((await check({ busy: '1 ticket run(s) going' })).week.why, /^the tickets first/);
@@ -470,7 +473,7 @@ test('the loop in observe or a dry run: nothing runs and nothing is written', as
   const calls = [];
   const forge = await forgeOf(w.settings, w.adapter);
   const r = await learningCheck({ settings: w.settings, clients: { forge }, io: { spawnClaude: fakeClaude(() => ({ patterns: [] }), calls) }, now: MONDAY, morningDone: true });
-  assert.deepEqual([calls.length, w.prs.length, fs.existsSync(path.join(w.settings.state, 'learning', 'proposals.json')), r.week.due], [0, 0, false, true]);
+  assert.deepEqual([calls.length, w.prs.length, fs.existsSync(path.join(w.settings.state, 'learning', 'proposals.json')), r.week.due], [0, 0, false, false]);
 });
 
 test('point 5: a toolkit rule that names the host, or a taste rule for a corpus, is never pushed', async () => {
