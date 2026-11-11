@@ -40,7 +40,9 @@ export const DEFAULT_LABELS = {
   rounds: 'Rounds',
   review: 'review',
   lineComments: 'line comments',
-  stages: { pr: 'first version', answerComments: 'comments', styleCheck: 'hand commit', enReview: 'EN review' },
+  // The heading over the answer pass's page edits in the description's list of edits (lib/answer-pass.mjs).
+  answerEdits: 'Edits from the answers',
+  stages: { pr: 'first version', answerComments: 'comments', styleCheck: 'hand commit', enReview: 'EN review', answerPass: 'answers' },
 };
 
 const norm = (s) => String(s ?? '').replace(/\r\n?/g, '\n').trim();
@@ -58,10 +60,12 @@ function answerLink(link, labels) {
 }
 
 // The questions of the description (`prs[].questions`): the open ones by reader, each with its number, the answered
-// ones folded under "resolved" with the answer in a few words and its link.
-export function renderQuestions(questions, labels) {
-  const open = (questions ?? []).filter((q) => !q.answer);
-  const done = (questions ?? []).filter((q) => q.answer);
+// ones folded under "resolved" with the answer in a few words and its link. A question a round asked that waits for the
+// answer pass (`held`) is not shown until the pass records it, answered or kept.
+export function renderQuestions(questions, labels, { hold = true } = {}) {
+  const shown = (questions ?? []).filter((q) => !(hold && q.held));
+  const open = shown.filter((q) => !q.answer);
+  const done = shown.filter((q) => q.answer);
   if (!open.length && !done.length) return labels.none;
   const readers = [...new Set([...Object.keys(labels.readers ?? {}).filter((r) => open.some((q) => q.reader === r)), ...open.map((q) => q.reader ?? '')])];
   const out = [];
@@ -114,10 +118,11 @@ export function renderRounds(rounds, labels, prUrl) {
 }
 
 // The three sections of one PR, from its ledger. `placeFacts`: the places with their page, source and why.
-export function renderSections(ledger, pr, labels, { placeFacts = false } = {}) {
+// `hold`: the questions held for the answer pass stay out (with the company repos unset, no pass comes: shown).
+export function renderSections(ledger, pr, labels, { placeFacts = false, hold = true } = {}) {
   const places = (ledger.places ?? []).filter((p) => p.repo === pr.repo && Number(p.pr) === Number(pr.number));
   return {
-    questions: renderQuestions(pr.questions ?? [], labels),
+    questions: renderQuestions(pr.questions ?? [], labels, { hold }),
     places: renderPlaces(places, labels, pr.url, { facts: placeFacts }),
     rounds: renderRounds(pr.rounds ?? [], labels, pr.url),
   };

@@ -5,6 +5,7 @@ import { notReadyYet, prId, readAllLedgers } from './ledger.mjs';
 import { readFeed } from './feed.mjs';
 import { reviewCommentFor } from './experts.mjs';
 import { duration as spell, mergedUntranslated } from './progress.mjs';
+import { renderAnswers } from './misses.mjs';
 
 // The morning report (design §7): a local file `<state>/reports/<date>.md`, written with no model call. Nothing goes to
 // the tracker or the forge. A separate skill reads it on demand.
@@ -67,7 +68,7 @@ const list = (rows, empty = 'none') => (rows.length ? rows.map((r) => `- ${r}`).
 
 // The report's text, from a status, the ledgers, the run log, the cards left in the host jobs' watch lists and the
 // weekly roles proposal.
-export function renderReport({ settings, st, date, runLog = [], watched = [], proposal = null, ledgers = readAllLedgers(settings.state) }) {
+export function renderReport({ settings, st, date, runLog = [], watched = [], proposal = null, answers = null, ledgers = readAllLedgers(settings.state) }) {
   const out = [];
   const byKey = new Map(ledgers.map((l) => [l.key, l]));
   out.push(`# Ticket flow, ${date}`, '');
@@ -224,6 +225,8 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
     const total = timed.reduce((s, r) => s + r.wallMs * (r.share ?? 1), 0);
     out.push("## Today's steps by wall-clock time", '', `${spell(total)} in all.`, '', list(timed.map((r) => `${new Date(Date.parse(r.start)).toTimeString().slice(0, 5)} ${r.key} ${r.stage}${r.pr ? ` (${r.pr})` : ''}${r.script ? (r.stage === 'baseMerge' ? ', the runner\'s merge of the base' : ', the runner\'s build') : ''}: ${spell(r.wallMs)}${typeof r.durationMs === 'number' && r.wallMs - r.durationMs >= 60000 ? ` (session ${spell(r.durationMs)})` : ''}, ${r.outcome}`)), '');
   }
+  // The week's answers and misses (lib/misses.mjs, TASK-105), on the day they were made.
+  out.push(...renderAnswers(answers));
   if (proposal?.proposals?.length) {
     out.push('## Proposed changes to the roles (yes or no)', '', list(proposal.proposals.map((p) => `${p.role}: ${p.change} (${p.why})`)), '');
   }

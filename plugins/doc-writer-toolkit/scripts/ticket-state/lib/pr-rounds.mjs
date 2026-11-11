@@ -1,5 +1,6 @@
 import { prId, readLedger } from './ledger.mjs';
 import { appendSections, renderSections, rewriteDescription } from './pr-description.mjs';
+import { companyReposOn } from './company-repos.mjs';
 
 // What the runner does on a PR after each step, a session's or its own, when the host takes review rounds
 // (`forge.reviewRounds`, D-142), with no model and never a role (lib/role-hook.mjs denies the two forge commands):
@@ -78,7 +79,7 @@ export async function followRounds({ settings, clients, keys, before }) {
       written.add(prId(p));
       try {
         const st = await clients.forge.prState({ ...at, withBody: true });
-        const sections = renderSections(l, { ...p, url: p.url ?? st.url ?? null }, settings.reviewRounds.labels, { placeFacts: Boolean(settings.checks?.places) });
+        const sections = renderSections(l, { ...p, url: p.url ?? st.url ?? null }, settings.reviewRounds.labels, { placeFacts: Boolean(settings.checks?.places), hold: companyReposOn(settings) });
         const r = rewriteDescription(st.body ?? '', sections);
         // A description with none of the markers (a PR opened before the switch) gets the three sections at its end, at
         // the PR's first round, so its new questions show; later, a person who took them all out is not overruled.
