@@ -13,7 +13,7 @@ import { prId } from './ledger.mjs';
 // `origin/<base>`, kept across tickets and never removed by the close step.
 
 // The stages that work on a PR branch, so their session gets the worktree (`build` and `idSync` are the runner's own).
-export const TREE_STAGES = ['write', 'uaReview', 'pr', 'answerComments', 'styleCheck', 'translate', 'enReview', 'locales', 'align', 'labelSync', 'build', 'visualPack', 'resync', 'idSync', 'baseMerge', 'baseFix'];
+export const TREE_STAGES = ['write', 'uaReview', 'answerPass', 'pr', 'answerComments', 'styleCheck', 'translate', 'enReview', 'locales', 'align', 'labelSync', 'build', 'visualPack', 'resync', 'idSync', 'baseMerge', 'baseFix'];
 export const DEFAULT_LINKS = ['node_modules'];
 
 const run = (cwd, args) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 }).trim();

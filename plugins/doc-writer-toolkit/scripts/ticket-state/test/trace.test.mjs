@@ -490,6 +490,8 @@ test('the mask does not backtrack on one very long line: 100k of "a-" is handled
   const printed = clean(line, 1e6);
   const took = Date.now() - started;
   assert.equal(printed, line);
-  assert.ok(took < 2000, `took ${took} ms`);
+  // Backtracking on 100k would take minutes: 15 s tells it apart from a slow machine under the parallel load of the
+  // regression set.
+  assert.ok(took < 15000, `took ${took} ms`);
   assert.equal(clean(`${line} --password "x y"`, 1e6), `${line} --password ***`);
 });

@@ -3,7 +3,7 @@
 // the role sessions and by the host's skills; this file only names them.
 
 // Ticket-level stages (before or around the PRs).
-export const TICKET_STAGES = ['triage', 'start', 'plan', 'questions', 'planGate', 'planApproval', 'videoGate', 'videoTry', 'videoBlock', 'videoExtract', 'videoImport', 'answers', 'write', 'uaReview', 'pr', 'follow', 'close'];
+export const TICKET_STAGES = ['triage', 'start', 'plan', 'questions', 'planGate', 'planApproval', 'videoGate', 'videoTry', 'videoBlock', 'videoExtract', 'videoImport', 'answers', 'write', 'uaReview', 'answerPass', 'pr', 'follow', 'close'];
 
 // The translation chain of one PR, in order. It runs only at the PR stage `translation`: a person moved the card there.
 export const CHAIN = ['translate', 'enReview', 'locales', 'align', 'labelSync', 'build', 'visualPack'];
@@ -12,7 +12,8 @@ export const CHAIN = ['translate', 'enReview', 'locales', 'align', 'labelSync', 
 // `untranslated` and `idSync` are the runner's own, with the translated label only (`forge.translatedLabel`).
 // `baseMerge` and `baseFix` keep a PR up to date with its base (`forge.keepFresh`): the runner's merge of the base into
 // the branch, and the session that resolves a merge that conflicted.
-export const PR_STAGES = ['move', 'follow', 'answerComments', 'styleCheck', 'questions', 'answers', ...CHAIN, 'readyForMerge', 'resync', 'untranslated', 'idSync', 'baseMerge', 'baseFix'];
+// `answerPass` on a PR: the answer pass after a review round asked new questions (lib/answer-pass.mjs).
+export const PR_STAGES = ['move', 'follow', 'answerComments', 'styleCheck', 'answerPass', 'questions', 'answers', ...CHAIN, 'readyForMerge', 'resync', 'untranslated', 'idSync', 'baseMerge', 'baseFix'];
 
 export const STATUSES = ['running', 'done', 'failed'];
 
@@ -34,6 +35,8 @@ export const ROLE_OF = {
   answers: 'writer',
   write: 'writer',
   uaReview: 'reviewer',
+  // The answer pass (TASK-105): a writer's session whose only job is to answer what is left open.
+  answerPass: 'writer',
   pr: 'writer',
   follow: null,
   close: null,
@@ -101,7 +104,7 @@ export function finishRank(step) {
   if (step.stage === 'close') return 0;
   if (['readyForMerge', 'resync', 'untranslated', 'idSync', 'baseMerge', 'baseFix'].includes(step.stage)) return 1;
   if (CHAIN.includes(step.stage) || (['move', 'follow'].includes(step.stage) && ['finalReview', 'translation'].includes(step.to))) return 2;
-  if (step.stage === 'answerComments' || step.stage === 'styleCheck' || (step.stage === 'move' && step.to === 'smeReview') || step.stage === 'follow' || step.stage === 'move') return 3;
+  if (step.stage === 'answerComments' || step.stage === 'styleCheck' || (step.stage === 'answerPass' && step.pr) || (step.stage === 'move' && step.to === 'smeReview') || step.stage === 'follow' || step.stage === 'move') return 3;
   if (['answers', 'planApproval', 'videoImport', 'videoTry', 'videoBlock', 'videoExtract'].includes(step.stage)) return 4;
   return 5;
 }

@@ -3,6 +3,8 @@ import { prId } from './ledger.mjs';
 import { editsOf, mergedEdits, nextEditNumber, parseReply, parseThreadReply, resolveReply, resolveThreadReply, suggestionOf } from './edits.mjs';
 import { IMAGE } from './world.mjs';
 import { parseStartHours } from './settings.mjs';
+import { companyReposOn } from './company-repos.mjs';
+import { heldPending, passGaveUp } from './answer-pass.mjs';
 
 // The next-step rule of the ticket flow (context/ticket-flow.md, "The rule"). A pure function of a ledger and what the
 // tracker, the forge, git and the files show now: the world wins over the ledger. First match wins:
@@ -82,20 +84,41 @@ function phaseOf(l) {
   if (last === 'questions' && rec?.status === 'done') return 'questions';
   if (last === 'planGate' && rec?.status === 'done') return 'planGate';
   if (['videoGate', 'videoTry', 'videoBlock', 'videoExtract'].includes(last) && l.stages?.videoGate?.status === 'done') return 'videoGate';
-  if (l.stages?.write?.status === 'done' || ['write', 'uaReview', 'pr'].includes(last)) return 'writing';
+  // A pass on the questions the plan held, with the plan not done yet: still planning.
+  if (last === 'answerPass' && l.heldQuestions?.from === 'plan' && l.stages?.plan?.status !== 'done') return 'planning';
+  if (l.stages?.write?.status === 'done' || ['write', 'uaReview', 'answerPass', 'pr'].includes(last)) return 'writing';
   if (['start', 'plan', 'answers', 'planApproval', 'videoImport'].includes(last)) return 'planning';
   return 'card';
 }
 
-// The next writer or reviewer stage before the PR: plan, then write, then the UA review, then the PR.
-function preparationStep(l) {
+// The next writer or reviewer stage before the PR: plan, then write, then the UA review, then the answer pass (with
+// `companyRepos`, TASK-105), then the PR. With no `companyRepos`, no pass: the PR follows the UA review, as before, and
+// `notes` says so.
+function preparationStep(l, settings, notes = []) {
   if (l.stages?.plan?.status !== 'done') return l.stages?.start?.status === 'done' ? step('plan') : startStep(l);
   const resumed = ['answers', 'planApproval', 'videoImport'].filter((s) => l.stages?.[s]?.status === 'done').map((s) => l.stages[s].seq);
   const lastResume = resumed.length ? Math.max(...resumed) : 0;
   const writeRec = l.stages?.write;
   if (!writeRec || writeRec.status !== 'done' || writeRec.seq < lastResume) return step('write');
   if (!doneAfter(l, 'uaReview', 'write')) return step('uaReview');
-  if (!doneAfter(l, 'pr', 'uaReview')) return step('pr');
+  if (companyReposOn(settings) && passGaveUp(l)) {
+    // The pass after this UA review failed (lib/answer-pass.mjs, `passFailed`): the PR follows the UA review with what
+    // the write left, as with no pass, so nothing waits on it.
+    if (!doneAfter(l, 'pr', 'uaReview')) {
+      notes.push('the answer pass failed after the UA review, so the PR follows the UA review with what the write left open');
+      return step('pr');
+    }
+    return null;
+  }
+  if (companyReposOn(settings)) {
+    if (!doneAfter(l, 'answerPass', 'uaReview')) return step('answerPass');
+    if (!doneAfter(l, 'pr', 'answerPass')) return step('pr');
+    return null;
+  }
+  if (!doneAfter(l, 'pr', 'uaReview')) {
+    notes.push('no answer pass: the host sets no companyRepos, so the PR follows the UA review as before');
+    return step('pr');
+  }
   return null;
 }
 
@@ -368,7 +391,8 @@ function derive(l, w) {
 
   // Row 15 (row 14 is the startable groups).
   if (phase === 'planning' || phase === 'writing') {
-    const s = preparationStep(l);
+    // The questions the plan or the write held for the answer pass (TASK-105) go to it before anything else.
+    const s = companyReposOn(w.settings) && heldPending(l) ? step('answerPass', { held: true }) : preparationStep(l, w.settings, out.notes);
     if (s) out.steps.push(s);
   }
   return out;
@@ -552,6 +576,9 @@ function prStep(l, p, w, out, prs) {
   // (`forge.idComments.rename`): the rename, with no model step, before the other comments.
   const rename = renameAsked(pr, world, w);
   if (rename.length) return step('idSync', { pr: id, head, commits: [], rename });
+  // Row 10b, with `companyRepos` and review rounds (TASK-105): a round asked new questions, held from the description
+  // until the answer pass on this PR records what it answered and what it kept.
+  if (pr.answerPassDue && companyReposOn(w.settings) && w.settings.reviewRounds) return step('answerPass', { pr: id, head, nextEdit: nextEditNumber(pr) });
   // Row 11.
   const approved = p.stage === 'smeReview' ? expertApproved(l, p) : null;
   if (world.newComments?.length) {
