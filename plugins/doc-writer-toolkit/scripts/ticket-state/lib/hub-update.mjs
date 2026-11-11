@@ -46,7 +46,7 @@ export async function updateHub(root, { git = runGit, fetchMs = HUB_FETCH_MS, ba
   const [ahead, behind] = counts.length === 2 && counts.every(Number.isFinite) ? counts : [null, null];
   if (behind === null) return { outcome: 'failed', base, note: `the hub's HEAD can't be compared with origin/${base}: the hub is not updated` };
   if (!behind) return { outcome: 'ahead', base, from, ahead };
-  const stay = (why) => ({ outcome: 'behind', base, from, to, commits: behind, note: `the hub is ${behind} commit(s) behind origin/${base} and was not updated: ${why}. Its settings are read as they were until it is` });
+  const stay = (why, extra = {}) => ({ outcome: 'behind', base, from, to, commits: behind, ...extra, note: `the hub is ${behind} commit(s) behind origin/${base} and was not updated: ${why}. Its settings are read as they were until it is` });
   const branch = git(root, ['symbolic-ref', '--short', '-q', 'HEAD']);
   if (!branch.ok || branch.out !== base) return stay(branch.ok ? `it is on ${branch.out}, not ${base}` : 'its HEAD is detached');
   if (ahead) return stay(`its ${base} has ${ahead} commit(s) origin's doesn't have`);
@@ -56,11 +56,20 @@ export async function updateHub(root, { git = runGit, fetchMs = HUB_FETCH_MS, ba
   const invalid = validate ? await validate(to) : null;
   if (invalid) return stay(`the settings at origin/${base} don't hold (${invalid})`);
   const held = busy ? busy() : null;
-  if (held) return stay(`${held}, which read(s) the hub's files: it moves at a check with none`);
+  if (held) return stay(`${held}, which read(s) the hub's files: it moves at a check with none`, { busy: true });
   const merged = git(root, ['-c', 'core.hooksPath=/dev/null', 'merge', '--ff-only', '--no-overwrite-ignore', '-q', to], { timeout: 0 });
   const now = git(root, ['rev-parse', '--verify', '-q', 'HEAD']).out;
   if (now !== to) return stay(`git would not fast-forward it (${merged.err || (merged.ok ? `HEAD is ${now.slice(0, 7)} after the merge` : 'no reason given')})`);
   return { outcome: 'moved', base, from, to, commits: behind };
+}
+
+// The drain (TASK-106): a hub kept behind by the runs going on for `DRAIN_MS` would wait for ever on a busy flow, so
+// from then on no new run starts (no hand-on, no ready group) until it has moved: the runs going end, and the next
+// check moves it. `hub`: the state the last full check left (`feed.json`, `hub`, with `behindSince`). Null, or why.
+export const DRAIN_MS = 30 * 60 * 1000;
+export function hubDrain(hub, now = Date.now()) {
+  if (hub?.outcome !== 'behind' || !hub.busy || !hub.behindSince || now - Date.parse(hub.behindSince) < DRAIN_MS) return null;
+  return `the hub has been behind origin/${hub.base} since ${hub.behindSince}, kept there by the runs going on: no new run starts until it has moved`;
 }
 
 // One phrase for the watcher's line and the run log; none for a note the last check gave already (`repeat`).

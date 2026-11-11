@@ -134,7 +134,7 @@ export async function settingsForCheck({ root, values = {}, update = updateHub, 
   const state = settings?.state ?? (await stateFolderOf({ root, settings: values.settings }));
   // The hub as a target of its own names its base; else origin's default branch.
   const base = settings?.targets.find((t) => t.path && path.resolve(root, t.path) === root)?.base ?? null;
-  const hub = await update(root, { base, validate: (ref) => sharedProblemAt({ root, settings: values.settings, ref }), busy: () => busyHub(state, now()) });
+  const hub = await update(root, { base, validate: (ref) => sharedProblemAt({ root, settings: values.settings, ref }), busy: () => (state ? busyHub(state, now()) : 'the state folder is not known (the settings file parses neither in the checkout nor at HEAD), so the runs going on can\'t be seen') });
   if (!broken) return { settings: hub?.outcome === 'moved' ? await load() : settings, hub };
   if (hub?.outcome === 'moved') return { settings: await load(), hub };
   throw new CliError(`${broken.message}${hubLine(hub) ? ` (${hubLine(hub)})` : ''}`, { code: broken.exitCode ?? 2 });

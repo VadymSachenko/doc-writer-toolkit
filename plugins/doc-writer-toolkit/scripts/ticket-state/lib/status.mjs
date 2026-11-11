@@ -18,6 +18,9 @@ import { withoutHeader } from '../../tracker/lib/comment-header.mjs';
 
 const bare = (t) => String(t ?? '').replace(/‌/g, '').trim();
 const OPEN_STATES = new Set(['ready', 'needsInfo', 'new', 'closed', 'outside', 'merged']);
+// The card statuses of the flow where a ticket is worked on: a PR closed unmerged of a ticket whose card is in one of
+// them may be redone, so its pages still count.
+const REDO_STATUSES = new Set(['inProgress', 'blocked', 'smeReview', 'finalReview', 'translation']);
 
 // `tried` and `retryWaiting` come from a run (lib/runner.mjs): the tickets it already started or tried, and whether it may
 // give a waiting failed start its one more try (`startable` in lib/limits.mjs: `true`, or a Set of the tickets that may). `inFlight`: the tickets of the starts
@@ -128,11 +131,17 @@ export async function computeStatus({ settings, clients, now = Date.now(), only 
     return { key: t.key, number: card?.number ?? null, name: card?.name ?? '', desc: card?.desc ?? '', targets: l.triage?.targets ?? [], relations: l.triage?.relations ?? [], together: l.triage?.together ?? [], pages: workPages(l, prWorld, { locked: Boolean(locks.get(l.group)?.live) || t.state === 'locked' }) };
   });
   // A ticket outside the flow because a PR of it was closed unmerged is not in work, but its branch still has the edits,
-  // and the PR may be opened again: its pages hold a ready ticket back too (`closed`), its relations don't.
+  // and the PR may be opened again: its pages hold a ready ticket back too (`closed`), its relations don't. Only while
+  // its card is in a working status of the flow, where someone may redo it: a card archived, gone, or moved to done, out
+  // of scope, the drafts or the ready status releases its pages (the owner's way to let the others start).
   const closedUnmerged = (l) => (l.prs ?? []).some((p) => p.number && !p.merged && prWorld.get(`${l.key}/${prId(p)}`)?.state === 'closed');
+  const redoing = (l) => {
+    const card = l.card?.id ? cards.get(l.card.id) : null;
+    return Boolean(card) && !card.closed && REDO_STATUSES.has(card.status);
+  };
   for (const t of tickets) {
     const l = t.ledger === 'present' && t.state === 'outside' && ledgers.find((x) => x.key === t.key);
-    if (l && l.stages?.close?.status !== 'done' && closedUnmerged(l)) workView.push({ key: t.key, closed: true, number: null, name: '', desc: '', targets: l.triage?.targets ?? [], relations: [], together: [], pages: workPages(l, prWorld) });
+    if (l && l.stages?.close?.status !== 'done' && closedUnmerged(l) && redoing(l)) workView.push({ key: t.key, closed: true, number: null, name: '', desc: '', targets: l.triage?.targets ?? [], relations: [], together: [], pages: workPages(l, prWorld) });
   }
   const repos = (t) => new Set((t.targets ?? []).map((id) => settings.targets.find((x) => x.id === id)?.repo).filter(Boolean));
   const groups = groupsOf(ready, settings).map((g) => {

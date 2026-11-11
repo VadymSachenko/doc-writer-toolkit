@@ -19,7 +19,7 @@ import { commentWait } from './quiet.mjs';
 import { dropHandOnStep, handOnLive, liveHandOnKeys, runsGoingIn, startsInFlight, takeHandOn } from './forge-state.mjs';
 import { makeDispatcher } from './dispatch.mjs';
 import { videoFetchDue } from './rule.mjs';
-import { hubLine } from './hub-update.mjs';
+import { hubDrain, hubLine } from './hub-update.mjs';
 
 // One check of the watcher (design §5, D-048), started by launchd every few minutes. No model call of its own:
 //   1. read every source since its cursor; a check that finds nothing ends here, with no status, no runner, no claude;
@@ -246,7 +246,11 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
       /* unreadable: said again */
     }
     const repeat = options.hub.outcome === 'skipped' && last?.outcome === 'skipped' && last.note === options.hub.note;
-    out.hub = { ...options.hub, ...(repeat ? { repeat: true } : {}) };
+    // Behind since the first check that found it so: in the note, and the drain counts from it (lib/hub-update.mjs).
+    const behindSince = options.hub.outcome === 'behind' ? (last?.outcome === 'behind' && last.behindSince) || iso(checkStart) : null;
+    out.hub = { ...options.hub, ...(repeat ? { repeat: true } : {}), ...(behindSince ? { behindSince, note: `${options.hub.note} (behind since ${behindSince})` } : {}) };
+    const drain = hubDrain(out.hub, checkStart);
+    if (drain) out.hub = { ...out.hub, drain: true, note: `${out.hub.note}. ${drain[0].toUpperCase()}${drain.slice(1)}` };
     if (hubLine(out.hub)) out.notes.push(hubLine(out.hub));
     // A move is in the run log whatever the check does next (mode off, the lock held): it happened.
     if (options.hub.outcome === 'moved' && !dryRun) appendRunLog(settings.state, today, [{ at: iso(checkStart), kind: 'hub', outcome: 'moved', base: options.hub.base, from: options.hub.from, to: options.hub.to, note: hubLine(options.hub) }]);
@@ -275,7 +279,7 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
     // When the last full check began: the watcher's tick runs the next one `watchMinutes` after it (checkKindOf).
     next.fullAt = iso(checkStart);
     // The hub's state at this check, for the report.
-    if (out.hub) next.hub = { at: iso(checkStart), outcome: out.hub.outcome, base: out.hub.base, ...(out.hub.commits ? { commits: out.hub.commits } : {}), ...(out.hub.note ? { note: out.hub.note } : {}) };
+    if (out.hub) next.hub = { at: iso(checkStart), outcome: out.hub.outcome, base: out.hub.base, ...(out.hub.commits ? { commits: out.hub.commits } : {}), ...(out.hub.busy ? { busy: true } : {}), ...(out.hub.behindSince ? { behindSince: out.hub.behindSince } : {}), ...(out.hub.note ? { note: out.hub.note } : {}) };
     const isAlive = io.isAlive ? { isAlive: io.isAlive } : {};
 
     // 0. The runs earlier checks handed on (lib/dispatch.mjs). One that ended leaves its result: its notifications (a
@@ -331,7 +335,8 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
     if (lostStart) next.starts = { ...(next.starts ?? {}), again: lostStart, retryAt: iso(checkStart + RETRY_MS) };
     out.finished = ended.map((h) => ({ id: h.id, keys: h.keys, stage: h.stage }));
     // One dispatcher per run this check makes; each adds its runs to `next.handOns`, written at once.
-    const dispatchFor = (by, why = null) => makeDispatcher({ settings, io, records: next.handOns, by, why, claude });
+    // While the hub drains (lib/hub-update.mjs `hubDrain`), no new run starts: the dispatcher hands on nothing.
+    const dispatchFor = (by, why = null) => makeDispatcher({ settings, io, records: next.handOns, by, why, claude, drain: () => hubDrain(next.hub, clock()) });
     // A group the run didn't hand on waits for a later check: no run slot, a run of another process holds it, its
     // process couldn't start, or no usage reading. A guard stop for the allowance drops it, as a run of its own would.
     const notHanded = (r) => (r?.handedOn ?? []).filter((x) => !x.handedOn && !(x.guard && !/^no usage reading/.test(x.guard))).flatMap((x) => x.keys);

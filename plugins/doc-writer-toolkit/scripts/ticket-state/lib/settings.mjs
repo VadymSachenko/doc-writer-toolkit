@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { loadClaudeConfig } from '../../ui-labels/lib/config.mjs';
@@ -488,18 +489,33 @@ export async function sharedProblemAt({ root, settings: flag, ref }) {
 }
 
 // The state folder as the shared file names it, read without validating the rest: what the watcher looks at for the runs
-// going on when the settings don't load (lib/hub-update.mjs `busy`). The default when the file doesn't say or doesn't read.
+// going on when the settings don't load (lib/hub-update.mjs `busy`). The working file, else the file at HEAD; the
+// default when the one that parses names none. Null when neither parses: the folder can't be known, and a hand-on's
+// locks may be elsewhere.
 export async function stateFolderOf({ root, settings: flag }) {
   const claude = await loadClaudeConfig(root);
   const fallback = path.join(claude['toolkit state root'] || '.doc-toolkit/', 'ticket-flow/');
-  let named = null;
+  const file = await settingsFile(root, flag);
+  const parsed = (text) => {
+    try {
+      const raw = JSON.parse(text);
+      return raw && typeof raw === 'object' ? raw : null;
+    } catch {
+      return null;
+    }
+  };
+  let working = null;
   try {
-    const raw = readJsonFile(await settingsFile(root, flag), 'settings file');
-    if (typeof raw?.state === 'string' && raw.state.trim()) named = raw.state;
+    working = fs.readFileSync(file, 'utf8');
   } catch {
-    /* the default */
+    /* no working file */
   }
-  return path.resolve(root, named ?? fallback);
+  const raw = (working !== null ? parsed(working) : null) ?? (() => {
+    const head = textAt(root, file, 'HEAD');
+    return head !== null ? parsed(head) : null;
+  })();
+  if (!raw) return working === null && textAt(root, file, 'HEAD') === null ? path.resolve(root, fallback) : null;
+  return path.resolve(root, typeof raw.state === 'string' && raw.state.trim() ? raw.state : fallback);
 }
 
 // What the local file may set: only its own keys, and of a role only what shapes the session's cost. A local file is

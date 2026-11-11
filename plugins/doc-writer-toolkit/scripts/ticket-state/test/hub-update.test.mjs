@@ -5,7 +5,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { host, rawSettings, tmp } from './fakes.mjs';
 import { updateHub } from '../lib/hub-update.mjs';
-import { loadSettings, sharedProblemAt } from '../lib/settings.mjs';
+import { loadSettings, sharedProblemAt, stateFolderOf } from '../lib/settings.mjs';
 import { takeLock } from '../lib/locks.mjs';
 import { takeWatchLock } from '../lib/watch.mjs';
 import { busyHub, settingsForCheck } from '../watcher.mjs';
@@ -220,6 +220,25 @@ test('merged settings that don\'t hold: the hub stays where it is, with the reas
   r = await settingsForCheck({ root: h.hub, values: {} });
   assert.deepEqual([r.hub.outcome, git(h.hub, 'rev-parse', 'HEAD')], ['moved', fix]);
   assert.deepEqual(r.settings.relatedRepos.map((x) => x.repo), ['code-two']);
+});
+
+test('the state folder when the settings don\'t parse: the working file\'s, else the one at HEAD; unknown when neither parses, and then the hub stays put', async () => {
+  const h = hubAndOrigin({ shared: { state: '.flow-elsewhere/' } });
+  assert.equal(await stateFolderOf({ root: h.hub }), path.join(h.hub, '.flow-elsewhere'));
+  // The working file doesn't parse: HEAD's names the folder, so a hand-on's lock there is seen.
+  fs.writeFileSync(path.join(h.hub, '.claude', 'ticket-flow.json'), '{ broken');
+  assert.equal(await stateFolderOf({ root: h.hub }), path.join(h.hub, '.flow-elsewhere'));
+  // Neither parses (committed broken): unknown, and the update moves nothing, saying why.
+  git(h.hub, 'commit', '-qam', 'broken by hand');
+  git(h.hub, 'push', '-q', 'origin', 'main');
+  assert.equal(await stateFolderOf({ root: h.hub }), null);
+  git(h.seed, 'pull', '-q', 'origin', 'main');
+  const fix = h.push({ '.claude/ticket-flow.json': settingsText({ state: '.flow-elsewhere/' }) });
+  await assert.rejects(settingsForCheck({ root: h.hub, values: {} }), /the state folder is not known/);
+  assert.notEqual(git(h.hub, 'rev-parse', 'HEAD'), fix);
+  // No settings file at all, anywhere: the default folder.
+  const bare = tmp();
+  assert.equal(await stateFolderOf({ root: bare }), path.resolve(bare, '.doc-toolkit/ticket-flow/'));
 });
 
 test('a run going on or another full check: the hub waits for a check with none, and says so', async () => {

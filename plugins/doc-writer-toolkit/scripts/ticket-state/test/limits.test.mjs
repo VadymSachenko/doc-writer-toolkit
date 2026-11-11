@@ -483,9 +483,9 @@ test('together joins in either direction, as #N or N, and not across repos; a ca
 // a number null for a branch with no PR yet, `files` undefined for a PR whose files the forge didn't give.
 const PAYMENT = 'api-docs docs/api-reference/create-payment/create-payment.md';
 const workTriage = { verdict: 'docs-required', targets: ['api', 'guide'], size: 'edit', relations: ['#1194'], pages: [`${PAYMENT} — the card details paragraphs`, 'guide-docs docs/methods/cash/cash.md — Lifecycle', 'guide-docs docs/routing/queue/queue.md — Queue handling'] };
-const inWorkWith = (w, number, prs, { status = 'finalReview', opened = true, triage = workTriage } = {}) => {
-  const c = card({ number, status });
-  w.tracker.cards.push(c);
+const inWorkWith = (w, number, prs, { status = 'finalReview', opened = true, triage = workTriage, archived = false, gone = false } = {}) => {
+  const c = card({ number, status, closed: archived });
+  if (!gone) w.tracker.cards.push(c);
   for (const p of prs) if (p.number) w.forge.prs.push(pr({ repo: p.repo, number: p.number, state: p.state ?? 'open', files: p.files, filesTruncated: p.filesTruncated, filesRenamed: p.filesRenamed }));
   const stages = { triage: 'done', start: 'done', plan: 'done', write: opened ? 'done' : 'running', ...(opened ? { uaReview: 'done', pr: 'done' } : {}) };
   ledger(w, c, { startedBy: 'schedule', stages, triage, prs: prs.map((p) => ({ repo: p.repo, number: p.number ?? null, targets: [p.repo === 'api-docs' ? 'api' : 'guide'], review: p.repo === 'api-docs' ? 'places' : 'sme', branch: `${number}-docs`, stage: p.number ? status : 'writing' })) });
@@ -569,6 +569,21 @@ test('a PR closed unmerged holds its files; a rename keeps the triage pages besi
   assert.equal(st.tickets.find((t) => t.key === '1157').state, 'outside', 'not in work, and not counted');
   assert.deepEqual(st.groups.find((g) => g.keys.includes('1193')).waitsFor, ['1157']);
   assert.deepEqual(st.notStarted.map((n) => n.reasons), [[`related to 1157, its PR closed unmerged: a page 1157's PR #62 changes (${PAYMENT})`]]);
+  // Released when its card leaves the working statuses: archived, gone, done, out of scope, the drafts or ready.
+  for (const how of [{ archived: true }, { gone: true }, { status: 'done' }, { status: 'outOfScope' }, { status: 'drafts' }, { status: 'ready' }]) {
+    const wr = world({ extra: estimates });
+    inWorkWith(wr, 1157, [{ repo: 'api-docs', number: 62, state: 'closed', files: ['docs/api-reference/create-payment/create-payment.md'] }], { status: 'inProgress', ...how });
+    readyOn(wr);
+    const sr = await wr.status({ usage: usage(5) });
+    assert.deepEqual(sr.groups.find((g) => g.keys.includes('1193')).waitsFor, [], JSON.stringify(how));
+  }
+  // In the other working statuses it still holds them.
+  for (const status of ['blocked', 'smeReview', 'finalReview', 'translation']) {
+    const wh = world({ extra: estimates });
+    inWorkWith(wh, 1157, [{ repo: 'api-docs', number: 62, state: 'closed', files: ['docs/api-reference/create-payment/create-payment.md'] }], { status });
+    readyOn(wh);
+    assert.deepEqual((await wh.status({ usage: usage(5) })).groups.find((g) => g.keys.includes('1193')).waitsFor, ['1157'], status);
+  }
   // Its relations don't hold anything: only its pages.
   const w1 = world({ extra: estimates });
   inWorkWith(w1, 1157, [{ repo: 'api-docs', number: 62, state: 'closed', files: ['docs/methods/other.md'] }], { status: 'inProgress', triage: { ...workTriage, relations: ['#1193'] } });
