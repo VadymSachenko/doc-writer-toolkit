@@ -305,6 +305,8 @@ export async function readPrs({ settings, forge, ledgers }) {
       if (!pr.number || pr.merged) continue;
       const st = await forge.prState({ repo: pr.repo, number: pr.number });
       const entry = { state: st.state, url: st.url ?? null, headCommit: st.headCommit, reviewRequests: st.reviewRequests ?? [], reviewDecision: st.reviewDecision ?? null, labels: st.labels ?? [], mergeCommit: st.mergeCommit ?? null, mergedAt: st.mergedAt ?? null, newComments: [] };
+      // The paths the PR changes, as far as the forge gave them: the pages the ticket holds (lib/limits.mjs `workPages`).
+      if (Array.isArray(st.files)) Object.assign(entry, { files: st.files, ...(st.filesTruncated ? { filesTruncated: true } : {}), ...(st.filesRenamed ? { filesRenamed: true } : {}) });
       // The base's tip and the head's CI, for keeping the branch up to date with its base (`forge.keepFresh`).
       if (settings.keepFresh) Object.assign(entry, { baseCommit: st.baseCommit ?? null, checks: st.checks ?? null, updatedAt: st.updatedAt ?? null });
       if (st.state === 'open') {

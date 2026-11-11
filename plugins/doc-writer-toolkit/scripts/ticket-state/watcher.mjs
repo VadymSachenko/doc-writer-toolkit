@@ -3,7 +3,11 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { CliError } from './lib/errors.mjs';
-import { loadSettings } from './lib/settings.mjs';
+import { loadSettings, sharedProblemAt, stateFolderOf, tickSecondsOf } from './lib/settings.mjs';
+import { allLocks } from './lib/locks.mjs';
+import { runsGoingIn } from './lib/forge-state.mjs';
+import { watchLockHolder } from './lib/watch.mjs';
+import { hubLine, updateHub } from './lib/hub-update.mjs';
 import { makeClients } from './lib/world.mjs';
 import { prepareEnv } from './lib/env.mjs';
 import { runHandOn, runTick } from './lib/forge-watch.mjs';
@@ -79,6 +83,7 @@ export function oneLine(out) {
   const failed = out.sources.filter((s) => s.outcome === 'failed' || s.outcome === 'gap');
   if (failed.length) bits.push(`${failed.length} source(s) failing`);
   if (out.morning) bits.push('morning run');
+  if (hubLine(out.hub)) bits.push(hubLine(out.hub));
   if (out.errors?.length) bits.push(`${out.errors.length} part(s) failed: ${out.errors.map((e) => e.part).join(', ')}`);
   for (const f of out.finished ?? []) bits.push(`run ${f.id} of ${f.keys.join(', ')} ended`);
   if (out.run?.handedOn) {
@@ -106,6 +111,44 @@ export function forgeLine(out) {
   return bits.join('; ');
 }
 
+// The settings this process runs with. A process that runs the full check first brings the hub up to its origin
+// (lib/hub-update.mjs), so a merged hub PR counts at this check with no person's pull, and reads the settings again when
+// it moved. Not a tick that only starts the full check, a forge check or a hand-on (it reads what the full check left),
+// a dry run or mode off. Settings that don't load (a bad file committed by hand, say) stop every process at this read,
+// so then any process but a hand-on or a dry run tries the update first: a fix merged on the forge is pulled, and the
+// error stands, with the hub's note, until one is. Returns { settings, hub }, `hub` null when no update was tried.
+export async function settingsForCheck({ root, values = {}, update = updateHub, now = Date.now }) {
+  const load = () => loadSettings({ root, settings: values.settings });
+  let settings = null;
+  let broken = null;
+  try {
+    settings = await load();
+  } catch (e) {
+    if (values['hand-on'] !== undefined || values['dry-run']) throw e;
+    broken = e;
+  }
+  if (!broken) {
+    const runsFull = Boolean(values.full) || (!values.forge && values['hand-on'] === undefined && tickSecondsOf(settings) >= settings.schedule.watchMinutes * 60);
+    if (!runsFull || values['dry-run'] || settings.mode === 'off') return { settings, hub: null };
+  }
+  const state = settings?.state ?? (await stateFolderOf({ root, settings: values.settings }));
+  // The hub as a target of its own names its base; else origin's default branch.
+  const base = settings?.targets.find((t) => t.path && path.resolve(root, t.path) === root)?.base ?? null;
+  const hub = await update(root, { base, validate: (ref) => sharedProblemAt({ root, settings: values.settings, ref }), busy: () => (state ? busyHub(state, now()) : 'the state folder is not known (the settings file parses neither in the checkout nor at HEAD), so the runs going on can\'t be seen') });
+  if (!broken) return { settings: hub?.outcome === 'moved' ? await load() : settings, hub };
+  if (hub?.outcome === 'moved') return { settings: await load(), hub };
+  throw new CliError(`${broken.message}${hubLine(hub) ? ` (${hubLine(hub)})` : ''}`, { code: broken.exitCode ?? 2 });
+}
+
+// What reads the hub's files now, as one phrase, or null: the runs going on (each live group lock, and each run a check
+// handed on that holds none yet) and another full check (it may be running a host job).
+export function busyHub(state, now = Date.now()) {
+  const runs = runsGoingIn(state, { locks: allLocks(state, now), now }).size;
+  const check = watchLockHolder(state, { now });
+  const bits = [...(runs ? [`${runs} run(s) going`] : []), ...(check && check.pid !== process.pid ? [`a full check running (pid ${check.pid})`] : [])];
+  return bits.length ? bits.join(' and ') : null;
+}
+
 export async function main(argv, io = {}) {
   const { stdout = process.stdout, env = process.env } = io;
   const { values, positionals } = parseArgs({ args: argv, options: OPTIONS, allowPositionals: true });
@@ -123,9 +166,9 @@ export async function main(argv, io = {}) {
     return 0;
   }
   const root = path.resolve(values.root ?? process.cwd());
-  const settings = await loadSettings({ root, settings: values.settings });
-  const { notes, claudeEnv } = prepareEnv(settings, env);
   const dryRun = Boolean(values['dry-run']);
+  const { settings, hub } = await settingsForCheck({ root, values, update: io.updateHub });
+  const { notes, claudeEnv } = prepareEnv(settings, env);
   const clients = makeClients({ settings, env, dryRun, io: { ...io, ...(values.origin ? { trackerOrigin: values.origin } : {}) } });
   if (values['hand-on'] !== undefined) {
     const r = await runHandOn({ settings, clients, io: { ...io, claudeEnv }, options: { id: values['hand-on'], keys: values.ticket, dryRun, claude: values.claude ?? 'claude' } });
@@ -134,7 +177,7 @@ export async function main(argv, io = {}) {
     return 0;
   }
   const kind = values.full ? 'full' : values.forge ? 'forge' : null;
-  const out = await runTick({ settings, clients, io: { notify, ...io, claudeEnv }, options: { dryRun, claude: values.claude ?? 'claude', notes, ...(kind ? { kind } : {}) } });
+  const out = await runTick({ settings, clients, io: { notify, ...io, claudeEnv }, options: { dryRun, claude: values.claude ?? 'claude', notes, ...(kind ? { kind } : {}), ...(hub ? { hub } : {}) } });
   if (values.quiet) {
     if (!out.quiet) stdout.write(oneLine(out) + '\n');
   } else stdout.write(JSON.stringify({ ok: true, command: 'watch', ...out, requests: clients.requests(), caught: clients.caught() }, null, 2) + '\n');

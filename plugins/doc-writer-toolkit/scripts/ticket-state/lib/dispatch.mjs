@@ -55,7 +55,8 @@ export const handOnId = (ms) => `${iso(ms).replace(/[-:.]/g, '')}-${crypto.rando
 // The `dispatch` option of the runner (lib/runner.mjs) for one full check. `records`: the full check's live runs (its
 // `feed.handOns`, which this adds to); `by`: `watcher`, `morning` or `startPass`; `why`: the start pass's reason.
 // Returns { group, keys, stage } with `id` and `pid` once handed on, or `waits`, `held` or `error`.
-export function makeDispatcher({ settings, io = {}, records, by, why = null, claude = 'claude' }) {
+// `drain`: why no new run starts now (the hub waiting for the runs to end, lib/hub-update.mjs `hubDrain`), or null.
+export function makeDispatcher({ settings, io = {}, records, by, why = null, claude = 'claude', drain = () => null }) {
   const clock = io.now ?? Date.now;
   const live = io.isAlive ? { isAlive: io.isAlive } : {};
   const groupOf = (k) => {
@@ -72,6 +73,8 @@ export function makeDispatcher({ settings, io = {}, records, by, why = null, cla
     const locks = allLocks(settings.state, at);
     const going = [...forgeHandOns(settings.state), ...records].filter((h) => handOnLive(h, { now: at, ...live }));
     if (locks.some((l) => l.live && l.group === group)) return { ...base, held: `its group's lock (${group})` };
+    const draining = drain();
+    if (draining) return { ...base, waits: draining };
     const holder = going.find((h) => h.keys.some((k) => step.keys.includes(k)));
     if (holder) return { ...base, held: `run ${holder.id}, handed on at ${holder.at}` };
     const busy = runsGoing({ locks, handOns: going, now: at, ...live, groupOf }).size;

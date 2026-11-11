@@ -203,6 +203,23 @@ test('prState: state, head and merge commits, review decision, requests and labe
   assert.deepEqual(s.reviewRequests, [{ login: 'rev-one' }, { team: 'tech-writers' }]);
   assert.equal(s.mergeState, 'CLEAN');
   assert.equal(s.nodeId, undefined);
+  // The paths it changes, in the same query; a longer list than the query reads says so.
+  assert.deepEqual(s.files, ['docs/export/export.md', 'i18n/en/docusaurus-plugin-content-docs/current/export/export.md']);
+  assert.deepEqual([s.filesTruncated, s.filesRenamed], [undefined, undefined]);
+  const long = fixture('gql-pr-7');
+  long.data.repository.pullRequest.files.totalCount = 140;
+  const many = setup({ routes: { 'graphql PrByNumber': long } });
+  const t = await many.forge.prState({ repo: 'guide-docs', number: 7 });
+  assert.equal(t.filesTruncated, true);
+  assert.equal(many.calls.length, 1, 'one query, the files with it');
+  assert.match(many.calls[0].query, /files\(first: 100\) \{ totalCount nodes \{ path changeType \} \}/);
+  // A rename: the new path only, and the flag that says so.
+  const moved = fixture('gql-pr-7');
+  moved.data.repository.pullRequest.files.nodes[0].changeType = 'RENAMED';
+  assert.equal((await setup({ routes: { 'graphql PrByNumber': moved } }).forge.prState({ repo: 'guide-docs', number: 7 })).filesRenamed, true);
+  // A PR read by head or among the changed ones carries no file list: only a read by number asks for it.
+  const byHead = setup({ routes: { 'graphql PrsByHead': fixture('gql-prs-by-head-open') } });
+  assert.equal('files' in (await byHead.forge.prState({ repo: 'guide-docs', head: 'docs/export-screen' })), false);
 });
 
 test('prState: the description only when asked for', async () => {

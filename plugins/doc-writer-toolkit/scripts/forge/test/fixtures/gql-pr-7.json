@@ -41,6 +41,19 @@
             }
           ]
         },
+        "files": {
+          "totalCount": 2,
+          "nodes": [
+            {
+              "path": "docs/export/export.md",
+              "changeType": "MODIFIED"
+            },
+            {
+              "path": "i18n/en/docusaurus-plugin-content-docs/current/export/export.md",
+              "changeType": "MODIFIED"
+            }
+          ]
+        },
         "reviewRequests": {
           "nodes": [
             {

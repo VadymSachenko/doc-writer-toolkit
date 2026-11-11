@@ -10,7 +10,10 @@
 //   Pr       { number, nodeId, url, title, body, state: 'open'|'closed'|'merged', draft, head, base, headCommit,
 //              mergeCommit|null, mergedAt|null, closedAt|null, createdAt, updatedAt, author|null,
 //              reviewDecision|null, mergeable, mergeState, reviewRequests: [{ login }|{ team }], labels: [names],
-//              assignees: [logins], baseCommit?, checks? }
+//              assignees: [logins], files?, filesTruncated?, baseCommit?, checks? }
+//            (`pr` alone gives `files`, the paths the PR changes, `filesTruncated: true` when it changes more than the
+//            adapter read, and `filesRenamed: true` when it renames a file (its old path is not in `files`); an
+//            adapter that can't tell leaves `files` out)
 //            (`pr` alone gives `baseCommit`, the base branch's tip now, and `checks`, the CI of the head branch's tip, its `commit` for the caller to compare with `headCommit`:
 //            { commit, state: 'success'|'failure'|'pending'|null, failing: [names], pending: [names] }, `state` null
 //            when no check reported on it; an adapter that can't tell leaves both out)

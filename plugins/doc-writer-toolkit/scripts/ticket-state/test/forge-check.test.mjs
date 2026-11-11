@@ -186,6 +186,22 @@ test('AC-1: a submitted review is a batch and starts at once; so is a review wit
   assert.deepEqual([out.handed, out.waiting.map((x) => x.key)], [[], ['481']]);
 });
 
+test('a hub drained for its merge: the forge check starts no run, and the review waits for the hub to move', async () => {
+  const { w, review } = commented();
+  seed(w, NOW - MIN);
+  // The last full check found the hub behind for 40 minutes, held there by the runs going on.
+  writeFeed(w.settings.state, { ...readFeed(w.settings.state), hub: { at: iso(NOW - MIN), outcome: 'behind', base: 'main', busy: true, behindSince: iso(NOW - 40 * MIN), note: 'behind' } });
+  const t = ticker(w);
+  review(81, NOW);
+  let out = await t.forge(NOW + 10 * SEC);
+  assert.deepEqual([out.handed, t.handOns().length], [[], 0]);
+  assert.ok(out.notes.some((n) => /no new run starts until it has moved: 481 wait/.test(n)), out.notes.join(' | '));
+  // Moved: the review goes on at the next tick.
+  writeFeed(w.settings.state, { ...readFeed(w.settings.state), hub: { at: iso(NOW), outcome: 'moved', base: 'main' } });
+  out = await t.forge(NOW + 70 * SEC);
+  assert.deepEqual(out.handed, ['481']);
+});
+
 test('AC-2: three comments 30 s apart start one run, not three, also with a full check started in the middle of them', async () => {
   const { w, say } = commented();
   // The last full check began 3 min 20 s before the first comment: the tick at +70 s starts a full one.

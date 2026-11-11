@@ -287,7 +287,7 @@ function runSection(run, flights, now, live, { starts = null, startHours = null,
 }
 
 // The whole file as text. Pure: the same input gives the same text.
-export function renderProgress({ ledgers = [], bad = [], memory = {}, run = null, live = false, flights = [], now = Date.now(), mode = null, stepsText = null, starts = null, startHours = null, translatedLabel = null }) {
+export function renderProgress({ ledgers = [], bad = [], memory = {}, run = null, live = false, flights = [], now = Date.now(), mode = null, stepsText = null, starts = null, startHours = null, translatedLabel = null, hub = null }) {
   const stale = new Map(Object.entries(memory.stale ?? {}));
   const open = ledgers.filter((l) => l.stages?.close?.status !== 'done');
   const mine = open.filter((l) => l.mode === 'pipeline');
@@ -298,7 +298,10 @@ export function renderProgress({ ledgers = [], bad = [], memory = {}, run = null
   const others = Object.entries(memory.others ?? {}).filter(([k]) => mine.some((l) => k.startsWith(`${l.key}|`))).flatMap(([k, list]) => list.map((c) => ({ key: k.split('|')[0], pr: k.split('|').slice(1).join('|'), ...c })));
   // With the translated label: a PR closed today that was merged without it, whose translations may be behind its base.
   const untranslated = translatedLabel ? mergedUntranslated(ledgers, (t) => Number.isFinite(ms(t)) && localDay(ms(t)) === localDay(now)) : [];
-  if (!gates.length && !others.length && !untranslated.length) out.push('Nothing waits for you.');
+  // The hub left behind its origin by the last full check (lib/hub-update.mjs), with since when and whether it drains.
+  const hubNote = hub?.note && ['behind', 'failed'].includes(hub.outcome) ? hub.note : null;
+  if (!gates.length && !others.length && !untranslated.length && !hubNote) out.push('Nothing waits for you.');
+  if (hubNote) out.push(`- ⚠️ The hub: ${oneLine(hubNote, 400)}`);
   for (const x of untranslated) out.push(`- ⚠️ ${x.key} — ${x.id}: merged without «${translatedLabel}»: its translations may be behind ${x.base}${x.url ? ` (${x.url})` : ''}`);
   for (const g of gates) {
     const l = mine.find((x) => x.key === g.key);
@@ -409,6 +412,15 @@ export function digestRun({ out = {}, st = null, log = [], trigger = null, start
   };
 }
 
+// The hub as the last full check left it, from the feed; a feed that doesn't read shows none.
+function hubOf(state) {
+  try {
+    return readFeed(state).hub ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // The watcher's last start pass, from the feed; a feed that doesn't read shows none.
 function startsOf(state) {
   try {
@@ -428,7 +440,7 @@ export function writeProgress({ settings, now = Date.now(), st = null, run = nul
     const memory = { ...mem.data, stale: staleFrom(st, mem.data.stale), others: othersFrom(st, mem.data.others), ...(run ? { lastRun: run } : {}) };
     // The first write seeds the gates already standing, so a host that starts using the file isn't told about all of them.
     if (!mem.exists) memory.notified = Object.fromEntries(ledgers.flatMap((l) => gatesOf(l).filter((g) => g.notify).map((g) => [gateId(g), iso(now)])));
-    const text = renderProgress({ ledgers, bad, memory, run: run ?? memory.lastRun ?? null, live: live && Boolean(run), flights, now, mode: settings.mode ?? null, stepsText: readSteps(settings.progress?.stepsFile), starts: startsOf(state), startHours: settings.limits?.startHours ?? null, translatedLabel: settings.forge?.translatedLabel ?? null });
+    const text = renderProgress({ ledgers, bad, memory, run: run ?? memory.lastRun ?? null, live: live && Boolean(run), flights, now, mode: settings.mode ?? null, stepsText: readSteps(settings.progress?.stepsFile), starts: startsOf(state), hub: hubOf(state), startHours: settings.limits?.startHours ?? null, translatedLabel: settings.forge?.translatedLabel ?? null });
     atomicWrite(progressPath(state), text);
     atomicWrite(memoryPath(state), JSON.stringify(memory, null, 2) + '\n');
     return { written: true, file: progressPath(state) };

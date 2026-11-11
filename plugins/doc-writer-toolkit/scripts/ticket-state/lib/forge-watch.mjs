@@ -10,6 +10,7 @@ import { tickSecondsOf } from './settings.mjs';
 import { alive, runCheck, takeWatchLock, watchLockHolder } from './watch.mjs';
 import { dropHandOnStep, fullHandOns, handOnLive, readForge, readHandOnStep, runsGoing, takeHandOn, writeForge, writeHandOn } from './forge-state.mjs';
 import { fullArgs, handOnArgs, handOnId, spawnDetached } from './dispatch.mjs';
+import { hubDrain } from './hub-update.mjs';
 
 // The forge check and the tick (D-126). The owner's and a reviewer's comments on the pipeline's PRs are picked up
 // within a minute, and nothing that runs long can hold that up:
@@ -174,7 +175,17 @@ export async function runForgeCheck({ settings, clients, io = {}, options = {} }
       const groupOf = (k) => ledgers.find((x) => x.key === k)?.group ?? k;
       const busy = runsGoing({ locks, handOns: [...next.handOns, ...fullRuns], now: checkStart, isAlive, groupOf }).size;
       const limit = settings.limits.parallel;
-      if (typeof limit === 'number' && busy >= limit) {
+      let hub = null;
+      try {
+        hub = readFeed(settings.state).hub ?? null;
+      } catch {
+        /* unreadable: no drain known */
+      }
+      const draining = hubDrain(hub, checkStart);
+      if (draining) {
+        out.notes.push(`${draining}: ${handing.join(', ')} wait`);
+        requeue(handing, draining, checkStart);
+      } else if (typeof limit === 'number' && busy >= limit) {
         out.notes.push(`${busy} run(s) going, limits.parallel ${limit}: ${handing.join(', ')} wait for a slot`);
         requeue(handing, `the runs are at limits.parallel (${limit})`, checkStart);
       } else {

@@ -14,6 +14,10 @@ import { readRunLog, renderReport } from '../lib/report.mjs';
 import { PUSH_DENIED, runDaily } from '../lib/runner.mjs';
 import { notificationsOf } from '../lib/notify.mjs';
 import { setLocal } from '../lib/setlocal.mjs';
+import { oneLine } from '../watcher.mjs';
+import { makeDispatcher } from '../lib/dispatch.mjs';
+import { hubDrain } from '../lib/hub-update.mjs';
+import { renderProgress } from '../lib/progress.mjs';
 
 // The watcher (design §5, D-048, D-054): one check reads every event since its cursor and makes no model call when it
 // finds nothing (AC-1); after a sleep the first check reads every event since the last one and each changed ticket
@@ -109,6 +113,57 @@ test('AC-1: a quiet check reads only the event sources and makes no status, runn
   assert.ok(actionReads.every((r) => r[2] === iso(NOW - 5 * MIN - WINDOW_MS)));
   assert.ok(Object.values(readFeed(w.settings.state).sources).every((s) => s.lastCheck === iso(NOW)));
   assert.deepEqual([w.tracker.log, w.forge.log], [[], []]);
+});
+
+test('the hub before the check: a move is in the run log and the line, a hub left behind is in the line, the notes and the report', async () => {
+  const w = world();
+  seed(w, NOW - 5 * MIN);
+  const { check } = checker(w);
+  const moved = { outcome: 'moved', base: 'main', from: 'a'.repeat(40), to: 'b'.repeat(40), commits: 2 };
+  let out = await check(NOW, { hub: moved });
+  assert.equal(out.quiet, false, 'a quiet check that moved the hub still prints its line');
+  assert.match(oneLine(out), /the hub fast-forwarded 2 commit\(s\) to origin\/main \(bbbbbbb\)/);
+  assert.deepEqual(readRunLog(w.settings.state, '2026-11-10').filter((e) => e.kind === 'hub').map((e) => [e.outcome, e.to]), [['moved', 'b'.repeat(40)]]);
+  assert.equal(readFeed(w.settings.state).hub.outcome, 'moved');
+  // A check that finds the watcher lock held still logs the move it made.
+  const held = takeWatchLock(w.settings.state, { now: NOW + MIN });
+  out = await check(NOW + MIN, { hub: { ...moved, to: 'c'.repeat(40) } });
+  assert.match(out.skipped, /holds the watcher lock/);
+  assert.deepEqual(readRunLog(w.settings.state, '2026-11-10').filter((e) => e.kind === 'hub').map((e) => e.to), ['b'.repeat(40), 'c'.repeat(40)]);
+  held.release();
+  const note = 'the hub is 3 commit(s) behind origin/main and was not updated: it has uncommitted changes to tracked files. Its settings are read as they were until a person updates it';
+  out = await check(NOW + 5 * MIN, { hub: { outcome: 'behind', base: 'main', commits: 3, note } });
+  const since = `${note} (behind since ${iso(NOW + 5 * MIN)})`;
+  assert.ok(out.notes.includes(since));
+  assert.ok(oneLine(out).includes(since));
+  assert.deepEqual(readFeed(w.settings.state).hub, { at: iso(NOW + 5 * MIN), outcome: 'behind', base: 'main', commits: 3, behindSince: iso(NOW + 5 * MIN), note: since });
+  const st = await w.status({ usage: usageAt(5) });
+  assert.ok(renderReport({ settings: w.settings, st, date: '2026-11-10', ledgers: [] }).includes(`the hub at ${iso(NOW + 5 * MIN)}: ${note}`));
+  // A hub whose default branch isn't known says so once, not at every check.
+  const unknown = { outcome: 'skipped', base: null, note: "the hub's default branch is not known (…): the hub is not updated" };
+  out = await check(NOW + 6 * MIN, { hub: unknown });
+  assert.ok(out.notes.includes(unknown.note));
+  out = await check(NOW + 7 * MIN, { hub: unknown });
+  assert.ok(!out.notes.includes(unknown.note));
+  assert.ok(!oneLine(out).includes('default branch'));
+  assert.equal(out.quiet, true);
+  // Held behind by the runs going on: since when, in the note and the feed; past 30 minutes, it drains: no new run starts.
+  const busy = { outcome: 'behind', base: 'main', commits: 1, busy: true, note: 'the hub is 1 commit(s) behind origin/main and was not updated: 1 run(s) going, which read(s) the hub\'s files: it moves at a check with none. Its settings are read as they were until it is' };
+  out = await check(NOW + 8 * MIN, { hub: busy });
+  assert.ok(out.notes.some((n) => n.endsWith(`(behind since ${iso(NOW + 8 * MIN)})`)));
+  assert.equal(out.hub.drain, undefined);
+  out = await check(NOW + 39 * MIN, { hub: busy });
+  assert.equal(readFeed(w.settings.state).hub.behindSince, iso(NOW + 8 * MIN), 'since the first check that found it behind');
+  assert.equal(out.hub.drain, true);
+  assert.match(readFeed(w.settings.state).hub.note, /\(behind since .*\)\. The hub has been behind origin\/main since .*, kept there by the runs going on: no new run starts until it has moved$/);
+  // The dispatcher hands nothing on meanwhile; the progress file shows the hub.
+  const dispatch = makeDispatcher({ settings: w.settings, records: [], by: 'watcher', drain: () => hubDrain(readFeed(w.settings.state).hub, NOW + 39 * MIN), io: { spawn: () => assert.fail('no run while the hub drains') } });
+  assert.match((await dispatch({ group: '501', keys: ['501'], stage: 'write' })).waits, /no new run starts until it has moved/);
+  assert.match(renderProgress({ ledgers: [], now: NOW, hub: readFeed(w.settings.state).hub }), /- ⚠️ The hub: the hub is 1 commit\(s\) behind origin\/main.*behind since/);
+  // No hub update tried (a forge tick's, a dry run's): nothing about it.
+  out = await check(NOW + 50 * MIN);
+  assert.equal(out.hub, undefined);
+  assert.equal(out.quiet, true);
 });
 
 test('AC-1: events on tickets with no next step call status, and start no runner and no model', async () => {

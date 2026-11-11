@@ -482,8 +482,9 @@ export function originHead(settings, pr) {
 // When that can't be made, the session reads the clone's files as they stand: off its base (a checked-out branch that
 // isn't the base, or a detached HEAD: the owner's branch work), or behind `origin/<base>` (the owner merges on the
 // forge, so a clone is behind after each merge), its files aren't the site's, and a note for the brief says so and how
-// to read the base instead. No session is held for it. The runner never checks out, pulls or resets the clone. Null for
-// a clone that isn't on this machine. Returns { repo, clone, base, branch, off, unfetched, notes }.
+// to read the base instead. No session is held for it. The runner never checks out, pulls or resets the clone (the
+// watcher fast-forwards the hub, a target clone too, only when clean and on its default branch: lib/hub-update.mjs).
+// Null for a clone that isn't on this machine. Returns { repo, clone, base, branch, off, unfetched, notes }.
 export function checkClone(settings, target) {
   const clone = clonePath(settings, target);
   if (!clone || !fs.existsSync(clone) || !checkoutKind(clone)) return null;
@@ -532,7 +533,8 @@ export function checkClone(settings, target) {
 // (lib/runner.mjs), and the hook refuses `mkdir` and a script's path there (lib/role-hook.mjs).
 // While another session that may read it runs (`othersRunning`), one at another commit, or with changes to tracked
 // files, is left as it is, so pages never change under a session still reading them; this session then reads the clone
-// with the note, as before. The clone itself is never checked out, pulled or reset: only its list of worktrees changes.
+// with the note, as before. The clone itself is never checked out, pulled or reset here: only its list of worktrees
+// changes (the hub's fast-forward before a full check is the watcher's, lib/hub-update.mjs).
 // Returns { path, commit, ref, linked, adopted } or { error } (the brief then falls back to the clone and its note).
 export const readCheckoutPath = (settings, target) => {
   const clone = clonePath(settings, target);
