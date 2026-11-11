@@ -220,7 +220,8 @@ function validateTicketCommits(raw) {
 
 // The sibling doc repos whose published pages are searched as evidence (`docRepos`, lib/doc-evidence.mjs), besides the
 // hub's own: { repo, path (the owner's clone, from the host root: read with `git grep` at `origin/<base>`, else HEAD,
-// never its working tree, never written, never opened to a session), base, roots (its root pairs from the repo's top:
+// never its working tree, never written; the runner adds no folder or rule for it to a session, and the brief never
+// names its path), base, roots (its root pairs from the repo's top:
 // `{ "ua", "en" }`, `en` optional, or a root alone as a string; none: its CLAUDE.md's) }. None: the hub's pages and
 // tickets only. A key the entry has no business having is refused, so a misspelt one isn't silently left out.
 const relPath = (p) => typeof p === 'string' && p.trim() !== '' && !path.isAbsolute(p) && !p.split(/[\\/]/).includes('..');

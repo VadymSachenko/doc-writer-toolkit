@@ -421,6 +421,10 @@ test('where a page is read: its read checkout, its worktree\'s git, the hub\'s g
   assert.ok(allowed.includes('Bash(git show:*)'));
   assert.ok(allowed.includes(`Bash(git -C ${clone} show:*)`));
   assert.ok(!cmd.args.includes(sibling), 'the sibling is no folder of the session');
+  // A step with worktrees: the hub's plain `git show` and the worktree's `git -C <worktree> show` are its rules too.
+  const wcmd = commandFor({ stage: 'write', role: 'writer', keys: ['1'], group: '1', worktrees: [{ repo: 'target-docs', branch: 'ticket-1', base: 'main', clone, path: '/wt/t-1' }] }, settings, { agentsPath: '/x/agents.json' });
+  const wallowed = wcmd.args.slice(wcmd.args.indexOf('--allowedTools') + 1, wcmd.args.indexOf('--disallowedTools'));
+  assert.ok(wallowed.includes('Bash(git show:*)') && wallowed.includes('Bash(git -C /wt/t-1 show:*)'));
   // The brief: each page with its way, and the sibling's folder named nowhere.
   const d = { terms: [{ term: 'TheTerm', files: 2 }], files: [{ ...page(clone, 'target-docs'), abs: path.join(clone, 'docs/a/a.md'), count: 1, terms: ['TheTerm'], hits: [{ line: 3, excerpt: 'TheTerm here' }], more: 0, twins: [], readAt: { read: '/rc/target/docs/a/a.md' } }, { ...page(sibling, 'sib-docs'), abs: path.join(sibling, 'docs/a/a.md'), count: 1, terms: ['TheTerm'], hits: [{ line: 7, excerpt: 'TheTerm there' }], more: 0, twins: [], readAt: null }], past: { files: 0, hits: 0, shown: [] }, searched: { repos: [], folders: 0 }, notes: [], repos: ['target-docs', 'sib-docs'], workFolder: null, exclude: DEFAULT_EXCLUDE };
   const text = docLines(d).join('\n');

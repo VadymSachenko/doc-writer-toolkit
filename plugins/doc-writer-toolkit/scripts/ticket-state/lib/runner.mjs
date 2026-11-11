@@ -657,7 +657,7 @@ function termTexts(step, settings, io) {
 // show <commit>:<path>` (its files hold this ticket's change, not the published page); in the hub, where the session
 // starts, with a plain `git show`; in a target clone on a step with no worktree, with `git -C <clone> show` (the step
 // may read a target clone's git, `cloneReadRules`). None of these (a sibling doc repo that is no target of the step):
-// null, and the page is cited from its excerpt. No checkout is made for it, and no owner's clone is opened to the session.
+// null, and the page is cited from its excerpt. No checkout is made for it, and no folder or rule is added for its clone.
 const realOf = (p) => {
   try {
     return fs.realpathSync(p);
