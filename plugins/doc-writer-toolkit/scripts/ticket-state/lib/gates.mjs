@@ -11,8 +11,9 @@ import { worktreePath } from './worktree.mjs';
 //   - `places`: every place names its source and why it isn't confirmed, and the description lists it.
 
 export const CHECKS = ['questionSources', 'markers', 'places'];
-// What a place's claim rests on (the TASK-042 design, §3): the kind only; the session's words go in `why`.
-export const PLACE_SOURCES = ['app', 'apiCall', 'person', 'code', 'transcript', 'explanation', 'card'];
+// What a place's claim rests on (the TASK-042 design, §3): the kind only; the session's words go in `why`. `docs` is a
+// published page or an earlier ticket's notes, from the brief's docs lookup (lib/doc-evidence.mjs).
+export const PLACE_SOURCES = ['app', 'apiCall', 'person', 'code', 'transcript', 'explanation', 'card', 'docs'];
 
 const text = (v) => typeof v === 'string' && v.trim() !== '';
 // A text as a comment or a description may carry it: no Markdown emphasis or code marks, spaces collapsed, any case.

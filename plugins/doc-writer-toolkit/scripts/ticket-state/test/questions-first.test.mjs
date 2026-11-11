@@ -281,7 +281,7 @@ test('AC-5: each place names its PR, page, claim, a source of the known kinds an
   const t = placesWorld();
   await refused(t.w, t.args([place('p1', { why: '' })]), 'places', /place p1 has no why/);
   await refused(t.w, t.args([place('p1', { source: undefined, page: undefined, repo: undefined })]), 'places', /place p1 has no repo, page, source/);
-  await refused(t.w, t.args([place('p1', { source: 'code; ticket #916 for the order' })]), 'places', /place p1's source 'code; ticket #916 for the order' is not one of app, apiCall, person, code, transcript, explanation, card/);
+  await refused(t.w, t.args([place('p1', { source: 'code; ticket #916 for the order' })]), 'places', /place p1's source 'code; ticket #916 for the order' is not one of app, apiCall, person, code, transcript, explanation, card, docs/);
   await refused(t.w, t.args([place('p1', { pr: 99 })]), 'places', /place p1 is on api-docs#99, not one of this record's PRs/);
   await refused(t.w, t.args([place('p1', { line: 5 })]), 'places', /place p1 is on a line api-docs#6 changed \(docs\/a\.md:5\): give the "commentId"/);
 });

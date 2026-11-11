@@ -9,13 +9,14 @@ import { validateJobs } from './jobs.mjs';
 import { DEFAULT_LABELS } from './pr-description.mjs';
 import { TRANSCRIBERS } from '../../transcriber/lib/index.mjs';
 import { CHECKS } from './gates.mjs';
+import { DEFAULT_EXCLUDE, DEFAULT_TICKET_FILES } from './doc-evidence.mjs';
 
 // The ticket flow settings: the shared file the host commits (`.claude/ticket-flow.json`, or the `Ticket flow
 // settings:` field of CLAUDE.md, or --settings), read at HEAD (`trustedShared`), and the owner's local file next to it
 // (`<name>.local.json`), merged key by key at any depth (a local key wins), for the local file's keys only (`localOnly`).
 // The tracker and forge scripts read the same files, as they stand and with no such limit.
 //
-// The shared file holds `state`, `workFolder`, `commentHeader`, `tracker`, `forge`, `targets`, `noReviewLabel`, `appRepos`, `relatedRepos`, `ticketCommits`, `hostRules`, `hostJobs`,
+// The shared file holds `state`, `workFolder`, `commentHeader`, `tracker`, `forge`, `targets`, `noReviewLabel`, `appRepos`, `relatedRepos`, `ticketCommits`, `docRepos`, `docEvidence`, `hostRules`, `hostJobs`,
 // `build`, `checks`, and each role's tool rules (`roles.<role>.allowedTools`, `disallowedTools`).
 // The local file holds `mode`, `limits`, `schedule`, `roles` (no tool rules), `modelLadder`, `video`, `cleanup` and `progress`. Defaults below.
 
@@ -215,6 +216,54 @@ function validateTicketCommits(raw) {
   }
   if (!Number.isInteger(t.limit) || t.limit < 1 || t.limit > 100) fail('ticketCommits.limit must be a whole number from 1 to 100');
   return { pattern: t.pattern, limit: t.limit };
+}
+
+// The sibling doc repos whose published pages are searched as evidence (`docRepos`, lib/doc-evidence.mjs), besides the
+// hub's own: { repo, path (the owner's clone, from the host root: read with `git grep` at `origin/<base>`, else HEAD,
+// never its working tree, never written; the runner adds no folder or rule for it to a session, and the brief never
+// names its path), base, roots (its root pairs from the repo's top:
+// `{ "ua", "en" }`, `en` optional, or a root alone as a string; none: its CLAUDE.md's) }. None: the hub's pages and
+// tickets only. A key the entry has no business having is refused, so a misspelt one isn't silently left out.
+const relPath = (p) => typeof p === 'string' && p.trim() !== '' && !path.isAbsolute(p) && !p.split(/[\\/]/).includes('..');
+const DOC_REPO_KEYS = ['repo', 'path', 'base', 'roots'];
+const cleanRel = (x) => x.replace(/^\.\/+/, '').replace(/\/+$/, '');
+function validateDocRepos(raw) {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) fail('docRepos must be a list of { repo, path, base, roots }');
+  const seen = new Set();
+  return raw.map((r, i) => {
+    if (!isObject(r)) fail(`docRepos[${i}] must be { repo, path, base, roots }`);
+    const unknown = Object.keys(r).filter((k) => !DOC_REPO_KEYS.includes(k));
+    if (unknown.length) fail(`docRepos[${i}].${unknown[0]} is not a setting (${DOC_REPO_KEYS.join(', ')})`);
+    if (typeof r.repo !== 'string' || !/^[^/\\\s]+$/.test(r.repo) || r.repo === '.' || r.repo === '..') fail(`docRepos[${i}].repo must be the repo's plain name`);
+    if (seen.has(r.repo)) fail(`docRepos names '${r.repo}' twice`);
+    seen.add(r.repo);
+    if (typeof r.path !== 'string' || !r.path.trim()) fail(`docRepos[${i}].path is required: the repo's clone, from the host root`);
+    if (r.base !== undefined && (typeof r.base !== 'string' || !r.base.trim())) fail(`docRepos[${i}].base must be a branch name`);
+    const rootBad = (x) => (typeof x === 'string' ? !relPath(x) : !isObject(x) || Object.keys(x).some((k) => k !== 'ua' && k !== 'en') || !relPath(x.ua) || (x.en !== undefined && x.en !== null && !relPath(x.en)));
+    if (r.roots !== undefined && (!Array.isArray(r.roots) || !r.roots.length || r.roots.some(rootBad))) fail(`docRepos[${i}].roots must be a list of root pairs from the repo's top, such as { "ua": "docs/", "en": "i18n/en/docusaurus-plugin-content-docs/current/" }, or roots alone, such as "docs/"`);
+    const roots = r.roots ? r.roots.map((x) => (typeof x === 'string' ? cleanRel(x) : { ua: cleanRel(x.ua), en: x.en ? cleanRel(x.en) : null })) : null;
+    return { repo: r.repo, path: r.path, base: r.base ?? 'main', roots };
+  });
+}
+
+// What the docs lookup leaves out and reads (`docEvidence`, lib/doc-evidence.mjs): `exclude`, what is never searched,
+// added to the default (the release notes), never put in its place: a folder's name, or a path under a content root,
+// left out under every content root of every doc repo (`excludeSpecs`); `ticketFiles`, the files of an earlier
+// ticket's work folder that are searched (a name ending in `/` is a folder, read with what is under it).
+export const DOC_EVIDENCE_DEFAULTS = { exclude: DEFAULT_EXCLUDE, ticketFiles: DEFAULT_TICKET_FILES };
+function validateDocEvidence(raw) {
+  if (raw === undefined || raw === null) return { exclude: [...DEFAULT_EXCLUDE], ticketFiles: [...DEFAULT_TICKET_FILES] };
+  if (!isObject(raw)) fail('docEvidence must be { "exclude", "ticketFiles" }');
+  const unknown = Object.keys(raw).filter((k) => !(k in DOC_EVIDENCE_DEFAULTS));
+  if (unknown.length) fail(`docEvidence.${unknown[0]} is not a setting (exclude, ticketFiles)`);
+  const list = (v, key, what) => {
+    if (v === undefined) return [...DOC_EVIDENCE_DEFAULTS[key]];
+    if (!Array.isArray(v) || v.some((x) => !relPath(x))) fail(`docEvidence.${key} must be a list of ${what}`);
+    return v.map((x) => x.replace(/^\.\/+/, ''));
+  };
+  const exclude = [...new Set([...DEFAULT_EXCLUDE, ...list(raw.exclude, 'exclude', 'folder names or paths under a content root, such as "drafts/"')])];
+  return { exclude, ticketFiles: list(raw.ticketFiles, 'ticketFiles', 'file names in a work folder, such as "app-notes.md" or "api/"') };
 }
 
 // The words an owner's PR comment starts with when it is for the pipeline (`forge.triggerWords`, D-142): `word:` at the
@@ -421,6 +470,8 @@ export function validateSettings(merged, { root, stateRootDefault }) {
     noReviewLabel: merged.noReviewLabel ?? null,
     ...validateCodeRepos(merged),
     ticketCommits: validateTicketCommits(merged.ticketCommits),
+    docRepos: validateDocRepos(merged.docRepos),
+    docEvidence: validateDocEvidence(merged.docEvidence),
     readyComment,
     reviewComment,
     idComments,
