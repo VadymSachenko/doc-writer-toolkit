@@ -122,6 +122,12 @@ test('the hub before the check: a move is in the run log and the line, a hub lef
   assert.match(oneLine(out), /the hub fast-forwarded 2 commit\(s\) to origin\/main \(bbbbbbb\)/);
   assert.deepEqual(readRunLog(w.settings.state, '2026-11-10').filter((e) => e.kind === 'hub').map((e) => [e.outcome, e.to]), [['moved', 'b'.repeat(40)]]);
   assert.equal(readFeed(w.settings.state).hub.outcome, 'moved');
+  // A check that finds the watcher lock held still logs the move it made.
+  const held = takeWatchLock(w.settings.state, { now: NOW + MIN });
+  out = await check(NOW + MIN, { hub: { ...moved, to: 'c'.repeat(40) } });
+  assert.match(out.skipped, /holds the watcher lock/);
+  assert.deepEqual(readRunLog(w.settings.state, '2026-11-10').filter((e) => e.kind === 'hub').map((e) => e.to), ['b'.repeat(40), 'c'.repeat(40)]);
+  held.release();
   const note = 'the hub is 3 commit(s) behind origin/main and was not updated: it has uncommitted changes to tracked files. Its settings are read as they were until a person updates it';
   out = await check(NOW + 5 * MIN, { hub: { outcome: 'behind', base: 'main', commits: 3, note } });
   assert.ok(out.notes.includes(note));

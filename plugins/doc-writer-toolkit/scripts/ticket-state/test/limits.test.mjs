@@ -486,7 +486,7 @@ const workTriage = { verdict: 'docs-required', targets: ['api', 'guide'], size: 
 const inWorkWith = (w, number, prs, { status = 'finalReview', opened = true, triage = workTriage } = {}) => {
   const c = card({ number, status });
   w.tracker.cards.push(c);
-  for (const p of prs) if (p.number) w.forge.prs.push(pr({ repo: p.repo, number: p.number, files: p.files }));
+  for (const p of prs) if (p.number) w.forge.prs.push(pr({ repo: p.repo, number: p.number, files: p.files, filesTruncated: p.filesTruncated }));
   const stages = { triage: 'done', start: 'done', plan: 'done', write: opened ? 'done' : 'running', ...(opened ? { uaReview: 'done', pr: 'done' } : {}) };
   ledger(w, c, { startedBy: 'schedule', stages, triage, prs: prs.map((p) => ({ repo: p.repo, number: p.number ?? null, targets: [p.repo === 'api-docs' ? 'api' : 'guide'], review: p.repo === 'api-docs' ? 'places' : 'sme', branch: `${number}-docs`, stage: p.number ? status : 'writing' })) });
 };
@@ -551,23 +551,31 @@ test('a PR in one target, none yet in the other: the second target\'s triage pag
   inWorkWith(w2, 1157, [{ repo: 'guide-docs', number: 61, files: ['docs/methods/cash/cash.md'] }, { repo: 'api-docs', number: 62 }]);
   readyOn(w2);
   st = await w2.status({ usage: usage(5) });
-  assert.deepEqual(st.groups.find((g) => g.keys.includes('1193')).waitsFor, ['1157'], 'unknown files: the guess stays');
+  assert.deepEqual(st.notStarted.map((n) => n.reasons), [[`related to 1157, still in work: a page 1157's triage names, its PR's files not read (${PAYMENT})`]], 'unknown files: the guess stays');
+  // A longer list than one read gives: the files read count, the guess beside them.
+  const w3 = world({ extra: estimates });
+  inWorkWith(w3, 1157, [{ repo: 'api-docs', number: 62, files: ['docs/api-reference/create-payment/create-payment.md'], filesTruncated: true }]);
+  readyOn(w3);
+  st = await w3.status({ usage: usage(5) });
+  assert.deepEqual(st.notStarted.map((n) => n.reasons), [[`related to 1157, still in work: a page 1157's PR #62 changes (${PAYMENT})`]]);
 });
 
 test('workPages: per repo, the open PR\'s files, the triage where no PR is opened yet or its files are unknown, nothing where it is merged', () => {
   const l = (prs, opened) => ({ key: '7', stages: opened ? { pr: { status: 'done' } } : {}, triage: { pages: ['guide-docs docs/a.md — A', 'api-docs docs/b.md — B', 'docs/c.md', { repo: 'api-docs', path: 'docs/d.md' }] }, prs });
   const at = (entries) => new Map(entries.map(([n, e]) => [`7/${n}`, e]));
-  const keys = (pages) => pages.map((p) => `${p.from} ${p.repo} ${p.path}${p.pr ? ` #${p.pr}` : ''}`);
+  const keys = (pages) => pages.map((p) => `${p.from} ${p.repo} ${p.path}${p.pr ? ` #${p.pr}` : ''}${p.why ? ` ${p.why}` : ''}`);
   // No PR, not opened: the triage's, the pages with no repo left out.
-  assert.deepEqual(keys(workPages(l([], false))), ['triage guide-docs docs/a.md', 'triage api-docs docs/b.md', 'triage api-docs docs/d.md']);
+  assert.deepEqual(keys(workPages(l([], false))), ['triage guide-docs docs/a.md noPr', 'triage api-docs docs/b.md noPr', 'triage api-docs docs/d.md noPr']);
   // Opened, one PR in the guide repo with its files: those files; the API repo has no PR and gets none.
   const one = [{ repo: 'guide-docs', number: 5 }];
   assert.deepEqual(keys(workPages(l(one, true), at([['guide-docs#5', { state: 'open', files: ['docs/x.md'] }]]))), ['pr guide-docs docs/x.md #5']);
   // Its files unknown (no files, a failed read, no read): the guide repo's triage page instead.
-  for (const world of [{ state: 'open' }, { error: 'HTTP 502' }, undefined]) assert.deepEqual(keys(workPages(l(one, true), at(world ? [['guide-docs#5', world]] : []))), ['triage guide-docs docs/a.md']);
+  for (const world of [{ state: 'open' }, { error: 'HTTP 502' }, undefined]) assert.deepEqual(keys(workPages(l(one, true), at(world ? [['guide-docs#5', world]] : []))), ['triage guide-docs docs/a.md filesUnknown']);
+  // Only part of its files (more than one read gives): those it read, and the triage's beside them.
+  assert.deepEqual(keys(workPages(l(one, true), at([['guide-docs#5', { state: 'open', files: ['docs/x.md'], filesTruncated: true }]]))), ['pr guide-docs docs/x.md #5', 'triage guide-docs docs/a.md filesUnknown']);
   // A branch with no PR yet in the API repo: its triage pages count beside the guide PR's files.
   const two = [{ repo: 'guide-docs', number: 5 }, { repo: 'api-docs', number: null, branch: 'b' }];
-  assert.deepEqual(keys(workPages(l(two, false), at([['guide-docs#5', { state: 'open', files: ['docs/x.md'] }]]))), ['pr guide-docs docs/x.md #5', 'triage api-docs docs/b.md', 'triage api-docs docs/d.md']);
+  assert.deepEqual(keys(workPages(l(two, false), at([['guide-docs#5', { state: 'open', files: ['docs/x.md'] }]]))), ['pr guide-docs docs/x.md #5', 'triage api-docs docs/b.md noPr', 'triage api-docs docs/d.md noPr']);
   // Merged in the guide repo: nothing there, before the stage is recorded too.
   assert.deepEqual(keys(workPages(l([{ repo: 'guide-docs', number: 5, merged: { at: 'x' } }], true))), []);
   assert.deepEqual(keys(workPages(l([{ repo: 'guide-docs', number: 5 }], true), at([['guide-docs#5', { state: 'merged', files: ['docs/x.md'] }]]))), []);

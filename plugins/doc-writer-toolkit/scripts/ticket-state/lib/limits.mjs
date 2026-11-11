@@ -146,46 +146,52 @@ export function overlapOf(a, b, repos) {
     return k && pa.has(k);
   });
   if (hit === undefined) return null;
-  return { by: 'page', page: pageKey(hit), from: hit?.from ?? 'triage', ...(hit?.pr ? { pr: hit.pr } : {}) };
+  return { by: 'page', page: pageKey(hit), from: hit?.from ?? 'triage', ...(hit?.pr ? { pr: hit.pr } : {}), ...(hit?.why ? { why: hit.why } : {}) };
 }
 
-// The page a not-started reason names, and where it came from: "a page 1157's PR #61 changes (<repo> <path>)", or "a
-// page 1157's triage names, no PR yet (…)" (for a ticket starting now, its triage is all there is). Null for another test.
+// The page a not-started reason names, and where it came from: "a page 1157's PR #61 changes (<repo> <path>)", "a page
+// 1157's triage names, no PR yet (…)", or "…, its PR's files not read (…)" (`why` of `workPages`); for a ticket
+// starting now, its triage is all there is. Null for another test.
+const TRIAGE_WHY = { noPr: ', no PR yet', filesUnknown: ", its PR's files not read" };
 export function overlapText(key, o, { starting = false } = {}) {
   if (o?.by !== 'page') return null;
-  const where = o.from === 'pr' ? `a page ${key}'s PR${o.pr ? ` #${o.pr}` : ''} changes` : `a page ${key}'s triage names${starting ? '' : ', no PR yet'}`;
+  const where = o.from === 'pr' ? `a page ${key}'s PR${o.pr ? ` #${o.pr}` : ''} changes` : `a page ${key}'s triage names${starting ? '' : TRIAGE_WHY[o.why] ?? TRIAGE_WHY.noPr}`;
   return `${where} (${o.page})`;
 }
 
 // The pages a ticket in work holds, each `{ repo, path, from }` (the triage's as `pageKey` reads them), per repo:
 //   - a repo where it has an open PR whose files the forge gave (lib/world.mjs `readPrs`): the paths that PR changes,
 //     `from: 'pr'` with its number. The triage's guess for that repo no longer counts: the PR says what it changes;
-//   - a repo where its PR has no number yet (a branch the plan or the write named, no PR opened), or where an open PR's
-//     files are unknown (a forge read that failed, more files than one read gives): the triage's pages of that repo,
-//     `from: 'triage'`;
+//   - a repo where its PR has no number yet (a branch the plan or the write named, no PR opened): the triage's pages of
+//     that repo, `from: 'triage'`, `why: 'noPr'`;
+//   - a repo where an open PR's files are unknown (a forge read that failed) or only in part (more files than one read
+//     gives): the triage's pages of that repo, `why: 'filesUnknown'`, beside the files that were read;
 //   - a repo where its PRs are merged: none, the change is on the base;
-//   - a repo of the triage's with no PR: the triage's pages while the ticket hasn't opened its PRs (its `pr` stage not
-//     done), none after: a ticket that opened its PRs and none in that repo changes nothing there.
+//   - a repo of the triage's with no PR: the triage's pages (`why: 'noPr'`) while the ticket hasn't opened its PRs (its
+//     `pr` stage not done), none after: a ticket that opened its PRs and none in that repo changes nothing there.
 // A ready ticket keeps its triage's pages: it has no PR.
 export function workPages(l, prWorld = new Map()) {
   const prs = (l.prs ?? []).map((p) => ({ p, world: p.number ? prWorld.get(`${l.key}/${prId(p)}`) ?? null : null }));
   const opened = l.stages?.pr?.status === 'done';
   const out = [];
-  const triageFor = new Set();
+  const triageFor = new Map(); // repo -> why its triage pages count; no PR yet wins over files not read
+  const triage = (repo, why) => triageFor.set(repo, triageFor.get(repo) === 'noPr' ? 'noPr' : why);
   for (const { p, world } of prs) {
     if (p.merged || world?.state === 'merged') continue;
-    if (!p.number || !world || world.error || !Array.isArray(world.files)) {
-      triageFor.add(p.repo);
+    if (!p.number) {
+      triage(p.repo, 'noPr');
       continue;
     }
-    if (world.state === 'open') for (const f of world.files) out.push({ repo: p.repo, path: f, from: 'pr', pr: p.number });
+    if (!world || world.error || !Array.isArray(world.files) || world.filesTruncated) triage(p.repo, 'filesUnknown');
+    if (world?.state === 'open') for (const f of world.files ?? []) out.push({ repo: p.repo, path: f, from: 'pr', pr: p.number });
   }
   const withPr = new Set(prs.map(({ p }) => p.repo));
   for (const page of l.triage?.pages ?? []) {
     const k = pageKey(page);
     if (!k) continue;
     const repo = k.split(' ')[0];
-    if (triageFor.has(repo) || (!withPr.has(repo) && !opened)) out.push({ repo, path: k.slice(repo.length + 1), from: 'triage' });
+    const why = triageFor.get(repo) ?? (!withPr.has(repo) && !opened ? 'noPr' : null);
+    if (why) out.push({ repo, path: k.slice(repo.length + 1), from: 'triage', why });
   }
   return out;
 }

@@ -239,6 +239,8 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
   if (options.hub) {
     out.hub = options.hub;
     if (hubLine(options.hub)) out.notes.push(hubLine(options.hub));
+    // A move is in the run log whatever the check does next (mode off, the lock held): it happened.
+    if (options.hub.outcome === 'moved' && !dryRun) appendRunLog(settings.state, today, [{ at: iso(checkStart), kind: 'hub', outcome: 'moved', base: options.hub.base, from: options.hub.from, to: options.hub.to, note: hubLine(options.hub) }]);
   }
   if (settings.mode === 'off') {
     out.stopped = 'mode off: nothing runs';
@@ -263,11 +265,8 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
     next.awakeSince = iso(awakeSince);
     // When the last full check began: the watcher's tick runs the next one `watchMinutes` after it (checkKindOf).
     next.fullAt = iso(checkStart);
-    // The hub's state at this check, for the report; a move goes to the run log once.
-    if (out.hub) {
-      next.hub = { at: iso(checkStart), outcome: out.hub.outcome, base: out.hub.base, ...(out.hub.commits ? { commits: out.hub.commits } : {}), ...(out.hub.note ? { note: out.hub.note } : {}) };
-      if (out.hub.outcome === 'moved') say({ kind: 'hub', outcome: 'moved', base: out.hub.base, from: out.hub.from, to: out.hub.to, note: hubLine(out.hub) });
-    }
+    // The hub's state at this check, for the report.
+    if (out.hub) next.hub = { at: iso(checkStart), outcome: out.hub.outcome, base: out.hub.base, ...(out.hub.commits ? { commits: out.hub.commits } : {}), ...(out.hub.note ? { note: out.hub.note } : {}) };
     const isAlive = io.isAlive ? { isAlive: io.isAlive } : {};
 
     // 0. The runs earlier checks handed on (lib/dispatch.mjs). One that ended leaves its result: its notifications (a
