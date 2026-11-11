@@ -4,6 +4,7 @@ import { editsOf, mergedEdits, nextEditNumber, parseReply, parseThreadReply, res
 import { IMAGE } from './world.mjs';
 import { parseStartHours } from './settings.mjs';
 import { companyReposOn } from './company-repos.mjs';
+import { heldPending } from './answer-pass.mjs';
 
 // The next-step rule of the ticket flow (context/ticket-flow.md, "The rule"). A pure function of a ledger and what the
 // tracker, the forge, git and the files show now: the world wins over the ledger. First match wins:
@@ -83,6 +84,8 @@ function phaseOf(l) {
   if (last === 'questions' && rec?.status === 'done') return 'questions';
   if (last === 'planGate' && rec?.status === 'done') return 'planGate';
   if (['videoGate', 'videoTry', 'videoBlock', 'videoExtract'].includes(last) && l.stages?.videoGate?.status === 'done') return 'videoGate';
+  // A pass on the questions the plan held, with the plan not done yet: still planning.
+  if (last === 'answerPass' && l.heldQuestions?.from === 'plan' && l.stages?.plan?.status !== 'done') return 'planning';
   if (l.stages?.write?.status === 'done' || ['write', 'uaReview', 'answerPass', 'pr'].includes(last)) return 'writing';
   if (['start', 'plan', 'answers', 'planApproval', 'videoImport'].includes(last)) return 'planning';
   return 'card';
@@ -379,7 +382,8 @@ function derive(l, w) {
 
   // Row 15 (row 14 is the startable groups).
   if (phase === 'planning' || phase === 'writing') {
-    const s = preparationStep(l, w.settings, out.notes);
+    // The questions the plan or the write held for the answer pass (TASK-105) go to it before anything else.
+    const s = companyReposOn(w.settings) && heldPending(l) ? step('answerPass', { held: true }) : preparationStep(l, w.settings, out.notes);
     if (s) out.steps.push(s);
   }
   return out;

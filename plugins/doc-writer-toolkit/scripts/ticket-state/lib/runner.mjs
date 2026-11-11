@@ -38,7 +38,7 @@ import { FILES_SHOWN, ticketCommits, ticketCommitsFor } from './ticket-commits.m
 import { BUDGET_MS as DOC_BUDGET_MS, DEFAULT_EXCLUDE, HITS_MAX, PER_FILE, docEvidence, extractTerms, ownTexts, skippedNote } from './doc-evidence.mjs';
 import { withoutHeader } from '../../tracker/lib/comment-header.mjs';
 import { companyReposOn, passRepos, resolveCompanyRepos } from './company-repos.mjs';
-import { inputStands, passInput, passLines, prLinesAfterPass, roundInput } from './answer-pass.mjs';
+import { heldAnswerLines, heldInput, heldPending, holdLines, inputStands, passInput, passLines, prLinesAfterPass, roundInput } from './answer-pass.mjs';
 import { markersAt } from './gates.mjs';
 import { renderAnswers, weekPath, weeklyAnswers, missesPath } from './misses.mjs';
 
@@ -420,6 +420,7 @@ export function briefFor(step, settings) {
     ...buildLines(step),
     ...videoImportLines(step),
     ...(step.stage === 'answerPass' ? passLines(step, settings) : []),
+    ...(['plan', 'write'].includes(step.stage) && step.role === 'writer' ? [...holdLines(step, settings), ...(step.heldAnswers ?? [])] : []),
     ...(step.stage === 'pr' ? step.passLines ?? [] : []),
     ...gateLines(step, settings),
     // The places' language, on whatever `checks` say: the description's places section is written from the record.
@@ -2502,6 +2503,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
           step = { ...step, answerItems: frozen.items, answerNotes: [...passNotes, ...frozen.notes] };
         }
         if (step.stage === 'pr') step = { ...step, passLines: prLinesAfterPass(step.keys.map((k) => readLedger(settings.state, k)), settings) };
+        if (['plan', 'write'].includes(step.stage)) step = { ...step, heldAnswers: heldAnswerLines(step.keys.map((k) => readLedger(settings.state, k))) };
         // The host's own docs, on the same stages, with or without code repos (it never throws).
         // The card's text comes from this run's check of the board (`cardTexts`), with no tracker call of its own.
         const docs = evidenceStage(step) ? withDocEvidence({ ...step, worktrees: trees, clones }, settings, { cardText: (k) => st?.cardTexts?.get(k) ?? null, ...io }) : null;
@@ -2753,6 +2755,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         }
         input = pr.answerInput && pr.answerInput.after === (pr.answerPassDue?.seq ?? null) ? pr.answerInput : roundInput(pr);
       } else if (inputStands(l)) input = l.answerInput;
+      else if (heldPending(l)) input = heldInput(l);
       else {
         const markers = new Map();
         for (const p of l.prs ?? []) {
@@ -2766,7 +2769,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         }
         input = passInput(l, { markers });
       }
-      await runRecord({ settings, clients, key: k, stage: 'answerPass', status: 'running', pr: step.pr, result: JSON.stringify({ input: { items: input.items, notes: input.notes ?? [] } }), now: clock() });
+      await runRecord({ settings, clients, key: k, stage: 'answerPass', status: 'running', pr: step.pr, result: JSON.stringify({ input: { items: input.items, notes: input.notes ?? [], ...(input.kind ? { kind: input.kind } : {}) } }), now: clock() });
       items.push(...input.items.map((x) => (step.keys.length > 1 ? { ...x, ticket: k } : x)));
       notes.push(...(input.notes ?? []));
     }
@@ -2809,7 +2812,8 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         }
       })() : l.stages?.[step.stage];
       const asked = !step.pr && askingStages(settings).includes(step.stage) ? l?.stages?.questions : null;
-      return !(rec && rec.status !== 'running' && rec.seq > before) && !(asked && asked.seq > before);
+      const held = !step.pr && askingStages(settings).includes(step.stage) ? l?.heldQuestions : null;
+      return !(rec && rec.status !== 'running' && rec.seq > before) && !(asked && asked.seq > before) && !(held && held.seq > before);
     });
   }
 
@@ -2835,7 +2839,9 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         // session's whole result, not a failure. A session that also recorded the stage, even as failed, ended on that record.
         const before = seqBefore.get(k) ?? 0;
         const asked = !step.pr && askingStages(settings).includes(step.stage) && (!rec || rec.seq <= before) ? l?.stages?.questions : null;
-        if (asked?.status !== 'done' || asked.seq <= before) ok = false;
+        // Or held them for the answer pass (TASK-105): that record is the session's result too.
+        const held = !step.pr && askingStages(settings).includes(step.stage) && (!rec || rec.seq <= before) ? l?.heldQuestions : null;
+        if ((asked?.status !== 'done' || asked.seq <= before) && !(held && held.seq > before)) ok = false;
       }
     }
     return ok ? 'done' : busy ? 'busy' : 'failed';

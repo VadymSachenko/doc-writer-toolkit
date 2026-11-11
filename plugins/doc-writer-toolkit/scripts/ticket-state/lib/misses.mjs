@@ -101,7 +101,7 @@ export function answerMeasures(ledgers, { since = 0, until = Infinity } = {}) {
     }
     // With the PR opened in the window, what it posted (the description's first questions, its places); else what the
     // passes kept for the owner.
-    const posted = (l.prs ?? []).reduce((n, p) => n + (p.questions ?? []).filter((q) => q.stage === 'pr').length, 0) + (l.places ?? []).length;
+    const posted = (l.prs ?? []).reduce((n, p) => n + (p.questions ?? []).filter((q) => q.stage === 'pr' && q.answer?.by !== 'answerPass').length, 0) + (l.places ?? []).length;
     out.push({ ticket: l.key, left, answered, confirmed, kept, reachedOwner: prAt ? posted : kept });
   }
   return out;

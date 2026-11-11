@@ -11,7 +11,7 @@ import { imagePairsAt } from './pairs.mjs';
 import { originHead, writtenIn } from './worktree.mjs';
 import { addEdits, addEnSides } from './edits.mjs';
 import { changedLines, commentProblems, languageMessage, markersAt, markersMessage, placeLanguageProblems, placeProblems, placesNotListed, questionProblems } from './gates.mjs';
-import { checkWriteOpen, docDirsOf, evidenceChecks, inputOf, passFor, passProblems, prAfterPass, refuse, settledOf } from './answer-pass.mjs';
+import { OWN_KINDS, checkWriteOpen, docDirsOf, evidenceChecks, heldPending, inputOf, passFor, passProblems, prAfterPass, refuse, settledOf } from './answer-pass.mjs';
 import { appendMisses, checkSource, missLine, sourceOfEvidence } from './misses.mjs';
 import { companyReposOn } from './company-repos.mjs';
 
@@ -103,7 +103,8 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
   if (stage === 'answerPass' && status === 'running' && result.input) {
     const input = result.input;
     if (!Array.isArray(input.items)) throw new CliError('answerPass running: "input" is { "items": [...], "notes": [...] }', { code: 2 });
-    const frozen = { items: input.items, notes: input.notes ?? [], at, seq: l.seq + 1, after: pr ? pr.answerPassDue?.seq ?? null : l.stages?.uaReview?.seq ?? null };
+    const held = !pr && input.kind === 'held';
+    const frozen = { items: input.items, notes: input.notes ?? [], ...(held ? { kind: 'held' } : {}), at, seq: l.seq + 1, after: pr ? pr.answerPassDue?.seq ?? null : held ? l.heldQuestions?.seq ?? null : l.stages?.uaReview?.seq ?? null };
     if (pr) pr.answerInput = frozen;
     else l.answerInput = frozen;
     delete result.input;
@@ -112,6 +113,8 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
   const warnings = [];
   // The misses this record settles (lib/misses.mjs), written once the ledger is.
   const misses = [];
+  // A held pass's kept questions, asked on the card in its session: recorded as the questions stage too.
+  let thenAsked = null;
 
   if (status === 'done') await applyDone();
   else if (status === 'running' && pr && (CHAIN.includes(stage) || ['answerComments', 'styleCheck', 'resync', 'readyForMerge'].includes(stage))) {
@@ -119,12 +122,17 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
     if (st) record.head = st.headCommit;
   }
 
-  // Where the record goes: a PR's chain or steps, or the ticket's stages.
+  // Where the record goes: a PR's chain or steps, or the ticket's stages. Questions held for the answer pass are no
+  // questions stage (nothing was asked on the card); a held pass that asked what it kept leaves the ticket at questions.
   if (pr && (CHAIN.includes(stage))) pr.chain[stage] = { ...record, ...(pr.chain[stage]?.head && status !== 'done' && !record.head ? { head: pr.chain[stage].head } : {}) };
   else if (pr && PR_STAGES.includes(stage)) pr.steps[stage] = record;
-  else {
+  else if (!(stage === 'questions' && status === 'done' && result.hold === true)) {
     l.stages[stage] = record;
     l.stage = stage;
+    if (thenAsked) {
+      l.stages.questions = { ...thenAsked, seq: record.seq, at };
+      l.stage = 'questions';
+    }
   }
   l.seq += 1;
   l.updatedAt = at;
@@ -207,6 +215,20 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         return;
       }
       case 'questions': {
+        // Held for the answer pass (TASK-105): a question the plan or the write would ask, not asked on the card yet; the
+        // card stays where it is, and the pass asks what it can't answer.
+        if (result.hold === true) {
+          if (pr) throw new CliError('questions: "hold" is for the plan and the write, at ticket level (no --pr)', { code: 2 });
+          if (!companyReposOn(settings)) throw new CliError('questions: "hold" needs the host\'s companyRepos (the answer pass): ask on the card instead', { code: 2 });
+          if (!['plan', 'write'].includes(result.from)) throw new CliError('questions: a held question gives "from", the stage that held it: plan or write', { code: 2 });
+          const qs = result.questions;
+          if (!Array.isArray(qs) || !qs.length || qs.some((q) => !q || typeof q.text !== 'string' || !q.text.trim())) throw new CliError('questions: "hold" needs "questions", each with its "text"', { code: 2 });
+          const own = qs.filter((q) => OWN_KINDS.includes(q.kind));
+          if (own.length) throw new CliError(`questions: a ${own[0].kind} question is the stage's own: ask it on the card, never held`, { code: 2 });
+          if (heldPending(l)) throw new Refused('answers', 'questions are held already and no answer pass has settled them');
+          l.heldQuestions = { items: qs.map((q) => ({ ...q })), from: result.from, at, seq: l.seq + 1 };
+          return;
+        }
         const card = await needCard('blocked');
         // The questions-first gate (D-044, `checks.questionSources`): no question without the sources it checked, each
         // asked in a comment the card has, posted after the ticket's last record, that names it or its sources' refs.
@@ -367,15 +389,46 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         if (!input) throw new Refused('answers', `no input was frozen for this pass${pr ? ` on ${prId(pr)}` : ''}: the runner freezes it before the session; run the stage from the runner`);
         const problems = passProblems(input, result, { settings, l, pr, checks: evidenceChecks(settings, { docRepos: docDirsOf(settings) }) });
         if (problems.length) throw refuse(problems);
-        result.input = { items: input.items, notes: input.notes ?? [], at: input.at };
+        result.input = { items: input.items, notes: input.notes ?? [], ...(input.kind ? { kind: input.kind } : {}), at: input.at };
         const byId = new Map(input.items.map((x) => [x.id, x]));
         const done = result.items.filter((r) => r.outcome !== 'kept');
         for (const r of done) {
           const item = byId.get(r.id);
-          const source = sourceOfEvidence(r.evidence[0]);
+          const source = sourceOfEvidence(r.evidence.find((e) => e?.kind !== 'rule') ?? r.evidence[0]);
           if (source) misses.push(missLine({ at, ticket: key, pr: pr ? prId(pr) : null, item: { id: r.id, kind: item.kind, text: String(item.text ?? item.claim ?? '').slice(0, 300) }, source, settledBy: 'answerPass', missedBy: item.from, key: `${key}|answerPass|${pr ? prId(pr) : ''}|${r.id}|${input.at}` }));
         }
+        if (!pr && input.kind === 'held') {
+          // Held questions: the answered ones go to the step that held them; the kept ones were asked on the card in
+          // this session (`asked`: the comment, the card in Blocked), and the ticket waits for the answers.
+          const kept = result.items.filter((r) => r.outcome === 'kept');
+          const questions = result.items.map((r) => {
+            const item = byId.get(r.id);
+            const q = { id: r.id, kind: item.asked ?? 'fact', text: item.text, sources: r.outcome === 'kept' ? r.sources : [...(item.sources ?? []), ...(r.evidence ?? []).map((e) => ({ kind: e.kind, ref: e.repo ? `${e.repo}:${e.path ?? ''}` : e.log ?? e.ref ?? `${e.ticket}/${e.file}`, result: r.answer }))], ...(r.outcome === 'kept' ? { why: r.why } : { answer: { at, by: 'answerPass', text: String(r.answer).trim() } }) };
+            return q;
+          });
+          if (kept.length) {
+            const commentId = result.asked?.commentId;
+            if (commentId === undefined || commentId === null || commentId === '') throw new Refused('answers', `${kept.length} item(s) kept: ask them on the card in one comment (the card to Blocked), then record its id as "asked": { "commentId" }`);
+            const card = await needCard('blocked');
+            const asked = questions.filter((q) => !q.answer).map((q) => ({ ...q, commentId }));
+            if (settings.checks?.questionSources) {
+              const off = commentProblems(asked, (await tracker.readCard({ card: card.id })).comments, ledger.updatedAt);
+              if (off.length) throw new Refused('comment', `${off.join('; ')}: ask the kept questions on the card, naming what was tried, then record that comment's id`, { problems: off });
+            }
+            thenAsked = { status: 'done', result: { questions: asked, from: 'answerPass' } };
+            l.left = { ...brief(card), at };
+          }
+          for (const q of questions) l.questions.push({ ...q, askedAt: at, ...(q.answer ? {} : { commentId: result.asked.commentId }) });
+          l.heldQuestions.passSeq = l.seq + 1;
+          return;
+        }
         if (!pr) {
+          // Pushed as they are: a page edit the PR would open without is no edit (lib/worktree.mjs, `writtenIn`).
+          for (const e of result.prs ?? []) {
+            if (!(e.commits ?? []).length) continue;
+            const w = writtenIn(settings, l.prs.find((x) => x.repo === e.repo && x.branch === e.branch) ?? e);
+            if (w.error) throw new Refused('notWritten', `${e.repo} ${e.branch}: ${w.error}`);
+          }
           for (const p of result.prs ?? []) upsertPr(p);
           return;
         }
@@ -453,9 +506,17 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
           // Only with review rounds (the host's `forge.reviewRounds`); there the questions are required (`[]` when none),
           // so the runner's section never replaces questions the session wrote with "none".
           if (settings.reviewRounds) {
+            if (Array.isArray(e.questions) && passFor(l)) {
+              // After an answer pass, a question with no kept item it carries is new to the pass: held from the
+              // description until the pass on this PR settles it (TASK-105).
+              const keptIds = new Set([...settledOf(passFor(l)).entries()].filter(([, v]) => v.result.outcome === 'kept').map(([k]) => k));
+              e.questions = e.questions.map((q) => (q && !keptIds.has(q.item) ? { ...q, hold: true } : q));
+            }
             if (!Array.isArray(e.questions)) throw new CliError(`pr: ${e.repo} ${e.branch}: "questions" is required with review rounds: the description's questions, [{ "text", "reader", "place"?, "why"?, "proposal"? }], or [] when there are none`, { code: 2 });
             p.questions = (p.questions ?? []).filter((q) => q.stage !== 'pr');
             addQuestions(p, e.questions);
+            if (p.questions.some((q) => q.held && !q.answer)) p.answerPassDue = { seq: l.seq + 1, at, stage };
+            else delete p.answerPassDue;
             firstRound(p, e);
           }
           const asked =(st.reviewRequests ?? []).map((r) => r.login ?? r.team ?? r).filter((r) => !p.reviewersRequested.map(String).includes(String(r)));
@@ -487,6 +548,8 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         // not refused (a retry would post them again): the record stands, the session is told, and `status` reports it.
         // A place that repeats an item the answer pass settled: its comment is posted, so it stands, with a warning.
         const settledIds = new Map([...settledOf(passFor(l)).entries()].filter(([, v]) => v.result.outcome !== 'kept'));
+        const keptPlaces = new Set([...settledOf(passFor(l)).entries()].filter(([, v]) => v.result.outcome === 'kept').map(([k]) => k));
+        if (passFor(l)) for (const place of result.places ?? []) if (!settledIds.has(place.item) && !keptPlaces.has(place.item)) warnings.push(`place ${place.id ?? '?'} carries no item the answer pass kept: a place new to the pass reached the owner unanswered`);
         for (const place of result.places ?? []) if (settledIds.has(place.item)) warnings.push(`place ${place.id ?? '?'} repeats item ${place.item}, which the answer pass ${settledIds.get(place.item).result.outcome}`);
         for (const place of result.places ?? []) {
           const noRef = place.source === 'code' && !(Array.isArray(place.refs) && place.refs.length && place.refs.every((r) => r?.repo && r?.path && r?.lines && r?.commit));
@@ -959,8 +1022,8 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
     let next = p.questions.reduce((m, x) => Math.max(m, x.n), 0) + 1;
     for (const x of items) {
       const n = Number.isInteger(Number(x.n)) && Number(x.n) >= next ? Number(x.n) : next;
-      const fields = Object.fromEntries(['reader', 'place', 'why', 'proposal'].filter((k) => typeof x[k] === 'string' && x[k].trim()).map((k) => [k, x[k].trim()]));
-      p.questions.push({ n, text: x.text.trim(), ...fields, stage, at });
+      const fields = Object.fromEntries(['reader', 'place', 'why', 'proposal', 'item'].filter((k) => typeof x[k] === 'string' && x[k].trim()).map((k) => [k, x[k].trim()]));
+      p.questions.push({ n, text: x.text.trim(), ...fields, ...(x.hold === true ? { held: true } : {}), stage, at });
       next = n + 1;
     }
   }

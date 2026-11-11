@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { NOW, ago, card, gitRepo, pr, rawSettings, tmp } from './fakes.mjs';
+import { LISTS, NOW, ago, card, gitRepo, noTree, pr, rawSettings, tmp } from './fakes.mjs';
 import { ledger, read, snapshot, world } from './helpers.mjs';
 import { runRecord } from '../lib/record.mjs';
 import { briefFor, codeReposFor, commandFor, runDaily } from '../lib/runner.mjs';
@@ -12,6 +12,7 @@ import { validateSettings } from '../lib/settings.mjs';
 import { ensureWorktree, codeClonePath } from '../lib/worktree.mjs';
 import { passRepos, resolveCompanyRepos, validateCompanyRepos } from '../lib/company-repos.mjs';
 import { passInput, prLinesAfterPass, roundInput } from '../lib/answer-pass.mjs';
+import { markersAt } from '../lib/gates.mjs';
 import { DEFAULT_LABELS, renderSections } from '../lib/pr-description.mjs';
 import { labelChanges, labelSnapshot } from '../lib/pr-labels.mjs';
 import { answerMeasures, missesPath, readMisses, renderAnswers, weekOf, weeklyAnswers } from '../lib/misses.mjs';
@@ -32,6 +33,7 @@ const COMPANY = [
   { repo: 'cabinet-web', url: 'https://code.example/acme/cabinet-web', base: 'develop', path: '../cabinet-web' },
   { repo: 'pay-widget', url: 'https://code.example/acme/pay-widget' },
 ];
+const RULE = { kind: 'rule', ref: 'role', text: "If your own proposal would be to leave the page as it is, or the card's words already answer it, it is no question: decide it and leave it out." };
 const rec = (w, args) => runRecord({ settings: w.settings, clients: w.clients(), now: NOW, ...args });
 
 // A code repo the runner has cloned (`<state>/code/<repo>.git`, bare), with the files given at one commit.
@@ -153,6 +155,8 @@ test('the flow: with companyRepos the answer pass runs after the UA review and b
   const t = await off.w.one('2101');
   assert.equal(t.next.stage, 'pr');
   assert.ok(t.notes.some((n) => /no answer pass: the host sets no companyRepos/.test(n)), t.notes.join('; '));
+  // And nothing is held: with no pass to answer them, the plan and the write ask on the card as before.
+  await assert.rejects(rec(off.w, { key: '2101', stage: 'questions', status: 'done', result: { hold: true, from: 'write', questions: [{ kind: 'fact', text: 'Which limit?' }] } }), (e) => e.exitCode === 2 && /"hold" needs the host's companyRepos/.test(e.message));
   // A UA review again after the pass: the pass runs again before the PR.
   const again = read(on.w, '2101');
   again.stages.uaReview = { ...again.stages.uaReview, seq: again.seq + 1 };
@@ -261,6 +265,7 @@ test('the gate: an answered item needs evidence that holds, a kept one its sourc
   await refusedAs(t, passDone(t, { items: [ok.items[0], { id: 'p1', outcome: 'confirmed', answer: 'x', evidence: [code] }] }), /a place is confirmed only when it was seen working/);
   await refusedAs(t, passDone(t, { items: [ok.items[0], { id: 'p1', outcome: 'answered', answer: 'x', evidence: [{ kind: 'live', log: 'work/tickets/2101/none.txt', setup: 'x' }] }] }), /the log work\/tickets\/2101\/none\.txt is not there/);
   await refusedAs(t, passDone(t, { items: [ok.items[0], { id: 'p1', outcome: 'answered', answer: 'x', evidence: [{ kind: 'rule', ref: 'nowhere', text: 'x' }] }] }), /the rule 'nowhere' is neither a key of the host's rules \(liveChecks\) nor "role"/);
+  await refusedAs(t, passDone(t, { items: [{ id: 'q1', outcome: 'answered', answer: 'x', evidence: [{ kind: 'rule', ref: 'role', text: 'A question is always answered by leaving the page as it is.' }] }, kept] }), /the rule's text is not in the role's rules: quote it as written there/);
   await passDone(t, ok);
   const l = read(t.w, '2101');
   assert.equal(l.stages.answerPass.status, 'done');
@@ -273,7 +278,7 @@ test('a stage\'s own question is passed through untouched: never an item, and th
   const input = await freeze(t);
   assert.deepEqual(input.items.map((x) => [x.id, x.kind]), [['q1', 'question']]);
   await refusedAs(t, passDone(t, { items: [{ id: 'fit-1', outcome: 'answered', answer: 'x', evidence: [{ kind: 'rule', ref: 'role', text: 'x' }] }, { id: 'q1', outcome: 'kept', why: 'x', sources: [{ kind: 'a', ref: 'b', result: 'c' }] }] }), /item fit-1 is not one of this pass's \(q1\): a stage's own question, and anything not listed, stays as it is/);
-  await passDone(t, { items: [{ id: 'q1', outcome: 'answered', answer: 'Лишити як є: це не питання.', evidence: [{ kind: 'rule', ref: 'role', text: 'If your own proposal would be to leave the page as it is, it is no question: decide it and leave it out.' }] }] });
+  await passDone(t, { items: [{ id: 'q1', outcome: 'answered', answer: 'Лишити як є: це не питання.', evidence: [{ kind: 'rule', ref: 'role', text: "If your own proposal would be to leave the page as it is, or the card's words already answer it, it is no question: decide it and leave it out." }] }] });
   assert.deepEqual(read(t.w, '2101').questions, own);
 });
 
@@ -290,6 +295,9 @@ test('the page edits: the pass\'s edits go on the description\'s list after the 
   t.forgePr.headCommit = after;
   const edit = { repo: 'api-docs', branch: 'ticket-1', page: 'docs/a.md', block: 'Абзац', before: '{/* NEEDS CONFIRMATION: the limit period */}', after: 'Ліміт діє 24 години.', item: 'm1' };
   await refusedAs(t, passDone(t, { items: [{ id: 'm1', outcome: 'answered', answer: '24 години', evidence: [{ kind: 'code', repo: 'ledger-api', path: 'limits/period.go', lines: '1', commit: sha }] }], edits: [{ ...edit, item: 'x' }], prs: [{ repo: 'api-docs', branch: 'ticket-1', commits: [after] }] }), /edit 1 names no answered or confirmed item/);
+  // The runner's worktree is not at the branch's head on origin: the edits the description would list are not there.
+  await assert.rejects(passDone(t, { items: [{ id: 'm1', outcome: 'answered', answer: '24 години', evidence: [{ kind: 'code', repo: 'ledger-api', path: 'limits/period.go', lines: '1', commit: sha }] }], edits: [edit], prs: [{ repo: 'api-docs', branch: 'ticket-1', commits: [after] }] }), (e) => e.refused === 'notWritten' && /push the worktree's head/.test(e.message));
+  ensureWorktree(t.w.settings, t.entry);
   await passDone(t, { items: [{ id: 'm1', outcome: 'answered', answer: '24 години', evidence: [{ kind: 'code', repo: 'ledger-api', path: 'limits/period.go', lines: '1', commit: sha }] }], edits: [edit], prs: [{ repo: 'api-docs', branch: 'ticket-1', commits: [after] }] });
   assert.ok(read(t.w, '2101').prs[0].pipelineCommits.includes(after), "the pass's commit is the pipeline's, never a hand edit");
   // The pr brief names the edit and the heading; the description's list takes it as item 2.
@@ -385,31 +393,47 @@ test('the measures per ticket: the items the writer left, those the pass answere
 
 // ------------------------------------------------------------------ replays (invented data, the shapes of real tickets)
 
-test('replay, a question answered from a frontend repo (AC-1): q1 from the cabinet\'s code with file and lines, the two leave-as-is questions settled by the question rule, and the description shows no open question', async () => {
-  const open = { questions: [
-    { text: 'Which amount does the archive column «Сума» show for an order closed with the actual amount?', reader: 'developer', why: 'The backend returns both amounts; which one the column shows is up to the frontend.', proposal: 'Replace the marker once answered.', sources: [{ kind: 'code', ref: 'ledger-api orders/handlers.go L463-L541', result: 'both amount and finishedAmount' }] },
-    { text: 'Add a sentence that orders are closed with the actual amount when it is lower too?', reader: 'writer', proposal: 'Leave it as it is: the rule is already true for a lower amount.' },
-    { text: 'Explain what the match level above 50 % measures?', reader: 'writer', proposal: 'Leave it as it is: the threshold is enough for the operator.' },
-  ] };
-  const t = passWorld({ key: '2501', open, extra: { forge: { ...rawSettings().forge, reviewRounds: true } } });
+test('replay, a question answered from a frontend repo (AC-1): the marker answered from the cabinet\'s code with file and lines, the two leave-as-is questions the PR stage asked held and settled by the question rule, and the description shows no open question', async () => {
+  const t = passWorld({ key: '2501', extra: { forge: { ...rawSettings().forge, triggerWords: ['helper'], reviewRounds: true } } });
+  const fx = apiClone(t.w);
+  const marker = '{/* NEEDS CONFIRMATION: which amount the archive column «Сума» shows */}';
+  t.forgePr.headCommit = fx.push({ 'docs/a.md': `# Сторінка\n\nАбзац про ліміти.\n\nАрхів показує суму. ${marker}\n` }, 'draft');
+  ensureWorktree(t.w.settings, t.entry);
+  // The write left a marker, as the live write did; the runner reads it in the worktree.
+  const l0 = read(t.w, '2501');
+  const input = passInput(l0, { markers: new Map([['api-docs:ticket-1', markersAt(t.w.settings, l0.prs[0], 'HEAD')]]) });
+  assert.deepEqual(input.items.map((x) => [x.id, x.kind, x.page, x.line]), [['m1', 'marker', 'docs/a.md', 5]]);
+  await rec(t.w, { key: '2501', stage: 'answerPass', status: 'running', result: { input } });
   const sha = codeClone(t.w.settings, 'cabinet-web', { 'src/components/Archive/columns.tsx': 'import x from "y";\n\nexport const columns = [\n  { title: "Сума", value: (row) => row.finishedAmount },\n];\n' });
-  await freeze(t);
-  const rule = { kind: 'rule', ref: 'role', text: 'If your own proposal would be to leave the page as it is, it is no question: decide it and leave it out.' };
-  await passDone(t, { items: [
-    { id: 'q1', outcome: 'answered', answer: 'Колонка «Сума» показує фактичну суму закриття (finishedAmount).', evidence: [{ kind: 'code', repo: 'cabinet-web', path: 'src/components/Archive/columns.tsx', lines: '4', commit: sha, url: `https://code.example/acme/cabinet-web/blob/${sha}/src/components/Archive/columns.tsx#L4-L4` }] },
-    { id: 'q2', outcome: 'answered', answer: 'Лишити як є.', evidence: [rule] },
-    { id: 'q3', outcome: 'answered', answer: 'Лишити як є.', evidence: [rule] },
-  ] });
-  const lines = prLinesAfterPass([read(t.w, '2501')], t.w.settings).join('\n');
-  assert.match(lines, /settled 3 of 3 item\(s\) and kept 0/);
-  // The PR stage posts none of them, and a question that repeats one is refused with review rounds.
-  const prRec = (questions) => rec(t.w, { key: '2501', stage: 'pr', status: 'done', result: { prs: [{ repo: 'api-docs', branch: 'ticket-1', number: 7, expertReview: { recommended: false, why: 'all checked in the code' }, questions }], places: [] } });
-  await refusedAs(t, prRec([{ text: 'Which amount?', reader: 'developer', item: 'q1' }]), /question \? repeats item q1, which the answer pass settled/);
-  await prRec([]);
-  const l = read(t.w, '2501');
-  assert.equal(renderSections(l, l.prs[0], DEFAULT_LABELS).questions, DEFAULT_LABELS.none);
-  const m = readMisses(t.w.settings.state).find((x) => x.item.id === 'q1');
-  assert.deepEqual([m.source.kind, m.source.ref, m.settledBy, m.missedBy], ['code', 'cabinet-web:src/components/Archive/columns.tsx#L4', 'answerPass', 'write']);
+  const after = fx.push({ 'docs/a.md': '# Сторінка\n\nАбзац про ліміти.\n\nАрхів показує фактичну суму закриття.\n' }, 'answers');
+  t.forgePr.headCommit = after;
+  ensureWorktree(t.w.settings, t.entry);
+  const code = { kind: 'code', repo: 'cabinet-web', path: 'src/components/Archive/columns.tsx', lines: '4', commit: sha, url: `https://code.example/acme/cabinet-web/blob/${sha}/src/components/Archive/columns.tsx#L4-L4` };
+  const edit = { repo: 'api-docs', branch: 'ticket-1', page: 'docs/a.md', block: 'Архів', before: `Архів показує суму. ${marker}`, after: 'Архів показує фактичну суму закриття.', item: 'm1' };
+  // A rule alone settles no fact: the marker needs the code that shows it.
+  await refusedAs(t, passDone(t, { items: [{ id: 'm1', outcome: 'answered', answer: 'x', evidence: [RULE] }] }), /item m1 is a marker: a rule alone settles no fact/);
+  await passDone(t, { items: [{ id: 'm1', outcome: 'answered', answer: 'Колонка «Сума» показує фактичну суму закриття (finishedAmount).', evidence: [code] }], edits: [edit], prs: [{ repo: 'api-docs', branch: 'ticket-1', commits: [after] }] });
+  // The PR stage asks two questions the pass never saw, with no item: held for the pass on the PR, never shown.
+  const asked = [{ text: 'Add a sentence that orders are closed with the actual amount when it is lower too?', reader: 'writer', proposal: 'Leave it as it is: the rule is already true for a lower amount.' }, { text: 'Explain what the match level above 50 % measures?', reader: 'writer', proposal: 'Leave it as it is: the threshold is enough for the operator.' }];
+  const prRec = (questions) => rec(t.w, { key: '2501', stage: 'pr', status: 'done', result: { prs: [{ repo: 'api-docs', branch: 'ticket-1', number: 7, expertReview: { recommended: false, why: 'all checked in the code' }, edits: [{ n: 1, page: edit.page, block: edit.block, before: edit.before, after: edit.after }], questions }], places: [] } });
+  await refusedAs(t, prRec([{ text: 'Which amount?', reader: 'developer', item: 'm1' }]), /question \? repeats item m1, which the answer pass settled/);
+  await prRec(asked);
+  let l = read(t.w, '2501');
+  let p = l.prs[0];
+  assert.deepEqual(p.questions.map((q) => [q.n, q.held ?? false]), [[1, true], [2, true]]);
+  assert.ok(p.answerPassDue);
+  assert.equal(renderSections(l, p, DEFAULT_LABELS).questions, DEFAULT_LABELS.none, 'nothing shown before the pass');
+  assert.ok((await t.w.one('2501')).steps.some((x) => x.stage === 'answerPass' && x.pr === 'api-docs#7'));
+  // The pass on the PR: both settled by the role's question rule.
+  await rec(t.w, { key: '2501', stage: 'answerPass', pr: 'api-docs#7', status: 'running', result: { input: roundInput(p) } });
+  await passDone(t, { items: [{ id: 'd1', outcome: 'answered', answer: 'Лишити як є.', evidence: [RULE] }, { id: 'd2', outcome: 'answered', answer: 'Лишити як є.', evidence: [RULE] }] }, { pr: 'api-docs#7' });
+  l = read(t.w, '2501');
+  p = l.prs[0];
+  const shown = renderSections(l, p, DEFAULT_LABELS).questions;
+  assert.ok(!shown.includes('<details open>'), 'no open question in the description');
+  assert.match(shown, /~~Add a sentence that orders are closed/);
+  const m = readMisses(t.w.settings.state);
+  assert.deepEqual(m.map((x) => [x.item.id, x.source.kind, x.source.ref, x.settledBy, x.missedBy]), [['m1', 'code', 'cabinet-web:src/components/Archive/columns.tsx#L4', 'answerPass', 'write'], ['d1', 'decision', 'role', 'answerPass', 'pr'], ['d2', 'decision', 'role', 'answerPass', 'pr']]);
   assert.deepEqual(answerMeasures([l], { since: NOW - 1000, until: NOW + 1000 })[0], { ticket: '2501', left: 3, answered: 3, confirmed: 0, kept: 0, reachedOwner: 0 });
 });
 
@@ -438,21 +462,83 @@ test('replay, a place answered from an earlier ticket\'s live check (AC-2): it l
   assert.deepEqual(m.map((x) => [x.item.id, x.source.kind, x.source.ref]), [['p1', 'ticket', '2480/api-check.md']]);
 });
 
-test('replay, a state no screen gives, reached through a backend route (AC-4): the claim\'s question is answered with the live check\'s log and the route in the code, and reaches no one', async () => {
-  const t = passWorld({ key: '2701', uaOpen: ['Update the reasons tables, or remove `reason` from the response sample? A finished claim was not reached: the console hides Finish and Reject for NEW claims.'], extra: { hostRules: { liveChecks: '.claude/rules/live.md' } } });
-  const sha = codeClone(t.w.settings, 'ledger-api', { 'routes/console.go': 'r.PATCH("/api/v2/console/order/:id/claim", setClaimStatus)\n' });
-  fs.mkdirSync(path.join(t.w.root, 'work/tickets/2701'), { recursive: true });
-  fs.writeFileSync(path.join(t.w.root, 'work/tickets/2701/api-check.md'), '## §6 A finished claim\n\nPATCH /api/v2/console/order/:id/claim {"Status":"CANCELED"} → 200\nGET /v1/order/:id/claim → 200, no "reason" key\n');
-  await freeze(t);
-  assert.deepEqual((read(t.w, '2701').answerInput.items).map((x) => [x.id, x.kind, x.from]), [['f1', 'finding', 'uaReview']]);
-  await passDone(t, { items: [{ id: 'f1', outcome: 'answered', answer: 'Remove `reason`: a finished claim read through the client API has no such key.', evidence: [{ kind: 'live', log: 'work/tickets/2701/api-check.md', setup: 'the test claim finished through the backend route the console calls, with the test admin account the host\'s rules name' }, { kind: 'code', repo: 'ledger-api', path: 'routes/console.go', lines: '1', commit: sha }] }] });
-  const l = read(t.w, '2701');
-  assert.equal(l.stages.answerPass.result.items[0].outcome, 'answered');
-  assert.deepEqual(answerMeasures([l], { since: NOW - 1000, until: NOW + 1000 })[0].reachedOwner, 0);
-  assert.deepEqual(readMisses(t.w.settings.state).map((x) => [x.item.id, x.source.kind]), [['f1', 'live']]);
-  // The brief tells the pass how such a state is reached.
-  const brief = briefFor({ stage: 'answerPass', role: 'writer', keys: ['2701'], answerItems: l.answerInput.items }, t.w.settings);
-  assert.match(brief, /A state no screen gives \(an action a cabinet hides for that status\) is often set through the backend route the screens call/);
+test('replay, a state no screen gives, reached through a backend route (AC-4): the plan holds its question instead of asking it, the pass answers it with the live check\'s log and the route in the code, the card never goes to Blocked, and the plan goes on with the answer', async () => {
+  const c = card({ number: 2701, status: 'inProgress', labels: ['Api'] });
+  const w = world({ cards: [c], extra: { companyRepos: COMPANY, appRepos: [{ repo: 'ledger-api', url: 'https://code.example/acme/ledger-api' }], workFolder: 'work/tickets/<key>' } });
+  ledger(w, c, { key: '2701', stages: { triage: 'done', start: 'done' }, startedBy: 'schedule', triage: { verdict: 'docs-required', targets: ['api'], size: 'edit' } });
+  const sha = codeClone(w.settings, 'ledger-api', { 'routes/console.go': 'r.PATCH("/api/v2/console/order/:id/claim", setClaimStatus)\n' });
+  const question = { id: 'q1', kind: 'fact', text: 'The create and the read pages describe `reason` and the reasons tables, but the API returns no `reason` to the partner: update the tables, or remove `reason` from both pages?', sources: [{ kind: 'code', ref: 'ledger-api claims.go', result: 'reason hidden for the partner' }, { kind: 'api', ref: 'work/tickets/2701/api-check.md §5', result: 'a finished claim not reached: the console hides Finish and Reject for NEW claims' }] };
+  const seen = [];
+  const spawnClaude = async (cmd) => {
+    const stage = stageOf(cmd);
+    seen.push({ stage, brief: briefOf(cmd) });
+    const at = (k) => runRecord({ settings: w.settings, clients: w.clients(), now: NOW, key: '2701', ...k });
+    if (stage === 'plan' && seen.filter((x) => x.stage === 'plan').length === 1) {
+      // A plain question would refuse here: the card is In progress, the plan holds it instead.
+      await at({ stage: 'questions', status: 'done', result: { hold: true, from: 'plan', questions: [question] } });
+    } else if (stage === 'answerPass') {
+      fs.mkdirSync(path.join(w.root, 'work/tickets/2701'), { recursive: true });
+      fs.writeFileSync(path.join(w.root, 'work/tickets/2701/api-check.md'), '## §6 A finished claim\n\nPATCH /api/v2/console/order/:id/claim {"Status":"CANCELED"} → 200\nGET /v1/order/:id/claim → 200, no "reason" key\n');
+      await at({ stage: 'answerPass', status: 'done', result: { items: [{ id: 'c1', outcome: 'answered', answer: 'Remove `reason` and the reasons tables: a finished claim read through the client API has no such key.', evidence: [{ kind: 'live', log: 'work/tickets/2701/api-check.md', setup: "the test claim finished through the backend route the console calls, with the test admin account the host's rules name" }, { kind: 'code', repo: 'ledger-api', path: 'routes/console.go', lines: '1', commit: sha }] }] } });
+    } else return { code: 1, stdout: '', stderr: 'stop' };
+    return { code: 0, stdout: RESULT, stderr: '' };
+  };
+  const ensureCodeTree = (s, app) => ({ repo: app.repo, path: path.join(s.state, 'code', app.repo, 'c0ffee1c0ffe'), commit: 'c0ffee1c0ffee1c0ffee1c0ffee1c0ffee1c0ff', url: app.url, notes: [], removed: [], kept: [] });
+  await runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude, ensureCodeTree, ticketCommits: (dir, key) => ({ key, more: false, commits: [] }) }, options: { named: ['2701'] } });
+  assert.deepEqual(seen.slice(0, 3).map((x) => x.stage), ['plan', 'answerPass', 'plan']);
+  // The plan's brief says to hold; the pass's frames the held question; the plan again gets the answer.
+  assert.match(seen[0].brief, /Hold it instead: .*--stage questions --status done --result '\{ "hold": true, "from": "plan"/);
+  assert.match(seen[1].brief, /on the questions the plan or the write held instead of asking them on the card/);
+  assert.match(seen[1].brief, /\*\*c1\*\* \(a question the plan held\): The create and the read pages describe/);
+  assert.match(seen[2].brief, /The answer pass answered the questions 2701's plan held/);
+  assert.match(seen[2].brief, /c1: .* → Remove `reason` and the reasons tables/);
+  const l = read(w, '2701');
+  assert.equal(c.placeId, LISTS.inProgress.id, 'the card never went to Blocked');
+  assert.equal(l.stages.questions, undefined, 'nothing was asked on the card');
+  assert.deepEqual(l.questions.map((q) => [q.id, q.answer?.by]), [['c1', 'answerPass']]);
+  assert.deepEqual(readMisses(w.settings.state).map((x) => [x.item.id, x.source.kind, x.settledBy, x.missedBy]), [['c1', 'live', 'answerPass', 'plan']]);
+  // A fit stop is the stage's own: never held.
+  await assert.rejects(runRecord({ settings: w.settings, clients: w.clients(), now: NOW, key: '2701', stage: 'questions', status: 'done', result: { hold: true, from: 'plan', questions: [{ kind: 'fit', text: 'The table lists cards: add a row?' }] } }), (e) => e.exitCode === 2 && /a fit question is the stage's own/.test(e.message));
+});
+
+test('a held question the pass can\'t answer is asked on the card in its session: the record needs that comment and the card in Blocked, and the ticket waits for the answer', async () => {
+  const c = card({ number: 2702, status: 'inProgress' });
+  const w = world({ cards: [c], extra: { companyRepos: COMPANY } });
+  ledger(w, c, { key: '2702', stages: { triage: 'done', start: 'done' } });
+  await rec(w, { key: '2702', stage: 'questions', status: 'done', result: { hold: true, from: 'plan', questions: [{ kind: 'fact', text: 'Which fee applies to a partial refund?' }] } });
+  assert.equal((await w.one('2702')).next.stage, 'answerPass');
+  await rec(w, { key: '2702', stage: 'answerPass', status: 'running', result: { input: (await import('../lib/answer-pass.mjs')).heldInput(read(w, '2702')) } });
+  const kept = { items: [{ id: 'c1', outcome: 'kept', why: 'No code or page names the fee for a partial refund.', sources: [{ kind: 'code', ref: 'ledger-api, fees/', result: 'one fee for full refunds only' }] }] };
+  await assert.rejects(rec(w, { key: '2702', stage: 'answerPass', status: 'done', result: kept }), (e) => e.refused === 'answers' && /ask them on the card in one comment/.test(e.message));
+  await assert.rejects(rec(w, { key: '2702', stage: 'answerPass', status: 'done', result: { ...kept, asked: { commentId: 'cm-9' } } }), (e) => e.refused === 'card');
+  c.placeId = LISTS.blocked.id;
+  await rec(w, { key: '2702', stage: 'answerPass', status: 'done', result: { ...kept, asked: { commentId: 'cm-9' } } });
+  const l = read(w, '2702');
+  assert.equal(l.stage, 'questions');
+  assert.deepEqual(l.stages.questions.result.questions.map((q) => [q.id, q.commentId]), [['c1', 'cm-9']]);
+  const t = await w.one('2702');
+  assert.equal(t.state, 'questions');
+});
+
+test('the runner: a round\'s held questions get the pass on the PR, with its items, its numbering and the PR\'s worktree', async () => {
+  const c = card({ number: 2801, status: 'finalReview' });
+  const w = world({ cards: [c], prs: [pr({ repo: 'guide-docs', number: 51, head: 'ticket-2801', headCommit: 'b'.repeat(40) })], extra: { companyRepos: COMPANY, forge: { ...rawSettings().forge, triggerWords: ['helper'], reviewRounds: true } } });
+  ledger(w, c, { key: '2801', stages: { start: 'done', plan: 'done', write: 'done', uaReview: 'done', answerPass: 'done', pr: 'done' }, prs: [{ repo: 'guide-docs', branch: 'ticket-2801', number: 51, targets: ['guide'], review: 'sme', stage: 'finalReview', edits: [{ n: 1, list: 'description', page: 'docs/a.md', before: 'a', after: 'b' }], questions: [{ n: 1, text: 'Does the widget retry?', reader: 'developer', stage: 'answerComments', held: true }], answerPassDue: { seq: 6, at: ago(1), stage: 'answerComments' } }] });
+  const briefs = [];
+  let frozen = null;
+  const spawnClaude = async (cmd) => {
+    briefs.push(briefOf(cmd));
+    frozen = read(w, '2801').prs[0].answerInput?.items.map((x) => x.id) ?? null;
+    return { code: 1, stdout: '', stderr: 'stop' };
+  };
+  const ensureCodeTree = (s, app) => ({ repo: app.repo, path: path.join(s.state, 'code', app.repo, 'c0ffee1c0ffe'), commit: 'c'.repeat(40), url: app.url, notes: [] });
+  await runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: usage, now: () => NOW, spawnClaude, ensureCodeTree, ensureWorktree: noTree, ticketCommits: (dir, key) => ({ key, more: false, commits: [] }) }, options: { named: ['2801'] } });
+  assert.ok(briefs.length);
+  assert.match(briefs[0], /Stage `answerPass` of ticket 2801 \(group 2801\), PR guide-docs#51/);
+  assert.match(briefs[0], /\*\*d1\*\* \(a question asked at answerComments, for developer\): Does the widget retry\?/);
+  assert.match(briefs[0], /Number the edits you record on this PR from 2/);
+  assert.match(briefs[0], /- pay-widget: /);
+  assert.deepEqual(frozen, ['d1']);
 });
 
 test('the report shows the week\'s answers on the day they were made', () => {
