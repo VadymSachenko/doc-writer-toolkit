@@ -5,9 +5,10 @@
 // The published pages are read with `git grep` at a ref of each repo (`origin/<base>` as last fetched, else `HEAD`),
 // never in a working tree, and nothing is written there. The work folders are never committed (a host ignores its
 // `.sources/`), so they are read from the files, read only: no link followed, no binary file, no file past `FILE_MAX`.
-// Never searched: the current ticket's own folder, the host's exclusions (release notes by default), `.assets`,
-// `.sources` inside a content root, frames and the label store (`.doc-toolkit`). The terms go to git as fixed strings,
-// each after `-e`, so none can become an option. Nothing here throws: a git error, a time out or a fault is a note.
+// Never searched: the current ticket's own folder, the release notes and the host's other exclusions, under every
+// content root of every doc repo, `.assets`, `.sources` inside a content root, frames and the label store
+// (`.doc-toolkit`). The terms go to git as fixed strings, each after `-e`, so none can become an option. Nothing here
+// throws: a git error, a time out or a fault is a note.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -28,22 +29,32 @@ const WALK_DEPTH_MAX = 3;
 // What falls past the bound is listed by file, this many, then counted.
 export const PAST_SHOWN = 10;
 
-// The host's defaults (`docEvidence`, lib/settings.mjs): the paths from each repo's top that are never searched, and
-// the files of an earlier ticket's work folder that are (a name ending in `/` is a folder, read with what is under it).
-export const DEFAULT_EXCLUDE = ['docs/release-notes/'];
+// The host's defaults (`docEvidence`, lib/settings.mjs): what is never searched, and the files of an earlier ticket's
+// work folder that are (a name ending in `/` is a folder, read with what is under it). An exclusion is a folder's name
+// (`release-notes/`: that folder at any depth, in every repo), or a path under a content root (`drafts/`, or
+// `docs/drafts/` with the root in it), left out under every content root, UA and EN, of every doc repo, and from each
+// repo's top. The release notes are always left out: the host's list is added to the default, never put in its place.
+export const DEFAULT_EXCLUDE = ['release-notes/'];
 export const DEFAULT_TICKET_FILES = ['app-notes.md', 'api-check.md', 'code-check.md', 'ticket.md', 'sme-interview.md', 'api/'];
 // Never searched, in every repo and every work folder.
 const NEVER = ['.assets', '.sources', '.doc-toolkit', 'frames', 'node_modules', '.git'];
 
 // ------------------------------------------------------------------ the terms
 
-// Words too generic to tell a page apart, any case: HTTP methods, JSON types, common values and words of a ticket.
+// Words too generic to tell a page apart, any case: HTTP methods, JSON types, common values and words of a ticket, and
+// the field labels of a ticket's or a note's template, in English and Ukrainian.
 const GENERIC = new Set([
   'get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'true', 'false', 'null', 'none', 'nil', 'undefined', 'string', 'number', 'integer',
   'boolean', 'bool', 'object', 'array', 'json', 'yaml', 'http', 'https', 'html', 'markdown', 'todo', 'readme', 'api', 'url', 'uri', 'uuid',
   'id', 'ok', 'error', 'errors', 'test', 'tests', 'main', 'master', 'docs', 'doc', 'note', 'notes', 'data', 'value', 'values', 'name',
   'type', 'list', 'item', 'items', 'text', 'link', 'page', 'pages', 'file', 'files', 'info', 'description', 'status', 'result', 'response',
   'request', 'body', 'query', 'header', 'headers', 'example', 'default', 'setting', 'settings', 'config', 'admin', 'user', 'users',
+  'card', 'original', 'summary', 'priority', 'steps', 'expected', 'actual', 'context', 'goal', 'source', 'sources', 'attachments', 'comments',
+  'question', 'questions', 'answer', 'answers', 'important', 'warning', 'date', 'author',
+  'опис', 'приклад', 'приклади', 'примітка', 'примітки', 'пріоритет', 'статус', 'назва', 'тип', 'значення', 'поле', 'поля', 'крок', 'кроки',
+  'результат', 'відповідь', 'запит', 'параметр', 'параметри', 'увага', 'важливо', 'порада', 'нотатки', 'коментар', 'коментарі', 'оригінал',
+  'джерело', 'джерела', 'посилання', 'вкладення', 'задача', 'завдання', 'картка', 'мета', 'контекст', 'сторінка', 'розділ', 'дата', 'автор',
+  'питання', 'очікувано', 'фактично', 'тест', 'тести', 'помилка', 'налаштування', 'документація',
 ]);
 // The last part of a dotted word that makes it a file name or a host name, not an identifier.
 const NOT_IDENT = new Set(['com', 'org', 'net', 'io', 'fyi', 'dev', 'app', 'ua', 'ru', 'eu', 'co', 'me', 'md', 'mdx', 'go', 'ts', 'tsx', 'js',
@@ -95,13 +106,50 @@ function keep(term, keys) {
   return t;
 }
 
+// A text with its fenced blocks taken out, fence lines and content: a block of code or of a raw response names the
+// code's own identifiers, which crowd out the terms a page would use. With `plain`, a fence with no language after it
+// keeps its content (a person's spec pasted into the card as a block, not code), and only its fence lines go.
+export function withoutFences(text, { plain = false } = {}) {
+  const out = [];
+  let open = null;
+  for (const line of String(text).split('\n')) {
+    const f = line.match(/^\s*(`{3,}|~{3,})(.*)$/);
+    if (open) {
+      if (f && f[1][0] === open.mark[0] && f[1].length >= open.mark.length && !f[2].trim()) open = null;
+      else if (open.keep) out.push(line);
+      continue;
+    }
+    if (f) {
+      open = { mark: f[1], keep: plain && !f[2].trim() };
+      continue;
+    }
+    out.push(line);
+  }
+  return out.join('\n');
+}
+
+// A bold span that is a field's label, not a name: its text ends in a colon (`**Card:**`), a separator follows it
+// (`**Опис**:`, `**Опис** — …`), or it is the whole line, after a list, heading or quote mark (`**Приклад**`).
+function boldLabel(text, m) {
+  if (/:\s*$/.test(m[1])) return true;
+  const after = text.slice(m.index + m[0].length);
+  if (/^\s*[:—–]|^\s+-\s/.test(after)) return true;
+  const start = text.lastIndexOf('\n', m.index) + 1;
+  const end = text.indexOf('\n', m.index + m[0].length);
+  const line = text.slice(start, end < 0 ? text.length : end);
+  return /^\s*(?:[-*+]|\d+[.)]|#{1,6}|>)?\s*$/.test(line.slice(0, m.index - start)) && /^\s*[.:]?\s*$/.test(line.slice(m.index - start + m[0].length));
+}
+
 // The terms of a ticket's texts, matched later as they are written: endpoint paths, code spans, CamelCase and dotted
-// identifiers, and bold spans; no term twice, the ones the texts name most often first, at most `max` (`more` counts
-// the rest). `keys` are the step's ticket keys: never a term, nor in one (a test record named after the ticket). URLs
-// are taken out first, so a link's path gives no term.
+// identifiers, and bold spans that aren't a field's label; no term twice, the ones the texts name most often first, at
+// most `max` (`more` counts the rest). A text is a string, its fenced blocks left out whole, or `{ text, plain: true }`
+// (the ticket's own text: its card and `ticket.md`), where a block with no language keeps its content. `keys` are the
+// step's ticket keys: never a term, nor in one (a test record named after the ticket). URLs are taken out first, so a
+// link's path gives no term.
 export function extractTerms(texts, { keys = [], max = TERMS_MAX } = {}) {
-  const text = (Array.isArray(texts) ? texts : [texts]).filter((x) => typeof x === 'string').join('\n')
-    .split('\n').filter((l) => !/^\s*(```|~~~)/.test(l)).join('\n')
+  const text = (Array.isArray(texts) ? texts : [texts])
+    .map((x) => (typeof x === 'string' ? withoutFences(x) : typeof x?.text === 'string' ? withoutFences(x.text, { plain: Boolean(x.plain) }) : null))
+    .filter((x) => x !== null).join('\n')
     .replace(/https?:\/\/[^\s)\]>»"'`]+/g, ' ');
   const found = { endpoint: [], code: [], ident: [], bold: [] };
   // Endpoint paths, with code marks inside them taken out (`/transaction/`cardDetails`` → `/transaction/cardDetails`).
@@ -124,6 +172,7 @@ export function extractTerms(texts, { keys = [], max = TERMS_MAX } = {}) {
     if (!NOT_IDENT.has(last) && !/^(e\.g|i\.e|etc)$/i.test(m[1])) found.ident.push(m[1]);
   }
   for (const m of text.matchAll(/\*\*([^*\n]{2,80})\*\*/g)) {
+    if (boldLabel(text, m)) continue;
     const b = tidy(m[1].replace(/`/g, ''));
     if (b.split(' ').length <= 6) found.bold.push(b);
   }
@@ -177,12 +226,27 @@ export function refOf(dir, base, timeoutMs = GIT_TIMEOUT_MS) {
   return null;
 }
 
+// The pathspecs that leave out the exclusions (`DEFAULT_EXCLUDE`) in a repo with these content roots: a name with no
+// `/` in it is that folder at any depth, and a page of that name; a path is left out from the repo's top and under every
+// root, with the root it starts with, if any, taken off first (`docs/drafts/` is `drafts/` under `portal/` too). `known`
+// are the roots a path may start with: every doc repo's, so a hub's path holds in a sibling with other roots.
+export function excludeSpecs(exclude, roots, known = roots) {
+  const under = roots.map(posix).filter((r) => r && r !== '.');
+  const prefixes = [...new Set([...known, ...roots].map(posix).filter((r) => r && r !== '.'))].sort((a, b) => b.length - a.length);
+  return [...new Set(exclude.map(posix).filter(Boolean).flatMap((e) => {
+    if (!e.includes('/')) return [`:(exclude,glob)**/${e}/**`, `:(exclude,glob)**/${e}.md`, `:(exclude,glob)**/${e}.mdx`];
+    const root = prefixes.find((r) => e.startsWith(`${r}/`));
+    const rest = root ? e.slice(root.length + 1) : e;
+    return [`:(exclude)${e}`, ...under.map((r) => `:(exclude)${r}/${rest}`)];
+  }))];
+}
+
 // The published pages of one repo that hold a term: `git grep` at the ref, over the Markdown files of its content
-// roots, with the exclusions. Returns { hits: [{ file, line, text }], error? }.
-export function grepPages(dir, { full, roots, exclude, terms, timeoutMs }) {
+// roots, with the exclusions under each (`known`: `excludeSpecs`). Returns { hits: [{ file, line, text }], error? }.
+export function grepPages(dir, { full, roots, exclude, known = roots, terms, timeoutMs }) {
   const pathspecs = [
     ...roots.flatMap((r) => (posix(r) === '' || posix(r) === '.' ? [':(glob)**/*.md', ':(glob)**/*.mdx'] : [`:(glob)${posix(r)}/**/*.md`, `:(glob)${posix(r)}/**/*.mdx`])),
-    ...exclude.map((e) => `:(exclude)${posix(e)}`),
+    ...excludeSpecs(exclude, roots, known),
     ...NEVER.map((n) => `:(exclude,glob)**/${n}/**`),
   ];
   let out;
@@ -203,14 +267,17 @@ export function grepPages(dir, { full, roots, exclude, terms, timeoutMs }) {
   return { hits };
 }
 
-// The files of an earlier ticket's work folder that are searched: each name of `files` that is a plain file there, and
-// what is under each name ending in `/` (no link followed, at most a few levels and files, no dot or never-searched
-// folder). Paths from the folder.
+// The files of a ticket's work folder that are searched: each name of `files` that is a plain file there, and what is
+// under each name ending in `/` (no link followed, no dot or never-searched folder). Paths from the folder, and what the
+// bounds left out (`skipped`): the files over `FILE_MAX` (`big`), the folders `WALK_DEPTH_MAX` levels down that are not
+// entered (`deep`), and whether the walk stopped at `WALK_FILES_MAX` files (`many`).
 function ticketFilesOf(folder, files) {
   const out = [];
-  const plain = (p) => {
+  const skipped = { big: [], deep: [], many: false };
+  const plain = (p, rel) => {
     try {
       const st = fs.lstatSync(p);
+      if (st.isFile() && st.size > FILE_MAX) skipped.big.push(rel);
       return st.isFile() && st.size <= FILE_MAX;
     } catch {
       return false;
@@ -224,11 +291,16 @@ function ticketFilesOf(folder, files) {
       return;
     }
     for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-      if (out.length >= WALK_FILES_MAX) return;
+      if (skipped.many) return;
       if (e.name.startsWith('.') || NEVER.includes(e.name)) continue;
       const r = path.posix.join(rel, e.name);
-      if (e.isDirectory() && depth < WALK_DEPTH_MAX) walk(r, depth + 1);
-      else if (e.isFile() && plain(path.join(folder, r))) out.push(r);
+      if (e.isDirectory()) {
+        if (depth < WALK_DEPTH_MAX) walk(r, depth + 1);
+        else skipped.deep.push(r);
+      } else if (e.isFile() && plain(path.join(folder, r), r)) {
+        if (out.length >= WALK_FILES_MAX) skipped.many = true;
+        else out.push(r);
+      }
     }
   };
   for (const f of files) {
@@ -239,49 +311,69 @@ function ticketFilesOf(folder, files) {
       } catch {
         /* none */
       }
-    } else if (plain(path.join(folder, f))) out.push(posix(f));
+    } else if (plain(path.join(folder, f), posix(f))) out.push(posix(f));
   }
-  return out;
+  return { files: out, skipped };
+}
+
+// What the bounds of the work folders left out, as one note (`ticketFilesOf`'s `skipped`, per ticket), or null. A few
+// files and folders are named, the rest counted.
+export function skippedNote(list, lead = 'not searched in the work folders') {
+  const named = (items) => `${items.slice(0, 3).join(', ')}${items.length > 3 ? `, and ${items.length - 3} more` : ''}`;
+  const big = list.flatMap((x) => x.skipped.big.map((f) => `${x.ticket} ${f}`));
+  const deep = list.flatMap((x) => x.skipped.deep.map((f) => `${x.ticket} ${f}/`));
+  const many = list.filter((x) => x.skipped.many).map((x) => x.ticket);
+  const parts = [
+    big.length ? `${big.length} file(s) over ${Math.round(FILE_MAX / 1024 / 1024)} MB (${named(big)})` : null,
+    deep.length ? `${deep.length} folder(s) more than ${WALK_DEPTH_MAX} levels down (${named(deep)})` : null,
+    many.length ? `what is past the first ${WALK_FILES_MAX} files of the folder of ${named(many)}` : null,
+  ].filter(Boolean);
+  return parts.length ? `${lead}: ${parts.join('; ')}` : null;
 }
 
 const isBinary = (buf) => buf.subarray(0, 8000).includes(0);
 
 // The texts of a ticket's own work folder that its terms come from: `ticket.md` first (the ticket as the start
 // gathered it), then the other Markdown files of `files` (the session's own notes: the live check, the API check; a raw
-// response under `api/` gives no term).
+// response under `api/` gives no term). Returns { texts: [{ name, text }], skipped } (`ticketFilesOf`).
 export function ownTexts(root, workFolder, key, files = DEFAULT_TICKET_FILES) {
-  if (!workFolder || !/^[\w-][\w.-]*$/.test(key)) return [];
+  const none = { texts: [], skipped: { big: [], deep: [], many: false } };
+  if (!workFolder || !/^[\w-][\w.-]*$/.test(key)) return none;
   const folder = path.resolve(root, workFolder.split('<key>').join(key));
   const order = [...files].sort((a, b) => (b === 'ticket.md') - (a === 'ticket.md'));
-  return ticketFilesOf(folder, order).filter((rel) => /\.md$/i.test(rel)).flatMap((rel) => {
+  const { files: found, skipped } = ticketFilesOf(folder, order);
+  const texts = found.filter((rel) => /\.md$/i.test(rel)).flatMap((rel) => {
     try {
       const buf = fs.readFileSync(path.join(folder, rel));
-      return isBinary(buf) ? [] : [buf.toString('utf8')];
+      return isBinary(buf) ? [] : [{ name: rel, text: buf.toString('utf8') }];
     } catch {
       return [];
     }
   });
+  return { texts, skipped };
 }
 
 // The earlier tickets' work folders: every folder the host's `workFolder` pattern gives for another key, the step's own
-// keys left out. Returns { hits: [{ ticket, name (from its folder), file (from the host root), line, text }], folders, error? }; `stopAt` is
-// the time the lookup must stop by, and what it no longer covers is said.
+// keys left out. Returns { hits: [{ ticket, name (from its folder), file (from the host root), line, text }], folders,
+// skipped: [{ ticket, skipped }] (what the bounds left out, `ticketFilesOf`), error? }; `stopAt` is the time the lookup
+// must stop by, and what it no longer covers is said.
 export function grepTickets(root, workFolder, { own = [], files, terms, now, stopAt }) {
   const [head] = workFolder.split('<key>');
   const base = path.resolve(root, head || '.');
   const hits = [];
+  const skipped = [];
   let names;
   try {
     names = fs.readdirSync(base, { withFileTypes: true }).filter((e) => e.isDirectory() && /^[\w-][\w.-]*$/.test(e.name)).map((e) => e.name);
   } catch (e) {
-    return { hits, folders: 0, ...(e?.code === 'ENOENT' ? {} : { error: `the work folders: ${String(e?.message ?? e).slice(0, 200)}` }) };
+    return { hits, folders: 0, skipped, ...(e?.code === 'ENOENT' ? {} : { error: `the work folders: ${String(e?.message ?? e).slice(0, 200)}` }) };
   }
   // Newest first, by the number in the key where there is one.
   names.sort((a, b) => (Number(b.replace(/\D/g, '')) || 0) - (Number(a.replace(/\D/g, '')) || 0) || a.localeCompare(b));
   const others = names.filter((n) => !own.includes(n));
   let folders = 0;
   for (const key of others) {
-    if (now() >= stopAt) return { hits, folders, error: `the time ran out after ${folders} of ${others.length} earlier tickets' folders` };
+    if (now() >= stopAt) return { hits, folders, skipped, error: `the time ran out after ${folders} of ${others.length} earlier tickets' folders` };
     const folder = path.resolve(root, workFolder.split('<key>').join(key));
     if (!folder.startsWith(base + path.sep)) continue;
     try {
@@ -290,7 +382,9 @@ export function grepTickets(root, workFolder, { own = [], files, terms, now, sto
       continue;
     }
     folders += 1;
-    for (const rel of ticketFilesOf(folder, files)) {
+    const found = ticketFilesOf(folder, files);
+    if (found.skipped.big.length || found.skipped.deep.length || found.skipped.many) skipped.push({ ticket: key, skipped: found.skipped });
+    for (const rel of found.files) {
       let buf;
       try {
         buf = fs.readFileSync(path.join(folder, rel));
@@ -304,18 +398,26 @@ export function grepTickets(root, workFolder, { own = [], files, terms, now, sto
       });
     }
   }
-  return { hits, folders };
+  return { hits, folders, skipped };
 }
 
-// The whole lookup. `repos`: [{ repo, dir, base, roots }], the hub first; `tickets`: { workFolder, own, files } or
-// null; `exclude`: paths from each repo's top. Returns { terms: [{ term, files }], files: [{ repo?, ticket?, ref?, file,
-// abs, count, terms, hits: [{ line, excerpt }], more }], past: { files, hits, shown: [{ label, count }] }, searched:
-// { repos: [{ repo, ref, commit }], folders }, notes }. Files are ranked by the terms they hold, a rarer term weighing
-// more (1 / the files it is in), then by their hits; at most `PER_FILE` lines of a file and `HITS_MAX` in all are
-// listed, and the files past that are counted, the first `PAST_SHOWN` named. A page whose twin in the other language
-// (the same path under another content root of the repo) is listed is named with it (`twins`), with no lines of its own.
-export function docEvidence({ root, repos = [], tickets = null, exclude = DEFAULT_EXCLUDE, terms = [], now = Date.now, budgetMs = BUDGET_MS, grep = grepPages, ref = refOf }) {
+// A repo's content roots as root pairs: a `{ ua, en }` pair (`en` may be none), or a root alone (a string), which is a
+// pair of its own with no twin.
+export const pairsOf = (roots) => (roots ?? []).map((r) => (typeof r === 'string' ? { ua: r, en: null } : { ua: r?.ua ?? null, en: r?.en ?? null })).filter((p) => p.ua || p.en);
+
+// The whole lookup. `repos`: [{ repo, dir, base, roots (`pairsOf`) }], the hub first; `tickets`: { workFolder, own,
+// files } or null; `exclude`: the host's exclusions, added to `DEFAULT_EXCLUDE` (`excludeSpecs`). Returns { terms:
+// [{ term, files }], files: [{ repo?, dir?, ticket?, ref?, commit?, file, abs, count, terms, hits: [{ line, excerpt }],
+// more, twins }], past: { files, hits, shown: [{ label, count }] }, searched: { repos: [{ repo, ref, commit, dir }],
+// folders }, notes }. Files are ranked by the terms they hold, a rarer term weighing more (1 / the files it is in), then
+// by their hits; at most `PER_FILE` lines of a file and `HITS_MAX` in all are listed, and the files past that are
+// counted, the first `PAST_SHOWN` named. A page whose twin in the other language (the same path under the other root
+// of its root pair) is listed is named with it (`twins`), with no lines of its own; two pairs' pages never fold.
+export function docEvidence({ root, repos = [], tickets = null, exclude = [], terms = [], now = Date.now, budgetMs = BUDGET_MS, grep = grepPages, ref = refOf }) {
   const out = { terms: [], files: [], past: { files: 0, hits: 0, shown: [] }, searched: { repos: [], folders: 0 }, notes: [] };
+  const excluded = [...new Set([...DEFAULT_EXCLUDE, ...(exclude ?? [])])];
+  const flatOf = (r) => [...new Set(pairsOf(r.roots).flatMap((p) => [p.ua, p.en].filter(Boolean)))];
+  const known = [...new Set(repos.flatMap(flatOf))];
   if (!terms.length) return out;
   const stopAt = now() + budgetMs;
   const left = () => stopAt - now();
@@ -324,6 +426,8 @@ export function docEvidence({ root, repos = [], tickets = null, exclude = DEFAUL
     const r = grepTickets(root, tickets.workFolder, { own: tickets.own ?? [], files: tickets.files ?? DEFAULT_TICKET_FILES, terms, now, stopAt });
     out.searched.folders = r.folders;
     if (r.error) out.notes.push(r.error);
+    const skipped = skippedNote(r.skipped ?? []);
+    if (skipped) out.notes.push(skipped);
     for (const h of r.hits) all.push({ ...h, abs: path.join(root, h.file), id: `ticket ${h.ticket}` });
   }
   for (const r of repos) {
@@ -336,25 +440,28 @@ export function docEvidence({ root, repos = [], tickets = null, exclude = DEFAUL
       out.notes.push(`${r.repo}: not searched (no commit to read at ${r.dir})`);
       continue;
     }
-    if (!r.roots?.length) {
+    const pairs = pairsOf(r.roots);
+    const flat = flatOf(r);
+    if (!flat.length) {
       out.notes.push(`${r.repo}: not searched (no content root)`);
       continue;
     }
-    const g = grep(r.dir, { full: at.full, roots: r.roots, exclude, terms, timeoutMs: Math.max(1, Math.min(GIT_TIMEOUT_MS, left())) });
+    const g = grep(r.dir, { full: at.full, roots: flat, exclude: excluded, known, terms, timeoutMs: Math.max(1, Math.min(GIT_TIMEOUT_MS, left())) });
     out.searched.repos.push({ repo: r.repo, ref: at.ref, commit: at.commit, dir: r.dir });
     if (g.error) out.notes.push(`${r.repo}: ${g.error}`);
-    // A page's path under its content root: a UA page and its EN twin share it.
-    const roots = r.roots.map(posix).filter((x) => x && x !== '.').sort((a, b) => b.length - a.length);
-    const under = (file) => roots.find((x) => file.startsWith(`${x}/`));
-    for (const h of g.hits ?? []) {
-      const root = under(h.file);
-      all.push({ ...h, repo: r.repo, ref: at.ref, commit: at.commit, abs: path.join(r.dir, h.file), twin: `${r.dir}\0${root ? h.file.slice(root.length + 1) : h.file}` });
-    }
+    // A page's twin key: its root pair and its path under the pair's root, which a UA page and its EN twin share. Only a
+    // pair with both roots has twins, and the longest root that holds the page decides its pair.
+    const roots = pairs.flatMap((p, i) => (p.ua && p.en ? [p.ua, p.en].map((x) => ({ root: posix(x), pair: i })) : [])).filter((x) => x.root && x.root !== '.').sort((a, b) => b.root.length - a.root.length);
+    const twinOf = (file) => {
+      const x = roots.find((y) => file.startsWith(`${y.root}/`));
+      return x ? `${r.dir}\0${x.pair}\0${file.slice(x.root.length + 1)}` : null;
+    };
+    for (const h of g.hits ?? []) all.push({ ...h, repo: r.repo, dir: r.dir, ref: at.ref, commit: at.commit, abs: path.join(r.dir, h.file), twin: twinOf(h.file) });
   }
   // Per file: its hits and the terms they hold.
   const byFile = new Map();
   for (const h of all) {
-    const f = byFile.get(h.abs) ?? { repo: h.repo, ticket: h.ticket, name: h.name, ref: h.ref, commit: h.commit, file: h.file, abs: h.abs, twin: h.twin ?? null, hits: [], terms: new Set() };
+    const f = byFile.get(h.abs) ?? { repo: h.repo, dir: h.dir, ticket: h.ticket, name: h.name, ref: h.ref, commit: h.commit, file: h.file, abs: h.abs, twin: h.twin ?? null, hits: [], terms: new Set() };
     const held = terms.filter((t) => h.text.includes(t));
     for (const t of held) f.terms.add(t);
     f.hits.push({ line: h.line, text: h.text, held });
@@ -387,7 +494,7 @@ export function docEvidence({ root, repos = [], tickets = null, exclude = DEFAUL
     const rarest = (held) => [...held].sort((a, b) => df.get(a) - df.get(b));
     const hits = [...f.hits].sort((a, b) => lineWeight(b) - lineWeight(a) || a.line - b.line).slice(0, room).sort((a, b) => a.line - b.line).map((h) => ({ line: h.line, excerpt: excerptOf(h.text, rarest(h.held)) }));
     listed += hits.length;
-    const entry = { ...(f.repo ? { repo: f.repo, ref: f.ref, commit: f.commit } : { ticket: f.ticket, name: f.name }), file: f.file, abs: f.abs, count: f.hits.length, terms: [...f.terms], hits, more: f.hits.length - hits.length, twins: [] };
+    const entry = { ...(f.repo ? { repo: f.repo, dir: f.dir, ref: f.ref, commit: f.commit } : { ticket: f.ticket, name: f.name }), file: f.file, abs: f.abs, count: f.hits.length, terms: [...f.terms], hits, more: f.hits.length - hits.length, twins: [] };
     out.files.push(entry);
     if (f.twin) twins.set(f.twin, entry);
   }
