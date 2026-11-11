@@ -285,7 +285,7 @@ test('a long session of one ticket never holds up another\'s comments: while a f
   let fullDone = false;
   const full = t.full(NOW).then((o) => ((fullDone = true), o));
   await new Promise((r) => setImmediate(r));
-  assert.ok(watchLockHolder(w.settings.state, { isAlive: () => true }), 'the full check holds its lock through its run');
+  assert.ok(watchLockHolder(w.settings.state, { now: NOW, isAlive: () => true }), 'the full check holds its lock through its run');
   // B: a submitted review. The first forge check after it starts B's run, while A's session still goes on.
   review(82, NOW + 20 * SEC);
   let out = await t.forge(NOW + 30 * SEC);
