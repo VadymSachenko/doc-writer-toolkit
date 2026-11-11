@@ -237,8 +237,17 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
   // The hub brought up to its origin before this check (watcher.mjs, lib/hub-update.mjs): a note when it moved, or is
   // behind and couldn't.
   if (options.hub) {
-    out.hub = options.hub;
-    if (hubLine(options.hub)) out.notes.push(hubLine(options.hub));
+    // A hub that can't be looked at (no default branch known) says so once, not at every check: the last check's state
+    // is in the feed. Behind and not moved is said each time: it changes nothing until a person or a check moves it.
+    let last = null;
+    try {
+      last = readFeed(settings.state).hub ?? null;
+    } catch {
+      /* unreadable: said again */
+    }
+    const repeat = options.hub.outcome === 'skipped' && last?.outcome === 'skipped' && last.note === options.hub.note;
+    out.hub = { ...options.hub, ...(repeat ? { repeat: true } : {}) };
+    if (hubLine(out.hub)) out.notes.push(hubLine(out.hub));
     // A move is in the run log whatever the check does next (mode off, the lock held): it happened.
     if (options.hub.outcome === 'moved' && !dryRun) appendRunLog(settings.state, today, [{ at: iso(checkStart), kind: 'hub', outcome: 'moved', base: options.hub.base, from: options.hub.from, to: options.hub.to, note: hubLine(options.hub) }]);
   }

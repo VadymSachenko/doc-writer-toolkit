@@ -5,7 +5,7 @@ import { allLocks } from './locks.mjs';
 import { deriveTicket, hasLabel, rebuiltState } from './rule.mjs';
 import { readCards, readPrs, prLinks, makeGit } from './world.mjs';
 import { intakeList, labelCheck, byPriorityThenAge } from './intake.mjs';
-import { estimatesOf, groupsOf, overlapOf, startable, workPages } from './limits.mjs';
+import { estimatesOf, groupsOf, overlapOf, rootsOf, startable, workPages } from './limits.mjs';
 import { allowanceOf } from './allowance.mjs';
 import { fileHash } from './record.mjs';
 import { readRearm, rearmedAt } from './setlocal.mjs';
@@ -125,11 +125,18 @@ export async function computeStatus({ settings, clients, now = Date.now(), only 
   const workView = inWorkTickets.map((t) => {
     const l = ledgers.find((x) => x.key === t.key);
     const card = cards.get(l.card?.id);
-    return { key: t.key, number: card?.number ?? null, name: card?.name ?? '', desc: card?.desc ?? '', targets: l.triage?.targets ?? [], relations: l.triage?.relations ?? [], together: l.triage?.together ?? [], pages: workPages(l, prWorld) };
+    return { key: t.key, number: card?.number ?? null, name: card?.name ?? '', desc: card?.desc ?? '', targets: l.triage?.targets ?? [], relations: l.triage?.relations ?? [], together: l.triage?.together ?? [], pages: workPages(l, prWorld, { locked: Boolean(locks.get(l.group)?.live) || t.state === 'locked' }) };
   });
+  // A ticket outside the flow because a PR of it was closed unmerged is not in work, but its branch still has the edits,
+  // and the PR may be opened again: its pages hold a ready ticket back too (`closed`), its relations don't.
+  const closedUnmerged = (l) => (l.prs ?? []).some((p) => p.number && !p.merged && prWorld.get(`${l.key}/${prId(p)}`)?.state === 'closed');
+  for (const t of tickets) {
+    const l = t.ledger === 'present' && t.state === 'outside' && ledgers.find((x) => x.key === t.key);
+    if (l && l.stages?.close?.status !== 'done' && closedUnmerged(l)) workView.push({ key: t.key, closed: true, number: null, name: '', desc: '', targets: l.triage?.targets ?? [], relations: [], together: [], pages: workPages(l, prWorld) });
+  }
   const repos = (t) => new Set((t.targets ?? []).map((id) => settings.targets.find((x) => x.id === id)?.repo).filter(Boolean));
   const groups = groupsOf(ready, settings).map((g) => {
-    const why = workView.map((w) => ({ key: w.key, ...(g.members.map((m) => overlapOf(m, w, repos)).find(Boolean) ?? {}) })).filter((x) => x.by);
+    const why = workView.map((w) => ({ key: w.key, ...(w.closed ? { closed: true } : {}), ...(g.members.map((m) => overlapOf(m, w, repos, rootsOf(settings))).find(Boolean) ?? {}) })).filter((x) => x.by);
     return { ...g, waitsFor: why.map((x) => x.key), waitsWhy: why };
   });
 

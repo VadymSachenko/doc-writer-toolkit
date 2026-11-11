@@ -6,7 +6,7 @@ import { LISTS, NOW, ago, card, host, pr, rawSettings, settingsFor, tmp } from '
 import { ledger, world } from './helpers.mjs';
 import { parseUsage, allowanceOf, parseReset } from '../lib/allowance.mjs';
 import { loadSettings, validateSettings } from '../lib/settings.mjs';
-import { estimatesOf, pageKey, related, remainingOf, workPages } from '../lib/limits.mjs';
+import { estimatesOf, pageKey, pageRef, related, remainingOf, samePage, workPages } from '../lib/limits.mjs';
 import { takeLock } from '../lib/locks.mjs';
 import { renderReport } from '../lib/report.mjs';
 import { digestRun, renderProgress } from '../lib/progress.mjs';
@@ -486,7 +486,7 @@ const workTriage = { verdict: 'docs-required', targets: ['api', 'guide'], size: 
 const inWorkWith = (w, number, prs, { status = 'finalReview', opened = true, triage = workTriage } = {}) => {
   const c = card({ number, status });
   w.tracker.cards.push(c);
-  for (const p of prs) if (p.number) w.forge.prs.push(pr({ repo: p.repo, number: p.number, files: p.files, filesTruncated: p.filesTruncated }));
+  for (const p of prs) if (p.number) w.forge.prs.push(pr({ repo: p.repo, number: p.number, state: p.state ?? 'open', files: p.files, filesTruncated: p.filesTruncated, filesRenamed: p.filesRenamed }));
   const stages = { triage: 'done', start: 'done', plan: 'done', write: opened ? 'done' : 'running', ...(opened ? { uaReview: 'done', pr: 'done' } : {}) };
   ledger(w, c, { startedBy: 'schedule', stages, triage, prs: prs.map((p) => ({ repo: p.repo, number: p.number ?? null, targets: [p.repo === 'api-docs' ? 'api' : 'guide'], review: p.repo === 'api-docs' ? 'places' : 'sme', branch: `${number}-docs`, stage: p.number ? status : 'writing' })) });
 };
@@ -560,6 +560,58 @@ test('a PR in one target, none yet in the other: the second target\'s triage pag
   assert.deepEqual(st.notStarted.map((n) => n.reasons), [[`related to 1157, still in work: a page 1157's PR #62 changes (${PAYMENT})`]]);
 });
 
+test('a PR closed unmerged holds its files; a rename keeps the triage pages beside them; a session on the ticket brings back the repos it has no PR in', async () => {
+  // Closed to be redone, its branch still has the edits: the shared page holds 1193 back.
+  const w = world({ extra: estimates });
+  inWorkWith(w, 1157, [{ repo: 'guide-docs', number: 61, files: ['docs/methods/cash/cash.md'] }, { repo: 'api-docs', number: 62, state: 'closed', files: ['docs/api-reference/create-payment/create-payment.md'] }], { status: 'inProgress' });
+  readyOn(w);
+  let st = await w.status({ usage: usage(5) });
+  assert.equal(st.tickets.find((t) => t.key === '1157').state, 'outside', 'not in work, and not counted');
+  assert.deepEqual(st.groups.find((g) => g.keys.includes('1193')).waitsFor, ['1157']);
+  assert.deepEqual(st.notStarted.map((n) => n.reasons), [[`related to 1157, its PR closed unmerged: a page 1157's PR #62 changes (${PAYMENT})`]]);
+  // Its relations don't hold anything: only its pages.
+  const w1 = world({ extra: estimates });
+  inWorkWith(w1, 1157, [{ repo: 'api-docs', number: 62, state: 'closed', files: ['docs/methods/other.md'] }], { status: 'inProgress', triage: { ...workTriage, relations: ['#1193'] } });
+  readyOn(w1);
+  assert.deepEqual((await w1.status({ usage: usage(5) })).startable.map((g) => g.group), ['1193']);
+  // A rename in the API repo's PR: its old path isn't in the list, so the triage's guess counts beside the files.
+  const w2 = world({ extra: estimates });
+  inWorkWith(w2, 1157, [{ repo: 'api-docs', number: 62, files: ['docs/guides/other/other.md'], filesRenamed: true }]);
+  readyOn(w2);
+  st = await w2.status({ usage: usage(5) });
+  assert.deepEqual(st.notStarted.map((n) => n.reasons), [[`related to 1157, still in work: a page 1157's triage names, its PR renames a file (${PAYMENT})`]]);
+  // AC-1's 1157 with a session running on it (a review round): its API triage page counts again while the lock is live.
+  const w3 = world({ extra: estimates });
+  inWorkWith(w3, 1157, [{ repo: 'guide-docs', number: 61, files: ['docs/methods/cash/cash.md'] }]);
+  readyOn(w3);
+  takeLock(w3.settings.state, { group: '1157', kind: 'schedule', stage: 'answerComments', leaseMinutes: 120, now: NOW });
+  st = await w3.status({ usage: usage(5) });
+  assert.ok(st.notStarted.find((n) => n.group === '1193').reasons.includes(`related to 1157, still in work: a page 1157's triage names, a session on it now (${PAYMENT})`), JSON.stringify(st.notStarted));
+});
+
+test('a page is its repo and its id: the EN translation, the extension, the page folder, its .assets, a URL form; a folder guess by prefix, a bare name by name', () => {
+  const ref = (p) => pageRef(p, ['docs/']);
+  for (const p of ['guide-docs docs/x/y/y.md', 'guide-docs docs/x/y.mdx', 'guide-docs docs/x/y/index.md', 'guide-docs docs/x/y/.assets/shot.png', 'guide-docs i18n/en/docusaurus-plugin-content-docs/current/x/y/y.md', 'guide-docs i18n/de/docusaurus-plugin-content-docs-portal/current/x/y/y.mdx', 'guide-docs /x/y', 'guide-docs docs/x/y/y.md#a-heading', { repo: 'guide-docs', path: 'docs/x/y/y.md' }]) {
+    assert.deepEqual([ref(p).repo, ref(p).id], ['guide-docs', 'x/y'], JSON.stringify(p));
+  }
+  assert.equal(ref('guide-docs docs/x/_category_.json').id, 'x');
+  assert.equal(pageRef('portal-docs portal/x/y/y.md', ['portal/']).id, 'x/y', "the repo's own root");
+  const same = (a, b) => samePage(ref(a), ref(b));
+  assert.equal(same('guide-docs docs/x/y/y.md — Block', 'guide-docs i18n/en/docusaurus-plugin-content-docs/current/x/y/y.md'), true, 'an EN-only change');
+  assert.equal(same('guide-docs docs/x/y/y.md', 'guide-docs docs/x/y/.assets/shot.png'), true, 'a screenshot of the page');
+  assert.equal(same('guide-docs docs/x/x.md', 'guide-docs docs/x/_category_.json'), true, "the section's label and its index page");
+  assert.equal(same('guide-docs docs/api-reference/ — a new page', 'guide-docs docs/api-reference/create-payment/create-payment.md'), true, 'a folder guess, by prefix');
+  assert.equal(same('guide-docs docs/api-reference/create-payment/create-payment.md', 'guide-docs docs/api-reference/'), true, 'either side');
+  assert.equal(same('guide-docs docs/api-reference/', 'guide-docs docs/guides/a/a.md'), false);
+  assert.equal(same('guide-docs create-payment.md', 'guide-docs docs/api-reference/create-payment/create-payment.md'), true, 'a bare name, by name');
+  assert.equal(same('guide-docs create-payment.md', 'guide-docs docs/api-reference/refund/refund.md'), false);
+  assert.equal(same('guide-docs /api-reference/create-payment', 'guide-docs docs/api-reference/create-payment/create-payment.md'), true, 'a URL form');
+  assert.equal(same('guide-docs docs/x/y/y.md', 'api-docs docs/x/y/y.md'), false, 'another repo');
+  assert.equal(same('guide-docs docs/x/y/y.md', 'guide-docs docs/x/z/z.md'), false);
+  // In status: an EN-only PR of the work ticket holds back the ready ticket on its UA page.
+  assert.equal(related({ key: '1', pages: ['guide-docs docs/x/y/y.md — Block'] }, { key: '2', pages: [{ repo: 'guide-docs', path: 'i18n/en/docusaurus-plugin-content-docs/current/x/y/y.md', from: 'pr', pr: 5 }] }, () => new Set(['guide-docs'])), true);
+});
+
 test('workPages: per repo, the open PR\'s files, the triage where no PR is opened yet or its files are unknown, nothing where it is merged', () => {
   const l = (prs, opened) => ({ key: '7', stages: opened ? { pr: { status: 'done' } } : {}, triage: { pages: ['guide-docs docs/a.md — A', 'api-docs docs/b.md — B', 'docs/c.md', { repo: 'api-docs', path: 'docs/d.md' }] }, prs });
   const at = (entries) => new Map(entries.map(([n, e]) => [`7/${n}`, e]));
@@ -576,6 +628,11 @@ test('workPages: per repo, the open PR\'s files, the triage where no PR is opene
   // A branch with no PR yet in the API repo: its triage pages count beside the guide PR's files.
   const two = [{ repo: 'guide-docs', number: 5 }, { repo: 'api-docs', number: null, branch: 'b' }];
   assert.deepEqual(keys(workPages(l(two, false), at([['guide-docs#5', { state: 'open', files: ['docs/x.md'] }]]))), ['pr guide-docs docs/x.md #5', 'triage api-docs docs/b.md noPr', 'triage api-docs docs/d.md noPr']);
+  // Closed unmerged: its files still count. Renamed: the triage's beside them.
+  assert.deepEqual(keys(workPages(l(one, true), at([['guide-docs#5', { state: 'closed', files: ['docs/x.md'] }]]))), ['pr guide-docs docs/x.md #5']);
+  assert.deepEqual(keys(workPages(l(one, true), at([['guide-docs#5', { state: 'open', files: ['docs/x.md'], filesRenamed: true }]]))), ['pr guide-docs docs/x.md #5', 'triage guide-docs docs/a.md renamed']);
+  // Opened, no PR in the API repo: none from it, unless a session runs on the ticket.
+  assert.deepEqual(keys(workPages(l(one, true), at([['guide-docs#5', { state: 'open', files: ['docs/x.md'] }]]), { locked: true })), ['pr guide-docs docs/x.md #5', 'triage api-docs docs/b.md session', 'triage api-docs docs/d.md session']);
   // Merged in the guide repo: nothing there, before the stage is recorded too.
   assert.deepEqual(keys(workPages(l([{ repo: 'guide-docs', number: 5, merged: { at: 'x' } }], true))), []);
   assert.deepEqual(keys(workPages(l([{ repo: 'guide-docs', number: 5 }], true), at([['guide-docs#5', { state: 'merged', files: ['docs/x.md'] }]]))), []);

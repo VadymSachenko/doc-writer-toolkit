@@ -3,7 +3,10 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { CliError } from './lib/errors.mjs';
-import { loadSettings, tickSecondsOf } from './lib/settings.mjs';
+import { loadSettings, sharedProblemAt, stateFolderOf, tickSecondsOf } from './lib/settings.mjs';
+import { allLocks } from './lib/locks.mjs';
+import { runsGoingIn } from './lib/forge-state.mjs';
+import { watchLockHolder } from './lib/watch.mjs';
 import { hubLine, updateHub } from './lib/hub-update.mjs';
 import { makeClients } from './lib/world.mjs';
 import { prepareEnv } from './lib/env.mjs';
@@ -111,13 +114,39 @@ export function forgeLine(out) {
 // The settings this process runs with. A process that runs the full check first brings the hub up to its origin
 // (lib/hub-update.mjs), so a merged hub PR counts at this check with no person's pull, and reads the settings again when
 // it moved. Not a tick that only starts the full check, a forge check or a hand-on (it reads what the full check left),
-// a dry run or mode off. Returns { settings, hub }, `hub` null when no update was tried.
-export async function settingsForCheck({ root, values = {}, update = updateHub }) {
-  const settings = await loadSettings({ root, settings: values.settings });
-  const runsFull = Boolean(values.full) || (!values.forge && values['hand-on'] === undefined && tickSecondsOf(settings) >= settings.schedule.watchMinutes * 60);
-  if (!runsFull || values['dry-run'] || settings.mode === 'off') return { settings, hub: null };
-  const hub = update(root);
-  return { settings: hub?.outcome === 'moved' ? await loadSettings({ root, settings: values.settings }) : settings, hub };
+// a dry run or mode off. Settings that don't load (a bad file committed by hand, say) stop every process at this read,
+// so then any process but a hand-on or a dry run tries the update first: a fix merged on the forge is pulled, and the
+// error stands, with the hub's note, until one is. Returns { settings, hub }, `hub` null when no update was tried.
+export async function settingsForCheck({ root, values = {}, update = updateHub, now = Date.now }) {
+  const load = () => loadSettings({ root, settings: values.settings });
+  let settings = null;
+  let broken = null;
+  try {
+    settings = await load();
+  } catch (e) {
+    if (values['hand-on'] !== undefined || values['dry-run']) throw e;
+    broken = e;
+  }
+  if (!broken) {
+    const runsFull = Boolean(values.full) || (!values.forge && values['hand-on'] === undefined && tickSecondsOf(settings) >= settings.schedule.watchMinutes * 60);
+    if (!runsFull || values['dry-run'] || settings.mode === 'off') return { settings, hub: null };
+  }
+  const state = settings?.state ?? (await stateFolderOf({ root, settings: values.settings }));
+  // The hub as a target of its own names its base; else origin's default branch.
+  const base = settings?.targets.find((t) => t.path && path.resolve(root, t.path) === root)?.base ?? null;
+  const hub = await update(root, { base, validate: (ref) => sharedProblemAt({ root, settings: values.settings, ref }), busy: () => busyHub(state, now()) });
+  if (!broken) return { settings: hub?.outcome === 'moved' ? await load() : settings, hub };
+  if (hub?.outcome === 'moved') return { settings: await load(), hub };
+  throw new CliError(`${broken.message}${hubLine(hub) ? ` (${hubLine(hub)})` : ''}`, { code: broken.exitCode ?? 2 });
+}
+
+// What reads the hub's files now, as one phrase, or null: the runs going on (each live group lock, and each run a check
+// handed on that holds none yet) and another full check (it may be running a host job).
+export function busyHub(state, now = Date.now()) {
+  const runs = runsGoingIn(state, { locks: allLocks(state, now), now }).size;
+  const check = watchLockHolder(state, { now });
+  const bits = [...(runs ? [`${runs} run(s) going`] : []), ...(check && check.pid !== process.pid ? [`a full check running (pid ${check.pid})`] : [])];
+  return bits.length ? bits.join(' and ') : null;
 }
 
 export async function main(argv, io = {}) {

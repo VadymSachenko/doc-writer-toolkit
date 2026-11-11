@@ -33,9 +33,10 @@ const PR_FRESH_FIELDS = `
 `;
 
 // One PR read by number also gives the paths it changes, in the same query: what a caller compares with another
-// ticket's pages (ticket-state, lib/limits.mjs). At most `PR_FILES` of them; `totalCount` tells a longer list.
+// ticket's pages (ticket-state, lib/limits.mjs). At most `PR_FILES` of them; `totalCount` tells a longer list. A rename
+// gives the new path only (`changeType` RENAMED), so the caller learns that it happened (`filesRenamed`).
 const PR_FILES = 100;
-const PR_FILE_FIELDS = `files(first: ${PR_FILES}) { totalCount nodes { path } }`;
+const PR_FILE_FIELDS = `files(first: ${PR_FILES}) { totalCount nodes { path changeType } }`;
 
 const Q = {
   prByNumber: `query PrByNumber($owner: String!, $name: String!, $number: Int!) {
@@ -175,7 +176,7 @@ export function normalizePr(n) {
     assignees: (n.assignees?.nodes ?? []).map((a) => a.login),
     headRepository: n.headRepository?.nameWithOwner ?? null,
     // Only from a read by number, which asks for them.
-    ...(n.files ? { files: (n.files.nodes ?? []).map((f) => f.path), ...((n.files.totalCount ?? 0) > (n.files.nodes ?? []).length ? { filesTruncated: true } : {}) } : {}),
+    ...(n.files ? { files: (n.files.nodes ?? []).map((f) => f.path), ...((n.files.totalCount ?? 0) > (n.files.nodes ?? []).length ? { filesTruncated: true } : {}), ...((n.files.nodes ?? []).some((f) => f.changeType === 'RENAMED') ? { filesRenamed: true } : {}) } : {}),
     ...(n.baseRef !== undefined ? { baseCommit: n.baseRef?.target?.oid ?? null } : {}),
     ...(n.headRef !== undefined ? { checks: checksOf(n.headRef?.target) } : {}),
   };

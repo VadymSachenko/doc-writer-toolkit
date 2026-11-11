@@ -129,21 +129,66 @@ export function pageKey(p) {
 // The triage's judgement that the two go together, in either direction. Across repos a relation stays context.
 export const together = (a, b, repos) => (names(a.together, b) || names(b.together, a)) && shareRepo(a, b, repos);
 
+// What a page is, to compare a triage's guess with the paths a PR changes: its repo and an id, the path from the content
+// root without the root, the extension or the page's own folder file. `docs/x/y/y.md`, `docs/x/y.mdx`, `docs/x/y/index.md`,
+// `docs/x/y/.assets/a.png`, the EN translation `i18n/en/<plugin folder>/current/x/y/y.md` (every locale's) and the URL
+// form `/x/y` are all `x/y`; a `_category_.json` is its folder's. `roots`: the UA content roots of the repo's targets.
+// `folder`: a guess ending in `/` (a new page somewhere in it), which matches every page under it; `bare`: a name with no
+// `/` (`create-payment.md`), which matches a page of that name anywhere in the repo. Two docs plugins whose pages share a
+// path from their roots read as one page: a ticket waits that needn't, never one starts that shouldn't.
+export function pageRef(p, roots = ['docs/']) {
+  const k = pageKey(p);
+  if (!k) return null;
+  const repo = k.split(' ')[0];
+  let rest = k.slice(repo.length + 1).trim().replace(/[?#].*$/, '').replace(/^\.\/+/, '');
+  const folder = rest.endsWith('/');
+  const bare = !rest.replace(/\/+$/, '').includes('/');
+  const i18n = rest.match(/^i18n\/[^/]+\/[^/]+\/current\/(.*)$/);
+  if (i18n) rest = i18n[1];
+  else if (rest.startsWith('/')) rest = rest.replace(/^\/+/, '');
+  else {
+    const root = roots.map((r) => r.replace(/^\.\/+/, '').replace(/\/*$/, '/')).filter((r) => rest.startsWith(r)).sort((x, y) => y.length - x.length)[0];
+    if (root) rest = rest.slice(root.length);
+  }
+  rest = rest.replace(/(^|\/)\.assets(\/.*)?$/, '').replace(/(^|\/)_category_\.(json|ya?ml)$/, '').replace(/\.mdx?$/, '').replace(/\/+$/, '');
+  const parts = rest.split('/').filter(Boolean);
+  if (parts.length && (parts.at(-1) === 'index' || (parts.length > 1 && parts.at(-1) === parts.at(-2)))) parts.pop();
+  return { repo, id: parts.join('/'), folder, bare, key: k };
+}
+
+const within = (id, folder) => folder === '' || id === folder || id.startsWith(`${folder}/`);
+export function samePage(x, y) {
+  if (!x || !y || x.repo !== y.repo) return false;
+  if (x.folder || y.folder) return x.folder ? within(y.id, x.id) : within(x.id, y.id);
+  if (x.bare || y.bare) return (x.bare ? x.id : x.id.split('/').at(-1)) === (y.bare ? y.id : y.id.split('/').at(-1));
+  return x.id === y.id;
+}
+
 // Overlap: the triage named the other (and they share a target repo), the card's text names the other's number, or the
-// two have a page in common.
-export const related = (a, b, repos) => overlapOf(a, b, repos) !== null;
+// two have a page in common (`samePage`). `roots`: a repo's UA content roots (`rootsOf`).
+export const related = (a, b, repos, roots) => overlapOf(a, b, repos, roots) !== null;
+
+// The UA content roots of each repo, from the settings' targets.
+export const rootsOf = (settings) => (repo) => {
+  const r = [...new Set((settings?.targets ?? []).filter((t) => t.repo === repo).map((t) => t.uaRoot).filter(Boolean))];
+  return r.length ? r : ['docs/'];
+};
 
 // Which test of `related` holds: { by: 'relation' | 'together' | 'named' } or { by: 'page', page, from, pr? }, the page
 // as `b` has it and where it came from (`workPages`: a page with no `from` is the triage's). Null when none holds.
-export function overlapOf(a, b, repos) {
+export function overlapOf(a, b, repos, roots = () => ['docs/']) {
   if ((names(a.relations, b) || names(b.relations, a)) && shareRepo(a, b, repos)) return { by: 'relation' };
   if (together(a, b, repos)) return { by: 'together' };
   const named = (t, n) => n !== null && n !== undefined && new RegExp(`#${n}\\b`).test(`${t.name ?? ''}\n${t.desc ?? ''}`.replace(/^\s*(#\d+\s*[-–—:]?\s*)+/, ''));
   if (named(a, b.number) || named(b, a.number)) return { by: 'named' };
-  const pa = new Set((a.pages ?? []).map(pageKey).filter(Boolean));
-  const hit = (b.pages ?? []).find((p) => {
+  const ref = (p) => {
     const k = pageKey(p);
-    return k && pa.has(k);
+    return k ? pageRef(p, roots(k.split(' ')[0])) : null;
+  };
+  const pa = (a.pages ?? []).map(ref).filter(Boolean);
+  const hit = (b.pages ?? []).find((p) => {
+    const r = ref(p);
+    return r && pa.some((x) => samePage(x, r));
   });
   if (hit === undefined) return null;
   return { by: 'page', page: pageKey(hit), from: hit?.from ?? 'triage', ...(hit?.pr ? { pr: hit.pr } : {}), ...(hit?.why ? { why: hit.why } : {}) };
@@ -152,7 +197,7 @@ export function overlapOf(a, b, repos) {
 // The page a not-started reason names, and where it came from: "a page 1157's PR #61 changes (<repo> <path>)", "a page
 // 1157's triage names, no PR yet (…)", or "…, its PR's files not read (…)" (`why` of `workPages`); for a ticket
 // starting now, its triage is all there is. Null for another test.
-const TRIAGE_WHY = { noPr: ', no PR yet', filesUnknown: ", its PR's files not read" };
+const TRIAGE_WHY = { noPr: ', no PR yet', filesUnknown: ", its PR's files not read", renamed: ', its PR renames a file', session: ', a session on it now' };
 export function overlapText(key, o, { starting = false } = {}) {
   if (o?.by !== 'page') return null;
   const where = o.from === 'pr' ? `a page ${key}'s PR${o.pr ? ` #${o.pr}` : ''} changes` : `a page ${key}'s triage names${starting ? '' : TRIAGE_WHY[o.why] ?? TRIAGE_WHY.noPr}`;
@@ -166,11 +211,16 @@ export function overlapText(key, o, { starting = false } = {}) {
 //     that repo, `from: 'triage'`, `why: 'noPr'`;
 //   - a repo where an open PR's files are unknown (a forge read that failed) or only in part (more files than one read
 //     gives): the triage's pages of that repo, `why: 'filesUnknown'`, beside the files that were read;
+//   - a repo where its PR renames a file (`filesRenamed`: the forge gives the new path only): the triage's pages beside
+//     the files, `why: 'renamed'`;
+//   - a PR closed unmerged holds its files as an open one does: its branch still has the edits, and may be opened again;
 //   - a repo where its PRs are merged: none, the change is on the base;
 //   - a repo of the triage's with no PR: the triage's pages (`why: 'noPr'`) while the ticket hasn't opened its PRs (its
-//     `pr` stage not done), none after: a ticket that opened its PRs and none in that repo changes nothing there.
+//     `pr` stage not done), none after: a ticket that opened its PRs and none in that repo changes nothing there. While a
+//     session runs on it (`locked`: a review round may edit a repo it has no PR in yet), they count again
+//     (`why: 'session'`).
 // A ready ticket keeps its triage's pages: it has no PR.
-export function workPages(l, prWorld = new Map()) {
+export function workPages(l, prWorld = new Map(), { locked = false } = {}) {
   const prs = (l.prs ?? []).map((p) => ({ p, world: p.number ? prWorld.get(`${l.key}/${prId(p)}`) ?? null : null }));
   const opened = l.stages?.pr?.status === 'done';
   const out = [];
@@ -183,14 +233,15 @@ export function workPages(l, prWorld = new Map()) {
       continue;
     }
     if (!world || world.error || !Array.isArray(world.files) || world.filesTruncated) triage(p.repo, 'filesUnknown');
-    if (world?.state === 'open') for (const f of world.files ?? []) out.push({ repo: p.repo, path: f, from: 'pr', pr: p.number });
+    else if (world.filesRenamed) triage(p.repo, 'renamed');
+    for (const f of world?.files ?? []) out.push({ repo: p.repo, path: f, from: 'pr', pr: p.number });
   }
   const withPr = new Set(prs.map(({ p }) => p.repo));
   for (const page of l.triage?.pages ?? []) {
     const k = pageKey(page);
     if (!k) continue;
     const repo = k.split(' ')[0];
-    const why = triageFor.get(repo) ?? (!withPr.has(repo) && !opened ? 'noPr' : null);
+    const why = triageFor.get(repo) ?? (withPr.has(repo) ? null : !opened ? 'noPr' : locked ? 'session' : null);
     if (why) out.push({ repo, path: k.slice(repo.length + 1), from: 'triage', why });
   }
   return out;
@@ -271,9 +322,13 @@ export function startable({ tickets, groups, settings, allowance, estimates, inW
     if (g.keys.some((k) => locked.has(k))) why.push('locked by a run');
     // A page that holds the group back is named, with where it came from (`overlapText`): no `;` in it, the report
     // and the progress file join the reasons with one.
-    const workPageWhy = (g.waitsWhy ?? []).map((x) => overlapText(x.key, x)).filter(Boolean);
-    if (g.waitsFor?.length) why.push(`related to ${g.waitsFor.join(', ')}, still in work${workPageWhy.length ? `: ${workPageWhy.join(', ')}` : ''}`);
-    const startingRelated = startingMembers.map((s) => ({ key: s.key, o: g.members.map((m) => overlapOf(m, s, repos)).find(Boolean) ?? null })).filter((x) => x.o);
+    // A ticket whose PR was closed unmerged (`closed`) holds its pages apart: it is not in work.
+    const waits = g.waitsWhy ?? (g.waitsFor ?? []).map((key) => ({ key }));
+    for (const [list, how] of [[waits.filter((x) => !x.closed), 'still in work'], [waits.filter((x) => x.closed), 'its PR closed unmerged']]) {
+      const pageWhy = list.map((x) => overlapText(x.key, x)).filter(Boolean);
+      if (list.length) why.push(`related to ${list.map((x) => x.key).join(', ')}, ${how}${pageWhy.length ? `: ${pageWhy.join(', ')}` : ''}`);
+    }
+    const startingRelated = startingMembers.map((s) => ({ key: s.key, o: g.members.map((m) => overlapOf(m, s, repos, rootsOf(settings))).find(Boolean) ?? null })).filter((x) => x.o);
     if (startingRelated.length) why.push(`related to ${startingRelated.map((x) => x.key).join(', ')}, starting now${startingRelated.some((x) => x.o.by === 'page') ? `: ${startingRelated.map((x) => overlapText(x.key, x.o, { starting: true })).filter(Boolean).join(', ')}` : ''}`);
     if (waiting >= limits.waiting) why.push(`${waiting} waiting (limit ${limits.waiting})`);
     if (limits.open !== null && open + g.size > limits.open && !(g.size > limits.open && open === 0)) why.push(`${open} open (${holders()}) + ${g.size} > ${limits.open}`);

@@ -446,15 +446,60 @@ export function validateSettings(merged, { root, stateRootDefault }) {
 // The shared file as the host's repo has it at HEAD, or null when it isn't tracked there (no repo, a file outside it, a
 // file never committed). A session can't move HEAD in the hub: its commits land only in a worktree, on a ticket branch.
 export function sharedAtHead(root, file) {
-  const rel = path.relative(root, path.resolve(root, file));
-  if (rel.startsWith('..') || path.isAbsolute(rel)) return null;
-  const run = spawnSync('git', ['-C', root, 'show', `HEAD:./${rel.split(path.sep).join('/')}`], { encoding: 'utf8', maxBuffer: 16 << 20, stdio: ['ignore', 'pipe', 'ignore'] });
-  if (run.status !== 0) return null;
+  const text = textAt(root, file, 'HEAD');
+  if (text === null) return null;
   try {
-    return JSON.parse(run.stdout);
+    return JSON.parse(text);
   } catch {
     return null;
   }
+}
+
+// A file's text at a commit of the host's repo, or null when it isn't tracked there.
+function textAt(root, file, ref) {
+  const rel = path.relative(root, path.resolve(root, file));
+  if (rel.startsWith('..') || path.isAbsolute(rel)) return null;
+  const run = spawnSync('git', ['-C', root, 'show', `${ref}:./${rel.split(path.sep).join('/')}`], { encoding: 'utf8', maxBuffer: 16 << 20, stdio: ['ignore', 'pipe', 'ignore'] });
+  return run.status === 0 ? run.stdout : null;
+}
+
+// Whether the shared file at a commit (the hub's origin, before the watcher moves the hub to it: lib/hub-update.mjs)
+// gives settings that hold, merged with the local file as `loadSettings` merges them. Null when they do (or when the
+// file is tracked at neither HEAD nor that commit: the working file stays as it is), else why not.
+export async function sharedProblemAt({ root, settings: flag, ref }) {
+  try {
+    const file = await settingsFile(root, flag);
+    const rel = path.relative(root, file);
+    const text = textAt(root, file, ref);
+    if (text === null) return textAt(root, file, 'HEAD') === null ? null : `${rel} is not in it`;
+    let shared;
+    try {
+      shared = JSON.parse(text);
+    } catch (e) {
+      return `${rel} is not JSON: ${e.message}`;
+    }
+    const { local: kept } = localOnly(readJsonFile(localSettingsPath(file), 'local settings file'));
+    const claude = await loadClaudeConfig(root);
+    validateSettings(deepMerge(shared, kept), { root, stateRootDefault: path.join(claude['toolkit state root'] || '.doc-toolkit/', 'ticket-flow/') });
+    return null;
+  } catch (e) {
+    return String(e.message ?? e).split('\n')[0];
+  }
+}
+
+// The state folder as the shared file names it, read without validating the rest: what the watcher looks at for the runs
+// going on when the settings don't load (lib/hub-update.mjs `busy`). The default when the file doesn't say or doesn't read.
+export async function stateFolderOf({ root, settings: flag }) {
+  const claude = await loadClaudeConfig(root);
+  const fallback = path.join(claude['toolkit state root'] || '.doc-toolkit/', 'ticket-flow/');
+  let named = null;
+  try {
+    const raw = readJsonFile(await settingsFile(root, flag), 'settings file');
+    if (typeof raw?.state === 'string' && raw.state.trim()) named = raw.state;
+  } catch {
+    /* the default */
+  }
+  return path.resolve(root, named ?? fallback);
 }
 
 // What the local file may set: only its own keys, and of a role only what shapes the session's cost. A local file is

@@ -135,6 +135,14 @@ test('the hub before the check: a move is in the run log and the line, a hub lef
   assert.deepEqual(readFeed(w.settings.state).hub, { at: iso(NOW + 5 * MIN), outcome: 'behind', base: 'main', commits: 3, note });
   const st = await w.status({ usage: usageAt(5) });
   assert.ok(renderReport({ settings: w.settings, st, date: '2026-11-10', ledgers: [] }).includes(`the hub at ${iso(NOW + 5 * MIN)}: ${note}`));
+  // A hub whose default branch isn't known says so once, not at every check.
+  const unknown = { outcome: 'skipped', base: null, note: "the hub's default branch is not known (…): the hub is not updated" };
+  out = await check(NOW + 6 * MIN, { hub: unknown });
+  assert.ok(out.notes.includes(unknown.note));
+  out = await check(NOW + 7 * MIN, { hub: unknown });
+  assert.ok(!out.notes.includes(unknown.note));
+  assert.ok(!oneLine(out).includes('default branch'));
+  assert.equal(out.quiet, true);
   // No hub update tried (a forge tick's, a dry run's): nothing about it.
   out = await check(NOW + 10 * MIN);
   assert.equal(out.hub, undefined);
