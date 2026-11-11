@@ -20,6 +20,7 @@ import { dropHandOnStep, handOnLive, liveHandOnKeys, runsGoingIn, startsInFlight
 import { makeDispatcher } from './dispatch.mjs';
 import { videoFetchDue } from './rule.mjs';
 import { hubDrain, hubLine } from './hub-update.mjs';
+import { learningCheck } from './learn.mjs';
 
 // One check of the watcher (design §5, D-048), started by launchd every few minutes. No model call of its own:
 //   1. read every source since its cursor; a check that finds nothing ends here, with no status, no runner, no claude;
@@ -578,6 +579,22 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
       if (!out.startPass) delete out.startPass;
     }
 
+    // 5c. Learning from the owner's edits (lib/learn.mjs, TASK-054): the rule PRs' merges and replies, the toolkit PRs,
+    // and the weekly session, which waits for today's morning run and for no ticket run going (D-131: the tickets
+    // first). No model unless a session is due; a session is guarded like a scheduled step.
+    if (settings.learning) {
+      try {
+        const going = runsGoingIn(settings.state, { locks: allLocks(settings.state, clock()), now: clock(), ...(io.isAlive ? { isAlive: io.isAlive } : {}), groupOf: groupOfKey(settings.state) }).size;
+        const busy = going ? `${going} ticket run(s) going` : null;
+        const readUsage = io.readUsage ?? (async () => (await readUsageTried(claude, io.claudeEnv, io.sleep ? { sleep: io.sleep } : {})).usage);
+        out.learning = await (io.learningCheck ?? learningCheck)({ settings, clients, io: { claude, claudeEnv: io.claudeEnv, readUsage, ...(io.learn ?? {}) }, now: clock(), morningDone: next.morning?.lastDate === today, busy, dryRun });
+        for (const n of out.learning.notes) out.notes.push(n);
+        if (out.learning.proposed.length || out.learning.replied.length || out.learning.toolkit.length) say({ kind: 'learning', outcome: 'done', note: [out.learning.proposed.length ? `rule PRs ${out.learning.proposed.map((p) => `${p.repo}#${p.number}`).join(', ')}` : null, out.learning.replied.length ? `replied on ${out.learning.replied.map((r) => r.pr).join(', ')}` : null, out.learning.toolkit.length ? `toolkit ${out.learning.toolkit.map((t) => t.url ?? t.failed).join(', ')}` : null].filter(Boolean).join('; ') });
+      } catch (e) {
+        failed('the learning from the owner\'s edits', e);
+      }
+    }
+
     // 6. Host jobs. A watch job whose board wasn't read in this check neither runs nor changes: it hasn't seen the list.
     // A disarmed job re-arms when the reads that failed with it read again, or by `set retry job <name>`; an alert held
     // through the night goes out at the first check after `schedule.morning` if the job is still disarmed (lib/rearm.mjs).
@@ -625,6 +642,8 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
         ...notificationsOf({ morning: out.morning, run: out.run, startPass: out.startPass, jobs: [...out.jobs, ...heldAlerts], errors: out.errors, capped: out.capped ?? [], today }),
         ...ended.flatMap((h) => notificationsOf({ run: h.run, today })),
         ...started.map((h) => startedNote(h, today)),
+        // Keyed by the day too: a key without today's date is cleared above on every check.
+        ...(out.learning?.notify ?? []).map((n) => ({ ...n, key: `${n.key}:${today}` })),
       ];
       for (const n of notes) {
         if (next.notified?.[n.key]) continue;

@@ -18,6 +18,8 @@ import { setLocal } from './lib/setlocal.mjs';
 import { runImport } from './lib/import.mjs';
 import { renderTrace } from './lib/trace.mjs';
 import { ROLE_SESSION_VARIABLE } from './lib/env.mjs';
+import { collectOnce, viewsFrom } from './lib/learn-log.mjs';
+import { learnStatus } from './lib/learn.mjs';
 
 const USAGE = `ticket-state <command> [<key>] [options]
 
@@ -50,6 +52,11 @@ Commands
   import                    The Markdown ledgers from before the JSON ones (<from>/<key>.md, default the state
                             folder), each into a JSON ledger holding every line; closed tickets' Markdown removed
                             once checked (to the Trash, or deleted with cleanup.mode delete); open ones kept.
+  learn collect             The owner's edits on the pipeline's PRs into the learning log (<state>/learning/edits.jsonl):
+                            every open PR and every PR merged since --since (default learning.since). Run again, it adds
+                            nothing twice: the backfill at the switch. --dry-run lists what it would add.
+  learn status              The log's counts, the weeks proposed, the open rule PRs and the rules' states. Writes nothing.
+                            Both are refused in a role session (DOC_TOOLKIT_ROLE_SESSION).
 
 Options
   --root <dir>              the host repo (default: cwd)
@@ -68,6 +75,7 @@ Options
   --date <yyyy-mm-dd>, --print                                report
   --unset                                                     set
   --from <dir>, --size <word>=<edit|newPage|newSection> (repeatable), --dry-run   import
+  --since <iso date-time>, --dry-run                         learn collect
   --origin <url>            the tracker's API origin (tests)
   -h, --help                this text
 `;
@@ -99,14 +107,16 @@ const OPTIONS = {
   from: { type: 'string' },
   size: { type: 'string', multiple: true },
   'dry-run': { type: 'boolean' },
+  since: { type: 'string' },
   origin: { type: 'string' },
   help: { type: 'boolean', short: 'h' },
 };
 
-const COMMANDS = ['status', 'record', 'handover', 'lock', 'unlock', 'config', 'intake', 'report', 'set', 'import', 'trace'];
+const COMMANDS = ['status', 'record', 'handover', 'lock', 'unlock', 'config', 'intake', 'report', 'set', 'import', 'trace', 'learn'];
 const TAKES_KEY = ['record', 'handover', 'trace'];
 // Options of one command only: refused on any other (exit 2), so `set mode off --dry-run` writes nothing.
-const ONLY = { from: ['import'], size: ['import'], 'dry-run': ['import'], transcripts: ['trace'] };
+const ONLY = { from: ['import'], size: ['import'], 'dry-run': ['import', 'learn'], transcripts: ['trace'], since: ['learn'] };
+const ISO = /^\d{4}-\d\d-\d\dT\d\d:\d\d(:\d\d(\.\d+)?)?(Z|[+-]\d\d:\d\d)$/;
 
 export function usageOf(values, io = {}) {
   if (values['usage-file'] !== undefined) {
@@ -151,6 +161,9 @@ export async function main(argv, io = {}) {
   }
   if (!COMMANDS.includes(command)) throw new CliError(`unknown command '${command}'.\n\n${USAGE}`, { code: 2 });
   // A role session runs `record` here, so `trace` refuses: it reads other sessions' transcripts, which a role has no reason to.
+  // `learn` writes the learning log and reads every PR: the owner's and the runner's, never a role session's.
+  if (command === 'learn' && env[ROLE_SESSION_VARIABLE] !== undefined) throw new CliError(`learn is refused in a role session (${ROLE_SESSION_VARIABLE} is set)`, { code: 2 });
+  if (command === 'learn' && !['collect', 'status'].includes(key)) throw new CliError(`learn needs collect or status.\n\n${USAGE}`, { code: 2 });
   if (command === 'trace' && env[ROLE_SESSION_VARIABLE] !== undefined) throw new CliError(`trace is for people: it is refused in a role session (${ROLE_SESSION_VARIABLE} is set)`, { code: 2 });
   // And the records of the runner's own scripted steps that keep commits apart or take the translated label off.
   if (command === 'record' && env[ROLE_SESSION_VARIABLE] !== undefined && ['idSync', 'untranslated'].includes(values.stage)) throw new CliError(`record --stage ${values.stage} is the runner's alone: it is refused in a role session (${ROLE_SESSION_VARIABLE} is set)`, { code: 2 });
@@ -168,7 +181,7 @@ export async function main(argv, io = {}) {
     stdout.write(JSON.stringify({ ok: true, command, ...setLocal({ settings, key, value: rest[0], name: rest[1], unset: Boolean(values.unset) }) }, null, 2) + '\n');
     return 0;
   }
-  if (!TAKES_KEY.includes(command) && !['lock', 'unlock'].includes(command) && key) throw new CliError(`unexpected argument '${key}'`, { code: 2 });
+  if (!TAKES_KEY.includes(command) && !['lock', 'unlock', 'learn'].includes(command) && key) throw new CliError(`unexpected argument '${key}'`, { code: 2 });
   if (rest.length) throw new CliError(`unexpected argument '${rest[0]}'`, { code: 2 });
 
   const root = path.resolve(values.root ?? process.cwd());
@@ -223,6 +236,18 @@ export async function main(argv, io = {}) {
         sizes[pair.slice(0, at).trim()] = pair.slice(at + 1).trim();
       }
       result = await runImport({ settings, clients, from: values.from ?? null, sizes, dryRun: Boolean(values['dry-run']), now, ...(io.trashDir ? { trashDir: io.trashDir } : {}) });
+      break;
+    }
+    case 'learn': {
+      if (!settings.learning) throw new CliError('learn: the shared settings have no "learning": the learning from the owner\'s edits is off', { code: 2 });
+      if (key === 'status') {
+        result = learnStatus(settings);
+        break;
+      }
+      if (values.since !== undefined && (!ISO.test(values.since) || Number.isNaN(Date.parse(values.since)))) throw new CliError('--since must be an ISO date-time with its zone, such as 2026-11-09T00:00:00+02:00', { code: 2 });
+      const since = values.since ?? settings.learning.since ?? null;
+      const r = await collectOnce(settings, { ledgers: readAllLedgers(settings.state), viewOf: viewsFrom(null, clients.forge), since, dryRun: Boolean(values['dry-run']), now, ...(io.learnReader ? { git: io.learnReader } : {}) });
+      result = { since, dryRun: Boolean(values['dry-run']), ...(r.skipped ? { skipped: r.skipped } : {}), added: r.added.length, prs: r.prs, notes: r.notes, ...(values['dry-run'] ? { entries: r.added } : {}) };
       break;
     }
     case 'handover':

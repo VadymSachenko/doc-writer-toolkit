@@ -11,6 +11,7 @@ import { DEFAULT_LABELS } from './pr-description.mjs';
 import { TRANSCRIBERS } from '../../transcriber/lib/index.mjs';
 import { CHECKS } from './gates.mjs';
 import { DEFAULT_EXCLUDE, DEFAULT_TICKET_FILES } from './doc-evidence.mjs';
+import { validateLearning } from './learn-settings.mjs';
 
 // The ticket flow settings: the shared file the host commits (`.claude/ticket-flow.json`, or the `Ticket flow
 // settings:` field of CLAUDE.md, or --settings), read at HEAD (`trustedShared`), and the owner's local file next to it
@@ -18,11 +19,11 @@ import { DEFAULT_EXCLUDE, DEFAULT_TICKET_FILES } from './doc-evidence.mjs';
 // The tracker and forge scripts read the same files, as they stand and with no such limit.
 //
 // The shared file holds `state`, `workFolder`, `commentHeader`, `tracker`, `forge`, `targets`, `noReviewLabel`, `appRepos`, `relatedRepos`, `ticketCommits`, `docRepos`, `docEvidence`, `hostRules`, `hostJobs`,
-// `build`, `checks`, and each role's tool rules (`roles.<role>.allowedTools`, `disallowedTools`).
+// `build`, `checks`, `learning`, and each role's tool rules (`roles.<role>.allowedTools`, `disallowedTools`).
 // The local file holds `mode`, `limits`, `schedule`, `roles` (no tool rules), `modelLadder`, `video`, `cleanup` and `progress`. Defaults below.
 
 export const MODES = ['off', 'observe', 'on'];
-export const ROLES = ['triage', 'writer', 'reviewer', 'translator'];
+export const ROLES = ['triage', 'writer', 'reviewer', 'translator', 'learner'];
 export const SIZES = ['edit', 'newPage', 'newSection'];
 export const START_ORDERS = ['priority', 'easiest'];
 
@@ -88,6 +89,7 @@ export const LOCAL_DEFAULTS = {
     writer: { model: 'claude-opus-5-5', effort: 'high', maxTurns: 200 },
     reviewer: { model: 'claude-sonnet-5-5', effort: 'high', maxTurns: 120 },
     translator: { model: 'claude-sonnet-5-5', effort: 'high', maxTurns: 120 },
+    learner: { model: 'claude-opus-5-5', effort: 'high', maxTurns: 60 },
   },
   // The order a step that failed its gate climbs: one retry with the next model up, never down.
   modelLadder: ['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5'],
@@ -483,6 +485,8 @@ export function validateSettings(merged, { root, stateRootDefault }) {
     hostRules: merged.hostRules ?? {},
     hostJobs: validateJobs(merged.hostJobs ?? [], root),
     styleCheck,
+    // Learning from the owner's edits (TASK-054, lib/learn.mjs): shared file only, as it names a clone the runner pushes from.
+    learning: validateLearning(merged.learning),
     build,
     checks,
     limits,

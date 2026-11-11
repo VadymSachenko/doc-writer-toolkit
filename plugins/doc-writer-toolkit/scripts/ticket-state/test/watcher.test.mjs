@@ -1052,3 +1052,54 @@ test('E6 and set retry job: a job that fails on its own (the network fine) stays
   await t.checks(Date.parse('2026-11-10T11:15:00Z'), Date.parse('2026-11-10T12:30:00Z'));
   assert.ok(t.state().disarmed, 'disarmed again after another hour');
 });
+
+test('the learning step (TASK-054): called on each full check only when `learning` is set, told whether the morning run is done and whether a ticket run goes; its notification goes out once', async () => {
+  const calls = [];
+  const learningCheck = async (a) => {
+    calls.push({ morningDone: a.morningDone, busy: a.busy, dryRun: a.dryRun });
+    return { notes: [], proposed: [{ repo: 'guide', number: 7, rules: 2 }], replied: [], toolkit: [], week: '2026-W46', notify: [{ key: 'learning:2026-W46', urgent: false, title: 'Ticket flow: rules from your edits', text: '2 rule(s) proposed' }] };
+  };
+  const run = async (w, at) => {
+    const notes = [];
+    const out = await runCheck({
+      settings: w.settings,
+      clients: w.clients(),
+      io: {
+        now: () => at,
+        git: quietGit,
+        runDaily: async (a) => ({ mode: w.settings.mode, named: a.options.named ?? [], ran: [], starts: [], guard: [] }),
+        readUsage: () => assert.fail('no /usage'),
+        spawnJob: async () => ({ code: 0, stdout: RESULT, stderr: '' }),
+        notify: (m) => (notes.push(m), { sent: true }),
+        learningCheck,
+      },
+      options: {},
+    });
+    return { out, notes };
+  };
+
+  const off = world();
+  seed(off, NOW - MIN);
+  await run(off, NOW);
+  assert.equal(calls.length, 0, 'no learning settings: not called');
+
+  // Before schedule.morning: today's morning run has not run, so the week waits.
+  const early = world({ extra: { learning: {}, schedule: { morning: '12:00' } } });
+  seed(early, NOW - MIN, { morning: '2026-11-09' });
+  await run(early, NOW);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].morningDone, false, 'the morning run of today is not done yet');
+  assert.equal(calls[0].busy, null);
+
+  const w = world({ extra: { learning: {} } });
+
+  seed(w, NOW - MIN);
+  takeLock(w.settings.state, { group: '601', kind: 'manual', leaseMinutes: 60, now: NOW });
+  const { out, notes } = await run(w, NOW + MIN);
+  assert.equal(calls.at(-1).morningDone, true);
+  assert.match(calls.at(-1).busy ?? '', /1 ticket run\(s\) going/);
+  assert.equal(out.learning.week, '2026-W46');
+  assert.ok(notes.some((n) => n.key === 'learning:2026-W46:2026-11-10'), 'the rule PR notification is sent');
+  const again = await run(w, NOW + 2 * MIN);
+  assert.ok(!again.notes.some((n) => n.key.startsWith('learning:')), 'once a day');
+});
