@@ -214,6 +214,7 @@ export function overlapText(key, o, { starting = false } = {}) {
 //   - a repo where its PR renames a file (`filesRenamed`: the forge gives the new path only): the triage's pages beside
 //     the files, `why: 'renamed'`;
 //   - a PR closed unmerged holds its files as an open one does: its branch still has the edits, and may be opened again;
+//     one closed as won't merge (`dropped`, `forge.wontMergeLabel`) holds none: it is out of the ticket;
 //   - a repo where its PRs are merged: none, the change is on the base;
 //   - a repo of the triage's with no PR: the triage's pages (`why: 'noPr'`) while the ticket hasn't opened its PRs (its
 //     `pr` stage not done), none after: a ticket that opened its PRs and none in that repo changes nothing there. While a
@@ -227,7 +228,7 @@ export function workPages(l, prWorld = new Map(), { locked = false } = {}) {
   const triageFor = new Map(); // repo -> why its triage pages count; no PR yet wins over files not read
   const triage = (repo, why) => triageFor.set(repo, triageFor.get(repo) === 'noPr' ? 'noPr' : why);
   for (const { p, world } of prs) {
-    if (p.merged || world?.state === 'merged') continue;
+    if (p.merged || world?.state === 'merged' || world?.dropped) continue;
     if (!p.number) {
       triage(p.repo, 'noPr');
       continue;
@@ -250,7 +251,7 @@ export function workPages(l, prWorld = new Map(), { locked = false } = {}) {
 // The WIP counts and the groups a scheduled run may start now, with the reason each other group doesn't.
 // An open ticket: a scheduled run started it, and it is from planning to the final review, ready for merge included. Not
 // open: before the start, a pause (the card moved back to the ready status), outside the flow (a PR closed unmerged,
-// the card archived, gone or moved out of the flow), merged or closed. A locked ticket counts as what it is doing; one
+// every PR closed as won't merge, the card archived, gone or moved out of the flow), merged or closed. A locked ticket counts as what it is doing; one
 // locked at its start by a scheduled run is open, its card still in the ready status or not: its session may be moving
 // the card now, and a second scheduled run at the same time (a runner.mjs run by hand without --manual, a check lock
 // taken over) must not start a group past the limit meanwhile.

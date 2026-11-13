@@ -31,7 +31,7 @@ export function roundSnapshot(state, keys) {
 
 const gone = (err) => err?.data?.status === 404 || /\b404\b/.test(String(err?.message ?? ''));
 
-export async function followRounds({ settings, clients, keys, before }) {
+export async function followRounds({ settings, clients, keys, before, skip = [] }) {
   if (!settings.reviewRounds) return [];
   const warnings = [];
   const written = new Set();
@@ -40,7 +40,8 @@ export async function followRounds({ settings, clients, keys, before }) {
     if (!l) continue;
     const own = (l.posted?.pr ?? []).map(String);
     for (const p of l.prs ?? []) {
-      if (!p.number || p.merged || p.stage === 'merged') continue;
+      // A dropped PR (`skip`, closed with `forge.wontMergeLabel`): its description, threads and summaries stay as they are.
+      if (!p.number || p.merged || p.stage === 'merged' || skip.includes(prId(p))) continue;
       const was = before.get(slot(key, p)) ?? { seq: null, rounds: 0, places: new Map() };
       if (was.seq === l.seq) continue;
       const at = { repo: p.repo, number: p.number };

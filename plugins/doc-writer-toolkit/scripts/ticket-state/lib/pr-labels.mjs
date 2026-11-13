@@ -31,12 +31,13 @@ export function labelSnapshot(state, keys) {
 }
 
 // The label changes the ledgers ask for since `before`, each ledger against its own snapshot: `[{ repo, number,
-// label, add }]`, one per PR and label. Two ledgers of one PR that disagree: on wins (a question open in either).
-export function labelChanges(before, state, keys, forge) {
+// label, add }]`, one per PR and label. Two ledgers of one PR that disagree: on wins (a question open in either). A
+// dropped PR (`skip`: the ids the step names, closed with `forge.wontMergeLabel`) gets none.
+export function labelChanges(before, state, keys, forge, skip = []) {
   const out = new Map();
   for (const key of keys) {
     for (const p of readLedger(state, key)?.prs ?? []) {
-      if (!p.number || p.merged || p.stage === 'merged') continue;
+      if (!p.number || p.merged || p.stage === 'merged' || skip.includes(prId(p))) continue;
       const was = before.get(slot(key, p)) ?? { stage: null, ready: 0, asked: null, translated: null };
       const change = (label, add) => {
         const k = `${prId(p)}|${label}`;
@@ -65,9 +66,9 @@ export function labelChanges(before, state, keys, forge) {
 }
 
 // Sets them on the forge. Returns the warnings.
-export async function followLabels({ settings, clients, keys, before }) {
+export async function followLabels({ settings, clients, keys, before, skip = [] }) {
   const warnings = [];
-  for (const c of labelChanges(before, settings.state, keys, settings.forge)) {
+  for (const c of labelChanges(before, settings.state, keys, settings.forge, skip)) {
     try {
       const args = { repo: c.repo, number: c.number, label: c.label };
       await (c.add ? clients.forge.addLabel(args) : clients.forge.removeLabel(args));

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { CliError, Refused } from './errors.mjs';
-import { checkKey, findPr, keyOf, newLedger, newPr, prId, readLedger, writeLedger } from './ledger.mjs';
+import { checkKey, droppedLabel, findPr, keyOf, newLedger, newPr, prId, readLedger, sameLabel, writeLedger } from './ledger.mjs';
 import { lockOf, renewLock } from './locks.mjs';
 import { CARD_STATUS_OF, CHAIN, LABEL_OF, PR_ORDER, PR_STAGE_OF_STATUS, PR_STAGES, STATUSES, TICKET_STAGES, followsMove, forwardMove, stageLabelOf } from './stages.mjs';
 import { labelCheck } from './intake.mjs';
@@ -47,7 +47,6 @@ function json(value, flag) {
   }
 }
 
-const sameLabel = (a, b) => String(a ?? '').trim().toLowerCase() === String(b ?? '').trim().toLowerCase();
 const brief = (card) => ({ status: card.status, list: { id: card.list?.id ?? null, name: card.list?.name ?? null } });
 const addAll = (list, items) => {
   for (const x of items ?? []) if (x !== null && x !== undefined && !list.map(String).includes(String(x))) list.push(x);
@@ -97,6 +96,15 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
   const forgeHead = async (p) => {
     const st = await clients.forge.prState({ repo: p.repo, number: p.number });
     return st;
+  };
+  // A PR closed as won't merge (`forge.wontMergeLabel`), read from the forge as the record runs (the forge wins over
+  // what the rule saw): dropped from the ticket, so no record moves it, counts it for the card's status or closes it.
+  // With no such label set, nothing is read.
+  const droppedNow = new Map();
+  const droppedAs = async (p) => {
+    if (!settings.forge.wontMergeLabel || !p?.number || p.merged) return null;
+    if (!droppedNow.has(prId(p))) droppedNow.set(prId(p), droppedLabel(await clients.forge.prState({ repo: p.repo, number: p.number }), settings));
+    return droppedNow.get(prId(p));
   };
   // The answer pass's input, frozen by the runner's `running` record before the session (lib/answer-pass.mjs): kept on
   // the ticket (or the PR), so the done record is checked against what the session was given, whatever it changed since.
@@ -601,7 +609,9 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
           if (!PR_TARGET_STAGES.includes(to)) throw new CliError(`move --pr needs --to, a PR stage: ${PR_TARGET_STAGES.join(', ')}`, { code: 2 });
           const before = pr.stage;
           pr.stage = to;
-          const expected = cardStatusFor(l);
+          const dropped = [];
+          for (const x of l.prs) if (x !== pr && (await droppedAs(x))) dropped.push(prId(x));
+          const expected = cardStatusFor(l, dropped);
           const card = await cardNow(ref);
           if (expected && card.status !== expected) {
             pr.stage = before;
@@ -640,6 +650,8 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
           // `takeReady`, with the head it saw) goes along with a move to `translation` too: the move approves that
           // change, and the rule re-syncs it. A head that moved again since the rule looked stays, like a pipeline commit.
           const take = to === 'translation' && p.stage === 'readyForMerge' && !p.merged ? (result.takeReady ?? []).find((x) => x?.pr === prId(p)) : null;
+          // A dropped PR stays where it was: the move is the other PRs'.
+          if (p.number && (take || followsMove(p.stage, from, to)) && (await droppedAs(p))) continue;
           const headNow = p.number && take ? (await clients.forge.prState({ repo: p.repo, number: p.number })).headCommit : null;
           const moved = Boolean(headNow && headNow === take.head && p.readyForMerge?.at(-1)?.head && headNow !== p.readyForMerge.at(-1).head);
           if (p.number && (followsMove(p.stage, from, to) || moved)) {
@@ -827,20 +839,31 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
         if (!CHAIN.includes(stage) && !['readyForMerge', 'resync', 'close'].includes(stage)) return;
         if (stage === 'close') {
           const open = [];
+          const dropped = [];
           for (const p of l.prs) {
             if (!p.number) {
               open.push(prId(p));
               continue;
             }
             const st = await clients.forge.prState({ repo: p.repo, number: p.number });
+            // Closed as won't merge (`forge.wontMergeLabel`): out of the ticket, so the close needs only the others
+            // merged. The ledger keeps when it was seen dropped, and with which label; its stage stays.
+            const label = droppedLabel(st, settings);
+            if (label) {
+              dropped.push(p);
+              p.dropped = { at, label };
+              continue;
+            }
+            delete p.dropped;
             if (st.state !== 'merged') open.push(prId(p));
             // With the translated label, whether the PR carried it when it was merged: a merge without it may have left
             // its translations behind the base (the report and the progress file say so).
             else p.merged = { at: st.mergedAt, commit: st.mergeCommit, ...(settings.forge.translatedLabel ? { translated: (st.labels ?? []).some((x) => sameLabel(x, settings.forge.translatedLabel)) } : {}) };
           }
           if (open.length) throw new Refused('notMerged', `not every PR is merged: ${open.join(', ')}`, { open });
+          if (dropped.length === l.prs.length) throw new Refused('notMerged', `no PR is merged: every one was closed as won't merge (${dropped.map(prId).join(', ')})`, { open: [] });
           const card = await needCard('done');
-          for (const p of l.prs) p.stage = 'merged';
+          for (const p of l.prs) if (!dropped.includes(p)) p.stage = 'merged';
           l.left = { ...brief(card), at };
           return;
         }
@@ -1094,10 +1117,12 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
   }
 }
 
-// The status the card belongs in: its least advanced PR's.
-export function cardStatusFor(l) {
-  if (!l.prs.length) return null;
-  const least = Math.min(...l.prs.map((p) => PR_ORDER.indexOf(p.merged ? 'merged' : p.stage)));
+// The status the card belongs in: its least advanced PR's, a dropped one left out (`dropped`: the PR ids closed with
+// `forge.wontMergeLabel`, which the rule or the forge named).
+export function cardStatusFor(l, dropped = []) {
+  const prs = l.prs.filter((p) => !dropped.includes(prId(p)));
+  if (!prs.length) return null;
+  const least = Math.min(...prs.map((p) => PR_ORDER.indexOf(p.merged ? 'merged' : p.stage)));
   return CARD_STATUS_OF[PR_ORDER[least]] ?? null;
 }
 

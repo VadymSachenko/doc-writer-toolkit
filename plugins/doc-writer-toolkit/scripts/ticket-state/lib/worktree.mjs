@@ -740,14 +740,15 @@ function moveInto(from, to) {
   }
 }
 
-// The PRs a step's session works on: the step's PR, or every open PR of its tickets with a branch.
+// The PRs a step's session works on: the step's PR, or every open PR of its tickets with a branch. A dropped PR
+// (`step.dropped`, closed with `forge.wontMergeLabel`) never gets a worktree.
 export function prsForStep(step, ledgers) {
   if (!TREE_STAGES.includes(step.stage)) return [];
   const out = [];
   const seen = new Set();
   for (const l of ledgers.filter(Boolean)) {
     for (const pr of l.prs ?? []) {
-      if (!pr.branch || pr.merged) continue;
+      if (!pr.branch || pr.merged || (step.dropped ?? []).includes(prId(pr))) continue;
       if (step.pr && prId(pr) !== step.pr && `${pr.repo}:${pr.branch}` !== step.pr) continue;
       const k = `${pr.repo}:${pr.branch}`;
       if (seen.has(k)) continue;

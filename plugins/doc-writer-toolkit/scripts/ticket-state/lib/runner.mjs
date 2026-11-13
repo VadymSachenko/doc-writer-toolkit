@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { computeStatus } from './status.mjs';
 import { videoQuota } from './rule.mjs';
 import { makeGit } from './world.mjs';
-import { readAllLedgers, readLedger, findPr, prId } from './ledger.mjs';
+import { droppedLabel, readAllLedgers, readLedger, findPr, prId } from './ledger.mjs';
 import { allLocks, takeLock, releaseLock, renewLock } from './locks.mjs';
 import { runRecord, cardStatusFor } from './record.mjs';
 import { runUnlock } from './handover.mjs';
@@ -1053,8 +1053,10 @@ export function collectSteps(st, { named = [], includeStart = false, retryWaitin
 // ------------------------------------------------------------------ the steps that need no model
 
 // What a scripted step does, as the tracker and forge operations it calls (for the plan of a dry run).
-export function scriptedCalls(step, ledger, settings) {
-  const card = ledger?.card?.shortLink ?? ledger?.card?.id ?? step.card?.shortLink;
+export function scriptedCalls(step, ledgerIn, settings) {
+  const card = ledgerIn?.card?.shortLink ?? ledgerIn?.card?.id ?? step.card?.shortLink;
+  // A dropped PR (`step.dropped`, closed with `forge.wontMergeLabel`) is out of the ticket: no call names it.
+  const ledger = withoutDropped(ledgerIn, step);
   const reviewCommentCall = (pr) => (pr.number && settings.reviewComment ? [`forge comment --repo ${pr.repo} --number ${pr.number} --body-file <the review comment> --unless-header <its first line>`] : []);
   const target = (pr) => settings.targets.find((t) => t.id === pr.targets?.[0]) ?? settings.targets.find((t) => t.repo === pr.repo);
   const label = (pr, stage) => {
@@ -1073,7 +1075,7 @@ export function scriptedCalls(step, ledger, settings) {
         const pr = findPr(ledger, step.pr);
         const after = structuredClone(ledger);
         findPr(after, step.pr).stage = step.to;
-        const expected = cardStatusFor(after);
+        const expected = cardStatusFor(after, step.dropped);
         return [...label(pr, step.to), ...(pr.stage === 'readyForMerge' ? readyOff(pr) : []), ...(step.to === 'smeReview' ? [...expertCalls(settings, [pr], [card], { request: false }), ...reviewCommentCall(pr)] : []), ...(expected && expected !== step.card?.status ? [`tracker move ${card} --to ${expected}`] : [])];
       }
       return [...ledger.prs.filter((p) => p.number && !p.merged).flatMap((p) => label(p, p.stage)), ...(step.ready ? [`tracker comment ${card} --text <the ready comment>`] : []), `tracker move ${card} --to ${step.to}`];
@@ -1081,7 +1083,7 @@ export function scriptedCalls(step, ledger, settings) {
     case 'follow': {
       const following = ledger.prs.filter((p) => p.number && followsMove(p.stage, ledger.left?.status, step.to));
       const taken = ledger.prs.filter((p) => p.number && (step.takeReady ?? []).some((t) => t.pr === prId(p)));
-      const others = cardsMovedWith(step, ledger, settings).map((o) => ({ o, own: o.prs.filter((p) => p.number && !ledger.prs.some((x) => prId(x) === prId(p)) && followsMove(p.stage, o.left?.status, step.to)) }));
+      const others = cardsMovedWith(step, ledger, settings).map((o) => ({ o, own: o.prs.filter((p) => p.number && !ledger.prs.some((x) => prId(x) === prId(p)) && !(step.dropped ?? []).includes(prId(p)) && followsMove(p.stage, o.left?.status, step.to)) }));
       // A person's forward move: the check label off every PR the move took, once the records stood (D-128).
       // To done, the ticket's open PRs: no PR follows a move there.
       const unchecked = !settings.forge.checkLabel || !forwardMove(ledger.left?.status, step.to) ? [] : step.to === 'done' ? ledger.prs.filter((p) => p.number && !p.merged) : [...following, ...taken.filter((p) => !following.includes(p)), ...others.flatMap((x) => x.own)];
@@ -1138,10 +1140,18 @@ export function scriptedCalls(step, ledger, settings) {
 // A PR with two cards: a person's move of either card into In translation, or back out of it, is a move for the other
 // too, so one chain never runs for one card and not the other. The other tickets of the group that share a PR with this
 // one and stand where this card stood, in the pipeline's hands. Only those moves: other moves keep each card on its own.
+// The ledger without the PRs the rule names dropped (`step.dropped`: closed with `forge.wontMergeLabel`), for what a
+// scripted step does on the forge and the tracker: it never touches them.
+function withoutDropped(ledger, step) {
+  const dropped = new Set(step.dropped ?? []);
+  return ledger && dropped.size ? { ...ledger, prs: (ledger.prs ?? []).filter((p) => !dropped.has(prId(p))) } : ledger;
+}
+
 function cardsMovedWith(step, ledger, settings) {
   const from = ledger.left?.status;
   if (step.to !== 'translation' && from !== 'translation') return [];
-  const shared = new Set((ledger.prs ?? []).filter((p) => p.number).map(prId));
+  const dropped = new Set(step.dropped ?? []);
+  const shared = new Set((ledger.prs ?? []).filter((p) => p.number && !dropped.has(prId(p))).map(prId));
   const taken = new Set((step.takeReady ?? []).map((x) => x.pr));
   return readAllLedgers(settings.state).filter((o) => o.key !== ledger.key && !step.keys.includes(o.key) && o.group === ledger.group && o.mode === 'pipeline' && o.left?.status === from && o.stages?.close?.status !== 'done' && (o.prs ?? []).some((p) => p.number && shared.has(prId(p)) && (followsMove(p.stage, from, step.to) || taken.has(prId(p)))));
 }
@@ -1149,7 +1159,8 @@ function cardsMovedWith(step, ledger, settings) {
 export async function runScripted(step, ctx) {
   const { settings, clients, io } = ctx;
   const key = step.keys[0];
-  const ledger = readLedger(settings.state, key);
+  // A dropped PR (`step.dropped`) gets no label, comment or review request: the step runs on the other PRs.
+  const ledger = withoutDropped(readLedger(settings.state, key), step);
   const card = ledger.card.shortLink ?? ledger.card.id;
   const target = (pr) => settings.targets.find((t) => t.id === pr.targets?.[0]) ?? settings.targets.find((t) => t.repo === pr.repo);
   const setLabel = async (pr, stage) => {
@@ -1187,7 +1198,7 @@ export async function runScripted(step, ctx) {
         for (const k of step.keys) {
           const after = structuredClone(readLedger(settings.state, k));
           findPr(after, step.pr).stage = step.to;
-          const expected = cardStatusFor(after);
+          const expected = cardStatusFor(after, step.dropped);
           if (expected) await clients.tracker.move({ card: after.card.shortLink ?? after.card.id, to: expected });
           await rec(k, { to: step.to, ...(Object.keys(result).length ? { result: JSON.stringify(result) } : {}) });
         }
@@ -1237,7 +1248,7 @@ export async function runScripted(step, ctx) {
       const labelled = new Set(following.map(prId));
       const moved = [...following];
       for (const k of before.keys()) {
-        for (const p of readLedger(settings.state, k).prs.filter((x) => x.number && !labelled.has(prId(x)) && x.stage !== before.get(k).get(prId(x)))) {
+        for (const p of readLedger(settings.state, k).prs.filter((x) => x.number && !labelled.has(prId(x)) && !(step.dropped ?? []).includes(prId(x)) && x.stage !== before.get(k).get(prId(x)))) {
           labelled.add(prId(p));
           moved.push(p);
           await afterRecord(p, p.stage);
@@ -1260,11 +1271,12 @@ export async function runScripted(step, ctx) {
     }
     case 'close': {
       // The PRs first: the cleanup removes nothing unless every one is merged.
+      // A PR closed as won't merge (`forge.wontMergeLabel`), read again here, is `dropped`: it keeps no work file.
       const states = new Map();
       const heads = [];
-      for (const p of ledger.prs.filter((x) => x.number)) {
+      for (const p of readLedger(settings.state, key).prs.filter((x) => x.number)) {
         const st = await clients.forge.prState({ repo: p.repo, number: p.number });
-        states.set(prId(p), st.state);
+        states.set(prId(p), droppedLabel(st, settings) ? 'dropped' : st.state);
         heads.push(st.headCommit);
       }
       const now = await clients.tracker.findCards({ link: card });
@@ -1616,7 +1628,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
       if (step.stage === 'close' && l) {
         // What the close step would remove after the merge: listed, nothing removed.
         const views = st.tickets.find((t) => t.key === l.key)?.prs ?? [];
-        const c = cleanupTicket({ settings, ledger: l, prState: (p) => views.find((v) => v.id === prId(p))?.state ?? (p.merged ? 'merged' : null), forgeHeads: views.map((v) => v.head), dryRun: true, trashDir: trashOf(settings, io) });
+        const c = cleanupTicket({ settings, ledger: l, prState: (p) => { const v = views.find((x) => x.id === prId(p)); return v?.dropped ? 'dropped' : v?.state ?? (p.merged ? 'merged' : null); }, forgeHeads: views.map((v) => v.head), dryRun: true, trashDir: trashOf(settings, io) });
         d.cleanup = { mode: c.mode, wouldRemove: c.removed, keeps: c.kept, ...(c.deletedWithWorktree.length ? { wouldDeleteWithWorktree: c.deletedWithWorktree } : {}), freesBytes: c.freedBytes, blocked: c.blocked, worktrees: c.worktrees.map((t) => t.path) };
       }
       return d;
@@ -1861,9 +1873,9 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         const r = await live.tracked(step, () => (step.role ? runModelStep(step) : step.stage === 'build' ? runBuildStep(step) : step.stage === 'idSync' ? runIdSyncStep(step) : step.stage === 'baseMerge' ? runBaseMergeStep(step) : step.stage === 'videoExtract' ? runExtractStep(step) : runScriptedStep(step)));
         for (const note of await settleMarks({ settings, clients, step, picked, outcome: r.outcome }).catch((e) => [`the marks were not set: ${e.message}`])) marked(note);
         // The ready, check and translated labels follow what the step recorded (lib/pr-labels.mjs), whoever recorded it.
-        for (const note of await followLabels({ settings, clients, keys: step.keys, before })) say({ kind: 'label', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, outcome: 'failed', note });
+        for (const note of await followLabels({ settings, clients, keys: step.keys, before, skip: step.dropped })) say({ kind: 'label', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, outcome: 'failed', note });
         // So do the description's sections, the place threads and the older summaries, with review rounds (lib/pr-rounds.mjs).
-        for (const note of await followRounds({ settings, clients, keys: step.keys, before: roundsBefore })) say({ kind: 'rounds', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, outcome: 'failed', note });
+        for (const note of await followRounds({ settings, clients, keys: step.keys, before: roundsBefore, skip: step.dropped })) say({ kind: 'rounds', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, outcome: 'failed', note });
         done.push(r);
         ran(r);
         // The branch moved under the step (a person's commit): its status is read again, and what it gives now runs. Twice

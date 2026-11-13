@@ -87,7 +87,7 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
   const experts = [];
   for (const t of st.tickets) {
     for (const p of t.prs ?? []) {
-      if (p.stage !== 'finalReview' || !p.expertReview) continue;
+      if (p.stage !== 'finalReview' || !p.expertReview || p.dropped) continue;
       experts.push(`${p.url ? `[${p.id}](${p.url})` : p.id} (${link(t)}): ${p.expertReview.recommended ? 'an expert review is recommended' : 'no expert review is recommended'}: ${p.expertReview.why}`);
     }
   }
@@ -99,7 +99,7 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
   const days = settings.schedule.expertQuietDays;
   for (const t of st.tickets) {
     for (const p of t.prs ?? []) {
-      if (p.stage !== 'smeReview' || (p.state && p.state !== 'open')) continue;
+      if (p.stage !== 'smeReview' || (p.state && p.state !== 'open') || p.dropped) continue;
       const since = [p.smeSince, p.reviewerAt].filter((x) => x && !Number.isNaN(Date.parse(x))).map((x) => Date.parse(x));
       if (!since.length) continue;
       const last = Math.max(...since);
@@ -114,10 +114,17 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
   const places = [];
   const check = [];
   const ready = [];
+  // A PR closed as won't merge (`forge.wontMergeLabel`): out of its ticket, shown as dropped and in no list that waits.
+  const dropped = [];
   const checkLabel = settings.forge.checkLabel?.toLowerCase();
   for (const t of st.tickets) {
     const l = byKey.get(t.key);
+    const live = (t.prs ?? []).filter((p) => !p.dropped);
     for (const p of t.prs ?? []) {
+      if (p.dropped) {
+        dropped.push(`${p.url ? `[${p.id}](${p.url})` : p.id} (${link(t)}): closed as «${p.dropped.label}»: ${live.length ? 'the ticket goes on without it' : 'no other PR is left, so the ticket is outside the flow'}`);
+        continue;
+      }
       const open = (l?.places ?? []).filter((x) => x.repo === p.repo && Number(x.pr) === Number(p.number) && (x.state ?? 'open') === 'open').length;
       if (open && p.state !== 'merged') places.push(`${p.url ? `[${p.id}](${p.url})` : p.id} (${link(t)}): ${open} open place(s)`);
       if (checkLabel && (p.labels ?? []).some((x) => x.toLowerCase() === checkLabel)) check.push(`${p.url ? `[${p.id}](${p.url})` : p.id} (${link(t)})`);
@@ -125,10 +132,11 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
       // or failed says why instead.
       const hold = settings.keepFresh ? p.notReady ?? notReadyYet((l?.prs ?? []).find((x) => prId(x) === p.id)) : null;
       if (p.stage === 'readyForMerge') ready.push(`${p.url ? `[${p.id}](${p.url})` : p.id} (${link(t)}): ${hold ? `not ready for merge yet: ${hold}` : 'ready for your final edit and the merge'}`);
-      else if (p.stage === 'finalReview' && t.state !== 'finalReview' && t.prs.length > 1) ready.push(`${p.id} (${link(t)}): in the owner's queue; it waits for the card, which stands where the slower PR is`);
+      else if (p.stage === 'finalReview' && t.state !== 'finalReview' && live.length > 1) ready.push(`${p.id} (${link(t)}): in the owner's queue; it waits for the card, which stands where the slower PR is`);
     }
   }
   out.push('## PRs with places', '', list(places), '');
+  if (settings.forge.wontMergeLabel) out.push(`## PRs closed as «${settings.forge.wontMergeLabel}»`, '', list(dropped), '');
   out.push(`## PRs labelled «${settings.forge.checkLabel ?? 'check'}»`, '', list(check), '');
 
   const videos = [];
