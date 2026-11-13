@@ -133,8 +133,9 @@ export async function computeStatus({ settings, clients, now = Date.now(), only 
   // A ticket outside the flow because a PR of it was closed unmerged is not in work, but its branch still has the edits,
   // and the PR may be opened again: its pages hold a ready ticket back too (`closed`), its relations don't. Only while
   // its card is in a working status of the flow, where someone may redo it: a card archived, gone, or moved to done, out
-  // of scope, the drafts or the ready status releases its pages (the owner's way to let the others start).
-  const closedUnmerged = (l) => (l.prs ?? []).some((p) => p.number && !p.merged && prWorld.get(`${l.key}/${prId(p)}`)?.state === 'closed');
+  // of scope, the drafts or the ready status releases its pages (the owner's way to let the others start). A PR closed as
+  // won't merge (`dropped`, `forge.wontMergeLabel`) holds nothing.
+  const closedUnmerged = (l) => (l.prs ?? []).some((p) => p.number && !p.merged && prWorld.get(`${l.key}/${prId(p)}`)?.state === 'closed' && !prWorld.get(`${l.key}/${prId(p)}`)?.dropped);
   const redoing = (l) => {
     const card = l.card?.id ? cards.get(l.card.id) : null;
     return Boolean(card) && !card.closed && REDO_STATUSES.has(card.status);

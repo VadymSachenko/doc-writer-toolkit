@@ -168,3 +168,17 @@ export function notReadyYet(pr) {
   const later = ready.seq !== undefined && m.seq !== undefined ? m.seq > ready.seq : String(m.at ?? '') > String(ready.at ?? '');
   return later && m.head !== ready.head ? `the base was merged in as ${String(m.head).slice(0, 7)}: ready again once CI passes on it` : null;
 }
+
+// A label name as the forge compares it: without case and outer spacing.
+export const sameLabel = (a, b) => String(a ?? '').trim().toLowerCase() === String(b ?? '').trim().toLowerCase();
+
+// A PR the owner closed on purpose (`forge.wontMergeLabel`, D-155): closed, not merged, and carrying that label, as the
+// forge gives it now (`st`: `{ state, labels }`). Such a PR is dropped: it leaves its ticket, and the ticket's other PRs
+// go on; no step is made for it, and nothing on the forge is done to it. Reopened, or the label taken off, it is not
+// dropped any more: the forge wins over the ledger. Returns the label as the forge spells it, or null; always null with
+// no such label set.
+export function droppedLabel(st, settings) {
+  const label = settings?.forge?.wontMergeLabel;
+  if (!label || st?.state !== 'closed') return null;
+  return (st.labels ?? []).find((x) => sameLabel(x, label)) ?? null;
+}

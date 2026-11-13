@@ -14,6 +14,9 @@ import { heldPending, passGaveUp } from './answer-pass.mjs';
 //    3 the card archived, gone, or outside the flow   outside; reported
 //    4 every PR merged                                merged; close
 //    5 a PR closed unmerged                           outside; reported
+//      A PR closed with `forge.wontMergeLabel` (dropped, D-155) is out of every row from 4 on: rows 4 and 5 read the
+//      ticket's other PRs, no step is made for it, and the card stands where the least advanced other PR is. Every PR
+//      dropped: outside, with a note.
 //    6 the card's list differs from left.list        a person moved it: follow the move
 //    7 a stage recorded running, no live lock         interrupted; run it again
 //    8-12 per PR: a hand edit, or a UA change after ready for merge (back to the owner's queue); finalReview with a new
@@ -140,6 +143,10 @@ const GATES = {
 // `<key>/<pr id>` -> the forge's view), git (makeGit), settings, fileExists(rel) }.
 export function deriveTicket(l, w) {
   const d = derive(l, w);
+  // The dropped PRs ride on every step of the ticket (`dropped`), so the runner and the records leave them alone: no
+  // label, no comment, no move, and the card's status from the other PRs only.
+  const droppedIds = d.prs.filter((p) => p.dropped).map((p) => p.id);
+  if (droppedIds.length) d.steps = d.steps.map((s) => ({ ...s, dropped: droppedIds }));
   const card = w.card;
   const t = {
     key: l.key,
@@ -302,18 +309,23 @@ function othersEntry(c, url) {
   return { id: c.id, kind: c.kind, author: c.author ?? null, at: c.updatedAt ?? null, link: url ? `${String(url).replace(/\/+$/, '')}#${ANCHOR[c.kind] === 'discussion_r' ? `discussion_r${c.id}` : `${ANCHOR[c.kind]}-${c.id}`}` : null };
 }
 
-function derive(l, w) {
+function derive(lIn, w) {
   const out = { state: null, steps: [], gate: null, mismatch: [], notes: [], prs: [] };
   const card = w.card;
   const status = card?.status ?? null;
 
-  const prs = (l.prs ?? []).map((pr) => {
-    const world = pr.number ? w.prWorld?.get(`${l.key}/${prId(pr)}`) ?? null : null;
+  const all = (lIn.prs ?? []).map((pr) => {
+    const world = pr.number ? w.prWorld?.get(`${lIn.key}/${prId(pr)}`) ?? null : null;
     const merged = Boolean(pr.merged) || world?.state === 'merged';
-    return { pr, world, merged, closed: world?.state === 'closed', stage: merged ? 'merged' : pr.stage };
+    return { pr, world, merged, closed: world?.state === 'closed', dropped: merged ? null : world?.dropped ?? null, stage: merged ? 'merged' : pr.stage };
   });
-  out.prs = prs.map((p) => ({ id: prId(p.pr), repo: p.pr.repo, number: p.pr.number, url: p.pr.url ?? p.world?.url ?? null, review: p.pr.review, stage: p.stage, state: p.merged ? 'merged' : p.world?.state ?? null, labels: p.world?.labels ?? null, head: p.world?.headCommit ?? null, expertReview: p.pr.expertReview ?? null, smeSince: p.pr.smeSince ?? (l.left?.status === 'smeReview' && p.stage === 'smeReview' ? l.left.at ?? null : null), reviewerAt: p.world?.reviewerAt ?? null, expertApproval: p.pr.expertApproval ?? null, ...(p.world?.others?.length ? { others: p.world.others.map((c) => othersEntry(c, p.pr.url ?? p.world.url)) } : {}), next: null }));
+  out.prs = all.map((p) => ({ id: prId(p.pr), repo: p.pr.repo, number: p.pr.number, url: p.pr.url ?? p.world?.url ?? null, review: p.pr.review, stage: p.stage, state: p.merged ? 'merged' : p.world?.state ?? null, labels: p.world?.labels ?? null, head: p.world?.headCommit ?? null, expertReview: p.pr.expertReview ?? null, smeSince: p.pr.smeSince ?? (lIn.left?.status === 'smeReview' && p.stage === 'smeReview' ? lIn.left.at ?? null : null), reviewerAt: p.world?.reviewerAt ?? null, expertApproval: p.pr.expertApproval ?? null, ...(p.world?.others?.length ? { others: p.world.others.map((c) => othersEntry(c, p.pr.url ?? p.world.url)) } : {}), ...(p.dropped ? { dropped: { label: p.dropped } } : {}), next: null }));
   const view = (p) => out.prs.find((x) => x.id === prId(p.pr));
+  // A dropped PR (closed with `forge.wontMergeLabel`) leaves the ticket: every row from here reads the ticket as if it
+  // had only its other PRs, so none makes a step for it (a stage left running on it included), and the card stands
+  // where the least advanced other PR is. `status` shows it with `dropped`.
+  const prs = all.filter((p) => !p.dropped);
+  const l = prs.length === all.length ? lIn : { ...lIn, prs: prs.map((p) => p.pr) };
 
   if (l.stages?.close?.status === 'done') {
     out.state = 'closed';
@@ -325,6 +337,14 @@ function derive(l, w) {
     out.notes.push(!card ? 'the card is gone' : card.closed ? 'the card is archived' : `the card is in '${card.list?.name ?? card.list?.id}', a list outside the flow`);
     return out;
   }
+  // Every PR dropped: nothing is left for the pipeline, and the ticket is the owner's to close or move out of the flow.
+  const dropped = all.filter((p) => p.dropped);
+  if (dropped.length && !prs.length) {
+    out.state = 'outside';
+    out.notes.push(`every PR of the ticket was closed as «${w.settings.forge.wontMergeLabel}» (${dropped.map((p) => prId(p.pr)).join(', ')}): nothing is left for the pipeline; move the card out of the flow or archive it`);
+    return out;
+  }
+  for (const p of dropped) out.notes.push(`${prId(p.pr)} was closed as «${p.dropped}»: the ticket goes on without it`);
   const opened = prs.filter((p) => p.pr.number);
   // Row 4.
   if (opened.length && opened.length === prs.length && prs.every((p) => p.merged)) {

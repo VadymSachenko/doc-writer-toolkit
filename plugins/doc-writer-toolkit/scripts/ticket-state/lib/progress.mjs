@@ -95,7 +95,12 @@ const GATE_ACTION = {
   readyForMerge: 'make the final edit and merge',
 };
 
-export function gatesOf(l) {
+// `dropped`: the PRs closed as won't merge (`forge.wontMergeLabel`) the last status saw, `{ '<key>|<pr>': { label } }`
+// (the memory): such a PR waits for no one. The forge decides, through the status: the close's mark on the ledger
+// (`prs[].dropped`) is history, and a closed ticket has no gate anyway.
+const droppedOf = (l, p, dropped) => dropped?.[`${l.key}|${prId(p)}`] ?? null;
+
+export function gatesOf(l, dropped = {}) {
   if (!l || l.mode !== 'pipeline' || l.stages?.close?.status === 'done') return [];
   const st = l.stages ?? {};
   const gates = [];
@@ -110,7 +115,7 @@ export function gatesOf(l) {
   if (st.videoBlock?.status === 'done' && !after('videoImport', 'videoBlock')) gate('video', 'owner', { ident: String(st.videoBlock.seq) });
 
   for (const p of l.prs ?? []) {
-    if (p.merged) continue;
+    if (p.merged || droppedOf(l, p, dropped)) continue;
     const id = prId(p);
     if (p.stage === 'smeReview') gate('smeReview', 'reviewer', { pr: id });
     else if (p.stage === 'reworkWait') gate('reworkWait', 'owner', { pr: id });
@@ -173,8 +178,8 @@ function calledOf(l, p) {
   return (p.reviewersRequested ?? []).some((r) => !own.has(String(r)));
 }
 
-function ticketBlock(l, { flights, stale, now }) {
-  const gates = gatesOf(l).filter((g) => !busyAt(flights, g));
+function ticketBlock(l, { flights, stale, now, dropped = {} }) {
+  const gates = gatesOf(l, dropped).filter((g) => !busyAt(flights, g));
   const st = l.stages ?? {};
   const all = [];
   const lines = [];
@@ -197,6 +202,12 @@ function ticketBlock(l, { flights, stale, now }) {
   if (!prs.length) add({ text: '- ⬜ Review, translation and merge — after the PR opens' });
   for (const p of prs) {
     const id = prId(p);
+    // Closed as won't merge: out of the ticket, shown as dropped, not as a wait.
+    const gone = droppedOf(l, p, dropped);
+    if (gone) {
+      lines.push('', `**PR ${id}** — dropped`, '', `- 🚫 Closed as «${gone.label}»: the ticket goes on without it`);
+      continue;
+    }
     const rank = PR_ORDER.indexOf(p.stage);
     const idx = (s) => PR_ORDER.indexOf(s);
     lines.push('', `**PR ${id}** — ${p.review ?? 'review'} review, stage ${p.stage}`, '');
@@ -293,7 +304,8 @@ export function renderProgress({ ledgers = [], bad = [], memory = {}, run = null
   const open = ledgers.filter((l) => l.stages?.close?.status !== 'done');
   const mine = open.filter((l) => l.mode === 'pipeline');
   const hand = open.filter((l) => l.mode !== 'pipeline').map((l) => l.key);
-  const gates = mine.flatMap(gatesOf).filter((g) => g.who === 'owner' && !busyAt(flights, g));
+  const dropped = memory.dropped ?? {};
+  const gates = mine.flatMap((l) => gatesOf(l, dropped)).filter((g) => g.who === 'owner' && !busyAt(flights, g));
   const out = ['# Ticket flow progress', '', `Updated ${hhmm(now)}${mode ? ` · mode ${mode}` : ''}`, '', '## Waiting for you', ''];
   // A colleague's comment the pipeline doesn't take (the trigger words): the owner hands it on or leaves it.
   const others = Object.entries(memory.others ?? {}).filter(([k]) => mine.some((l) => k.startsWith(`${l.key}|`))).flatMap(([k, list]) => list.map((c) => ({ key: k.split('|')[0], pr: k.split('|').slice(1).join('|'), ...c })));
@@ -322,7 +334,7 @@ export function renderProgress({ ledgers = [], bad = [], memory = {}, run = null
   else if (!mine.length) out.push('No ticket is in work.');
   const started = (l) => Boolean(l.stages?.start) || flights.some((f) => f.keys?.includes(l.key));
   for (const l of mine.filter(started)) {
-    const b = ticketBlock(l, { flights, stale, now });
+    const b = ticketBlock(l, { flights, stale, now, dropped });
     out.push(b.head, '', ...b.lines, '');
   }
   const waiting = mine.filter((l) => !started(l)).map((l) => l.key);
@@ -396,6 +408,17 @@ function othersFrom(st, previous = {}) {
   return next;
 }
 
+// The PRs closed as won't merge (`forge.wontMergeLabel`), from the status: { '<key>|<pr>': { label } }, for the tickets
+// the status covers. One reopened, or with the label taken off, goes at the next status.
+function droppedFrom(st, previous = {}) {
+  const next = { ...previous };
+  for (const t of st?.tickets ?? []) {
+    for (const k of Object.keys(next)) if (k.startsWith(`${t.key}|`)) delete next[k];
+    for (const p of t.prs ?? []) if (p.dropped) next[`${t.key}|${p.id}`] = { label: p.dropped.label };
+  }
+  return next;
+}
+
 // What the run looks like in the file, from what the runner has so far. Plain data, kept in the memory so a quiet
 // watcher pass can still show the last run.
 export function digestRun({ out = {}, st = null, log = [], trigger = null, startedAt = null, now = Date.now() } = {}) {
@@ -446,9 +469,9 @@ export function writeProgress({ settings, now = Date.now(), st = null, run = nul
     const state = settings.state;
     const { ledgers, bad } = readLedgersApart(state);
     const mem = readMemory(state);
-    const memory = { ...mem.data, stale: staleFrom(st, mem.data.stale), others: othersFrom(st, mem.data.others), ...(run ? { lastRun: run } : {}) };
+    const memory = { ...mem.data, stale: staleFrom(st, mem.data.stale), others: othersFrom(st, mem.data.others), dropped: droppedFrom(st, mem.data.dropped), ...(run ? { lastRun: run } : {}) };
     // The first write seeds the gates already standing, so a host that starts using the file isn't told about all of them.
-    if (!mem.exists) memory.notified = Object.fromEntries(ledgers.flatMap((l) => gatesOf(l).filter((g) => g.notify).map((g) => [gateId(g), iso(now)])));
+    if (!mem.exists) memory.notified = Object.fromEntries(ledgers.flatMap((l) => gatesOf(l, memory.dropped).filter((g) => g.notify).map((g) => [gateId(g), iso(now)])));
     const text = renderProgress({ ledgers, bad, memory, run: run ?? memory.lastRun ?? null, live: live && Boolean(run), flights, now, mode: settings.mode ?? null, stepsText: readSteps(settings.progress?.stepsFile), starts: startsOf(state), hub: hubOf(state), startHours: settings.limits?.startHours ?? null, translatedLabel: settings.forge?.translatedLabel ?? null, rulePrs: settings.learning ? rulePrsOf(state) : [] });
     atomicWrite(progressPath(state), text);
     atomicWrite(memoryPath(state), JSON.stringify(memory, null, 2) + '\n');
@@ -480,8 +503,8 @@ export function notifyGates({ settings, notify = null, notifyIo = {}, now = Date
     if (!notify) return { sent: [], skipped: 'no sender' };
     const state = settings.state;
     const { ledgers } = readLedgersApart(state);
-    const gates = ledgers.flatMap((l) => gatesOf(l).filter((g) => g.notify).map((g) => ({ ...g, id: gateId(g), name: l.card?.name ?? '' })));
     const mem = readMemory(state);
+    const gates = ledgers.flatMap((l) => gatesOf(l, mem.data.dropped ?? {}).filter((g) => g.notify).map((g) => ({ ...g, id: gateId(g), name: l.card?.name ?? '' })));
     const notified = mem.exists ? { ...(mem.data.notified ?? {}) } : null;
     const next = {};
     const due = [];

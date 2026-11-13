@@ -11,7 +11,8 @@ import { canon, checkoutKind, clonePath, cloneOf, isReadCheckout, listWorktrees,
 //   - a path git tracks, in its own repo;
 //   - a path outside the host repo and the state root;
 //   - a path the keep list names (`cleanup.keep`: the distilled notes later page updates read);
-//   - everything, while a PR of the ticket is open or was closed unmerged.
+//   - everything, while a PR of the ticket is open or was closed unmerged; a PR closed as won't merge
+//     (`forge.wontMergeLabel`, dropped from the ticket) keeps nothing, and its branch on the forge is never touched.
 // `cleanup.mode` `trash` (default) moves them into the macOS Trash, `delete` removes them.
 // First, the ticket's worktrees (lib/worktree.mjs) go with `git worktree remove --force`, then the clone's list is
 // pruned. A recorded folder that is a worktree, or holds one, goes the same way; one that is a repository of its own is
@@ -128,7 +129,7 @@ export function moveToTrash(abs, trashDir) {
 }
 
 // What the close step removes for one ticket, and does. `prState(pr)`: the forge's state of a PR of the ticket
-// (`merged`, `open`, `closed`); `forgeHeads`: the heads the forge gives for them now. With `dryRun` nothing is removed:
+// (`merged`, `open`, `closed`, or `dropped` for one closed with `forge.wontMergeLabel`); `forgeHeads`: the heads the forge gives for them now. With `dryRun` nothing is removed:
 // the list says what would go.
 export function cleanupTicket({ settings, ledger, prState, forgeHeads = [], dryRun = false, trashDir = path.join(os.homedir(), '.Trash') }) {
   const { mode, keep } = settings.cleanup;
@@ -143,7 +144,7 @@ export function cleanupTicket({ settings, ledger, prState, forgeHeads = [], dryR
     .map((p) => ({ path: worktreePath(settings, p), clone: clonePath(settings, targetOf(settings, p)), branch: p.branch }))
     .filter((t) => t.path && t.clone && listWorktrees(t.clone).some((x) => canon(x.path) === canon(t.path)));
   if (!files.length && !trees.length) return out;
-  const open = (ledger.prs ?? []).filter((p) => !p.number || prState(p) !== 'merged');
+  const open = (ledger.prs ?? []).filter((p) => !p.number || !['merged', 'dropped'].includes(prState(p)));
   if (!(ledger.prs ?? []).length || open.length) {
     const closed = open.filter((p) => p.number && prState(p) === 'closed');
     out.blocked = closed.length ? `${closed.map((p) => `${p.repo}#${p.number}`).join(', ')} closed unmerged: nothing is removed` : `${open.length ? open.map((p) => (p.number ? `${p.repo}#${p.number}` : `${p.repo}:${p.branch}`)).join(', ') : 'no PR'} not merged: nothing is removed`;

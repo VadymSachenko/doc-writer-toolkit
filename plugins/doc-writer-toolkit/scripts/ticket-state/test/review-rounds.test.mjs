@@ -640,3 +640,12 @@ test('a round changes only a place\'s state, its reply and its answer; the EN ro
   const brief = briefFor({ stage: 'enReview', pr: 'guide-docs#81', role: 'reviewer', keys: ['999'] }, w2.settings);
   assert.match(brief, /"role": "translation" \| "style"/);
 });
+
+test("a PR closed as won't merge (`skip`, the step's dropped ids): its description, threads and summaries are left as they are", async () => {
+  const { w } = roundWorld(995);
+  assert.deepEqual(await followRounds({ settings: w.settings, clients: w.clients(), keys: ['995'], before: new Map(), skip: ['guide-docs#81'] }), []);
+  assert.deepEqual(w.forge.log, []);
+  // The same PR not dropped: the description is written.
+  await followRounds({ settings: w.settings, clients: w.clients(), keys: ['995'], before: new Map() });
+  assert.ok(w.forge.log.some((x) => x[0] === 'updatePr'));
+});

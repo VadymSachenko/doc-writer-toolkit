@@ -604,6 +604,40 @@ test('a PR closed unmerged holds its files; a rename keeps the triage pages besi
   assert.ok(st.notStarted.find((n) => n.group === '1193').reasons.includes(`related to 1157, still in work: a page 1157's triage names, a session on it now (${PAYMENT})`), JSON.stringify(st.notStarted));
 });
 
+test("a PR closed as won't merge (`forge.wontMergeLabel`) holds no page and counts for no limit, beside an open PR or alone; without the label it holds them as before", async () => {
+  const WONT = "won't merge";
+  const extra = { ...estimates, forge: { ...rawSettings().forge, wontMergeLabel: WONT } };
+  const labelled = (w) => {
+    w.forge.prs.find((p) => p.number === 62).labels = [WONT];
+  };
+  // Beside an open PR in the guide repo: the ticket is in work by that PR alone, and the payment page holds nothing.
+  const w = world({ extra });
+  inWorkWith(w, 1157, [{ repo: 'guide-docs', number: 61, files: ['docs/methods/cash/cash.md'] }, { repo: 'api-docs', number: 62, state: 'closed', files: ['docs/api-reference/create-payment/create-payment.md'] }], { status: 'finalReview' });
+  labelled(w);
+  readyOn(w);
+  let st = await w.status({ usage: usage(5) });
+  assert.equal(st.tickets.find((t) => t.key === '1157').state, 'finalReview');
+  assert.deepEqual(st.groups.find((g) => g.keys.includes('1193')).waitsFor, []);
+  assert.deepEqual(st.startable.map((g) => g.group), ['1193']);
+  // Alone: the ticket is outside, and its card in a working status keeps no page either.
+  const w1 = world({ extra });
+  inWorkWith(w1, 1157, [{ repo: 'api-docs', number: 62, state: 'closed', files: ['docs/api-reference/create-payment/create-payment.md'] }], { status: 'finalReview' });
+  labelled(w1);
+  readyOn(w1);
+  st = await w1.status({ usage: usage(5) });
+  assert.equal(st.tickets.find((t) => t.key === '1157').state, 'outside');
+  assert.deepEqual(st.groups.find((g) => g.keys.includes('1193')).waitsFor, []);
+  assert.equal(st.wip.inProgress + st.wip.waiting, 0);
+  // The same PR closed without the label, or the label with no setting: it holds the page, as before.
+  for (const variant of [{ extra, label: false }, { extra: estimates, label: true }]) {
+    const w2 = world({ extra: variant.extra });
+    inWorkWith(w2, 1157, [{ repo: 'api-docs', number: 62, state: 'closed', files: ['docs/api-reference/create-payment/create-payment.md'] }], { status: 'finalReview' });
+    if (variant.label) labelled(w2);
+    readyOn(w2);
+    assert.deepEqual((await w2.status({ usage: usage(5) })).groups.find((g) => g.keys.includes('1193')).waitsFor, ['1157'], JSON.stringify(variant.label));
+  }
+});
+
 test('a page is its repo and its id: the EN translation, the extension, the page folder, its .assets, a URL form; a folder guess by prefix, a bare name by name', () => {
   const ref = (p) => pageRef(p, ['docs/']);
   for (const p of ['guide-docs docs/x/y/y.md', 'guide-docs docs/x/y.mdx', 'guide-docs docs/x/y/index.md', 'guide-docs docs/x/y/.assets/shot.png', 'guide-docs i18n/en/docusaurus-plugin-content-docs/current/x/y/y.md', 'guide-docs i18n/de/docusaurus-plugin-content-docs-portal/current/x/y/y.mdx', 'guide-docs /x/y', 'guide-docs docs/x/y/y.md#a-heading', { repo: 'guide-docs', path: 'docs/x/y/y.md' }]) {

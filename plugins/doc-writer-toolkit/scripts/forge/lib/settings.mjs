@@ -31,6 +31,7 @@ export const labelKey = (name) => String(name ?? '').trim().toLowerCase();
 //                  questions and takes it off at a person's forward move), `readyLabel` (off when the PR leaves
 //                  ready for merge) and `translatedLabel` (off when UA changes after the translation); `expertLabel`
 //                  is never removed;
+//                  `wontMergeLabel` is in neither: the module never adds or removes it;
 //   logins         the users it may assign or ask for a review: `self`, `assignee`, every target's reviewers.
 // `header` is the shared file's `commentHeader`, the line every comment the module posts starts with.
 export function validateForge(forge, targets, header = null) {
@@ -48,6 +49,9 @@ export function validateForge(forge, targets, header = null) {
   // The label on a PR whose translations match its UA (the ticket flow puts it on after the chain or a re-sync, and
   // takes it off at a UA change): a fact of its own, next to the stage label.
   const translatedLabel = str(forge.translatedLabel, 'forge.translatedLabel', { optional: true });
+  // The label the owner puts on a PR closed on purpose (the ticket flow drops it from its ticket, and the ticket's other
+  // PRs go on): read only, never added or removed by the module, so it is in neither set below.
+  const wontMergeLabel = str(forge.wontMergeLabel, 'forge.wontMergeLabel', { optional: true });
   if (!Array.isArray(targets) || !targets.length) fail("the file has no 'targets' list (the forge works only on the repos the targets name)");
   const list = targets.map((t, i) => {
     if (!isObject(t)) fail(`targets[${i}] must be an object`);
@@ -80,12 +84,13 @@ export function validateForge(forge, targets, header = null) {
   }
   if (readyLabel && [...addable.keys(), labelKey(checkLabel), labelKey(expertLabel)].includes(labelKey(readyLabel))) fail(`forge.readyLabel '${readyLabel}' is also a stage, check or expert label: it needs a label of its own`);
   if (translatedLabel && [...addable.keys(), labelKey(checkLabel), labelKey(expertLabel), labelKey(readyLabel)].includes(labelKey(translatedLabel))) fail(`forge.translatedLabel '${translatedLabel}' is also a stage, check, expert or ready label: it needs a label of its own`);
+  if (wontMergeLabel && [...addable.keys(), labelKey(checkLabel), labelKey(expertLabel), labelKey(readyLabel), labelKey(translatedLabel)].includes(labelKey(wontMergeLabel))) fail(`forge.wontMergeLabel '${wontMergeLabel}' is also a stage, check, expert, ready or translated label: it needs a label of its own`);
   for (const extra of [checkLabel, expertLabel, readyLabel, translatedLabel]) if (extra && !addable.has(labelKey(extra))) addable.set(labelKey(extra), extra);
   for (const extra of [checkLabel, readyLabel, translatedLabel]) if (extra && !removable.has(labelKey(extra))) removable.set(labelKey(extra), extra);
   const logins = new Set([self, assignee, ...list.flatMap((t) => t.reviewers)].filter(Boolean));
   // `keepFresh` (the ticket flow's keeping of a PR up to date with its base): the PR read by number asks for the base's
   // tip and the head's CI too. Absent when off.
-  return { kind, owner, self, assignee, checkLabel, expertLabel, readyLabel, translatedLabel, commentHeader: validateCommentHeader(header), targets: list, repos: [...new Set(list.map((t) => t.repo))], addable, removable, logins, ...(forge.keepFresh === true ? { keepFresh: true } : {}) };
+  return { kind, owner, self, assignee, checkLabel, expertLabel, readyLabel, translatedLabel, wontMergeLabel, commentHeader: validateCommentHeader(header), targets: list, repos: [...new Set(list.map((t) => t.repo))], addable, removable, logins, ...(forge.keepFresh === true ? { keepFresh: true } : {}) };
 }
 
 export async function loadSettings({ root, settings: flag }) {

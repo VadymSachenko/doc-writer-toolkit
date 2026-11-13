@@ -116,6 +116,17 @@ test('settings: the expert label may be added and is never removed', () => {
   assert.ok(!f.removable.has('expert advised'));
 });
 
+test("settings: the won't-merge label is read only: never added or removed, and a label of its own", () => {
+  const f = validateForge({ kind: 'github', owner: OWNER, wontMergeLabel: "won't merge" }, [{ id: 'a', repo: `${OWNER}/r`, labels: { inProgress: 'in progress' } }]);
+  assert.equal(f.wontMergeLabel, "won't merge");
+  assert.ok(!f.addable.has("won't merge"));
+  assert.ok(!f.removable.has("won't merge"));
+  assert.equal(validateForge({ kind: 'github', owner: OWNER }, [{ id: 'a', repo: `${OWNER}/r` }]).wontMergeLabel, null);
+  assert.throws(() => validateForge({ kind: 'github', owner: OWNER, wontMergeLabel: 'In Progress' }, [{ id: 'a', repo: `${OWNER}/r`, labels: { inProgress: 'in progress' } }]), /wontMergeLabel 'In Progress' is also a stage/);
+  assert.throws(() => validateForge({ kind: 'github', owner: OWNER, translatedLabel: 'translated', wontMergeLabel: 'Translated' }, [{ id: 'a', repo: `${OWNER}/r` }]), /needs a label of its own/);
+  assert.throws(() => validateForge({ kind: 'github', owner: OWNER, wontMergeLabel: ' ' }, [{ id: 'a', repo: `${OWNER}/r` }]), /forge\.wontMergeLabel must be a non-empty string/);
+});
+
 test('settings: found by flag, by the CLAUDE.md field, or at the default place; the local file merges over the shared one', async () => {
   const root = tmp();
   const write = (rel, value) => {

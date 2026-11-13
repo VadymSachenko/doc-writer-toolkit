@@ -10,7 +10,7 @@ import { spawnGh } from '../../forge/adapters/github/gh.mjs';
 import { withoutHeader } from '../../tracker/lib/comment-header.mjs';
 import { FLOW_STATUSES } from './settings.mjs';
 import { expertsOf } from './experts.mjs';
-import { prId } from './ledger.mjs';
+import { droppedLabel, prId } from './ledger.mjs';
 import { isIdOnlyChange } from '../../doc-align/lib/idonly.mjs';
 
 // What the ticket flow reads: the tracker and the forge through their modules (this script composes no tracker or
@@ -296,7 +296,7 @@ export async function readCards({ settings, tracker, ledgers }) {
 }
 
 // The forge's view of each open PR of the ledgers: its state, head, review requests and decision, labels, and the
-// comments and reviews no record has handled yet.
+// comments and reviews no record has handled yet. A PR closed with `forge.wontMergeLabel` is `dropped` (the label).
 export async function readPrs({ settings, forge, ledgers }) {
   const out = new Map();
   for (const l of ledgers) {
@@ -305,6 +305,9 @@ export async function readPrs({ settings, forge, ledgers }) {
       if (!pr.number || pr.merged) continue;
       const st = await forge.prState({ repo: pr.repo, number: pr.number });
       const entry = { state: st.state, url: st.url ?? null, headCommit: st.headCommit, reviewRequests: st.reviewRequests ?? [], reviewDecision: st.reviewDecision ?? null, labels: st.labels ?? [], mergeCommit: st.mergeCommit ?? null, mergedAt: st.mergedAt ?? null, newComments: [] };
+      // Closed on purpose (`forge.wontMergeLabel`): dropped from its ticket, read again at every check (lib/ledger.mjs).
+      const dropped = droppedLabel(st, settings);
+      if (dropped) entry.dropped = dropped;
       // The paths the PR changes, as far as the forge gave them: the pages the ticket holds (lib/limits.mjs `workPages`).
       if (Array.isArray(st.files)) Object.assign(entry, { files: st.files, ...(st.filesTruncated ? { filesTruncated: true } : {}), ...(st.filesRenamed ? { filesRenamed: true } : {}) });
       // The base's tip and the head's CI, for keeping the branch up to date with its base (`forge.keepFresh`).
