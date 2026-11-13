@@ -471,10 +471,25 @@ export function gateLines(step, settings) {
 // build of its head when there is one. A session that builds the site itself (a re-sync, a visual pack with no build to
 // reuse) runs under the build lock, which the runner holds for it.
 export function buildLines(step) {
-  if (step.stage === 'locales') return ['Run the locale-translator with `--no-build`: the runner builds the site once for this PR, at the chain\'s `build` stage after `labelSync`, so this stage builds nothing.'];
+  if (step.stage === 'locales') return ['Run the locale-translator with `--no-build`: the runner builds the site once for this PR, at the chain\'s `build` stage after `labelSync`, so this stage builds nothing.', ...workerLines(step), 'This brief gives all the stage needs: no `ticket-state status` call is needed.'];
+  if (step.stage === 'resync') return [...workerLines(step), buildLockLine(step)];
   if (step.stage === 'visualPack' && step.buildDir) return [`The chain's \`build\` stage built this head into ${step.buildDir}: run visual-pack with \`--build-dir ${step.buildDir}\`, so the site is not built again.`];
-  if (step.stage === 'visualPack' || step.stage === 'resync') return [`The runner holds the build lock for this session: ${step.stage === 'resync' ? 'the locale-translator\'s build' : 'visual-pack\'s own build (no build of this head is there to reuse)'} runs as usual, and no other pipeline build runs meanwhile.`];
+  if (step.stage === 'visualPack') return [buildLockLine(step)];
   return [];
+}
+const buildLockLine = (step) => `The runner holds the build lock for this session: ${step.stage === 'resync' ? 'the locale-translator\'s build' : 'visual-pack\'s own build (no build of this head is there to reuse)'} runs as usual, and no other pipeline build runs meanwhile.`;
+
+// What the brief says to a stage that starts the locale-translator's workers (`WORKER_STAGES`): how to wait for them,
+// and the line their prompts carry. A measured locales stage (8 pages, 8 locales) polled its workers for 55 minutes
+// (204 model calls, 41 M tokens read) because it believed that ending its turn would end the session; and the
+// workers' shell variables, heredocs and redirects into files were refused by the hook, a turn each
+// (lib/role-hook.mjs).
+export function workerLines(step) {
+  if (!WORKER_STAGES.includes(step.stage)) return [];
+  return [
+    `Start the locale-translator's workers all in one message, in the background, then end your turn with one short line. Ending a turn while your workers run does not end the session: it waits for them (up to ${BG_WAIT_CEILING_MS / 3600000} hours with no notice), and each worker's completion notice starts your next turn by itself. Never check on them in a loop: no ListAgents, no git status or git diff to watch their files, no Monitor and no sleep to wait. A locale whose worker is running gets no second one.`,
+    `Give every worker's prompt this line too, after the shared lines and before the locale's own: "Run each command as one plain Bash call with literal paths: the full \`node <plugin root>/scripts/locale-sync/locale-sync.mjs <command> …\` every time (LS is the document's shorthand, not a shell variable), and no variable, \`&&\`, \`;\`, loop, redirect into a file (\`>\`, \`>>\`), heredoc, \`$(…)\` or \`node -e\`: such a command is refused. Read a script's output from the tool result. Write files with the Write tool, and add a line to results.jsonl by reading the file and writing it back with every line it had and the new one at the end."`,
+  ];
 }
 
 // What the brief says at the video's import: what the runner's frame sweep (`videoExtract`) left, per video. The
@@ -862,11 +877,23 @@ export function sessionEnv(step, settings, { roots, roleRules, trees }) {
     // `baseFix`: the hook refuses a commit and a push too (the runner commits the merge and pushes it).
     ...(step.stage === 'baseFix' ? { noCommit: true } : {}),
   };
-  return { [ROLE_SESSION_VARIABLE]: step.role, [DOWNLOAD_DIRS_VARIABLE]: JSON.stringify(downloadDirsFor(step, settings)), [HOOK_VARIABLE]: JSON.stringify(config) };
+  return { [ROLE_SESSION_VARIABLE]: step.role, [DOWNLOAD_DIRS_VARIABLE]: JSON.stringify(downloadDirsFor(step, settings)), [HOOK_VARIABLE]: JSON.stringify(config), ...(WORKER_STAGES.includes(step.stage) ? { [BG_WAIT_VARIABLE]: String(BG_WAIT_CEILING_MS) } : {}) };
 }
 
 // How long a role session may run before the runner kills it; a resumed session gets what its first process left.
 export const SESSION_TIMEOUT_MS = 4 * 3600 * 1000;
+
+// The stages whose session starts background workers: the locale-translator's, one per locale. In `claude -p` a turn
+// that ends while a session's own background agents run doesn't end the session: the CLI waits, and each agent's
+// completion notice starts the next turn. But only for `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` after the last turn
+// (600 000 ms by default; read in the 2.1.321 binary, probed at 60 000 ms): then it stops the agents, says so on stderr
+// and exits as a session that ended on text (a measured stage's first wave of 8 workers was cut off so after 10
+// minutes, and its pages redone). The clock starts again at each turn, so the ceiling is the longest a session waits
+// with no notice: above the longest single worker measured (56 minutes), below the session timeout, so a hung worker
+// still ends in an exit the runner resumes once, never in the kill.
+export const WORKER_STAGES = ['locales', 'resync'];
+export const BG_WAIT_VARIABLE = 'CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS';
+export const BG_WAIT_CEILING_MS = 2 * 3600 * 1000;
 
 // Runs one session; resolves { code, stdout, stderr }, and `timedOut` when the runner killed it.
 // The child gets no API key or auth token (`lib/env.mjs`), so the plan pays.
@@ -959,12 +986,20 @@ export function recordRefused(session, { root, transcripts = null, env = process
   return false;
 }
 
-// The prompt a resumed session gets: what stopped it, and how the stage ends.
+// The prompt a resumed session gets: what stopped it, and how the stage ends. A session whose background agents the
+// CLI stopped at its wait limit gets a notice that lists them as stopped; their transcripts keep their progress, and
+// SendMessage to an agent's id continues it in the resumed process (probed on 2.1.321). The measured stage's resumed
+// session started a second wave instead (one worker redid its 8 pages), and polled it for 55 minutes, because this
+// prompt told it that a turn ending on text ends the session. That is so only when no background work of the
+// session's is left running.
+// The stopped agent saw its last tool call refused as if by a person ("The user doesn't want to proceed"), so the
+// message says it wasn't.
 export function continuationFor(step) {
   const keys = step.keys.join(', ');
   const branch = step.worktrees?.length ? 'commit and push your changes as the brief says, post what the stage posts, and record it' : 'record it as the brief says';
   return [
-    `The stage \`${step.stage}\` of ticket${step.keys.length > 1 ? 's' : ''} ${keys} is not finished: nothing is recorded for it. Your last message was text with no tool call, which in this mode ends the session.`,
+    `The stage \`${step.stage}\` of ticket${step.keys.length > 1 ? 's' : ''} ${keys} is not finished: nothing is recorded for it. Your last message was text with no tool call, and the session ended: in this mode a turn that ends on text ends the session once no background work of yours is left running.`,
+    'If a notice lists background agents of yours as stopped, continue each one with SendMessage to its id (load the tool with ToolSearch if it is not there yet): its transcript keeps its progress, so start no new agent for the same work. Tell it that the session\'s time limit stopped it, not a person, and to go on from its last finished step, redoing the one in flight. Only an agent that can\'t be continued is replaced, by a new one for the work it left open. Then end your turn with one short line: the session waits for the agents you run, and each one\'s completion notice starts your next turn by itself. Never check on them in a loop (ListAgents, git status or git diff, Monitor, sleep).',
     `Continue the stage from where it stopped and finish it: ${branch}, with the record command in the brief.`,
     'If it truly cannot be finished, record it failed with the reason (`--status failed --note <the reason>`).',
   ].join('\n');

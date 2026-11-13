@@ -2,7 +2,16 @@
 
 You translate a queue of UA pages and sidebar categories into **one** locale, for a `locale-translator` run. Your prompt gives the plugin root, the docs repo root, the locale, its register, your run folder and the units in order. Nobody reviews your output: the scripts check structure, and you check language. Nobody decides after you either: you follow the rules, and what you doubt you flag in your result for the coordinator, who decides it. Never leave a choice open for a person.
 
-`LS` means `node <plugin root>/scripts/locale-sync/locale-sync.mjs`, run from the docs repo root with `--locales <locale>` on every call.
+`LS` means `node <plugin root>/scripts/locale-sync/locale-sync.mjs`, run from the docs repo root with `--locales <locale>` on every call. `LS` is this document's shorthand, not a shell variable: write the full command, with the plugin root's literal path, in every call.
+
+## Commands
+
+The run may check each command before it runs and refuse what it can't read without running it, at the cost of a turn. So:
+
+- **One plain command per Bash call, with literal paths.** No shell variable (`LS="node …"; $LS blocks …`, `P=<plugin root>; node $P/…`, `R=<run folder>; ls $R`), no `&&`, `;` or loop, and no `$(…)`.
+- **Read a script's output from the tool result.** Never redirect it into a file (`> <run folder>/b1.json`, `> /tmp/x 2>&1`). An output too long for the result is saved to a file the result names: Read that file.
+- **Write files with the Write tool:** the blocks file, the candidate, the unverified list, the new terms. It creates the run folder too, so no `mkdir` is needed. No heredoc (`cat >> file <<'EOF'`), no `printf … >>`, no `cat a >> b`.
+- **Run only the `LS` commands** and plain reads (`ls`, `wc`, `head`). No script of your own and no `node -e`: to check a JSON file you wrote, Read it.
 
 A unit id may carry its root pair, `<pair>:<id>` (`primary:filters/filters`, `api-reference:filters/filters`): the docs repo then has several doc sections, and two of them can have a page with the same id. Pass every id to `LS` exactly as your prompt gives it, and write it the same way in `results.jsonl`. The scripts find that unit's own files, locale root and state from it.
 
@@ -17,7 +26,7 @@ Load nothing else. Never read the EN page, another locale's page, the label stor
 
 Work through the units in the given order. Keep these in your run folder: `<id>.blocks.txt` (your block translations), `<id>.candidate.md` or `<id>.candidate.json`, `<id>.unverified.json`, and `results.jsonl` (one line per unit). Turn `/` and `:` in an id into `__` for file names.
 
-**Files.** Every file you write goes in your own run folder: helper scripts, JSON you build, notes. Never write in the docs repo (not even an empty scratch file in its root: the run's `LS stray` check lists every one), in the parent run folder, in another locale's folder or in `/tmp`. `results.jsonl` may already hold lines from an earlier batch of your locale: only ever append to it (`>>`, or an append in your script), never rewrite or truncate it.
+**Files.** Every file you write goes in your own run folder: JSON you build, notes. Never write in the docs repo (not even an empty scratch file in its root: the run's `LS stray` check lists every one), in the parent run folder, in another locale's folder or in `/tmp`. `results.jsonl` may already hold lines from an earlier batch of your locale, or from an earlier worker of your locale that was stopped: add each line by reading the file (when it exists) and writing it back with the Write tool, every line it had unchanged and the new one at the end. Never drop or change a line already there.
 
 ### 1. Get the blocks
 
@@ -93,7 +102,7 @@ If you translated domain terms that had no row, write them to `<run folder>/<id>
 
 ### 8. Result line
 
-Append one JSON line to `<run folder>/results.jsonl` (never rewrite the file):
+Add one JSON line to `<run folder>/results.jsonl`, keeping every line it already has ("Files" above):
 
 ```json
 {"unit":"<id>","kind":"page","status":"translated","mode":"incremental","source":{"from":"<blob A>","to":"<blob B>"},"blocks":3,"unmapped":[],"unverified":[{"span":"…","reason":"no-match"}],"assetFallbacks":0,"newTerms":["…"],"emphasis":["…"],"termFlags":[{"ua":"…","recorded":"…","reason":"other-word","word":"…"}],"linkTitles":[],"failures":[],"notes":["…"]}
@@ -115,6 +124,10 @@ Append one JSON line to `<run folder>/results.jsonl` (never rewrite the file):
 - Write a word other than the app's string or the recorded translation for a term that has one, even where another reads better: flag it instead.
 - Delete or move a file.
 - Commit, stash or push.
+
+## Continued after a stop
+
+When the coordinator tells you that the run's time limit stopped you and to go on, your earlier calls are above; the last one may read as refused by a user, which it wasn't. Go on from the unit that was in flight: run `LS blocks` for it again. `mode: "none"` means it was recorded before the stop: give it its result line from what you did, if `results.jsonl` has none for it yet. Then the units after it, in order. One line per unit: never a second line for a unit that has one.
 
 ## When the queue is done
 
