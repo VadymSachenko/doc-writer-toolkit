@@ -234,3 +234,19 @@ test('AC-4: the close removes the work files with every other PR merged and one 
   assert.equal(cleanupTicket({ ...base, prState: states('dropped') }).blocked, null);
   assert.match(cleanupTicket({ ...base, prState: states('closed') }).blocked, /api-docs#72 closed unmerged: nothing is removed/);
 });
+
+test("AC-1: a step on the other PR (a review requested from the owner's queue) takes the card where that PR goes; the dropped PR left behind pulls nothing back", async () => {
+  const { w, c, key, guide } = twoPrs({ number: 1614, stages: { guide: 'finalReview', api: 'reworkWait' } });
+  guide.reviewRequests = [{ login: 'expert-one' }];
+  const t = await w.one(key);
+  assert.deepEqual(steps(t), ['move guide-docs#71 -> smeReview']);
+  assert.deepEqual(t.next.dropped, ['api-docs#72']);
+  const calls = scriptedCalls({ ...t.next, keys: [key], card: { status: 'finalReview' } }, read(w, key), w.settings);
+  assert.ok(calls.some((x) => /^tracker move \S+ --to smeReview$/.test(x)), calls.join('\n'));
+  assert.ok(!calls.some((x) => /--number 72\b|--to inProgress/.test(x)), calls.join('\n'));
+  const out = await run(w, noSession, { named: [key] });
+  assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['move', 'done']]);
+  assert.equal(w.tracker.cards.find((x) => x.id === c.id).placeId, LISTS.smeReview.id, 'not back to In progress, where the dropped PR stands');
+  assert.deepEqual(read(w, key).prs.map((p) => [p.number, p.stage]), [[71, 'smeReview'], [72, 'reworkWait']]);
+  assert.deepEqual(writesOn(w, 72), []);
+});
