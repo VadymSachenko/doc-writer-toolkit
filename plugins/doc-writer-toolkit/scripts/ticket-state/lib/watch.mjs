@@ -274,6 +274,8 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
   const checkStart = clock();
   const today = localDate(checkStart);
   const out = { kind: 'full', mode: settings.mode, dryRun, at: iso(checkStart), sources: [], events: 0, unmapped: 0, tickets: [], handed: [], waiting: [], pending: [], morning: null, run: null, jobs: [], errors: [], capped: [], notified: [], notes: [...(options.notes ?? [])] };
+  // The hub fast-forwarded before this check: every open ticket is looked at (step 3).
+  const hubMoved = options.hub?.outcome === 'moved';
   // The hub brought up to its origin before this check (watcher.mjs, lib/hub-update.mjs): a note when it moved, or is
   // behind and couldn't.
   if (options.hub) {
@@ -505,6 +507,10 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
       // looked at in each full check, whatever the events: a merge into its base (another PR's, which maps to no ticket)
       // and a CI that finished on its head are seen within `schedule.watchMinutes`.
       if (settings.keepFresh) for (const l of ledgers) if (l.mode === 'pipeline' && l.stages?.close?.status !== 'done' && (l.prs ?? []).some((p) => p.number && !p.merged && (p.stage === 'readyForMerge' || (p.stage === 'translation' && CHAIN.every((c) => p.chain?.[c]?.status === 'done'))))) want(l.key);
+      // A hub this check moved (watcher.mjs `settingsForCheck`), at once or after it waited for the runs going on: a
+      // merged setting or rule may give any ticket a next step, and the move is no event of a ticket's. So every open
+      // ticket is looked at, once, as if it had one; `status` decides, and the guards below hold as for any other.
+      if (hubMoved) for (const l of ledgers) if (l.mode === 'pipeline' && l.stages?.close?.status !== 'done') want(l.key);
       // A `set retry` since the last check: the tickets whose last session failed, or that hit the cap, are looked at.
       const rearmed = latestRearm(readRearm(settings.state));
       if (rearmed && rearmed > (feed.rearmSeen ? Date.parse(feed.rearmSeen) : 0)) {
@@ -586,7 +592,7 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
           out.notes.push(`${full}: ${handing.join(', ')} wait for a slot`);
           next.pending = [...new Set([...next.pending, ...handing])];
         } else if (handing.length) {
-          say({ kind: 'watch', keys: handing, outcome: 'handed', note: `${fresh.length} new event(s); the runner hands on ${handing.join(', ')}, a process per group` });
+          say({ kind: 'watch', keys: handing, outcome: 'handed', note: `${fresh.length} new event(s)${hubMoved ? ', the hub moved' : ''}; the runner hands on ${handing.join(', ')}, a process per group` });
           try {
             const retryWaiting = handing.some((k) => owed.includes(k));
             out.run = await run({ settings, clients, io: runnerIo, options: { dryRun, trigger: 'watcher', named: handing, claude, dispatch: dispatchFor('watcher'), ...(retryWaiting ? { retryWaiting } : {}) } });

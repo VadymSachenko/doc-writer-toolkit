@@ -17,8 +17,9 @@ const USAGE = `watcher [options]
 
 One check of the ticket flow's watcher, for launchd to start every few minutes (see launchd.mjs). With no model call
 of its own, it reads every event since the last check (the boards' actions, the PRs that changed and the PR events),
-maps them to tickets through the ledgers, asks 'ticket-state status' what each changed ticket does next, and hands
-each group that has a next step to a run in a process of its own (--hand-on), each once, and doesn't wait for it.
+maps them to tickets through the ledgers, asks 'ticket-state status' what each changed ticket does next (every open
+ticket, at a check that fast-forwarded the hub to a merged change), and hands each group that has a next step to a run
+in a process of its own (--hand-on), each once, and doesn't wait for it.
 Once a day after schedule.morning it starts the morning run instead. Inside limits.startHours (10-22 by default),
 when a slot frees or another start may have become possible, it has the runner triage and decide the starts as a
 scheduled run would, once per change, each start handed to a process of its own. It also runs the host jobs that
@@ -115,10 +116,11 @@ export function forgeLine(out) {
 
 // The settings this process runs with. A process that runs the full check first brings the hub up to its origin
 // (lib/hub-update.mjs), so a merged hub PR counts at this check with no person's pull, and reads the settings again when
-// it moved. Not a tick that only starts the full check, a forge check or a hand-on (it reads what the full check left),
-// a dry run or mode off. Settings that don't load (a bad file committed by hand, say) stop every process at this read,
-// so then any process but a hand-on or a dry run tries the update first: a fix merged on the forge is pulled, and the
-// error stands, with the hub's note, until one is. Returns { settings, hub }, `hub` null when no update was tried.
+// it moved; that check then looks at every open ticket (lib/watch.mjs, step 3). Not a tick that only starts the full
+// check, a forge check or a hand-on (it reads what the full check left), a dry run or mode off. Settings that don't
+// load (a bad file committed by hand, say) stop every process at this read, so then any process but a hand-on or a dry
+// run tries the update first: a fix merged on the forge is pulled, and the error stands, with the hub's note, until one
+// is. Returns { settings, hub }, `hub` null when no update was tried.
 export async function settingsForCheck({ root, values = {}, update = updateHub, now = Date.now }) {
   const load = () => loadSettings({ root, settings: values.settings });
   let settings = null;
