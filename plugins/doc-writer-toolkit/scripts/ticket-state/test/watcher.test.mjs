@@ -59,7 +59,7 @@ function act(c, time, { type = 'commentCard', from = null, to = null, list = nul
 }
 
 // A check with stand-ins that fail on any model call, recording what the runner and the notifications were asked.
-function checker(w, { runDaily, readUsage, spawnJob } = {}) {
+function checker(w, { runDaily, readUsage, spawnJob, io = {} } = {}) {
   const calls = { runs: [], usage: 0, jobs: [], notes: [] };
   const check = (at, options = {}) =>
     runCheck({
@@ -81,6 +81,7 @@ function checker(w, { runDaily, readUsage, spawnJob } = {}) {
           return spawnJob ? spawnJob(cmd, opts) : { code: 0, stdout: RESULT, stderr: '' };
         },
         notify: (msg) => (calls.notes.push(msg), { sent: true }),
+        ...io,
       },
       options,
     });
@@ -164,6 +165,94 @@ test('the hub before the check: a move is in the run log and the line, a hub lef
   out = await check(NOW + 50 * MIN);
   assert.equal(out.hub, undefined);
   assert.equal(out.quiet, true);
+});
+
+// TASK-109: a hub move is no event of a ticket's, but a merged setting or rule may give a waiting ticket a next step.
+// The check that moves the hub looks at every open ticket as if it had an event; a check that doesn't, as before.
+const HUB_MOVED = { outcome: 'moved', base: 'main', from: 'a'.repeat(40), to: 'b'.repeat(40), commits: 8 };
+
+// The open tickets of a flow with no event of their own, and one with an event: 901 has a next step (the answers),
+// 902 waits for a person, 903 is closed, 904 is in the owner's hands (mode hand), 905 is held by a run, 906 has an event.
+function quietFlow() {
+  const actions = { [BOARD]: [] };
+  const w = world({ actions });
+  answered(w, 901);
+  const waiting = card({ number: 902, status: 'blocked' });
+  const closed = card({ number: 903, status: 'done' });
+  const hand = card({ number: 904, status: 'inProgress' });
+  w.tracker.cards.push(waiting, closed, hand);
+  ledger(w, waiting, { stages: { triage: 'done', start: 'done', plan: 'done', questions: 'done' }, left: 'blocked' });
+  ledger(w, closed, { stages: { triage: 'done', start: 'done', plan: 'done', write: 'done', pr: 'done', close: 'done' } });
+  ledger(w, hand, { mode: 'hand', stages: { triage: 'done', start: 'done', plan: 'done', questions: 'done' } });
+  answered(w, 905);
+  takeLock(w.settings.state, { group: '905', kind: 'manual', leaseMinutes: 600, now: NOW });
+  const changed = answered(w, 906);
+  return { w, actions, changed };
+}
+
+test('TASK-109 AC-1, AC-3: the check that moves the hub looks at every open ticket and hands on those with a next step, once each; a check with no move, only the changed ones', async () => {
+  const { w, actions, changed } = quietFlow();
+  seed(w, NOW - 5 * MIN);
+  const { check, calls } = checker(w);
+  actions[BOARD].push(act(changed, NOW - MIN));
+  // AC-3: no hub update tried, the hub level with origin, the hub behind: only the ticket with an event, as before.
+  let out = await check(NOW, { hub: { outcome: 'level', base: 'main', from: 'a'.repeat(40) } });
+  assert.deepEqual(out.tickets.map((t) => t.key), ['906']);
+  assert.deepEqual(calls.runs.map((r) => r.named), [['906']]);
+  out = await check(NOW + 5 * MIN);
+  assert.equal(out.quiet, true, 'no event, no move: no status, no runner');
+  assert.deepEqual(out.tickets, []);
+  out = await check(NOW + 10 * MIN, { hub: { outcome: 'behind', base: 'main', commits: 8, note: 'the hub is 8 commit(s) behind origin/main and was not updated: it is on side, not main. Its settings are read as they were until it is' } });
+  assert.deepEqual(out.tickets, []);
+  assert.equal(calls.runs.length, 1, 'a hub left behind hands nothing on');
+  // AC-1: the check that moves the hub asks status about every open ticket, as if each had an event. 906 has one too:
+  // it is handed on once.
+  actions[BOARD].push(act(changed, NOW + 14 * MIN));
+  out = await check(NOW + 15 * MIN, { hub: HUB_MOVED });
+  assert.deepEqual(out.tickets.map((t) => [t.key, t.next, t.locked, t.events]).sort(), [['901', 'answers', false, 0], ['902', null, false, 0], ['905', null, true, 0], ['906', 'answers', false, 1]]);
+  assert.equal(calls.runs.length, 2, 'one hand-off to the runner');
+  assert.deepEqual(calls.runs[1].trigger, 'watcher');
+  assert.deepEqual([...calls.runs[1].named].sort(), ['901', '906'], 'each ticket with a next step once; not the one waiting, the closed one, the owner\'s or the one a run holds');
+  assert.deepEqual(out.pending, ['905'], 'the guards hold: a ticket a run holds waits in pending');
+  assert.match(oneLine(out), /the hub fast-forwarded 8 commit\(s\)/);
+  assert.match(readRunLog(w.settings.state, '2026-11-10').find((e) => e.kind === 'watch' && e.keys.includes('901')).note, /^1 new event\(s\), the hub moved; the runner hands on/);
+  // The next check, the hub level again: back to the tickets with events (and the one left pending).
+  out = await check(NOW + 20 * MIN, { hub: { outcome: 'level', base: 'main', from: 'b'.repeat(40) } });
+  assert.deepEqual(out.tickets.map((t) => t.key), ['905']);
+  assert.equal(calls.runs.length, 2);
+});
+
+test('TASK-109 AC-2: a move deferred by the runs going on: nothing is looked at again while the hub waits or drains; the check that finally moves it looks at every open ticket', async () => {
+  const w = world();
+  answered(w, 911);
+  answered(w, 912);
+  seed(w, NOW - 5 * MIN);
+  const spawned = [];
+  // A runner that hands each named ticket to the check's dispatcher, as the real one does: a process each (stood in).
+  const runDaily = async (a) => {
+    const handedOn = [];
+    for (const k of a.options.named) handedOn.push({ ...(await a.options.dispatch({ group: k, keys: [k], stage: 'answers' })), handedOn: null });
+    for (const h of handedOn) if (h.id) h.handedOn = { id: h.id, pid: h.pid };
+    return { mode: w.settings.mode, named: a.options.named, ran: [], starts: [], guard: [], handedOn };
+  };
+  const { check, calls } = checker(w, { runDaily, io: { spawn: (args) => (spawned.push(args), { pid: 4242 }), isAlive: () => true } });
+  const busy = { outcome: 'behind', base: 'main', commits: 1, busy: true, note: 'the hub is 1 commit(s) behind origin/main and was not updated: 1 run(s) going, which read(s) the hub\'s files: it moves at a check with none. Its settings are read as they were until it is' };
+  let out = await check(NOW, { hub: busy });
+  assert.deepEqual([out.tickets, calls.runs], [[], []], 'held behind: nothing is looked at again');
+  out = await check(NOW + 35 * MIN, { hub: busy });
+  assert.equal(out.hub.drain, true);
+  assert.deepEqual([out.tickets, calls.runs], [[], []]);
+  // The runs going ended; this check moves the hub: every open ticket is looked at, and the drain is over.
+  out = await check(NOW + 40 * MIN, { hub: { ...HUB_MOVED, commits: 1 } });
+  assert.equal(out.hub.drain, undefined);
+  assert.deepEqual(calls.runs.map((r) => [...r.named].sort()), [['911', '912']]);
+  assert.deepEqual(out.run.handedOn.map((x) => [x.keys[0], Boolean(x.handedOn)]).sort(), [['911', true], ['912', true]]);
+  assert.equal(spawned.length, 2, 'each handed on once');
+  assert.match(oneLine(out), /handed on 91[12] \(run .*\); 91[12] \(run .*\)/);
+  // The next check, with the two runs going: no move, so no ticket is handed on again.
+  out = await check(NOW + 45 * MIN, { hub: { outcome: 'level', base: 'main', from: 'b'.repeat(40) } });
+  assert.equal(calls.runs.length, 1);
+  assert.equal(spawned.length, 2);
 });
 
 test('AC-1: events on tickets with no next step call status, and start no runner and no model', async () => {
