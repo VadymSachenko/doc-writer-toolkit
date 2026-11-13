@@ -10,7 +10,7 @@ import { detectUa, headingComments, headingText, uaHeadingId } from './headings.
 import { findNames, searchable } from './names.mjs';
 import { codeDiff, cyrillicText, fenceParts } from './fences.mjs';
 import { headingIdMismatches } from './ids.mjs';
-import { pairMatcher, pairedCodeDiff } from './examples.mjs';
+import { holdsFor, pairMatcher, pairedCodeDiff } from './examples.mjs';
 
 const trunc = (s, n = 80) => (s.length <= n ? s : `${s.slice(0, n - 1)}…`);
 const hLabel = (h) => `${'#'.repeat(h.level)} ${trunc(headingText(h.raw))}`;
@@ -131,7 +131,8 @@ function checkTables(r, m, s) {
 
 // Check 6 compares each block's code part (code-blocks.md, fences.mjs): a diagram by its ids, keywords, arrows and
 // lines, any other block by everything but its comments and tree descriptions. Those are translated. With the existing
-// pairs of an example values file, a quoted UA value of a pair may be its EN value on the EN side (examples.mjs).
+// pairs of an example values file, on the pages a pair lists, a UA string literal whose value is the pair's UA value may
+// be its EN value on the EN side (examples.mjs).
 function checkCode(r, m, s, examples) {
   const matcher = examplePairs(r, examples);
   r.sub(6, 'Code blocks keep their code', () => {
@@ -154,18 +155,20 @@ function checkCode(r, m, s, examples) {
       r.bug(6, 'CODE-BLOCK-MISMATCH', `code block ${i + 1} differs from line ${k + 1} of the block (${what} must be identical; only labels, comments and descriptions are translated)`, sf.line + 1 + k, r.secondary);
     });
     if (!matcher) return;
-    for (const row of examples.rows) {
+    for (const row of matcher.byUa.values()) {
       const lines = used.filter((u) => u === row).length;
       if (lines) r.examples.matched.push({ ua: row.ua, en: row.en, type: row.type, lines });
     }
   });
 }
 
-// The pairs matcher for Check 6, or null. Sets the report's `examples` field, and warns when a pair can't be used: the
-// file has no pairs section, a row is not a valid pair, or neither page reads as UA (a pair has a direction).
+// The pairs matcher for Check 6, or null: only the pairs whose Pages list this page (examples.mjs, holdsFor). Sets the
+// report's `examples` field, and warns when a pair can't be used: the file has no pairs section, a row is not a valid
+// pair, or neither page reads as UA (a pair has a direction).
 function examplePairs(r, examples) {
   if (!examples) return null;
-  r.examples = { pairs: examples.rows.length, matched: [] };
+  const here = examples.rows.filter((row) => holdsFor(row, [r.main, r.secondary]));
+  r.examples = { pairs: examples.rows.length, here: here.length, matched: [] };
   if (!examples.found) {
     r.warn(6, 'EXAMPLE-PAIRS-MISSING', `no existing pairs section ('## Existing pairs' or '## Наявні пари') in ${examples.file}`, 1, examples.file);
     return null;
@@ -175,7 +178,7 @@ function examplePairs(r, examples) {
     r.warn(6, 'EXAMPLES-SKIPPED', 'cannot tell which page is UA (a pair goes from UA to EN); pass --ua main|secondary to use the existing pairs', 1, r.secondary);
     return null;
   }
-  return examples.rows.length ? pairMatcher(examples.rows) : null;
+  return here.length ? pairMatcher(here) : null;
 }
 
 // Check 9, inside code blocks: Cyrillic left in the EN page's diagram labels, code comments and tree descriptions. The

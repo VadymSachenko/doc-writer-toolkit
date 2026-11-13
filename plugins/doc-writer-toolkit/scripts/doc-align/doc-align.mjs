@@ -19,9 +19,10 @@ Options
                         Cyrillic letters in its headings, else in its whole text)
   --names <file>        a product kit glossary with a names table ('## Names' or '## Назви'); checks the
                         names of organizations against it (Check 12). May be given more than once
-  --examples <file>     a product kit's example values file; Check 6 counts each of its existing pairs ('## Existing
-                        pairs' or '## Наявні пари') as the same value: a quoted UA value may be its EN value in EN
-  --propose-ids        instead of comparing: propose an id for every UA heading without one, from the EN
+  --examples <file>     a product kit's example values file; on the pages a pair lists, Check 6 counts each of its
+                        existing pairs ('## Existing pairs' or '## Наявні пари') as the same value: a UA string
+                        literal that is the pair's UA value may be its EN value in EN
+  --propose-ids         instead of comparing: propose an id for every UA heading without one, from the EN
                         heading at the same position, and list the links that use the old fragments. Prints
                         { ua, en, proposals, links, unresolved, skipped }
   --root <dir>[=<url prefix>]

@@ -61,7 +61,7 @@ Load these files at the start of the task.
 **Never translate:**
 - The code part of a code block (` ``` `): the code, ids, keywords, arrows, comment markers, whitespace and line count stay byte-for-byte (`code-blocks.md`)
 - Inline code (`` `backtick` ``) — preserve exactly
-- JSON keys and values, and every other data value inside code blocks, Ukrainian letters included. The one exception is an existing pair of type `example` in the kit's example values file: its UA value becomes its EN value. A system value never changes (`example-values-format.md`)
+- JSON keys and values, and every other data value inside code blocks, Ukrainian letters included. The one exception is the kit's existing pairs: on a page a pair lists, a string literal whose whole value is the UA value of an `example` pair becomes that pair's EN value (`example-values-format.md`, which says when a pair holds)
 - HTTP methods and paths (`POST /transaction/create`)
 - Reader-replaced placeholders: `*`\``UPPER_CASE`\``*`
 - MDX component names and attribute names (`<details>`, `<summary>`, `:::note`, `<Icon>`, etc.)
@@ -297,7 +297,7 @@ Before saving, check:
 - The EN `title:` is the semantic equivalent of the UA title, and an EN `sidebar_label:` of the UA one (`naming-conventions.md`); the output path, filename, and any `slug:` field are unchanged from the source's shared path — the page was not re-slugged or moved
 - Every page-to-page link path is byte-identical to the UA source (`internal-links.md`); no route was localized or "corrected"
 - Each diagram keeps its structure: the same ids, keywords, arrows, directives, styling lines and number of lines as the source; only its labels changed (`code-blocks.md`)
-- Every other code block keeps its code part byte-for-byte: the code, the data, the comment markers, the whitespace and the number of lines; only its comments and tree descriptions changed, and each quoted UA value of an `example` pair is that pair's EN value
+- Every other code block keeps its code part byte-for-byte: the code, the data, the comment markers, the whitespace and the number of lines; only its comments and tree descriptions changed, and the `example` pairs that hold for this page (`example-values-format.md`) have their EN value
 - Every system value, in a code block or in inline code, is the UA page's value, verbatim, even when an existing pair lists it (`example-values-format.md`)
 - No `{/* #anchor */}` comments appear in EN headings
 - Every EN heading's id, generated from its text or explicit `\{#id}` (an existing `{#id}` counts too), equals its UA heading's comment id (`heading-anchors.md`)

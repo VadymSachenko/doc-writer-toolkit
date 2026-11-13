@@ -30,8 +30,8 @@ The values examples use, the same on every page: in English, with a person's nam
 
 ## Existing pairs
 
-Pages written before this file, whose UA and EN code samples hold different values: the UA value and the EN value kept with it. Leave the table empty when there are none, and never add a pair for new content.
+Pages written before this file, whose UA and EN code samples hold different values: the UA value, the EN value kept with it, and the pages it holds for (each page's path relative to its content root, without the extension). Leave the table empty when there are none, and never add a pair for new content.
 
 | UA value | EN value | Type | Pages |
 |---|---|---|---|
-| `Петренко Олег` | `John Smith` | example | `api/create-payment.md` |
+| `Петренко Олег` | `John Smith` | example | `api/create-payment` |

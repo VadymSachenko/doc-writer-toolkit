@@ -50,10 +50,9 @@ The checks read the two parts with one implementation, `${CLAUDE_PLUGIN_ROOT}/sc
    and is translated. Everything up to the dash, the dash and the padding included, stays.
 4. **Data stays.** Values in an example (JSON values, request and response bodies, strings, names, a payment
    purpose, a bank name in a value) are what the system sends and returns. They stay exactly as written, Ukrainian
-   letters included, in every language. One exception, for UA → EN only: a value that the product kit's example
-   values file lists as an existing pair of type `example` becomes that pair's EN value in the EN page. A system
-   value never changes. Further locales copy the UA value. The file and what each skill does with it:
-   `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/example-values-format.md`.
+   letters included, in every language. The one exception is the product kit's existing pairs, for UA → EN only:
+   `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/example-values-format.md` says when a pair holds and what each skill
+   does with it. A system value never changes, and further locales copy UA.
 5. **Prose rules stop at the fence.** Typography rules for a language's prose (EN: no spaces around an em dash,
    capitals after a colon) don't apply inside a code block. A comment is translated in the comment's own style,
    with no period added or removed.
