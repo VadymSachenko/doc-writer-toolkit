@@ -204,3 +204,37 @@ test('the settings: forge.reactions and tracker.reactions are off by default, an
   assert.throws(() => settingsFor(tmp(), { forge: { ...rawSettings().forge, reactions: 'yes' } }), /forge\.reactions must be true or false/);
   assert.throws(() => settingsFor(tmp(), { tracker: { ...rawSettings().tracker, reactions: 1 } }), /tracker\.reactions must be true or false/);
 });
+
+// Counts the forge's PR reads, and runs `hook` at the n-th one: a change on the forge between the status a run reads
+// (`perStatus` reads, twice before its first step) and the read right before that step.
+function onRead(w, n, hook) {
+  const get = w.forge.pr;
+  let count = 0;
+  w.forge.pr = async (a) => {
+    if (++count === n) hook();
+    return get(a);
+  };
+}
+async function readsPerStatus(w) {
+  const get = w.forge.pr;
+  let count = 0;
+  w.forge.pr = async (a) => (count++, get(a));
+  await w.status();
+  w.forge.pr = get;
+  return count;
+}
+
+test("a PR closed as won't merge between the status and its answerComments step: no 👀 goes on its comments, and nothing runs", async () => {
+  const extra = { ...MARKED(), forge: { ...MARKED().forge, wontMergeLabel: "won't merge" } };
+  const { w, key } = prWorld(908, [comment(5801, 'owner-login', 'helper: shorten step 2')], { extra });
+  const forgePr = w.forge.prs.find((p) => p.number === 81);
+  const k = await readsPerStatus(w);
+  onRead(w, 2 * k + 1, () => {
+    forgePr.state = 'closed';
+    forgePr.labels = ["won't merge"];
+  });
+  const out = await run(w, key, async () => assert.fail('no session for a dropped PR'));
+  assert.deepEqual(out.ran.map((r) => [r.stage, r.pr, r.outcome]), [['answerComments', 'guide-docs#81', 'moved']]);
+  assert.deepEqual(reacts(w), [], 'no reaction written on the dropped PR');
+  assert.deepEqual(marks(w, 5801), []);
+});

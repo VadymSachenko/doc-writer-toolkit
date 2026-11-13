@@ -376,3 +376,35 @@ test('with no label set, the follow, move --pr and close records read the forge 
   assert.deepEqual(await records({}, 1760), { follow: 0, move: 1, close: 2 });
   assert.deepEqual(await records(WITH_LABEL, 1770), { follow: 2, move: 2, close: 2 }, 'with the label set, the PRs it would move or count are read');
 });
+
+test("a step on a PR closed as won't merge right before it acts: moved, with its note; no session and no run on that PR; the status is read again, and the live PR's step runs", async () => {
+  const c = card({ number: 1800, status: 'translation' });
+  const guide = pr({ repo: 'guide-docs', number: 71, headCommit: HEAD, labels: ['In translation'] });
+  const api = pr({ repo: 'api-docs', number: 72, headCommit: HEAD, labels: ['In translation'] });
+  const w = world({ cards: [c], prs: [guide, api], extra: WITH_TRANSLATION });
+  ledger(w, c, { stages: BASE, prs: [{ repo: 'guide-docs', number: 71, targets: ['guide'], review: 'sme', stage: 'translation' }, { repo: 'api-docs', number: 72, targets: ['api'], review: 'places', stage: 'translation' }] });
+  assert.deepEqual(steps(await w.one('1800')), ['translate guide-docs#71', 'translate api-docs#72']);
+  // The forge's PR reads: a run reads its status twice before the first step, then the read right before that step.
+  const get = w.forge.pr;
+  let k = 0;
+  w.forge.pr = async (a) => (k++, get(a));
+  await w.status();
+  let n = 0;
+  w.forge.pr = async (a) => {
+    if (++n === 2 * k + 1) {
+      guide.state = 'closed';
+      guide.labels = ['In translation', WONT];
+    }
+    return get(a);
+  };
+  const briefs = [];
+  const out = await run(w, async (cmd) => (briefs.push(cmd.args[cmd.args.indexOf('-p') + 1]), stopHere()), { named: ['1800'] });
+  assert.deepEqual(out.ran[0], { stage: 'translate', role: 'translator', group: '1800', keys: ['1800'], pr: 'guide-docs#71', priority: 'medium', outcome: 'moved', note: `guide-docs#71 was closed as «${WONT}» since the status: nothing runs on it` });
+  assert.ok(briefs.length > 0 && briefs.every((b) => !b.includes('guide-docs#71') && b.includes('api-docs#72')), 'only the live PR\'s sessions');
+  assert.ok(out.ran.slice(1).every((r) => r.pr === 'api-docs#72'), JSON.stringify(out.ran));
+  const l = read(w, '1800');
+  assert.ok(!(l.runs ?? []).some((r) => r.pr === 'guide-docs#71'), 'nothing in the runs for the dropped PR');
+  assert.ok((l.runs ?? []).some((r) => r.pr === 'api-docs#72' && r.stage === 'translate'));
+  assert.deepEqual(l.prs[0].chain?.translate ?? null, null);
+  assert.deepEqual(writesOn(w, 71), []);
+});

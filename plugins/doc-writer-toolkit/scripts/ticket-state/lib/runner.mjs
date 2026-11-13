@@ -1897,10 +1897,12 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         const roundsBefore = roundSnapshot(settings.state, step.keys);
         // The comments a session takes get the pipeline's marks around it (lib/reactions.mjs): 👀 now, the result after.
         // Neither call stops the step or what follows it: a throw is a warning.
+        // A step on a PR closed as won't merge since the status gave it: nothing runs, no mark goes on its comments (a
+        // write on the forge), and the status is read again.
+        const gone = Boolean(step.pr) && (step.dropped ?? []).includes(step.pr);
         const marked = (note) => say({ kind: 'reactions', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, outcome: 'warning', note });
-        const picked = step.role ? await pickMarks({ settings, clients, step }).catch((e) => (marked(`no marks: ${e.message}`), null)) : null;
-        // A step on a PR closed as won't merge since the status gave it: nothing runs, and the status is read again.
-        const r = step.pr && (step.dropped ?? []).includes(step.pr) ? droppedSince(step) : await live.tracked(step, () => (step.role ? runModelStep(step) : step.stage === 'build' ? runBuildStep(step) : step.stage === 'idSync' ? runIdSyncStep(step) : step.stage === 'baseMerge' ? runBaseMergeStep(step) : step.stage === 'videoExtract' ? runExtractStep(step) : runScriptedStep(step)));
+        const picked = step.role && !gone ? await pickMarks({ settings, clients, step }).catch((e) => (marked(`no marks: ${e.message}`), null)) : null;
+        const r = gone ? droppedSince(step) : await live.tracked(step, () => (step.role ? runModelStep(step) : step.stage === 'build' ? runBuildStep(step) : step.stage === 'idSync' ? runIdSyncStep(step) : step.stage === 'baseMerge' ? runBaseMergeStep(step) : step.stage === 'videoExtract' ? runExtractStep(step) : runScriptedStep(step)));
         for (const note of await settleMarks({ settings, clients, step, picked, outcome: r.outcome }).catch((e) => [`the marks were not set: ${e.message}`])) marked(note);
         // The ready, check and translated labels follow what the step recorded (lib/pr-labels.mjs), whoever recorded it.
         for (const note of await followLabels({ settings, clients, keys: step.keys, before, skip: step.dropped })) say({ kind: 'label', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, outcome: 'failed', note });
