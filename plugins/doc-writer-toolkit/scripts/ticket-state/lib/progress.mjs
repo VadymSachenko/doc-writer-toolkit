@@ -96,8 +96,9 @@ const GATE_ACTION = {
 };
 
 // `dropped`: the PRs closed as won't merge (`forge.wontMergeLabel`) the last status saw, `{ '<key>|<pr>': { label } }`
-// (the memory): such a PR waits for no one. So does one the close recorded dropped.
-const droppedOf = (l, p, dropped) => dropped?.[`${l.key}|${prId(p)}`] ?? (p.dropped ? { label: p.dropped.label } : null);
+// (the memory): such a PR waits for no one. The forge decides, through the status: the close's mark on the ledger
+// (`prs[].dropped`) is history, and a closed ticket has no gate anyway.
+const droppedOf = (l, p, dropped) => dropped?.[`${l.key}|${prId(p)}`] ?? null;
 
 export function gatesOf(l, dropped = {}) {
   if (!l || l.mode !== 'pipeline' || l.stages?.close?.status === 'done') return [];

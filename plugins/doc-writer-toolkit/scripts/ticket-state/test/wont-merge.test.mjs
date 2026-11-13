@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { LISTS, NOW, ago, card, gitRepo, pr, rawSettings, tmp } from './fakes.mjs';
 import { ledger, read, world } from './helpers.mjs';
-import { runDaily, scriptedCalls } from '../lib/runner.mjs';
+import { collectSteps, runDaily, runScripted, scriptedCalls } from '../lib/runner.mjs';
 import { runRecord } from '../lib/record.mjs';
 import { renderReport } from '../lib/report.mjs';
 import { gatesOf, notifyGates, progressPath, writeProgress } from '../lib/progress.mjs';
@@ -249,4 +249,130 @@ test("AC-1: a step on the other PR (a review requested from the owner's queue) t
   assert.equal(w.tracker.cards.find((x) => x.id === c.id).placeId, LISTS.smeReview.id, 'not back to In progress, where the dropped PR stands');
   assert.deepEqual(read(w, key).prs.map((p) => [p.number, p.stage]), [[71, 'smeReview'], [72, 'reworkWait']]);
   assert.deepEqual(writesOn(w, 72), []);
+});
+
+// ------------------------------------------------------------------ the fix round of the review
+
+test('record close on a ticket with no PR stands as before, with the label set or not', async () => {
+  for (const extra of [{}, WITH_LABEL]) {
+    const c = card({ number: extra.forge ? 1701 : 1700, status: 'done' });
+    const w = world({ cards: [c], extra });
+    ledger(w, c, { stages: { start: 'done' }, prs: [] });
+    await runRecord({ settings: w.settings, clients: w.clients(), key: String(c.number), stage: 'close', status: 'done', now: NOW });
+    assert.equal(read(w, String(c.number)).stages.close.status, 'done', JSON.stringify(Boolean(extra.forge)));
+  }
+});
+
+// Cards 598 and 599 share guide-docs#63, in the owner's queue with a review requested; 599 also has api-docs#64, closed
+// as won't merge and left at rework. Either card first in the group: the step leaves #64 alone for both.
+for (const order of [['598', '599'], ['599', '598']]) {
+  test(`a group's step on a shared PR, the dropped PR in one ticket only (${order.join(' then ')}): the dropped ids go with the group's step, and both cards follow the shared PR`, async () => {
+    const cards = Object.fromEntries(['598', '599'].map((k) => [k, card({ number: Number(k), status: 'finalReview' })]));
+    const shared = pr({ repo: 'guide-docs', number: 63, headCommit: HEAD, labels: ['In final review'], reviewRequests: ['expert-one'] });
+    const own = pr({ repo: 'api-docs', number: 64, state: 'closed', headCommit: HEAD, labels: ['In final review', WONT] });
+    const w = world({ cards: order.map((k) => cards[k]), prs: [shared, own], extra: WITH_LABEL });
+    const sharedPr = { repo: 'guide-docs', number: 63, targets: ['guide'], review: 'sme', stage: 'finalReview' };
+    for (const k of order) ledger(w, cards[k], { stages: BASE, group: '598-599', prs: k === '599' ? [sharedPr, { repo: 'api-docs', number: 64, targets: ['api'], review: 'places', stage: 'reworkWait' }] : [sharedPr] });
+    const group = collectSteps(await w.status()).find((s) => s.group === '598-599');
+    assert.deepEqual([fmt(group), [...group.keys].sort(), group.dropped], ['move guide-docs#63 -> smeReview', ['598', '599'], ['api-docs#64']]);
+    assert.ok(!scriptedCalls(group, read(w, group.keys[0]), w.settings).some((x) => /--to inProgress|--number 64\b/.test(x)));
+    const out = await run(w, noSession, { named: ['598', '599'] });
+    assert.deepEqual(out.ran.map((r) => [r.stage, r.outcome]), [['move', 'done']], JSON.stringify(out.ran));
+    for (const k of ['598', '599']) assert.equal(w.tracker.cards.find((x) => x.id === cards[k].id).placeId, LISTS.smeReview.id, k);
+    assert.deepEqual(read(w, '598').prs.map((p) => [p.number, p.stage]), [[63, 'smeReview']]);
+    assert.deepEqual(read(w, '599').prs.map((p) => [p.number, p.stage]), [[63, 'smeReview'], [64, 'reworkWait']]);
+    assert.deepEqual(writesOn(w, 64), []);
+  });
+}
+
+test('the forge changes between the status and the step: reopened, the PR is labelled and moved; closed with the label, it is neither, and the ledger agrees with the labels', async () => {
+  // (a) Dropped when the status was read, reopened before the step acts.
+  const a = twoPrs({ number: 1730, extra: WITH_TRANSLATION });
+  moved(a.c, 'translation');
+  const ta = await a.w.one(a.key);
+  assert.deepEqual(ta.next.dropped, ['api-docs#72']);
+  a.api.state = 'open';
+  await runScripted({ ...ta.next, keys: [a.key] }, { settings: a.w.settings, clients: a.w.clients(), io: { now: () => NOW } });
+  assert.deepEqual(read(a.w, a.key).prs.map((p) => [p.number, p.stage]), [[71, 'translation'], [72, 'translation']]);
+  assert.deepEqual(a.api.labels, [WONT, 'In translation']);
+
+  // (b) Open when the status was read, closed with the label before the step acts.
+  const b = twoPrs({ number: 1740, apiState: 'open', apiLabels: ['In final review'], extra: WITH_TRANSLATION });
+  moved(b.c, 'translation');
+  const tb = await b.w.one(b.key);
+  assert.equal(tb.next.dropped, undefined);
+  b.api.state = 'closed';
+  b.api.labels = ['In final review', WONT];
+  await runScripted({ ...tb.next, keys: [b.key] }, { settings: b.w.settings, clients: b.w.clients(), io: { now: () => NOW } });
+  assert.deepEqual(read(b.w, b.key).prs.map((p) => [p.number, p.stage]), [[71, 'translation'], [72, 'finalReview']]);
+  assert.deepEqual(writesOn(b.w, 72), [], 'no GitHub write names it');
+  assert.deepEqual(b.api.labels, ['In final review', WONT]);
+});
+
+test('one PR dropped and another closed unmerged without the label: outside, with both notes', async () => {
+  const { w, key, guide } = twoPrs({ number: 1710, guideState: 'closed' });
+  guide.labels = ['wontfix'];
+  const t = await w.one(key);
+  assert.equal(t.state, 'outside');
+  assert.deepEqual(t.steps, []);
+  assert.deepEqual(t.notes, [`api-docs#72 was closed as «${WONT}»: the ticket goes on without it`, 'guide-docs#71 was closed unmerged']);
+});
+
+test('one PR merged, one dropped, one open: the ticket stands where the open one is; once it is merged too, close', async () => {
+  const c = card({ number: 1720, status: 'finalReview' });
+  const merged = pr({ repo: 'guide-docs', number: 71, state: 'merged', headCommit: HEAD });
+  const dropped = pr({ repo: 'api-docs', number: 72, state: 'closed', headCommit: HEAD, labels: [WONT] });
+  const open = pr({ repo: 'guide-docs', number: 73, headCommit: HEAD, labels: ['In final review'] });
+  const w = world({ cards: [c], prs: [merged, dropped, open], extra: WITH_LABEL });
+  ledger(w, c, { stages: BASE, prs: [{ repo: 'guide-docs', number: 71, targets: ['guide'], review: 'sme', stage: 'readyForMerge' }, { repo: 'api-docs', number: 72, targets: ['api'], review: 'places', stage: 'reworkWait' }, { repo: 'guide-docs', number: 73, targets: ['guide'], review: 'sme', stage: 'finalReview', branch: 'ticket-73' }] });
+  const t = await w.one('1720');
+  assert.deepEqual([t.state, t.steps], ['finalReview', []], 'not back to In progress, where the dropped PR stands');
+  assert.deepEqual(t.prs.map((p) => p.dropped ?? null), [null, { label: WONT }, null]);
+  open.state = 'merged';
+  const after = await w.one('1720');
+  assert.deepEqual([after.state, steps(after)], ['merged', ['close']]);
+});
+
+test("the close's mark on the ledger makes no PR dropped: the forge does", async () => {
+  for (const [state, want] of [['closed', 'outside'], ['open', 'finalReview']]) {
+    const { w, c, key } = twoPrs({ number: 1750, apiState: state, apiLabels: ['In final review'] });
+    const l = read(w, key);
+    l.prs[1].dropped = { at: ago(2), label: WONT };
+    ledger(w, c, { stages: BASE, prs: l.prs });
+    const t = await w.one(key);
+    assert.equal(t.state, want, state);
+    assert.equal(t.prs[1].dropped, undefined, state);
+  }
+});
+
+test('with no label set, the follow, move --pr and close records read the forge no more than before', async () => {
+  const counted = (w) => {
+    const n = { count: 0 };
+    const get = w.forge.pr;
+    w.forge.pr = async (a) => (n.count++, get(a));
+    return n;
+  };
+  const records = async (extra, base) => {
+    const out = {};
+    // A follow to In progress reads nothing for itself.
+    const f = twoPrs({ number: base, apiState: 'open', extra });
+    moved(f.c, 'inProgress');
+    let n = counted(f.w);
+    await runRecord({ settings: f.w.settings, clients: f.w.clients(), key: f.key, stage: 'follow', status: 'done', to: 'inProgress', now: NOW });
+    out.follow = n.count;
+    // A move --pr reads the PR it moves.
+    const m = twoPrs({ number: base + 1, status: 'smeReview', apiState: 'open', stages: { guide: 'finalReview', api: 'smeReview' }, extra });
+    m.guide.labels = ['in expert review'];
+    n = counted(m.w);
+    await runRecord({ settings: m.w.settings, clients: m.w.clients(), key: m.key, stage: 'move', status: 'done', pr: 'guide-docs#71', to: 'smeReview', now: NOW });
+    out.move = n.count;
+    // A close reads every PR, as it did.
+    const cl = twoPrs({ number: base + 2, status: 'done', guideState: 'merged', apiState: 'merged', extra });
+    n = counted(cl.w);
+    await runRecord({ settings: cl.w.settings, clients: cl.w.clients(), key: cl.key, stage: 'close', status: 'done', now: NOW });
+    out.close = n.count;
+    return out;
+  };
+  assert.deepEqual(await records({}, 1760), { follow: 0, move: 1, close: 2 });
+  assert.deepEqual(await records(WITH_LABEL, 1770), { follow: 2, move: 2, close: 2 }, 'with the label set, the PRs it would move or count are read');
 });

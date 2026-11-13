@@ -97,12 +97,15 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
     const st = await clients.forge.prState({ repo: p.repo, number: p.number });
     return st;
   };
-  // A PR closed as won't merge (`forge.wontMergeLabel`), read from the forge as the record runs (the forge wins over
-  // what the rule saw): dropped from the ticket, so no record moves it, counts it for the card's status or closes it.
-  // With no such label set, nothing is read.
+  // A PR closed as won't merge (`forge.wontMergeLabel`): dropped from the ticket, so no record moves it or counts it for
+  // the card's status. The runner reads the forge once right before a `move` or `follow` and acts on that read; it hands
+  // the dropped ids over (`result.dropped`), so its labels and this record agree. With none handed over (a record by
+  // hand), the forge is read here. With no such label set, nothing is read.
+  if (result.dropped !== undefined && (!Array.isArray(result.dropped) || result.dropped.some((x) => typeof x !== 'string'))) throw new CliError('"dropped" is a list of PR ids (`<repo>#<n>`): the PRs closed as won\'t merge', { code: 2 });
   const droppedNow = new Map();
   const droppedAs = async (p) => {
     if (!settings.forge.wontMergeLabel || !p?.number || p.merged) return null;
+    if (Array.isArray(result.dropped) && stage !== 'close') return result.dropped.includes(prId(p)) ? settings.forge.wontMergeLabel : null;
     if (!droppedNow.has(prId(p))) droppedNow.set(prId(p), droppedLabel(await clients.forge.prState({ repo: p.repo, number: p.number }), settings));
     return droppedNow.get(prId(p));
   };
@@ -861,7 +864,7 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
             else p.merged = { at: st.mergedAt, commit: st.mergeCommit, ...(settings.forge.translatedLabel ? { translated: (st.labels ?? []).some((x) => sameLabel(x, settings.forge.translatedLabel)) } : {}) };
           }
           if (open.length) throw new Refused('notMerged', `not every PR is merged: ${open.join(', ')}`, { open });
-          if (dropped.length === l.prs.length) throw new Refused('notMerged', `no PR is merged: every one was closed as won't merge (${dropped.map(prId).join(', ')})`, { open: [] });
+          if (dropped.length && dropped.length === l.prs.length) throw new Refused('notMerged', `no PR is merged: every one was closed as won't merge (${dropped.map(prId).join(', ')})`, { open: [] });
           const card = await needCard('done');
           for (const p of l.prs) if (!dropped.includes(p)) p.stage = 'merged';
           l.left = { ...brief(card), at };

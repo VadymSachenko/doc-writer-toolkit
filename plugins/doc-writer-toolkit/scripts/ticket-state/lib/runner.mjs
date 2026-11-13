@@ -1038,8 +1038,12 @@ export function collectSteps(st, { named = [], includeStart = false, retryWaitin
   for (const [group, tickets] of groups) {
     const first = tickets[0];
     const same = tickets.filter((t) => t.next.stage === first.next.stage && (t.next.pr ?? null) === (first.next.pr ?? null) && (t.next.startedBy ?? null) === (first.next.startedBy ?? null));
+    // The PRs dropped from any of the step's tickets (closed with `forge.wontMergeLabel`): a PR's state is the forge's,
+    // so one dropped in a ticket is dropped in every ticket that has it, and the group's step leaves it alone for each.
+    const dropped = [...new Set(same.flatMap((t) => t.next.dropped ?? []))];
     out.push({
       ...first.next,
+      ...(dropped.length ? { dropped } : {}),
       group,
       keys: same.map((t) => t.key),
       priority: tickets.map((t) => t.priority).sort((a, b) => PRIORITY_RANK[a] - PRIORITY_RANK[b])[0],
@@ -1140,6 +1144,24 @@ export function scriptedCalls(step, ledgerIn, settings) {
 // A PR with two cards: a person's move of either card into In translation, or back out of it, is a move for the other
 // too, so one chain never runs for one card and not the other. The other tickets of the group that share a PR with this
 // one and stand where this card stood, in the pipeline's hands. Only those moves: other moves keep each card on its own.
+// With `forge.wontMergeLabel`: the step with the PRs closed with it as the forge has them now (`dropped`), across the
+// step's tickets and the other tickets of their group, read once (`droppedRead`) right before the step acts. A PR
+// reopened, or closed with the label, since the status gave the step is then read as it is: no label is written on a
+// PR the forge shows dropped, and a reopened one is moved and labelled like any other. With no such label: the step as
+// it is, and no read.
+export async function withFreshDropped(step, { settings, clients }) {
+  if (!settings.forge.wontMergeLabel || step.droppedRead) return step;
+  const keys = new Set(step.keys ?? []);
+  const groups = new Set([step.group, ...[...keys].map((k) => readLedger(settings.state, k)?.group)].filter(Boolean));
+  const ledgers = readAllLedgers(settings.state).filter((l) => keys.has(l.key) || (groups.has(l.group) && l.stages?.close?.status !== 'done'));
+  const read = new Map();
+  for (const p of ledgers.flatMap((l) => l.prs ?? [])) {
+    if (!p.number || p.merged || read.has(prId(p))) continue;
+    read.set(prId(p), droppedLabel(await clients.forge.prState({ repo: p.repo, number: p.number }), settings));
+  }
+  return { ...step, dropped: [...read].filter(([, label]) => label).map(([id]) => id), droppedRead: true };
+}
+
 // The ledger without the PRs the rule names dropped (`step.dropped`: closed with `forge.wontMergeLabel`), for what a
 // scripted step does on the forge and the tracker: it never touches them.
 function withoutDropped(ledger, step) {
@@ -1156,8 +1178,12 @@ function cardsMovedWith(step, ledger, settings) {
   return readAllLedgers(settings.state).filter((o) => o.key !== ledger.key && !step.keys.includes(o.key) && o.group === ledger.group && o.mode === 'pipeline' && o.left?.status === from && o.stages?.close?.status !== 'done' && (o.prs ?? []).some((p) => p.number && shared.has(prId(p)) && (followsMove(p.stage, from, step.to) || taken.has(prId(p)))));
 }
 
-export async function runScripted(step, ctx) {
+export async function runScripted(stepIn, ctx) {
   const { settings, clients, io } = ctx;
+  // With `forge.wontMergeLabel`, the dropped PRs as the forge has them now, not as the status saw them: the labels,
+  // the card's place and the records below all come from this one read (`dropped`, handed to the records).
+  const step = await withFreshDropped(stepIn, ctx);
+  const handed = settings.forge.wontMergeLabel ? { dropped: step.dropped ?? [] } : {};
   const key = step.keys[0];
   // A dropped PR (`step.dropped`) gets no label, comment or review request: the step runs on the other PRs.
   const ledger = withoutDropped(readLedger(settings.state, key), step);
@@ -1185,7 +1211,7 @@ export async function runScripted(step, ctx) {
       if (step.pr) {
         const pr = findPr(ledger, step.pr);
         await setLabel(pr, step.to);
-        const result = {};
+        const result = { ...handed };
         // A review a person requested from the owner's queue: the card members too (lib/experts.mjs), and the comment
         // with the way to approve; its id goes in `posted`.
         if (step.to === 'smeReview') {
@@ -1234,13 +1260,14 @@ export async function runScripted(step, ctx) {
           if (id) posted.push(id);
         }
       }
-      const result = { ...(step.takeReady?.length ? { takeReady: step.takeReady } : {}), ...(posted.length ? { posted } : {}) };
+      const result = { ...(step.takeReady?.length ? { takeReady: step.takeReady } : {}), ...(posted.length ? { posted } : {}), ...handed };
       // The other card first: a stop here leaves this ticket's move still to follow, and the run starts it again.
       const others = cardsMovedWith(step, ledger, settings);
       const before = new Map([...others, ...step.keys.map((k) => readLedger(settings.state, k))].map((l) => [l.key, new Map(l.prs.map((x) => [prId(x), x.stage]))]));
       for (const o of others) {
         await clients.tracker.move({ card: o.card.shortLink ?? o.card.id, to: step.to });
-        await runRecord({ settings, clients, key: o.key, stage: 'follow', status: 'done', to: step.to, now: (io.now ?? Date.now)(), ...(step.takeReady?.length ? { result: JSON.stringify({ takeReady: step.takeReady }) } : {}) });
+        const theirs = { ...(step.takeReady?.length ? { takeReady: step.takeReady } : {}), ...handed };
+        await runRecord({ settings, clients, key: o.key, stage: 'follow', status: 'done', to: step.to, now: (io.now ?? Date.now)(), ...(Object.keys(theirs).length ? { result: JSON.stringify(theirs) } : {}) });
       }
       for (const k of step.keys) await rec(k, { to: step.to, ...(Object.keys(result).length ? { result: JSON.stringify(result) } : {}) });
       // Every other PR the records moved: a ready PR taken along (`takeReady`, which the record may leave when its head
@@ -1864,13 +1891,16 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
       let movedInRow = 0;
       for (let i = 0; step && i < settings.limits.stepsPerTicket; i++) {
         if (step.role && !guard(step.stage, step.group)) break;
+        // With `forge.wontMergeLabel`, the dropped PRs read again right before the step acts (`withFreshDropped`).
+        step = await withFreshDropped(step, { settings, clients });
         const before = labelSnapshot(settings.state, step.keys);
         const roundsBefore = roundSnapshot(settings.state, step.keys);
         // The comments a session takes get the pipeline's marks around it (lib/reactions.mjs): 👀 now, the result after.
         // Neither call stops the step or what follows it: a throw is a warning.
         const marked = (note) => say({ kind: 'reactions', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, outcome: 'warning', note });
         const picked = step.role ? await pickMarks({ settings, clients, step }).catch((e) => (marked(`no marks: ${e.message}`), null)) : null;
-        const r = await live.tracked(step, () => (step.role ? runModelStep(step) : step.stage === 'build' ? runBuildStep(step) : step.stage === 'idSync' ? runIdSyncStep(step) : step.stage === 'baseMerge' ? runBaseMergeStep(step) : step.stage === 'videoExtract' ? runExtractStep(step) : runScriptedStep(step)));
+        // A step on a PR closed as won't merge since the status gave it: nothing runs, and the status is read again.
+        const r = step.pr && (step.dropped ?? []).includes(step.pr) ? droppedSince(step) : await live.tracked(step, () => (step.role ? runModelStep(step) : step.stage === 'build' ? runBuildStep(step) : step.stage === 'idSync' ? runIdSyncStep(step) : step.stage === 'baseMerge' ? runBaseMergeStep(step) : step.stage === 'videoExtract' ? runExtractStep(step) : runScriptedStep(step)));
         for (const note of await settleMarks({ settings, clients, step, picked, outcome: r.outcome }).catch((e) => [`the marks were not set: ${e.message}`])) marked(note);
         // The ready, check and translated labels follow what the step recorded (lib/pr-labels.mjs), whoever recorded it.
         for (const note of await followLabels({ settings, clients, keys: step.keys, before, skip: step.dropped })) say({ kind: 'label', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, outcome: 'failed', note });
@@ -1919,6 +1949,12 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
     // `retried`: a failed step's (or a failed start's, `prior`) one more try, which a later check owes it when it waits
     // here (lib/watch.mjs `owed`).
     return { ...pick(step), handedOn: r.id ? { id: r.id, pid: r.pid } : null, ...(r.waits ? { waits: r.waits } : {}), ...(r.held ? { held: r.held } : {}), ...(r.error ? { error: r.error } : {}), ...(step.waits || (step.stage === 'start' && step.prior) ? { retried: true } : {}) };
+  }
+
+  function droppedSince(step) {
+    const note = `${step.pr} was closed as «${settings.forge.wontMergeLabel}» since the status: nothing runs on it`;
+    say({ kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr, role: step.role ?? null, outcome: 'moved', note });
+    return { ...pick(step), outcome: 'moved', note };
   }
 
   async function runScriptedStep(step) {
