@@ -533,6 +533,7 @@ test('the loop: Monday\'s session proposes in a PR, nothing reaches the kit befo
   assert.deepEqual(calls[0].input.edits.map((e) => e.id), ['a', 'b', 'c', 'd', 'e']);
   // The session's role: the learner, writing only under the state's tmp folder, no Bash.
   assert.equal(calls[0].cmd.args[calls[0].cmd.args.indexOf('--agent') + 1], 'ticket-learner');
+  assert.equal(calls[0].cmd.args[calls[0].cmd.args.indexOf('--plugin-dir') + 1], PLUGIN, 'the plugin from the toolkit the runner runs (D-157)');
   assert.ok(calls[0].cmd.args.includes(`Edit(//${path.join(settings.state, 'tmp').replace(/^\/+/, '')}/**)`));
   assert.ok(!calls[0].cmd.args.some((a) => /^Edit\(.*\.sources/.test(a)), 'no .sources folder for the learner');
   assert.deepEqual(r.proposed.map((p) => [p.repo, p.rules]), [['guide-docs', 2]]);
