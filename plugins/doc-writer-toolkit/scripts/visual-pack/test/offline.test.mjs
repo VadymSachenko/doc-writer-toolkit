@@ -17,6 +17,8 @@ import { startServer, resolveFile } from '../lib/server.mjs';
 import { loadPackSettings, normalizeBaseUrl, parseViewport } from '../lib/config.mjs';
 import { loadPlaywright } from '../lib/playwright.mjs';
 import { buildArgs } from '../lib/build.mjs';
+import { captureAll, newNetworkStats } from '../lib/capture.mjs';
+import { measureDom } from '../lib/dom.mjs';
 import { makeHost, makeBuild, tmp, write } from './fixture.mjs';
 
 const run = promisify(execFile);
@@ -389,6 +391,139 @@ test('an image of the site itself is shown by its path, not by the address of th
     sourceLocale: 'uk',
   });
   assert.equal(f[0].items[0], '/img/m.png: the site answered 404');
+});
+
+test('a pack with no view retried prints the same summary as before the retry existed', () => {
+  const settings = { range: 'a...b', defaultLocale: 'uk', columns: ['uk', 'en'] };
+  const pages = [{ key: 'primary:a.md', pair: 'primary', rel: 'a.md', changedIn: ['uk'], urls: { uk: '/a', en: '/en/a' }, files: { uk: 'x', en: 'x' } }];
+  const captures = [
+    { page: 'primary:a.md', locale: 'uk', status: 200, shot: 'shots/uk/a.png', error: null, dom: dom(), responses: {}, blocked: [] },
+    { page: 'primary:a.md', locale: 'en', status: 404, shot: 'shots/en/a.png', error: null, dom: dom(), responses: {}, blocked: [] },
+  ];
+  const report = assemble({ settings, pages, captures, network: { requests: 2, local: 2, blocked: 0, blockedHosts: [] }, timings: { buildSeconds: null, captureSeconds: 1.2, retrySeconds: null, totalSeconds: 2 }, sheet: 's.html' });
+  assert.equal(
+    summaryText(report),
+    [
+      'visual-pack: 1 page × 2 locales (uk, en); 2 captured, 0 not.',
+      'Findings: 1 to fix, 0 to look at.',
+      '  page-missing 1',
+      '  ! Page not found or not captured: primary:a.md [en] /en/a answered 404',
+      'Network: 2 local requests, 0 blocked (not local).',
+      'Time: build skipped (existing build), capture 1.2 s.',
+      'Sheet: s.html',
+    ].join('\n'),
+  );
+  assert.deepEqual([report.summary.retried, report.summary.capturedOnRetry], [0, 0]);
+  assert.deepEqual(Object.values(report.pages[0].captures).map((c) => [c.retried, c.firstError]), [[false, null], [false, null]]);
+  assert.doesNotMatch(renderSheet(report), /second try|twice/);
+});
+
+// ------------------------------------------------------------------ the captures, with a stand-in browser
+// A browser with the calls captureAll makes. `plan` maps a URL path to its attempts, in order: { status, error }, where
+// `error` is thrown by the screenshot. It records each attempt, the timeouts each wait was given, and how many views
+// were open at once.
+function standInBrowser(plan) {
+  const seen = { attempts: {}, timeouts: [], open: 0, events: [] };
+  const browser = {
+    async newContext() {
+      let url = null;
+      return {
+        setDefaultTimeout: (ms) => seen.timeouts.push(['default', ms]),
+        async newPage() {
+          let step;
+          return {
+            route: async () => {},
+            on: () => {},
+            async goto(address, options) {
+              url = new URL(address).pathname;
+              const n = (seen.attempts[url] = (seen.attempts[url] ?? 0) + 1);
+              step = plan[url][Math.min(n, plan[url].length) - 1];
+              seen.open += 1;
+              seen.events.push({ url, n, open: seen.open });
+              seen.timeouts.push(['goto', options.timeout]);
+              await new Promise((resolve) => setTimeout(resolve, 5));
+              return { status: () => step.status ?? 200 };
+            },
+            waitForLoadState: async () => {},
+            evaluate: async (fn) => (fn === measureDom ? dom({ heading: 'A' }) : undefined),
+            async screenshot(options) {
+              seen.timeouts.push(['screenshot', options.timeout]);
+              await new Promise((resolve) => setTimeout(resolve, 5));
+              if (step.error) throw new Error(`${step.error}\nCall log: …`);
+            },
+          };
+        },
+        async close() {
+          if (url) seen.open -= 1;
+        },
+      };
+    },
+  };
+  return { browser, seen };
+}
+
+const PLAN_PAGES = [
+  { key: 'primary:a.md', urls: { uk: '/a', en: '/en/a' } },
+  { key: 'primary:b.md', urls: { uk: '/b', en: '/en/b' } },
+];
+const captureWith = (plan, settings = {}) => {
+  const { browser, seen } = standInBrowser(plan);
+  const out = tmp('visual-pack-capture');
+  const net = newNetworkStats();
+  const run = captureAll({ browser, server: { origin: 'http://127.0.0.1:1' }, net, settings: { viewport: { width: 1280, height: 800 }, maxHeight: 8000, jobs: 4, timeoutMs: 45000, ...settings }, pages: PLAN_PAGES, columns: ['uk', 'en'], shotsDir: path.join(out, 'shots'), outDir: out });
+  return run.then((result) => ({ ...result, seen }));
+};
+const TIMEOUT_SHOT = 'page.screenshot: Timeout 30000ms exceeded.';
+const TIMEOUT_GOTO = 'page.goto: Timeout 30000ms exceeded.';
+
+test('captureAll: a view that failed to capture is captured once more, alone, after all the others; a 4xx answer is not', async () => {
+  const { captures, retrySeconds, seen } = await captureWith({
+    '/a': [{}],
+    '/en/a': [{ error: TIMEOUT_SHOT }, {}], // fails, then the retry captures it
+    '/b': [{ status: 404, error: TIMEOUT_SHOT }], // an answer: a finding as it stands, even with its screenshot failed
+    '/en/b': [{ error: TIMEOUT_SHOT }, { error: TIMEOUT_GOTO }], // fails twice
+  });
+  const cell = (url) => captures.find((c) => c.url === url);
+  assert.deepEqual(captures.map((c) => c.url), ['/a', '/en/a', '/b', '/en/b'], 'the order of the targets');
+  assert.deepEqual(seen.attempts, { '/a': 1, '/en/a': 2, '/b': 1, '/en/b': 2 });
+
+  assert.deepEqual([cell('/en/a').retried, cell('/en/a').error, cell('/en/a').firstError, cell('/en/a').shot], [true, null, TIMEOUT_SHOT, 'shots/en/p01-primary_a.png']);
+  assert.deepEqual([cell('/en/b').retried, cell('/en/b').error, cell('/en/b').firstError, cell('/en/b').shot], [true, TIMEOUT_GOTO, TIMEOUT_SHOT, null], 'the error of the second try is the one reported');
+  assert.deepEqual([cell('/b').retried, cell('/b').status, cell('/b').error], [false, 404, TIMEOUT_SHOT]);
+  assert.deepEqual([cell('/a').retried, cell('/a').firstError], [false, null]);
+  assert.equal(typeof retrySeconds, 'number');
+
+  // the second pass starts when the first is over, and opens one view at a time
+  const firstRetry = seen.events.findIndex((e) => e.n === 2);
+  assert.equal(firstRetry, 4, 'every view had its first try before any retry');
+  assert.ok(seen.events.slice(0, 4).some((e) => e.open > 1), 'the first pass runs views side by side');
+  assert.deepEqual(seen.events.slice(firstRetry).map((e) => e.open), [1, 1], 'each retry is alone');
+
+  // the findings: the view captured on the retry has none; the others are reported as before the retry existed (an
+  // error is reported before the status, as it always was)
+  const report = assemble({ settings: { range: 'a...b', defaultLocale: 'uk', columns: ['uk', 'en'] }, pages: PLAN_PAGES.map((p) => ({ ...p, pair: 'primary', rel: p.key, changedIn: ['uk'], files: { uk: 'x', en: 'x' } })), captures, network: { requests: 0, local: 0, blocked: 0, blockedHosts: [] }, timings: { buildSeconds: null, captureSeconds: 1, retrySeconds: 0.5, totalSeconds: 1 }, sheet: 's.html' });
+  assert.deepEqual(report.findings.map((f) => [f.type, f.page, f.locale, f.detail]), [
+    ['page-missing', 'primary:b.md', 'uk', `could not be captured: ${TIMEOUT_SHOT}`],
+    ['page-missing', 'primary:b.md', 'en', `could not be captured: ${TIMEOUT_GOTO}`],
+  ]);
+  assert.deepEqual([report.summary.captured, report.summary.notCaptured, report.summary.retried, report.summary.capturedOnRetry], [2, 2, 2, 1]);
+  assert.deepEqual([report.pages[0].captures.en.retried, report.pages[0].captures.en.firstError], [true, TIMEOUT_SHOT]);
+  const text = summaryText(report);
+  assert.match(text, /^visual-pack: 2 pages × 2 locales \(uk, en\); 2 captured, 2 not\.\nRetry: 2 page views that failed to capture were captured once more, one at a time: 1 captured, 1 not\.\n/);
+  assert.match(text, /\nTime: build skipped \(existing build\), capture 1 s \(the retry 0\.5 s of it\)\.\n/);
+  const html = renderSheet(report);
+  assert.match(html, /captured on the second try \(the first: page\.screenshot: Timeout 30000ms exceeded\.\)/);
+  assert.match(html, /not captured, twice: page\.goto: Timeout 30000ms exceeded\./);
+});
+
+test('captureAll: the run\'s timeout reaches every wait of a view, the screenshot too; no failure, no retry', async () => {
+  const { captures, retrySeconds, seen } = await captureWith({ '/a': [{}], '/en/a': [{}], '/b': [{}], '/en/b': [{}] }, { timeoutMs: 180000 });
+  assert.equal(retrySeconds, null);
+  assert.ok(captures.every((c) => c.retried === false && c.firstError === null && c.shot));
+  const kinds = (kind) => seen.timeouts.filter(([k]) => k === kind).map(([, ms]) => ms);
+  assert.deepEqual(kinds('screenshot'), [180000, 180000, 180000, 180000], 'the screenshot keeps no 30 s of its own');
+  assert.deepEqual(kinds('goto'), [180000, 180000, 180000, 180000]);
+  assert.deepEqual(kinds('default'), [180000, 180000, 180000, 180000], 'any other wait of the view gets it too');
 });
 
 // ------------------------------------------------------------------ the local server

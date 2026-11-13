@@ -4,6 +4,9 @@
 //   AC-1  a fixture site with a broken image and a wide table: the sheet flags both.
 //   AC-2  the script makes no model call: a `claude` stand-in on PATH records no call, and a request to anything but the
 //         local server is blocked and counted, while a second local port that records every hit sees none.
+//   TASK-110  a page whose screenshot takes longer than Playwright's 30 s is captured when --timeout allows it (it was
+//         `page-missing` before: the timeout never reached the screenshot); a view that fails twice is still
+//         `page-missing` with its error, and a page that answers 404 is not tried again.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -11,7 +14,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { makeHost, makeBuild, tmp } from './fixture.mjs';
+import { makeHost, makeBuild, makeSlowHost, makeSlowBuild, tmp } from './fixture.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CLI = path.join(HERE, '..', 'visual-pack.mjs');
@@ -47,9 +50,9 @@ after(async () => {
 });
 
 // Runs the command and returns { code, report }, whatever the exit code.
-const visualPack = (args) =>
+const visualPack = (args, on = host) =>
   new Promise((resolve, reject) => {
-    execFile('node', [CLI, '--root', host.dir, '--range', host.range, '--json', ...args], { env, maxBuffer: 64 * 1024 * 1024 }, (error, stdout, stderr) => {
+    execFile('node', [CLI, '--root', on.dir, '--range', on.range, '--json', ...args], { env, maxBuffer: 64 * 1024 * 1024 }, (error, stdout, stderr) => {
       try {
         resolve({ code: error ? error.code : 0, report: JSON.parse(stdout), stderr });
       } catch {
@@ -71,6 +74,7 @@ test('AC-1: the sheet flags the broken image and the wide table of the fixture s
   assert.deepEqual(report.columns, ['uk', 'en', 'ru']);
   assert.equal(report.summary.captured, 9);
   assert.equal(report.summary.notCaptured, 0);
+  assert.deepEqual([report.summary.retried, report.timings.retrySeconds], [0, null], 'nothing failed, nothing was tried again');
 
   // the broken image: the file that is not there, in every locale; the good image is not reported
   const broken = findingsOf(report, 'broken-image');
@@ -144,6 +148,44 @@ test('--locales narrows the columns, and a locale missing from the build is a fi
   assert.deepEqual(missing.map((f) => f.locale), ['ru', 'ru', 'ru']);
   assert.match(missing[0].detail, /answered 404/);
   assert.equal(report.summary.captured, 6, 'a 404 page is still captured');
+  assert.ok(report.pages.every((p) => p.captures.ru.status === 404 && p.captures.ru.retried === false), 'a 404 answer is not tried again');
+  assert.equal(report.summary.retried, 0);
   assert.ok(!fs.existsSync(calls));
   assert.deepEqual(tripHits, []);
+});
+
+test('TASK-110: a page whose screenshot takes longer than Playwright\'s 30 s is captured with a --timeout above it', async () => {
+  // Before the fix this view was `page-missing` with "page.screenshot: Timeout 30000ms exceeded.", --timeout or not.
+  const slow = makeSlowHost();
+  const build = makeSlowBuild({ stallMs: { en: 34000 } });
+  const { code, report } = await visualPack(['--build-dir', build, '--out', path.join(slow.dir, 'pack'), '--locales', 'en', '--timeout', '60000'], slow);
+  assert.equal(code, 0);
+  const en = report.pages[0].captures.en;
+  assert.deepEqual([en.status, en.error, en.retried], [200, null, false]);
+  assert.ok(en.shot && fs.readFileSync(path.join(slow.dir, 'pack', en.shot)).subarray(0, 4).equals(PNG_SIGNATURE));
+  assert.ok(report.timings.captureSeconds >= 30, `the screenshot waited past 30 s (capture ${report.timings.captureSeconds} s)`);
+  assert.deepEqual(report.findings, []);
+  assert.deepEqual([report.summary.captured, report.summary.notCaptured, report.summary.retried], [2, 0, 0]);
+});
+
+test('TASK-110: a view that fails twice is page-missing with its error, the retry is recorded, and a 404 is not tried again', async () => {
+  const slow = makeSlowHost();
+  const build = makeSlowBuild({ stallMs: { en: 120000 }, locales: ['uk', 'en'] }); // ru is not in the build: 404
+  const { code, report } = await visualPack(['--build-dir', build, '--out', path.join(slow.dir, 'pack'), '--timeout', '5000'], slow);
+  assert.equal(code, 10);
+  const { uk, en, ru } = report.pages[0].captures;
+  assert.match(en.error, /^page\.screenshot: Timeout 5000ms exceeded/, 'the timeout reached the screenshot');
+  assert.match(en.firstError, /^page\.screenshot: Timeout 5000ms exceeded/);
+  assert.deepEqual([en.retried, en.shot], [true, null]);
+  assert.deepEqual([ru.status, ru.retried], [404, false]);
+  assert.deepEqual([uk.retried, Boolean(uk.shot)], [false, true]);
+  assert.deepEqual(
+    report.findings.map((f) => [f.type, f.level, f.locale, f.detail]),
+    [
+      ['page-missing', 'problem', 'en', `could not be captured: ${en.error}`],
+      ['page-missing', 'problem', 'ru', '/ru/guide/slow answered 404'],
+    ],
+  );
+  assert.deepEqual([report.summary.retried, report.summary.capturedOnRetry], [1, 0]);
+  assert.ok(report.timings.retrySeconds >= 5, `the retry waited its own 5 s (${report.timings.retrySeconds} s)`);
 });

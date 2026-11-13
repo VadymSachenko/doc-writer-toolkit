@@ -51,9 +51,9 @@ function cell(report, page, pageIdx, locale) {
   const badges = mine.map((f) => `<span class="badge ${f.level}">${escapeHtml(TYPES[f.type].title)}</span>`).join('');
   let body;
   if (capture?.shot) {
-    body = `<a href="${hrefOf(capture.shot)}"><img src="${hrefOf(capture.shot)}" alt="${escapeHtml(`${page.key} in ${locale}`)}" loading="lazy"></a>${capture.cropped ? '<div class="muted">cropped at the height limit</div>' : ''}`;
+    body = `<a href="${hrefOf(capture.shot)}"><img src="${hrefOf(capture.shot)}" alt="${escapeHtml(`${page.key} in ${locale}`)}" loading="lazy"></a>${capture.cropped ? '<div class="muted">cropped at the height limit</div>' : ''}${capture.retried ? `<div class="muted">captured on the second try (the first: ${escapeHtml(capture.firstError)})</div>` : ''}`;
   } else {
-    body = `<div class="muted">not captured${capture?.error ? `: ${escapeHtml(capture.error)}` : ''}</div>`;
+    body = `<div class="muted">not captured${capture?.retried ? ', twice' : ''}${capture?.error ? `: ${escapeHtml(capture.error)}` : ''}</div>`;
   }
   return `<td id="${cellId(pageIdx, locale)}">${body}${badges ? `<div>${badges}</div>` : ''}</td>`;
 }

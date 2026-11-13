@@ -33,7 +33,9 @@ Options (default: the 'Documentation toolkit configuration' block of <root>/CLAU
   --docusaurus-config <f>  path to the Docusaurus config
   --ua-root <dir> --en-root <dir> --url-prefix <path>   the primary root pair  --pair <ids>  only these root pairs
   --viewport <WxH>         default 1280x800     --max-height <px>  longest screenshot, default 8000
-  --jobs <n>               pages captured at once, default 4     --timeout <ms>  per page, default 30000
+  --jobs <n>               pages captured at once, default 4
+  --timeout <ms>           how long each wait of a page view may take (its load, its screenshot), default 30000;
+                           a view that fails to capture is captured once more, alone, after all the others
   --playwright-from <dir>  a folder whose node_modules holds Playwright (default: the root; env VISUAL_PACK_PLAYWRIGHT_FROM)
   --dry-run                list the pages and their URLs; build and capture nothing
   --json                   print the report as JSON on stdout instead of the short summary
@@ -76,7 +78,7 @@ export async function run(values, env = process.env) {
     ...base,
     pages: pages.map((p) => ({ key: p.key, pair: p.pair, rel: p.rel, changedIn: p.changedIn, urls: p.urls, captures: {} })),
     findings: [],
-    summary: { pages: pages.length, locales: settings.columns.length, captured: 0, notCaptured: 0, findings: { total: 0, problems: 0, look: 0, byType: {} } },
+    summary: { pages: pages.length, locales: settings.columns.length, captured: 0, notCaptured: 0, retried: 0, capturedOnRetry: 0, findings: { total: 0, problems: 0, look: 0, byType: {} } },
     ...extra,
   });
   if (!pages.length) return { report: emptyView({ empty: true }), exitCode: 0, text: `visual-pack: no changed docs page in ${settings.range}.` };
@@ -95,6 +97,7 @@ export async function run(values, env = process.env) {
   const browser = await launchBrowser(chromium);
   let captures;
   let buildSeconds = null;
+  let retrySeconds = null;
   let captureStarted;
   const net = newNetworkStats();
   let server;
@@ -114,13 +117,13 @@ export async function run(values, env = process.env) {
     server = await startServer(buildDir, settings.baseUrl);
     captureStarted = Date.now();
     log(`visual-pack: capturing ${pages.length * settings.columns.length} page views …`);
-    captures = await captureAll({ browser, server, net, settings, pages, columns: settings.columns, shotsDir, outDir: settings.outDir });
+    ({ captures, retrySeconds } = await captureAll({ browser, server, net, settings, pages, columns: settings.columns, shotsDir, outDir: settings.outDir }));
   } finally {
     await browser.close().catch(() => {});
     await server?.close();
   }
 
-  const timings = { buildSeconds, captureSeconds: seconds(captureStarted), totalSeconds: seconds(started) };
+  const timings = { buildSeconds, captureSeconds: seconds(captureStarted), retrySeconds, totalSeconds: seconds(started) };
   const sheetPath = path.relative(settings.root, sheetFile) || sheetFile;
   const report = assemble({ settings, pages, captures, network: networkView(net, server), timings, sheet: sheetPath.startsWith('..') ? sheetFile : sheetPath });
   await writeFileAtomic(sheetFile, renderSheet(report));

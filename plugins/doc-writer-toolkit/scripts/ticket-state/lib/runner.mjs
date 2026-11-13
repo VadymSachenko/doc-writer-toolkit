@@ -423,6 +423,7 @@ export function briefFor(step, settings) {
     step.stale ? `The UA pages changed after this stage last ran (${step.stale} file(s)): run it again on the current head${pagesRead(step, settings)}.` : null,
     ...buildLines(step),
     ...videoImportLines(step),
+    step.stage === 'visualPack' ? 'Run visual-pack once. It captures every view that failed to capture once more by itself, one at a time, and what it still reports not captured is a finding: never run the whole pack again, with a longer `--timeout` or fewer `--jobs` or as it was.' : null,
     ...(step.stage === 'answerPass' ? passLines(step, settings) : []),
     ...(['plan', 'write'].includes(step.stage) && step.role === 'writer' ? [...holdLines(step, settings), ...(step.heldAnswers ?? [])] : []),
     ...(step.stage === 'pr' ? step.passLines ?? [] : []),

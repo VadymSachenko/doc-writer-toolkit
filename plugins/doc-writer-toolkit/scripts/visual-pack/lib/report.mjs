@@ -15,6 +15,8 @@ export function assemble({ settings, pages, captures, network, timings, sheet })
         shot: capture?.shot ?? null,
         cropped: capture?.cropped ?? false,
         error: capture?.error ?? null,
+        retried: capture?.retried ?? false,
+        firstError: capture?.firstError ?? null,
         title: capture?.dom?.heading || capture?.dom?.title || null,
         images: capture?.dom?.images.length ?? null,
         tables: capture?.dom?.tables.length ?? null,
@@ -39,6 +41,8 @@ export function assemble({ settings, pages, captures, network, timings, sheet })
       locales: settings.columns.length,
       captured: cellsAll.filter((c) => c.shot).length,
       notCaptured: cellsAll.filter((c) => !c.shot).length,
+      retried: cellsAll.filter((c) => c.retried).length,
+      capturedOnRetry: cellsAll.filter((c) => c.retried && c.shot).length,
       findings: summarizeFindings(sorted),
     },
     network,
@@ -57,6 +61,10 @@ export function summaryText(report, { maxLines = 15 } = {}) {
     return lines.join('\n');
   }
   lines.push(`visual-pack: ${summary.pages} page${summary.pages === 1 ? '' : 's'} × ${summary.locales} locale${summary.locales === 1 ? '' : 's'} (${report.columns.join(', ')}); ${summary.captured} captured, ${summary.notCaptured} not.`);
+  // Only when a view failed to capture: the pack already tried it twice, so running it again is not needed.
+  if (summary.retried) {
+    lines.push(`Retry: ${summary.retried} page view${summary.retried === 1 ? '' : 's'} that failed to capture ${summary.retried === 1 ? 'was' : 'were'} captured once more, one at a time: ${summary.capturedOnRetry} captured, ${summary.retried - summary.capturedOnRetry} not.`);
+  }
   const f = summary.findings;
   if (!f.total) {
     lines.push('Findings: none.');
@@ -79,7 +87,7 @@ export function summaryText(report, { maxLines = 15 } = {}) {
   }
   lines.push(`Network: ${report.network.local} local request${report.network.local === 1 ? '' : 's'}, ${report.network.blocked} blocked (not local).`);
   const built = report.timings.buildSeconds === null ? 'skipped (existing build)' : `${report.timings.buildSeconds} s`;
-  lines.push(`Time: build ${built}, capture ${report.timings.captureSeconds} s.`);
+  lines.push(`Time: build ${built}, capture ${report.timings.captureSeconds} s${report.timings.retrySeconds != null ? ` (the retry ${report.timings.retrySeconds} s of it)` : ''}.`);
   lines.push(`Sheet: ${report.sheet}`);
   return lines.join('\n');
 }
