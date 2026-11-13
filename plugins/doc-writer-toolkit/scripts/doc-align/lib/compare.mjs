@@ -2,13 +2,15 @@
 // in skills/doc-alignment-checker/SKILL.md, null for the counts that have no Check of their own (images, links,
 // admonitions). Severity follows the skill: heading count and levels, code blocks and Cyrillic left in the EN page's
 // code text are bugs, the rest warnings.
-// With a names table (--names), Check 12 also compares the names of organizations against it.
+// With a names table (--names), Check 12 also compares the names of organizations against it. With the existing pairs
+// of an example values file (--examples), Check 6 counts a listed pair as the same value.
 
 import { parse } from './parse.mjs';
 import { detectUa, headingComments, headingText, uaHeadingId } from './headings.mjs';
 import { findNames, searchable } from './names.mjs';
 import { codeDiff, cyrillicText, fenceParts } from './fences.mjs';
 import { headingIdMismatches } from './ids.mjs';
+import { pairMatcher, pairedCodeDiff } from './examples.mjs';
 
 const trunc = (s, n = 80) => (s.length <= n ? s : `${s.slice(0, n - 1)}…`);
 const hLabel = (h) => `${'#'.repeat(h.level)} ${trunc(headingText(h.raw))}`;
@@ -38,6 +40,7 @@ class Report {
   toJSON() {
     const out = { main: this.main, secondary: this.secondary, ua: this.ua, bugs: this.bugs, warnings: this.warnings, passed: this.passed };
     if (this.names) out.names = this.names;
+    if (this.examples) out.examples = this.examples;
     return out;
   }
 }
@@ -127,21 +130,46 @@ function checkTables(r, m, s) {
 }
 
 // Check 6 compares each block's code part (code-blocks.md, fences.mjs): a diagram by its ids, keywords, arrows and
-// lines, any other block by everything but its comments and tree descriptions. Those are translated.
-function checkCode(r, m, s) {
+// lines, any other block by everything but its comments and tree descriptions. Those are translated. With the existing
+// pairs of an example values file, a quoted UA value of a pair may be its EN value on the EN side (examples.mjs).
+function checkCode(r, m, s, examples) {
+  const matcher = examplePairs(r, examples);
   r.sub(6, 'Code blocks keep their code', () => {
     if (m.fences.length !== s.fences.length) {
       r.bug(6, 'CODE-BLOCK-MISMATCH', `main has ${m.fences.length} code block(s), secondary has ${s.fences.length}`, s.fences.at(-1)?.line ?? 1, r.secondary);
       return;
     }
+    const used = [];
     m.fences.forEach((mf, i) => {
       const sf = s.fences[i];
-      const k = codeDiff(mf, sf);
+      const k = !matcher ? codeDiff(mf, sf) : r.ua === 'main' ? pairedCodeDiff(mf, sf, matcher, used) : pairedCodeDiff(sf, mf, matcher, used);
       if (k < 0) return;
       const what = fenceParts(mf.info, mf.lines).kind === 'diagram' ? 'the diagram ids, keywords, arrows and lines' : 'the code, data and line count';
       r.bug(6, 'CODE-BLOCK-MISMATCH', `code block ${i + 1} differs from line ${k + 1} of the block (${what} must be identical; only labels, comments and descriptions are translated)`, sf.line + 1 + k, r.secondary);
     });
+    if (!matcher) return;
+    for (const row of examples.rows) {
+      const lines = used.filter((u) => u === row).length;
+      if (lines) r.examples.matched.push({ ua: row.ua, en: row.en, type: row.type, lines });
+    }
   });
+}
+
+// The pairs matcher for Check 6, or null. Sets the report's `examples` field, and warns when a pair can't be used: the
+// file has no pairs section, a row is not a valid pair, or neither page reads as UA (a pair has a direction).
+function examplePairs(r, examples) {
+  if (!examples) return null;
+  r.examples = { pairs: examples.rows.length, matched: [] };
+  if (!examples.found) {
+    r.warn(6, 'EXAMPLE-PAIRS-MISSING', `no existing pairs section ('## Existing pairs' or '## Наявні пари') in ${examples.file}`, 1, examples.file);
+    return null;
+  }
+  for (const x of examples.invalid) r.warn(6, 'EXAMPLE-PAIR-INVALID', `row skipped: ${x.reason}`, x.line, examples.file);
+  if (!r.ua) {
+    r.warn(6, 'EXAMPLES-SKIPPED', 'cannot tell which page is UA (a pair goes from UA to EN); pass --ua main|secondary to use the existing pairs', 1, r.secondary);
+    return null;
+  }
+  return examples.rows.length ? pairMatcher(examples.rows) : null;
 }
 
 // Check 9, inside code blocks: Cyrillic left in the EN page's diagram labels, code comments and tree descriptions. The
@@ -227,8 +255,9 @@ function checkNames(r, m, s, names) {
 }
 
 // mainText / secondaryText: the two pages. ua: 'main' | 'secondary' | undefined (detect). names: the names table
-// for Check 12, { tables: [{ file, found }], rows: [{ ua, en, source }] }, or undefined to skip the check.
-export function compare(mainText, secondaryText, { mainPath = 'main', secondaryPath = 'secondary', ua, names } = {}) {
+// for Check 12, { tables: [{ file, found }], rows: [{ ua, en, source }] }, or undefined to skip the check. examples: the
+// existing pairs for Check 6, { file, found, rows: [{ ua, en, type, line }], invalid }, or undefined for none.
+export function compare(mainText, secondaryText, { mainPath = 'main', secondaryPath = 'secondary', ua, names, examples } = {}) {
   const m = parse(mainText);
   const s = parse(secondaryText);
   const r = new Report(mainPath, secondaryPath, ua ?? detectUa(mainText, secondaryText, m, s));
@@ -236,7 +265,7 @@ export function compare(mainText, secondaryText, { mainPath = 'main', secondaryP
   checkHeadingStructure(r, m, s);
   checkHeadingIds(r, m, s);
   checkTables(r, m, s);
-  checkCode(r, m, s);
+  checkCode(r, m, s, examples);
   checkCodeText(r, m, s);
   countCheck(r, 7, '<details> block count', 'DETAILS-BLOCK-COUNT-MISMATCH', m.details, s.details);
   checkMarkers(r, m, s);

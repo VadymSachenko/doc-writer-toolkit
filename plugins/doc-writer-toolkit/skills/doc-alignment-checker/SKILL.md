@@ -22,6 +22,7 @@ Load these files at the start of the task. Do not load others unless the user re
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/code-blocks.md` — the shared rule for what a translation changes inside a code block. Checks 6 and 9 read code blocks by it; do not restate it here.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` — the shared slug/title/filename convention. Check 11 checks title form and slug/filename agreement against this file; do not restate it here.
 - The product kit's names table, for Check 12: the `## Назви` / `## Names` section of `<kit>/glossary-ua.md` and `<kit>/glossary-en.md` (`${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`, "Product kit"; the format is `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/glossary-format.md`, "Names"). Read only that section. With no kit declared, say so and run Check 12 without a table.
+- The product kit's example values file, for Check 6: `<kit>/example-values.md`, if present. The script reads its existing pairs; you read it only when a Check 6 finding involves a value it lists. The format is `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/example-values-format.md`.
 - The UA page being checked (at the path resolved above).
 - The EN counterpart page (at the path resolved above).
 
@@ -52,10 +53,10 @@ A Node script does the mechanical counting, so it is exact on long pages: dates,
 Run it with the main file first and the secondary file second:
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/doc-align/doc-align.mjs <main-file> <secondary-file> --names <kit>/glossary-ua.md --names <kit>/glossary-en.md
+node ${CLAUDE_PLUGIN_ROOT}/scripts/doc-align/doc-align.mjs <main-file> <secondary-file> --names <kit>/glossary-ua.md --names <kit>/glossary-en.md --examples <kit>/example-values.md
 ```
 
-Leave out each `--names` whose file isn't there, and both with no kit declared.
+Leave out each `--names` or `--examples` whose file isn't there, and all three with no kit declared.
 
 It prints one JSON report: `bugs[]`, `warnings[]` and `passed[]`. Each finding has a `check` (the Check number below), a `flag`, a `description`, a `line` and a `file`. The fields, flags and exit codes are in `${CLAUDE_PLUGIN_ROOT}/scripts/doc-align/README.md`. Read that file only when a finding is unclear.
 
@@ -121,11 +122,11 @@ Every page-to-page link in both files must have the form the page's root pair de
 
 ### Check 6 — Code blocks keep their code
 
-Extract every fenced code block (` ``` `) from both files in order. The counts must match, and each pair must have the same code part (`code-blocks.md`): a diagram the same ids, keywords, arrows and number of lines; any other block the same code, data, comment markers, whitespace and number of lines, byte for byte. Its reader text (diagram labels, comments, the descriptions of a folder tree) is translated, so a difference there is not a finding.
+Extract every fenced code block (` ``` `) from both files in order. The counts must match, and each pair must have the same code part (`code-blocks.md`): a diagram the same ids, keywords, arrows and number of lines; any other block the same code, data, comment markers, whitespace and number of lines, byte for byte. Its reader text (diagram labels, comments, the descriptions of a folder tree) is translated, so a difference there is not a finding. An existing pair of the kit's example values file is not a finding either: a quoted UA value of a pair may be its EN value in the EN page (`example-values-format.md`). Any other difference in a value is.
 
 **Flag:** `[CODE BLOCK MISMATCH]` — show the position (nth code block) and a side-by-side diff of the differing lines.
 
-Script flag: `CODE-BLOCK-MISMATCH`. Its `line` is the first line whose code part differs; you still write the diff.
+Script flag: `CODE-BLOCK-MISMATCH`. Its `line` is the first line whose code part differs; you still write the diff. A difference in an invented value that the file lacks: say that the value belongs in Example values (a new page) or Existing pairs (a page written before the file), and leave the decision to the user. `examples.matched` lists the pairs the script used; name them under **Passed**. Warnings `EXAMPLE-PAIRS-MISSING`, `EXAMPLE-PAIR-INVALID` and `EXAMPLES-SKIPPED` go in the report as warnings.
 
 ### Check 7 — `<details>` block count matches
 

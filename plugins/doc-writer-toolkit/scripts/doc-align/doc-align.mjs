@@ -6,8 +6,9 @@ import { detectUa } from './lib/headings.mjs';
 import { parse } from './lib/parse.mjs';
 import { mergeRows, parseNamesTable } from './lib/names.mjs';
 import { proposeIds } from './lib/ids.mjs';
+import { parseExamplePairs } from './lib/examples.mjs';
 
-const USAGE = `doc-align <main-file> <secondary-file> [--ua main|secondary] [--names <glossary-file>]...
+const USAGE = `doc-align <main-file> <secondary-file> [--ua main|secondary] [--names <glossary-file>]... [--examples <example-values-file>]
 doc-align <main-file> <secondary-file> --propose-ids [--ua main|secondary] [--root <dir>[=<url prefix>]]... [--write]
 
 Compares the structure of two Markdown/MDX pages, a main (source of truth) and a secondary that must conform
@@ -18,7 +19,9 @@ Options
                         Cyrillic letters in its headings, else in its whole text)
   --names <file>        a product kit glossary with a names table ('## Names' or '## Назви'); checks the
                         names of organizations against it (Check 12). May be given more than once
-  --propose-ids         instead of comparing: propose an id for every UA heading without one, from the EN
+  --examples <file>     a product kit's example values file; Check 6 counts each of its existing pairs ('## Existing
+                        pairs' or '## Наявні пари') as the same value: a quoted UA value may be its EN value in EN
+  --propose-ids        instead of comparing: propose an id for every UA heading without one, from the EN
                         heading at the same position, and list the links that use the old fragments. Prints
                         { ua, en, proposals, links, unresolved, skipped }
   --root <dir>[=<url prefix>]
@@ -31,6 +34,7 @@ Options
 const OPTIONS = {
   ua: { type: 'string' },
   names: { type: 'string', multiple: true },
+  examples: { type: 'string' },
   'propose-ids': { type: 'boolean' },
   root: { type: 'string', multiple: true },
   write: { type: 'boolean' },
@@ -66,6 +70,7 @@ async function main() {
   if (!values['propose-ids'] && (values.root || values.write)) throw new CliError('--root and --write go with --propose-ids.');
   if (values['propose-ids']) {
     if (values.names) throw new CliError('--names does not go with --propose-ids.');
+    if (values.examples) throw new CliError('--examples does not go with --propose-ids.');
     const ua = values.ua ?? detectUa(mainText, secondaryText, parse(mainText), parse(secondaryText));
     if (!ua) throw new CliError('cannot tell which page is UA (no Cyrillic text in either, or the same amount): pass --ua main|secondary.');
     const [uaPath, enPath, uaText, enText] = ua === 'main' ? [mainPath, secondaryPath, mainText, secondaryText] : [secondaryPath, mainPath, secondaryText, mainText];
@@ -86,7 +91,8 @@ async function main() {
     for (const file of values.names) tables.push({ file, ...parseNamesTable(await read(file)) });
     names = { tables: tables.map(({ file, found }) => ({ file, found })), rows: mergeRows(tables) };
   }
-  const report = compare(mainText, secondaryText, { mainPath, secondaryPath, ua: values.ua, names });
+  const examples = values.examples ? { file: values.examples, ...parseExamplePairs(await read(values.examples)) } : undefined;
+  const report = compare(mainText, secondaryText, { mainPath, secondaryPath, ua: values.ua, names, examples });
   process.stdout.write(JSON.stringify(report, null, 2) + '\n');
   return 0;
 }

@@ -13,6 +13,7 @@ import { findNames, looseKey, mergeRows, parseNamesTable, searchable } from '../
 import { headingIdMismatches, proposeIds, renameIds, withExplicitId } from '../lib/ids.mjs';
 import { isIdOnlyChange } from '../lib/idonly.mjs';
 import { codeDiff, fenceBlock, fenceParts } from '../lib/fences.mjs';
+import { parseExamplePairs } from '../lib/examples.mjs';
 
 const run = promisify(execFile);
 const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'doc-align.mjs');
@@ -706,6 +707,172 @@ test('CLI: --names reads the names table from one or more glossaries', async () 
   const missing = await cli(files.ua, files.en, '--names', path.join(dir, 'nope.md'));
   assert.equal(missing.code, 2);
   assert.match(missing.out.error, /file not found/);
+});
+
+// Check 6 with an example values file (--examples): its existing pairs count as the same value
+// (context/doc-rules/example-values-format.md). Invented values.
+const EXAMPLES = `---
+name: Example values
+---
+
+## System values
+
+| Value | Field | Source |
+|---|---|---|
+| \`Оплата послуг\` | \`paymentPurpose\` | code: \`payments-api\`@1a2b3c4:\`defaults.go\` |
+
+## Example values
+
+| Kind | Value | Fields |
+|---|---|---|
+| Person's name | \`Olena Marchenko\` | \`recipient\` |
+
+## Existing pairs
+
+| UA value | EN value | Type | Pages |
+|---|---|---|---|
+| \`Петренко Олег\` | \`John Smith\` | example | create-payment |
+| \`TEST Petrenko Oleh\` | \`John Smith\` | example | create-payment |
+| \`Кошти не надійшли.\` | \`The funds did not arrive.\` | example | disputes |
+| \`Оплата послуг\` | \`Service payment\` | system | create-payment |
+`;
+
+const examplesOf = (text, file = 'example-values.md') => ({ file, ...parseExamplePairs(text) });
+
+const XUA = `# Платіж
+
+## Запит {/* #request */}
+
+\`\`\`bash
+curl -X POST https://api.example/pay -d '{"recipient": "Петренко Олег", "comment": "Кошти не надійшли."}'
+\`\`\`
+
+## Відповідь {/* #response */}
+
+\`\`\`jsonc
+{
+  "recipient": "Петренко Олег", // отримувач
+  "sender": "TEST Petrenko Oleh",
+  "paymentPurpose": "Оплата послуг",
+  "phoneNumber": "+380000000001"
+}
+\`\`\`
+`;
+
+const XEN = `# Payment
+
+## Request
+
+\`\`\`bash
+curl -X POST https://api.example/pay -d '{"recipient": "John Smith", "comment": "The funds did not arrive."}'
+\`\`\`
+
+## Response
+
+\`\`\`jsonc
+{
+  "recipient": "John Smith", // recipient
+  "sender": "John Smith",
+  "paymentPurpose": "Service payment",
+  "phoneNumber": "+380000000001"
+}
+\`\`\`
+`;
+
+const check6 = (r) => r.bugs.filter((f) => f.check === 6).map((f) => [f.flag, f.line]);
+
+test('Check 6 with --examples: the pairs table', () => {
+  const t = parseExamplePairs(EXAMPLES);
+  assert.equal(t.found, true);
+  assert.deepEqual(t.rows.map((r) => [r.ua, r.en, r.type, r.line]), [
+    ['Петренко Олег', 'John Smith', 'example', 21],
+    ['TEST Petrenko Oleh', 'John Smith', 'example', 22],
+    ['Кошти не надійшли.', 'The funds did not arrive.', 'example', 23],
+    ['Оплата послуг', 'Service payment', 'system', 24],
+  ]);
+  assert.deepEqual(t.invalid, []);
+  // The Ukrainian heading reads the same; a value with a backtick or a pipe; a row that is no pair is skipped.
+  const ua = parseExamplePairs('## Наявні пари\n\n| Значення UA | Значення EN | Тип |\n|---|---|---|\n| `` a`b `` | `c\\|d` | |\n| `x` | `x` | example |\n| `y` | | example |\n| `z` | `w` | other |\n');
+  assert.deepEqual(ua.rows.map((r) => [r.ua, r.en, r.type]), [['a`b', 'c|d', 'example']]);
+  assert.deepEqual(ua.invalid.map((x) => x.line), [6, 7, 8]);
+  assert.deepEqual(parseExamplePairs('## Example values\n\n| Kind | Value |\n|---|---|\n| a | `b` |\n'), { found: false, rows: [], invalid: [] });
+  assert.deepEqual(parseExamplePairs('## Existing pairs\n\nNone yet.\n\n## Other\n'), { found: true, rows: [], invalid: [] });
+});
+
+test('Check 6 with --examples: a listed pair is the same value, in either direction of main (AC-1)', () => {
+  // Without the file, every pair is a code-block bug: the two blocks differ from their first data line.
+  assert.deepEqual(check6(compare(XUA, XEN)), [['CODE-BLOCK-MISMATCH', 6], ['CODE-BLOCK-MISMATCH', 13]]);
+  const r = compare(XUA, XEN, { examples: examplesOf(EXAMPLES) });
+  assert.deepEqual(check6(r), []);
+  assert.ok(r.passed.some((p) => p.check === 6 && p.name === 'Code blocks keep their code'));
+  assert.deepEqual(r.examples, {
+    pairs: 4,
+    matched: [
+      { ua: 'Петренко Олег', en: 'John Smith', type: 'example', lines: 2 },
+      { ua: 'TEST Petrenko Oleh', en: 'John Smith', type: 'example', lines: 1 },
+      { ua: 'Кошти не надійшли.', en: 'The funds did not arrive.', type: 'example', lines: 1 },
+      { ua: 'Оплата послуг', en: 'Service payment', type: 'system', lines: 1 },
+    ],
+  });
+  // EN as main: the pairs still go from UA to EN.
+  assert.deepEqual(check6(compare(XEN, XUA, { examples: examplesOf(EXAMPLES) })), []);
+  // An EN page that copied the UA value passes too: a system value stays verbatim, and data used to stay.
+  const copied = edit(XEN, '"paymentPurpose": "Service payment"', '"paymentPurpose": "Оплата послуг"');
+  const c = compare(XUA, copied, { examples: examplesOf(EXAMPLES) });
+  assert.deepEqual(check6(c), []);
+  assert.ok(!c.examples.matched.some((m) => m.type === 'system'));
+  // Without --examples the report has no examples field.
+  assert.equal(compare(XUA, XEN).examples, undefined);
+});
+
+test('Check 6 with --examples: every other difference is still a bug (AC-1)', () => {
+  const examples = examplesOf(EXAMPLES);
+  for (const [what, ua, en, line] of [
+    ['a value outside the file', XUA, edit(XEN, '"+380000000001"', '"+380000000002"'), 16],
+    ["an EN value other than the pair's", XUA, edit(XEN, '"recipient": "John Smith", //', '"recipient": "Jane Smith", //'), 13],
+    ["a pair's UA value changed on the UA side", edit(XUA, '"recipient": "Петренко Олег", //', '"recipient": "Петренко Ольга", //'), XEN, 13],
+    ['a pair written the other way round', edit(XUA, '"sender": "TEST Petrenko Oleh"', '"sender": "John Smith"'), edit(XEN, '"sender": "John Smith"', '"sender": "TEST Petrenko Oleh"'), 14],
+    ["a pair's UA value inside a longer string", edit(XUA, '"TEST Petrenko Oleh"', '"Петренко Олег Іванович"'), edit(XEN, '"sender": "John Smith"', '"sender": "John Smith Іванович"'), 14],
+    ['other quotes on the EN side', XUA, edit(XEN, '"recipient": "John Smith", //', "\"recipient\": 'John Smith', //"), 13],
+    ['a key, not a value', XUA, edit(XEN, '"recipient": "John Smith", //', '"recipientName": "John Smith", //'), 13],
+  ]) {
+    assert.deepEqual(check6(compare(ua, en, { examples })), [['CODE-BLOCK-MISMATCH', line]], what);
+  }
+  // A pair's EN value in a comment is reader text, translated: not compared.
+  assert.deepEqual(check6(compare(XUA, edit(XEN, '// recipient', '// John Smith'), { examples })), []);
+});
+
+test('Check 6 with --examples: no pairs section, rows that are no pair, no UA page', () => {
+  const none = compare(XUA, XEN, { examples: examplesOf('## Example values\n') });
+  assert.deepEqual(flags(none), ['CODE-BLOCK-MISMATCH', 'CODE-BLOCK-MISMATCH', 'EXAMPLE-PAIRS-MISSING']);
+  assert.equal(none.warnings[0].file, 'example-values.md');
+  assert.deepEqual(none.examples, { pairs: 0, matched: [] });
+  const bad = compare(XUA, XEN, { examples: examplesOf(`${EXAMPLES}| \`Сидоренко\` | \`Сидоренко\` | example | x |\n`) });
+  assert.deepEqual(bad.warnings.map((w) => [w.flag, w.line, w.file]), [['EXAMPLE-PAIR-INVALID', 25, 'example-values.md']]);
+  assert.deepEqual(check6(bad), []);
+  // Two pages with no Cyrillic: a pair has a direction, so it is not used.
+  assert.ok(flags(compare(XEN, XEN, { examples: examplesOf(EXAMPLES) })).includes('EXAMPLES-SKIPPED'));
+});
+
+test('CLI: --examples reads the existing pairs of an example values file', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'doc-align-'));
+  const files = { ua: path.join(dir, 'ua.md'), en: path.join(dir, 'en.md'), ex: path.join(dir, 'example-values.md') };
+  await fs.writeFile(files.ua, XUA);
+  await fs.writeFile(files.en, XEN);
+  await fs.writeFile(files.ex, EXAMPLES);
+  const r = await cli(files.ua, files.en, '--examples', files.ex);
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(Object.keys(r.out), ['main', 'secondary', 'ua', 'bugs', 'warnings', 'passed', 'examples']);
+  assert.deepEqual(r.out.bugs, []);
+  assert.equal(r.out.examples.pairs, 4);
+  const plain = await cli(files.ua, files.en);
+  assert.equal(plain.out.bugs.filter((b) => b.check === 6).length, 2);
+  const missing = await cli(files.ua, files.en, '--examples', path.join(dir, 'nope.md'));
+  assert.equal(missing.code, 2);
+  assert.match(missing.out.error, /file not found/);
+  const ids = await cli(files.ua, files.en, '--propose-ids', '--examples', files.ex);
+  assert.equal(ids.code, 2);
+  assert.match(ids.out.error, /--examples does not go with --propose-ids/);
 });
 
 // --propose-ids: the missing UA heading ids, taken from the EN anchors, and the links to the old fragments

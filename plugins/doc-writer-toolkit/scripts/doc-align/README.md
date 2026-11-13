@@ -1,9 +1,9 @@
 # doc-align
 
-Counts and pairs the structural elements of two Markdown/MDX pages, a **main** page (the source of truth) and a **secondary** page that must conform to it, and checks the heading ids of the UA one. Given a names table, it also checks the names of organizations in both pages against it. Node, no dependencies. No AI is involved. The `doc-alignment-checker` skill runs it so the counting is exact on long pages, and spends the model only on what needs judgment.
+Counts and pairs the structural elements of two Markdown/MDX pages, a **main** page (the source of truth) and a **secondary** page that must conform to it, and checks the heading ids of the UA one. Given a names table, it also checks the names of organizations in both pages against it. Given an example values file, it counts the file's existing pairs as the same value in code blocks. Node, no dependencies. No AI is involved. The `doc-alignment-checker` skill runs it so the counting is exact on long pages, and spends the model only on what needs judgment.
 
 ```
-node ${CLAUDE_PLUGIN_ROOT}/scripts/doc-align/doc-align.mjs <main-file> <secondary-file> [--ua main|secondary] [--names <glossary-file>]...
+node ${CLAUDE_PLUGIN_ROOT}/scripts/doc-align/doc-align.mjs <main-file> <secondary-file> [--ua main|secondary] [--names <glossary-file>]... [--examples <example-values-file>]
 node ${CLAUDE_PLUGIN_ROOT}/scripts/doc-align/doc-align.mjs <main-file> <secondary-file> --propose-ids [--ua main|secondary] [--root <dir>[=<url prefix>]]... [--write]
 ```
 
@@ -25,7 +25,8 @@ The reader is line based and code aware: fenced code blocks and the frontmatter 
 - `<secondary-file>`: the page that must conform.
 - `--ua main|secondary`: which file is the UA page, for the heading-id checks. Without it, the UA page is the one with more Cyrillic letters in its heading text, and if that is a tie, in its whole text. If that is a tie too (no Cyrillic in either page), the heading-id checks are skipped with a `HEADING-ID-SKIPPED` warning. Pass the flag when a page's headings are mostly Latin text.
 - `--names <glossary-file>`: a product kit glossary that holds the names table (a table under `## Names` or `## Назви`, columns UA form, EN form, UI forms, API values, Source: `context/doc-rules/glossary-format.md`, "Names"; only the first two, the organization's own forms, are compared, and a three-column table reads the same). Turns on Check 12. Give it more than once to read both glossaries: the rows are merged, one per UA/EN pair. A glossary without the table is not an error: the report then has a `NAMES-TABLE-MISSING` warning.
-- `--propose-ids`: propose the missing UA heading ids and find the links to their old fragments, instead of comparing (below). `--names` doesn't go with it.
+- `--examples <example-values-file>`: a product kit's example values file (`context/doc-rules/example-values-format.md`). Check 6 reads its existing pairs (the table under `## Existing pairs` or `## Наявні пари`, columns UA value, EN value, Type, Pages) and counts each pair as the same value: see "Code blocks" below. A file without the section is not an error: the report then has an `EXAMPLE-PAIRS-MISSING` warning. A row that is no pair (a value missing, the same value twice, a type other than `example` or `system`) is skipped with an `EXAMPLE-PAIR-INVALID` warning on its line. A pair goes from UA to EN, so when the script can't tell which page is UA, the pairs are not used and an `EXAMPLES-SKIPPED` warning says so.
+- `--propose-ids`: propose the missing UA heading ids and find the links to their old fragments, instead of comparing (below). `--names` and `--examples` don't go with it.
 - `--root <dir>[=<url prefix>]`: with `--propose-ids`, a UA content root to search for links, and its UA URL prefix (default `/`). Give it once per root pair. An EN i18n root may be given too (with the same prefix as its UA root): an EN link copied from UA with an old fragment is broken in EN and gets the id as well.
 - `--write`: with `--propose-ids`, write the proposals into the UA page and the link rewrites into the pages that hold the links.
 - `-h`, `--help`: the usage text.
@@ -71,6 +72,7 @@ Output is one JSON report on stdout. A failure prints `{"error": …}` on stdout
 | `line`, `file` | Where to look: 1-based line in that file. For a count difference, the last item of the file that has more; line `1` when there is nothing to point at. |
 | `passed[]` | `{ check, name }` for every sub-check that ran and found nothing. A sub-check that could not run (the heading-id comparison when the heading counts differ, the id checks when `ua` is `null`) is in neither list. |
 | `names` | Only with `--names`. `rows`: the number of table rows read. `found[]`: `{ ua, en, main, secondary }` for every row named in either page, with the number of times in each. |
+| `examples` | Only with `--examples`. `pairs`: the number of existing pairs read. `matched[]`: `{ ua, en, type, lines }` for every pair that made a line of a passing code block the same, with the number of such lines. |
 
 ## Checks and flags
 
@@ -86,6 +88,9 @@ Severity follows the skill: heading count and levels, code blocks and Cyrillic l
 | 2 | (the id checks could not run) | `HEADING-ID-SKIPPED` | warning |
 | 3 | Table count, columns and rows | `TABLE-MISMATCH` | warning |
 | 6 | Code blocks keep their code | `CODE-BLOCK-MISMATCH` | bug |
+| 6 | (no existing pairs section in the `--examples` file) | `EXAMPLE-PAIRS-MISSING` | warning |
+| 6 | (a row of the existing pairs that is no pair) | `EXAMPLE-PAIR-INVALID` | warning |
+| 6 | (cannot tell which page is UA, so the pairs are not used) | `EXAMPLES-SKIPPED` | warning |
 | 9 | No Cyrillic in EN diagram labels or code comments (not run when `ua` is `null`) | `CYRILLIC-IN-EN-CODE-TEXT` | bug |
 | 7 | `<details>` block count | `DETAILS-BLOCK-COUNT-MISMATCH` | warning |
 | 8 | ToDo markers paired, NEEDS CONFIRMATION markers paired | `MARKER-MISSING-IN-SECONDARY`, `MARKER-MISSING-IN-MAIN` | warning |
@@ -109,6 +114,8 @@ What each one compares:
   - A language with comments (the table in `code-blocks.md`): the comment bodies. Strings are skipped first, so `//` or `#` inside quotes is code; `#` opens a comment only at the start of a word, and a first-line `#!` is code. A block comment may span lines.
   - `text`, `txt`, `plaintext`, `plain` or no language: the text after ` — ` on each line (a folder tree's descriptions).
   - Any other language, `json` included: no reader text; the whole block is code.
+
+  With `--examples`, a line also counts as the same when the only differences are existing pairs (`lib/examples.mjs`). A pair's UA value counts as a whole quoted value of the UA page's code part (`"…"`, `'…'` or `` `…` ``): the EN page's line may hold, in the same quotes, that value or the pair's EN value. A value that holds a pair's UA value inside a longer string, an EN value on the UA side, other quotes, or any other byte that differs is still a `CODE-BLOCK-MISMATCH`. A `system` pair counts like an `example` one: it keeps the EN page that translated a system value aligned, and the EN page that copies the value passes as before.
 - **Cyrillic in the EN page's code blocks** (Check 9). The EN page is the one `ua` doesn't name. Each piece of reader text in its code blocks that holds a Cyrillic letter is a `CYRILLIC-IN-EN-CODE-TEXT` bug on its line. Cyrillic in the code part (a JSON value, a string) is data and is not reported. Cyrillic in the EN prose is the skill's to find.
 - **`<details>`.** Each `<details` tag outside code.
 - **Markers.** `{/* ToDo: … */}` and `{/* NEEDS CONFIRMATION: … */}`, also over several lines, by kind. When the heading counts match, they pair section by section (the section is the last heading above the marker), so a marker that moved to another section shows as one gap on each side. Otherwise only the totals compare. The surplus markers on the side that has more are reported, with their text. A marker in a heading is a marker, not a heading comment.
@@ -183,4 +190,4 @@ What the ticket flow's runner uses, with no model, after a person's edit of an E
 
 ## How the skill uses it
 
-`doc-translator` runs `--propose-ids --write` after it saves the EN page, so every UA heading gets its id from the EN anchor, with the links rewritten in the same change. `doc-alignment-checker` runs it as Step 1.5, after both files are loaded. It reads the JSON, treats each finding as a candidate (a difference may be intended), and supplies Checks 1, 2, 3, 6, 7 and 8 from it, the code-block part of Check 9, and the table part of Check 12 when the host's product kit has a names table. It still runs its semantic checks itself. When the script can't run, the skill counts by hand as each Check describes and says so in its report.
+`doc-translator` runs `--propose-ids --write` after it saves the EN page, so every UA heading gets its id from the EN anchor, with the links rewritten in the same change. `doc-alignment-checker` runs it as Step 1.5, after both files are loaded. It reads the JSON, treats each finding as a candidate (a difference may be intended), and supplies Checks 1, 2, 3, 6, 7 and 8 from it, the code-block part of Check 9, the table part of Check 12 when the host's product kit has a names table, and Check 6 with the kit's existing pairs when it has an example values file. It still runs its semantic checks itself. When the script can't run, the skill counts by hand as each Check describes and says so in its report.
