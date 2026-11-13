@@ -820,7 +820,19 @@ test('Check 6 with --examples: a listed pair is the same value, in either direct
   const copied = edit(XEN, '"paymentPurpose": "Service payment"', '"paymentPurpose": "Оплата послуг"');
   const c = compare(XUA, copied, { examples: examplesOf(EXAMPLES) });
   assert.deepEqual(check6(c), []);
+  assert.deepEqual(c.warnings, []);
   assert.ok(!c.examples.matched.some((m) => m.type === 'system'));
+  // An EN page that kept the UA value of an `example` pair is not a code-block bug, but a warning on each such line:
+  // the translator writes the EN value, so a re-translated block that put the UA value back is caught.
+  const kept = compare(XUA, edit(edit(XEN, '"recipient": "John Smith", //', '"recipient": "Петренко Олег", //'), '"John Smith", "comment"', '"Петренко Олег", "comment"'), { mainPath: 'ua.md', secondaryPath: 'en.md', examples: examplesOf(EXAMPLES) });
+  assert.deepEqual(check6(kept), []);
+  assert.deepEqual(kept.warnings.map((w) => [w.flag, w.line, w.file]), [['EXAMPLE-PAIR-NOT-APPLIED', 6, 'en.md'], ['EXAMPLE-PAIR-NOT-APPLIED', 13, 'en.md']]);
+  assert.match(kept.warnings[0].description, /keeps the UA value 'Петренко Олег' of an existing pair; its EN value is 'John Smith'/);
+  // EN as main: the warning points at the EN file, which is then main.
+  const keptMain = compare(edit(XEN, '"recipient": "John Smith", //', '"recipient": "Петренко Олег", //'), XUA, { mainPath: 'en.md', secondaryPath: 'ua.md', examples: examplesOf(EXAMPLES) });
+  assert.deepEqual(keptMain.warnings.map((w) => [w.flag, w.line, w.file]), [['EXAMPLE-PAIR-NOT-APPLIED', 13, 'en.md']]);
+  // The same identical lines without the file are no finding at all.
+  assert.deepEqual(compare(XUA, edit(XEN, '"recipient": "John Smith", //', '"recipient": "Петренко Олег", //')).warnings, []);
   // Without --examples the report has no examples field.
   assert.equal(compare(XUA, XEN).examples, undefined);
 });

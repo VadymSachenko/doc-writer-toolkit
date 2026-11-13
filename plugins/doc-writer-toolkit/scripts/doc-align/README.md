@@ -88,6 +88,7 @@ Severity follows the skill: heading count and levels, code blocks and Cyrillic l
 | 2 | (the id checks could not run) | `HEADING-ID-SKIPPED` | warning |
 | 3 | Table count, columns and rows | `TABLE-MISMATCH` | warning |
 | 6 | Code blocks keep their code | `CODE-BLOCK-MISMATCH` | bug |
+| 6 | (the EN page keeps the UA value of an `example` pair) | `EXAMPLE-PAIR-NOT-APPLIED` | warning |
 | 6 | (no existing pairs section in the `--examples` file) | `EXAMPLE-PAIRS-MISSING` | warning |
 | 6 | (a row of the existing pairs that is no pair) | `EXAMPLE-PAIR-INVALID` | warning |
 | 6 | (cannot tell which page is UA, so the pairs are not used) | `EXAMPLES-SKIPPED` | warning |
@@ -115,7 +116,7 @@ What each one compares:
   - `text`, `txt`, `plaintext`, `plain` or no language: the text after ` — ` on each line (a folder tree's descriptions).
   - Any other language, `json` included: no reader text; the whole block is code.
 
-  With `--examples`, a line also counts as the same when the only differences are existing pairs (`lib/examples.mjs`). A pair's UA value counts as a whole quoted value of the UA page's code part (`"…"`, `'…'` or `` `…` ``): the EN page's line may hold, in the same quotes, that value or the pair's EN value. A value that holds a pair's UA value inside a longer string, an EN value on the UA side, other quotes, or any other byte that differs is still a `CODE-BLOCK-MISMATCH`. A `system` pair counts like an `example` one: it keeps the EN page that translated a system value aligned, and the EN page that copies the value passes as before.
+  With `--examples`, a line also counts as the same when the only differences are existing pairs (`lib/examples.mjs`). A pair's UA value counts as a whole quoted value of the UA page's code part (`"…"`, `'…'` or `` `…` ``): the EN page's line may hold, in the same quotes, that value or the pair's EN value. A value that holds a pair's UA value inside a longer string, an EN value on the UA side, other quotes, or any other byte that differs is still a `CODE-BLOCK-MISMATCH`. The EN line may also keep the UA value. For a `system` pair that is the right value: the pair only keeps an EN page that translated a system value aligned. For an `example` pair it is an `EXAMPLE-PAIR-NOT-APPLIED` warning on the EN line, not a bug: `doc-translator` writes the EN value, so a re-translated block that put the UA value back shows here.
 - **Cyrillic in the EN page's code blocks** (Check 9). The EN page is the one `ua` doesn't name. Each piece of reader text in its code blocks that holds a Cyrillic letter is a `CYRILLIC-IN-EN-CODE-TEXT` bug on its line. Cyrillic in the code part (a JSON value, a string) is data and is not reported. Cyrillic in the EN prose is the skill's to find.
 - **`<details>`.** Each `<details` tag outside code.
 - **Markers.** `{/* ToDo: … */}` and `{/* NEEDS CONFIRMATION: … */}`, also over several lines, by kind. When the heading counts match, they pair section by section (the section is the last heading above the marker), so a marker that moved to another section shows as one gap on each side. Otherwise only the totals compare. The surplus markers on the side that has more are reported, with their text. A marker in a heading is a marker, not a heading comment.

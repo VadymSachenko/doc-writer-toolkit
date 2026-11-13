@@ -67,13 +67,13 @@ export function pairMatcher(rows) {
   return { byUa, literal };
 }
 
-// Whether EN line `en` is UA line `ua` with some of its pair literals replaced by their EN values. Returns the rows
-// used (empty when the lines are the same), or null when they differ otherwise. A UA value counts only as a whole
-// literal, in the same quotes on both sides: not inside a longer string, and never the other way round (an EN value
-// on the UA side is not a pair).
+// Whether EN line `en` is UA line `ua` with some of its pair literals replaced by their EN values. Returns
+// { used, kept }, or null when the lines differ otherwise. `used`: the rows whose EN value the EN line holds. `kept`:
+// the `example` rows whose UA value the EN line still holds, where the translator writes the EN value. A UA value counts
+// only as a whole literal, in the same quotes on both sides: not inside a longer string, and never the other way round
+// (an EN value on the UA side is not a pair).
 export function pairedLine(ua, en, matcher) {
-  if (ua === en) return [];
-  if (!matcher.literal) return null;
+  if (!matcher.literal) return ua === en ? { used: [], kept: [] } : null;
   const slots = [];
   let src = '';
   let last = 0;
@@ -84,27 +84,32 @@ export function pairedLine(ua, en, matcher) {
     slots.push(v);
     last = m.index + whole.length;
   }
-  if (!slots.length) return null;
+  if (!slots.length) return ua === en ? { used: [], kept: [] } : null;
   const hit = en.match(new RegExp(`^${src}${escape(ua.slice(last))}$`));
   if (!hit) return null;
   const used = [];
+  const kept = [];
   slots.forEach((v, n) => {
     const got = hit[n + 1];
-    if (got !== v) used.push(matcher.byUa.get(v).find((r) => r.en === got));
+    const rows = matcher.byUa.get(v);
+    if (got !== v) used.push(rows.find((r) => r.en === got));
+    else if (rows.some((r) => r.type === 'example')) kept.push(rows.find((r) => r.type === 'example'));
   });
-  return used;
+  return { used, kept };
 }
 
 // codeDiff (fences.mjs) with the pairs: the first line (0-based) where the code parts of a UA fence and its EN fence
-// differ by more than the listed pairs, or -1. `used` collects the rows that made a line the same, for the report.
-export function pairedCodeDiff(ua, en, matcher, used = []) {
+// differ by more than the listed pairs, or -1. `used` collects the rows that made a line the same, for the report;
+// `kept` collects { row, line } for each `example` pair whose UA value the EN fence kept (line 0-based in the fence).
+export function pairedCodeDiff(ua, en, matcher, used = [], kept = []) {
   const [x, y] = [fenceParts(ua.info, ua.lines).code, fenceParts(en.info, en.lines).code];
   const mine = [];
   let k = 0;
   while (k < x.length && k < y.length) {
     const u = pairedLine(x[k], y[k], matcher);
     if (!u) break;
-    mine.push(...u);
+    mine.push(...u.used);
+    for (const row of u.kept) kept.push({ row, line: k });
     k++;
   }
   if (k === x.length && k === y.length) {

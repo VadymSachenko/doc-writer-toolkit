@@ -126,7 +126,7 @@ Extract every fenced code block (` ``` `) from both files in order. The counts m
 
 **Flag:** `[CODE BLOCK MISMATCH]` — show the position (nth code block) and a side-by-side diff of the differing lines.
 
-Script flag: `CODE-BLOCK-MISMATCH`. Its `line` is the first line whose code part differs; you still write the diff. A difference in an invented value that the file lacks: say that the value belongs in Example values (a new page) or Existing pairs (a page written before the file), and leave the decision to the user. `examples.matched` lists the pairs the script used; name them under **Passed**. Warnings `EXAMPLE-PAIRS-MISSING`, `EXAMPLE-PAIR-INVALID` and `EXAMPLES-SKIPPED` go in the report as warnings.
+Script flag: `CODE-BLOCK-MISMATCH`. Its `line` is the first line whose code part differs; you still write the diff. A difference in an invented value that the file lacks: say that the value belongs in Example values (a new page) or Existing pairs (a page written before the file), and leave the decision to the user. `examples.matched` lists the pairs the script used; name them under **Passed**. Warnings `EXAMPLE-PAIR-NOT-APPLIED` (the EN page kept an `example` pair's UA value; the fix is the pair's EN value), `EXAMPLE-PAIRS-MISSING`, `EXAMPLE-PAIR-INVALID` and `EXAMPLES-SKIPPED` go in the report as warnings.
 
 ### Check 7 — `<details>` block count matches
 

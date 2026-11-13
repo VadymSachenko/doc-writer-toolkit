@@ -142,7 +142,13 @@ function checkCode(r, m, s, examples) {
     const used = [];
     m.fences.forEach((mf, i) => {
       const sf = s.fences[i];
-      const k = !matcher ? codeDiff(mf, sf) : r.ua === 'main' ? pairedCodeDiff(mf, sf, matcher, used) : pairedCodeDiff(sf, mf, matcher, used);
+      const [uaFence, enFence, enFile] = r.ua === 'main' ? [mf, sf, r.secondary] : [sf, mf, r.main];
+      const kept = [];
+      const k = matcher ? pairedCodeDiff(uaFence, enFence, matcher, used, kept) : codeDiff(mf, sf);
+      // The EN page kept the UA value of an `example` pair: the translator writes its EN value (example-values-format.md).
+      for (const x of kept) {
+        r.warn(6, 'EXAMPLE-PAIR-NOT-APPLIED', `code block ${i + 1}: the EN page keeps the UA value '${trunc(x.row.ua, 40)}' of an existing pair; its EN value is '${trunc(x.row.en, 40)}'`, enFence.line + 1 + x.line, enFile);
+      }
       if (k < 0) return;
       const what = fenceParts(mf.info, mf.lines).kind === 'diagram' ? 'the diagram ids, keywords, arrows and lines' : 'the code, data and line count';
       r.bug(6, 'CODE-BLOCK-MISMATCH', `code block ${i + 1} differs from line ${k + 1} of the block (${what} must be identical; only labels, comments and descriptions are translated)`, sf.line + 1 + k, r.secondary);
