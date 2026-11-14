@@ -34,8 +34,9 @@ Options (default: the 'Documentation toolkit configuration' block of <root>/CLAU
   --ua-root <dir> --en-root <dir> --url-prefix <path>   the primary root pair  --pair <ids>  only these root pairs
   --viewport <WxH>         default 1280x800     --max-height <px>  longest screenshot, default 8000
   --jobs <n>               pages captured at once, default 4
-  --timeout <ms>           how long each wait of a page view may take (its load, its screenshot), default 30000;
-                           a view that fails to capture is captured once more, alone, after all the others
+  --timeout <ms>           how long each wait of a page view may take (its load, its screenshot), default 30000
+  --retry-timeout <ms>     the same for the one retry of a view that failed to capture, default 4 × --timeout
+  --retry-budget <ms>      the longest the retry may take in all, default 1800000 (30 min); 0: no retry
   --playwright-from <dir>  a folder whose node_modules holds Playwright (default: the root; env VISUAL_PACK_PLAYWRIGHT_FROM)
   --dry-run                list the pages and their URLs; build and capture nothing
   --json                   print the report as JSON on stdout instead of the short summary
@@ -58,6 +59,8 @@ const OPTIONS = {
   'max-height': { type: 'string' },
   jobs: { type: 'string' },
   timeout: { type: 'string' },
+  'retry-timeout': { type: 'string' },
+  'retry-budget': { type: 'string' },
   'playwright-from': { type: 'string' },
   'dry-run': { type: 'boolean' },
   json: { type: 'boolean' },
@@ -78,7 +81,7 @@ export async function run(values, env = process.env) {
     ...base,
     pages: pages.map((p) => ({ key: p.key, pair: p.pair, rel: p.rel, changedIn: p.changedIn, urls: p.urls, captures: {} })),
     findings: [],
-    summary: { pages: pages.length, locales: settings.columns.length, captured: 0, notCaptured: 0, retried: 0, capturedOnRetry: 0, findings: { total: 0, problems: 0, look: 0, byType: {} } },
+    summary: { pages: pages.length, locales: settings.columns.length, captured: 0, notCaptured: 0, retried: 0, capturedOnRetry: 0, notRetried: 0, findings: { total: 0, problems: 0, look: 0, byType: {} } },
     ...extra,
   });
   if (!pages.length) return { report: emptyView({ empty: true }), exitCode: 0, text: `visual-pack: no changed docs page in ${settings.range}.` };

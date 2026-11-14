@@ -43,6 +43,7 @@ export function assemble({ settings, pages, captures, network, timings, sheet })
       notCaptured: cellsAll.filter((c) => !c.shot).length,
       retried: cellsAll.filter((c) => c.retried).length,
       capturedOnRetry: cellsAll.filter((c) => c.retried && c.shot).length,
+      notRetried: captures.filter((c) => c.retrySkipped).length,
       findings: summarizeFindings(sorted),
     },
     network,
@@ -61,10 +62,12 @@ export function summaryText(report, { maxLines = 15 } = {}) {
     return lines.join('\n');
   }
   lines.push(`visual-pack: ${summary.pages} page${summary.pages === 1 ? '' : 's'} × ${summary.locales} locale${summary.locales === 1 ? '' : 's'} (${report.columns.join(', ')}); ${summary.captured} captured, ${summary.notCaptured} not.`);
-  // Only when a view failed to capture: the pack already tried it twice, so running it again is not needed.
-  if (summary.retried) {
-    lines.push(`Retry: ${summary.retried} page view${summary.retried === 1 ? '' : 's'} that failed to capture ${summary.retried === 1 ? 'was' : 'were'} captured once more, one at a time: ${summary.capturedOnRetry} captured, ${summary.retried - summary.capturedOnRetry} not.`);
-  }
+  // Only when a view failed to capture: the pack already tried it again with more time, so running it again is not needed.
+  const views = (n) => `${n} page view${n === 1 ? '' : 's'} that failed to capture ${n === 1 ? 'was' : 'were'}`;
+  const retry = [];
+  if (summary.retried) retry.push(`${views(summary.retried)} captured once more, with more time: ${summary.capturedOnRetry} captured, ${summary.retried - summary.capturedOnRetry} not.`);
+  if (summary.notRetried) retry.push(`${views(summary.notRetried)} not tried again: the retry's time ran out.`);
+  if (retry.length) lines.push(`Retry: ${retry.join(' ')}`);
   const f = summary.findings;
   if (!f.total) {
     lines.push('Findings: none.');

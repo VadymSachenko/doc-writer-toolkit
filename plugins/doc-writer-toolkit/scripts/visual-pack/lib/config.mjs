@@ -24,6 +24,12 @@ export function normalizeBaseUrl(value) {
   return v.endsWith('/') ? v : `${v}/`;
 }
 
+// The retry of a view that failed to capture: each wait gets RETRY_FACTOR × --timeout (120 s at the default), so a view
+// that is only slow is captured; the whole retry ends within RETRY_BUDGET_MS, so the pack stays far below the 4 h a
+// ticket-flow session may run (the README, "The worst case of a whole pack").
+export const RETRY_FACTOR = 4;
+export const RETRY_BUDGET_MS = 30 * 60 * 1000;
+
 const CONFIG_FILES = ['docusaurus.config.ts', 'docusaurus.config.js', 'docusaurus.config.mjs', 'docusaurus.config.cjs'];
 
 // `baseUrl: '/x/'` as a string literal in the Docusaurus config; null when it is not one.
@@ -63,6 +69,7 @@ export async function loadPackSettings(values, env = process.env) {
   const settings = await loadSettings(values);
   const pairs = selectPairs(requirePairs(settings), values.pair);
   const { defaultLocale, columns, known } = await resolveColumns(settings);
+  const timeoutMs = num('timeout', values.timeout, 30000, { min: 1000 });
   const baseUrl = normalizeBaseUrl(values['base-url'] ?? settings.claude['site base url'] ?? (await readBaseUrl(settings)) ?? '/');
   return {
     ...settings,
@@ -77,7 +84,9 @@ export async function loadPackSettings(values, env = process.env) {
     viewport: parseViewport(values.viewport),
     maxHeight: num('max-height', values['max-height'], 8000, { min: 500 }),
     jobs: num('jobs', values.jobs, 4),
-    timeoutMs: num('timeout', values.timeout, 30000, { min: 1000 }),
+    timeoutMs,
+    retryTimeoutMs: num('retry-timeout', values['retry-timeout'], RETRY_FACTOR * timeoutMs, { min: timeoutMs }),
+    retryBudgetMs: num('retry-budget', values['retry-budget'], RETRY_BUDGET_MS, { min: 0 }),
     playwrightFrom: path.resolve(values['playwright-from'] ?? env.VISUAL_PACK_PLAYWRIGHT_FROM ?? settings.root),
     dryRun: Boolean(values['dry-run']),
     json: Boolean(values.json),

@@ -15,7 +15,15 @@ Run it from the docs repo (or pass `--root`) with the branch checked out: the wo
 3. **The server.** A static server on `127.0.0.1` and a free port, for the build folder, with the paths Docusaurus builds (`<path>/index.html`, `<path>.html`, the `404.html` page).
 4. **The captures.** Chromium opens each changed page in each locale at 1280×800, loads the lazy images, reads the page's DOM and saves a full-page PNG (cut at `--max-height`). Each wait of a view, its load and its screenshot, may take up to `--timeout`; no wait keeps Playwright's own 30 s. **Every request that isn't to the local server is blocked and counted**: a route handler aborts it, and Chromium is started with a host resolver that resolves nothing but `127.0.0.1`, so a request that got past the handler would fail too.
 
-   **One retry.** When every view has had its turn, each view that failed to capture (an error or a timeout, not a 4xx or 5xx answer) is captured once more, alone and with the same settings, and its result says so. A view that answered 4xx or 5xx is not tried again, and a view that fails again is reported as it would be without the retry. So the pack is run once: running it again, with a longer `--timeout` or fewer `--jobs`, is never needed for views it reports not captured.
+   **One retry, with more time.** When every view has had its turn, each view that failed to capture (an error or a timeout, not a 4xx or 5xx answer) is captured once more. Each of its waits may take `--retry-timeout` (default 4 × `--timeout`, so 120 s), and two views are captured at a time (one with `--jobs 1`), half the first pass's default load. The result says so. A view that answered 4xx or 5xx is not tried again, and a view that fails again is reported as it would be without the retry.
+
+   **The retry's time is capped** by `--retry-budget` (default 30 min). The retry starts a view only while that view's worst case still ends within the budget: 2 × `--retry-timeout` + 13 s (the load, the screenshot, and the 5 s network-idle and 8 s image waits). A view it cannot start stays as first reported, and `summary.notRetried` counts it.
+
+   **The worst case of a whole pack** is the first pass, ⌈views ÷ `--jobs`⌉ × (2 × `--timeout` + 13 s), plus the budget, plus the build when the pack runs it. For 80 views at the defaults that is 20 × 73 s ≈ 24 min, plus 30 min, plus the build (17–34 min on the largest site measured): about 1.5 h, well under the 4 h a ticket-flow session may run. The wait for the page's fonts runs inside the page and takes no Playwright timeout: a page whose fonts never load is the one case outside this bound.
+
+   **Why these numbers.** In the measured pack, two views at a time captured 63 of 80 even with the screenshot held to 30 s, and each of the 17 left failed on that 30 s. 120 s a wait gives such a view four times the room. 30 min covers 44 failed views, two at a time, at up to about a minute each.
+
+   **Run the pack once.** Run it again only when it ended without writing its sheet (exit 2 or 3). A view still `page-missing` after the retry is a finding, not a reason to run the pack again.
 5. **The findings,** from the DOM and the same page in the default locale (the reference, always a column):
 
 | Finding | Level | Rule |
@@ -50,7 +58,7 @@ Declared in the `Documentation toolkit configuration` block of `<root>/CLAUDE.md
 | `--locales <list>` | | The columns. Default: every locale in `docusaurus.config`. The default locale is always a column. Without a `docusaurus.config`, the first locale listed is the default one. |
 | `--docusaurus-config <file>` | | Default: `docusaurus.config.{ts,js,mjs,cjs}` in the root. |
 
-Other flags: `--root <dir>` (default: the working folder), `--build-dir <dir>`, `--out <dir>`, `--viewport <WxH>` (default `1280x800`), `--max-height <px>` (default `8000`), `--jobs <n>` (pages captured at once, default `4`), `--timeout <ms>` (how long each wait of a page view may take, its load and its screenshot, default `30000`), `--dry-run` (list the pages and their URLs; no build, no browser), `--json`, `-h`.
+Other flags: `--root <dir>` (default: the working folder), `--build-dir <dir>`, `--out <dir>`, `--viewport <WxH>` (default `1280x800`), `--max-height <px>` (default `8000`), `--jobs <n>` (pages captured at once, default `4`), `--timeout <ms>` (how long each wait of a page view may take, its load and its screenshot, default `30000`), `--retry-timeout <ms>` (the same on the retry, default 4 × `--timeout`, never less than it), `--retry-budget <ms>` (the longest the retry may take in all, default `1800000`; `0` turns the retry off), `--dry-run` (list the pages and their URLs; no build, no browser), `--json`, `-h`.
 
 **Where Playwright is.** `--playwright-from <dir>`, or the environment variable `VISUAL_PACK_PLAYWRIGHT_FROM`, names a folder whose `node_modules` holds Playwright. The default is the docs repo itself. The script loads Playwright from there (`playwright`, then `playwright-core`, then `@playwright/test`), so it needs no dependency of its own. With `DOC_TOOLKIT_ROLE_SESSION` set (a ticket flow role session; the runner sets it), the flag is refused, since it runs JavaScript from that folder.
 
@@ -58,11 +66,11 @@ Other flags: `--root <dir>` (default: the working folder), `--build-dir <dir>`, 
 
 A short summary on stdout, which is all a model needs to read: the counts, one line per finding (a finding that repeats in several locales of a page is one line with the locales listed), the network count, the times and the sheet's path. `--json` prints the report instead, and `report.json` always has it.
 
-When a view failed to capture, a `Retry:` line follows the counts, and the time line gives the retry's share; a pack where every view was captured on its first try prints neither:
+When a view failed to capture, a `Retry:` line follows the counts, and the time line gives the retry's share; a pack where every view was captured on its first try prints neither. When the budget ran out, the line ends with the views not tried again:
 
 ```
 visual-pack: 8 pages × 10 locales (uk, en, …); 78 captured, 2 not.
-Retry: 9 page views that failed to capture were captured once more, one at a time: 7 captured, 2 not.
+Retry: 9 page views that failed to capture were captured once more, with more time: 7 captured, 2 not.
 …
 Time: build skipped (existing build), capture 412.6 s (the retry 95.3 s of it).
 ```
@@ -79,9 +87,9 @@ Time: build skipped (existing build), capture 2.6 s.
 Sheet: .doc-toolkit/visual-pack/sheet.html
 ```
 
-The report: `ok`, `range`, `defaultLocale`, `columns`, `baseUrl`, `pages[]` (`key`, `changedIn`, `urls`, and per locale `status`, `shot`, `error`, `retried`, `firstError`, `title`, `images`, `tables`), `findings[]` (`type`, `level`, `page`, `locale`, `detail`, `items`), `summary` (`pages`, `locales`, `captured`, `notCaptured`, `retried`, `capturedOnRetry`, `findings` with `problems`, `look` and `byType`), `network` (`requests`, `local`, `blocked`, `blockedHosts`, `servedByLocalServer`), `timings` (`buildSeconds`, `captureSeconds`, `retrySeconds`, `totalSeconds`), `sheet`.
+The report: `ok`, `range`, `defaultLocale`, `columns`, `baseUrl`, `pages[]` (`key`, `changedIn`, `urls`, and per locale `status`, `shot`, `error`, `retried`, `firstError`, `title`, `images`, `tables`), `findings[]` (`type`, `level`, `page`, `locale`, `detail`, `items`), `summary` (`pages`, `locales`, `captured`, `notCaptured`, `retried`, `capturedOnRetry`, `notRetried`, `findings` with `problems`, `look` and `byType`), `network` (`requests`, `local`, `blocked`, `blockedHosts`, `servedByLocalServer`), `timings` (`buildSeconds`, `captureSeconds`, `retrySeconds`, `totalSeconds`), `sheet`.
 
-- **The retry's fields.** `retried` is `true` for a view captured a second time, and `firstError` is then the first try's error; `error`, `status` and `shot` are the second try's. `summary.retried` counts those views, and `summary.capturedOnRetry` how many of them the retry captured. `timings.retrySeconds` is the second pass, inside `captureSeconds`, and `null` when no view needed it. The network counts include the retry's requests. The sheet notes a cell captured on the second try, or not captured twice.
+- **The retry's fields.** `retried` is `true` for a view captured a second time, and `firstError` is then the first try's error; `error`, `status` and `shot` are the second try's. `summary.retried` counts those views, `summary.capturedOnRetry` how many of them the retry captured, and `summary.notRetried` the views that failed but were not tried again because the budget ran out (each stays as first reported). `timings.retrySeconds` is the second pass, inside `captureSeconds`, and `null` when no view needed it. The network counts include the retry's requests. The sheet notes a cell captured on the second try, or not captured twice.
 
 Exit codes: `0` sheet written, nothing to fix · `10` sheet written, with findings to fix (things to look at alone give `0`) · `1` the build failed · `2` a missing declaration or flag, no Playwright or Chromium, or a bad range · `3` unexpected error. No changed page in the range is one line and exit `0`.
 
@@ -97,5 +105,16 @@ The script spawns two kinds of process: `git` and the host's own `docusaurus`, a
 
 - **Offline** (no browser): the page and route mapping (number prefixes, `index`, `slug`, `id`, root pairs, the base URL), changed files from a throwaway git repo, the findings rules, the untranslated-text rule per locale (Russian, Kazakh, Kyrgyz, Tajik, English, Turkish, Uzbek, Azerbaijani, Spanish), the sheet writer and its escaping, the local server, the settings, and the command line up to the browser. A `claude` stand-in on `PATH` records any call.
 - **Browser** (a fixture site in the layout `docusaurus build` writes, with a broken image and a wide table): the sheet flags both (AC-1); no `claude` call, and a request to another host, or to another port on `127.0.0.1` that records every hit, is blocked and counted (AC-2).
-- **The timeout and the retry.** A second fixture page holds its screenshot back for as long as the test says, and nothing else of its capture: a 34 s hold with `--timeout 60000` is captured, where Playwright's own 30 s used to fail it (about 35 s of the run); a hold longer than `--timeout` fails twice and is `page-missing` with the screenshot's timeout, the retry recorded; a page that answers 404 is not tried again. Offline, a stand-in browser shows a view that fails once and is captured on the retry, the retry running alone after all the first tries, and the timeout reaching the screenshot and every other wait; a pack with no view retried prints the same summary as before.
+- **The timeout and the retry.** A second fixture page holds its screenshot back for as long as the test says, and nothing else of its capture:
+  - a 34 s hold with `--timeout 60000` is captured, where Playwright's own 30 s used to fail it (about 35 s of the run);
+  - an 8 s hold with `--timeout 3000` fails, then is captured on the retry with `--retry-timeout 30000`;
+  - a hold longer than both timeouts fails twice and is `page-missing` with the retry's screenshot timeout, the first try's kept as `firstError`;
+  - a page that answers 404 is not tried again.
+
+  Offline, a stand-in browser shows:
+  - views that fail once are captured on the retry, after all the first tries, two at a time (one with `--jobs 1`), each wait with `--retry-timeout`;
+  - the budget: views whose worst case no longer fits are not tried again and stay as first reported, and a budget of `0` tries none;
+  - a browser that died makes each view's error, not the end of the run;
+  - the timeout reaches the screenshot and every other wait;
+  - a pack with no view retried prints the same summary as before.
 - **No Playwright, no pass.** Without Playwright and Chromium the browser test is not run, and `npm test` prints why and exits `2` after the offline tests passed. `tools/regression.mjs` shows that as `not run`, which fails the run unless `--allow-not-run` is passed. `VISUAL_PACK_PLAYWRIGHT_FROM` names where Playwright is. CI installs it in its own job.

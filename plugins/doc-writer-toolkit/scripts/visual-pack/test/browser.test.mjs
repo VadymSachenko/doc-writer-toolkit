@@ -5,8 +5,9 @@
 //   AC-2  the script makes no model call: a `claude` stand-in on PATH records no call, and a request to anything but the
 //         local server is blocked and counted, while a second local port that records every hit sees none.
 //   TASK-110  a page whose screenshot takes longer than Playwright's 30 s is captured when --timeout allows it (it was
-//         `page-missing` before: the timeout never reached the screenshot); a view that fails twice is still
-//         `page-missing` with its error, and a page that answers 404 is not tried again.
+//         `page-missing` before: the timeout never reached the screenshot); a view only slower than --timeout is
+//         captured on the retry, with --retry-timeout; a view that fails twice is still `page-missing` with its error,
+//         and a page that answers 404 is not tried again.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -168,14 +169,26 @@ test('TASK-110: a page whose screenshot takes longer than Playwright\'s 30 s is 
   assert.deepEqual([report.summary.captured, report.summary.notCaptured, report.summary.retried], [2, 0, 0]);
 });
 
+test('TASK-110: a view only slower than --timeout is captured on the retry, which gives each wait --retry-timeout', async () => {
+  const slow = makeSlowHost();
+  const build = makeSlowBuild({ stallMs: { en: 8000 } });
+  const { code, report } = await visualPack(['--build-dir', build, '--out', path.join(slow.dir, 'pack'), '--locales', 'en', '--timeout', '3000', '--retry-timeout', '30000'], slow);
+  assert.equal(code, 0);
+  const { en } = report.pages[0].captures;
+  assert.match(en.firstError, /^page\.screenshot: Timeout 3000ms exceeded/, 'the first try had --timeout');
+  assert.deepEqual([en.retried, en.error, Boolean(en.shot)], [true, null, true], 'the retry, with 30 s a wait, outlasted the 8 s');
+  assert.deepEqual(report.findings, []);
+  assert.deepEqual([report.summary.retried, report.summary.capturedOnRetry, report.summary.notRetried], [1, 1, 0]);
+});
+
 test('TASK-110: a view that fails twice is page-missing with its error, the retry is recorded, and a 404 is not tried again', async () => {
   const slow = makeSlowHost();
   const build = makeSlowBuild({ stallMs: { en: 120000 }, locales: ['uk', 'en'] }); // ru is not in the build: 404
-  const { code, report } = await visualPack(['--build-dir', build, '--out', path.join(slow.dir, 'pack'), '--timeout', '5000'], slow);
+  const { code, report } = await visualPack(['--build-dir', build, '--out', path.join(slow.dir, 'pack'), '--timeout', '5000', '--retry-timeout', '6000'], slow);
   assert.equal(code, 10);
   const { uk, en, ru } = report.pages[0].captures;
-  assert.match(en.error, /^page\.screenshot: Timeout 5000ms exceeded/, 'the timeout reached the screenshot');
-  assert.match(en.firstError, /^page\.screenshot: Timeout 5000ms exceeded/);
+  assert.match(en.error, /^page\.screenshot: Timeout 6000ms exceeded/, 'the retry\'s timeout reached the screenshot');
+  assert.match(en.firstError, /^page\.screenshot: Timeout 5000ms exceeded/, 'and the first try\'s did');
   assert.deepEqual([en.retried, en.shot], [true, null]);
   assert.deepEqual([ru.status, ru.retried], [404, false]);
   assert.deepEqual([uk.retried, Boolean(uk.shot)], [false, true]);
@@ -187,5 +200,5 @@ test('TASK-110: a view that fails twice is page-missing with its error, the retr
     ],
   );
   assert.deepEqual([report.summary.retried, report.summary.capturedOnRetry], [1, 0]);
-  assert.ok(report.timings.retrySeconds >= 5, `the retry waited its own 5 s (${report.timings.retrySeconds} s)`);
+  assert.ok(report.timings.retrySeconds >= 6, `the retry waited its own 6 s (${report.timings.retrySeconds} s)`);
 });

@@ -371,9 +371,9 @@ test('AC-1: the locales brief runs the locale-translator with --no-build; the re
   for (const stage of ['translate', 'enReview', 'align', 'labelSync']) assert.doesNotMatch(briefFor({ stage, role: 'translator', keys: ['701'], pr: 'guide-docs#61' }, w.settings), /build lock|--no-build|--build-dir/);
 });
 
-test('TASK-110: the visual pack\'s brief says to run the pack once, since it retries what failed to capture itself', () => {
+test('TASK-110: the visual pack\'s brief says to run the pack once, since it retries what failed to capture itself, and again only without a sheet', () => {
   const w = world();
-  const once = /Run visual-pack once\. It captures every view that failed to capture once more by itself, one at a time, .*never run the whole pack again/;
+  const once = /Run visual-pack once\. It captures each view that failed to capture once more by itself, with more time, and a view it still reports `page-missing` is a finding, not a reason to run it again\. Run it again only when it ended without writing its sheet \(exit 2 or 3\)\./;
   for (const step of [{ buildDir: '/x/build' }, {}]) assert.match(briefFor({ stage: 'visualPack', role: 'reviewer', keys: ['701'], pr: 'guide-docs#61', head: HEAD, ...step }, w.settings), once);
   for (const stage of ['locales', 'resync', 'enReview']) assert.doesNotMatch(briefFor({ stage, role: stage === 'enReview' ? 'reviewer' : 'translator', keys: ['701'], pr: 'guide-docs#61', head: HEAD }, w.settings), /visual-pack once/);
 });
