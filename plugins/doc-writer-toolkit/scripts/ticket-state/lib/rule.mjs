@@ -252,9 +252,9 @@ export function actedAfter(l, w, mark) {
 
 // The ticket's last session, when it failed at the stage the ticket would run now: how many sessions failed in a row,
 // and whether a person acted since the last of them. A session that ended on a busy lock (`busy`), or on a branch a
-// person moved under it (`moved`), is neither a failure nor a success: the one before it counts. A run of the runner's
-// own build (`script`) counts as a run with no session.
-const PASSING = new Set(['busy', 'moved']);
+// person moved under it (`moved`), or on an error of the API (`apiError`), is neither a failure nor a success: the one
+// before it counts. A run of the runner's own build (`script`) counts as a run with no session.
+const PASSING = new Set(['busy', 'moved', 'apiError']);
 function failedStep(l, w, steps) {
   const last = (l.runs ?? []).findLast((r) => !PASSING.has(r.outcome));
   const s = steps[0];

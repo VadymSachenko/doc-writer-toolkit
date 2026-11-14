@@ -8,7 +8,7 @@ import { runRecord } from '../lib/record.mjs';
 import { noteBusy, takeBrowserLock } from '../lib/browser-lock.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
 import { localDate } from '../lib/report.mjs';
-import { addUp, endedOnText, parseResult, recordRefused, runDaily } from '../lib/runner.mjs';
+import { addUp, apiErrorOf, endedOnText, parseResult, recordRefused, runDaily } from '../lib/runner.mjs';
 
 // A role session that stops on a text message with its stage unrecorded (in `claude -p` such a message ends the
 // session) is resumed once, with the same command and a continuation prompt; never twice in a step, and never after a
@@ -301,4 +301,66 @@ test('the resume gets the time the first process left, and none when it used it 
     return { code: 0, stdout: ENDED() };
   }, { now: () => u });
   assert.deepEqual(later, [null], 'the first process used the whole timeout');
+});
+
+// TASK-114: a session the API refused (a 403 at its edge on 2.1.321: exit 1, the transcript's last assistant entry
+// marked `isApiErrorMessage`) is not the model's failure.
+const apiTranscript = (dir, session, text = 'Failed to authenticate. API Error: 403 Attention Required! | Cloudflare', marked = true) => fs.writeFileSync(path.join(dir, `${session}.jsonl`), [
+  { type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'Read', input: { file_path: '/x' } }] } },
+  { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }] } },
+  { type: 'assistant', ...(marked ? { isApiErrorMessage: true, apiErrorStatus: 403, error: 'authentication_failed' } : {}), message: { content: [{ type: 'text', text }] } },
+  { type: 'last-prompt' },
+].map((x) => JSON.stringify(x)).join('\n') + '\n');
+const REFUSED = (session) => JSON.stringify({ type: 'result', subtype: 'success', is_error: true, num_turns: 2, total_cost_usd: 0, duration_ms: 3000, session_id: session, usage: { input_tokens: 0, output_tokens: 0 }, permission_denials: [] });
+
+test('TASK-114: an API error is read from the result event or the transcript\'s last assistant entry, only when marked', () => {
+  const dir = tmp();
+  apiTranscript(dir, 'refused');
+  apiTranscript(dir, 'plain', 'Failed to authenticate. API Error: 403', false);
+  const opts = { root: dir, transcripts: dir };
+  assert.equal(apiErrorOf({ session: 'refused' }, opts), 'Failed to authenticate. API Error: 403 Attention Required! | Cloudflare');
+  assert.equal(apiErrorOf({ session: 'plain' }, opts), null, 'text alone is not the mark');
+  assert.equal(apiErrorOf({ session: 'missing' }, opts), null);
+  assert.equal(apiErrorOf({ session: '../refused' }, opts), null);
+  assert.equal(apiErrorOf({ apiError: 529, session: 'missing' }, opts), 'API error 529');
+});
+
+test('TASK-114: a session the API refused counts no failure, tries no bigger model and is not held; it runs again at the next run, up to the stage\'s daily cap', async () => {
+  const w = planWorld('claude-sonnet-5-5');
+  w.settings.limits.sessionsPerStageDay = 2;
+  const transcripts = tmp();
+  const calls = [];
+  const spawnClaude = async (cmd) => {
+    const session = `sess-${calls.length + 1}`;
+    calls.push(flag(cmd, '--model'));
+    apiTranscript(transcripts, session);
+    return { code: 1, stdout: REFUSED(session), stderr: '' };
+  };
+  await run(w, spawnClaude, { transcripts });
+  assert.deepEqual(calls, ['claude-sonnet-5-5'], 'no retry on the next model up');
+  let plans = read(w, '502').runs.filter((r) => r.stage === 'plan');
+  assert.deepEqual(plans.map((r) => [r.outcome, r.failures ?? null]), [['apiError', null]]);
+  assert.match(plans[0].note, /API Error: 403/);
+  assert.equal(logOf(w).find((e) => e.kind === 'step' && e.stage === 'plan').outcome, 'apiError');
+  await run(w, spawnClaude, { transcripts });
+  assert.deepEqual(calls, ['claude-sonnet-5-5', 'claude-sonnet-5-5'], 'the next run tries the step again, on the same model');
+  await run(w, spawnClaude, { transcripts });
+  assert.equal(calls.length, 2, 'the daily cap stops a refusal that lasts');
+  plans = read(w, '502').runs.filter((r) => r.stage === 'plan');
+  assert.deepEqual(plans.map((r) => r.outcome), ['apiError', 'apiError']);
+});
+
+test('TASK-114: a session that gave no result keeps its exit code and the end of its stderr; it still fails and retries as before', async () => {
+  const w = planWorld('claude-sonnet-5-5');
+  const calls = [];
+  await run(w, async (cmd) => {
+    calls.push(flag(cmd, '--model'));
+    return { code: 1, stdout: '', stderr: 'node: something broke\nat the end\n', signal: calls.length === 2 ? 'SIGKILL' : undefined };
+  });
+  assert.deepEqual(calls, ['claude-sonnet-5-5', 'claude-opus-5-5']);
+  const plans = read(w, '502').runs.filter((r) => r.stage === 'plan');
+  assert.deepEqual(plans.map((r) => [r.outcome, r.failures, r.exit, r.signal ?? null, r.note]), [
+    ['failed', 1, 1, null, 'stderr: node: something broke\nat the end'],
+    ['failed', 2, 1, 'SIGKILL', 'stderr: node: something broke\nat the end'],
+  ]);
 });
