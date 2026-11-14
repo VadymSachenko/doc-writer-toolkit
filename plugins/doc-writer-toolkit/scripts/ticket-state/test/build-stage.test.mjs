@@ -373,7 +373,7 @@ test('AC-1: the locales brief runs the locale-translator with --no-build; the re
 
 test('TASK-110: the visual pack\'s brief says to run the pack once, since it retries what failed to capture itself, and again only after a crash or a fixed flag, never after a failed build', () => {
   const w = world();
-  const once = /Run visual-pack once\. It captures each view that failed to capture once more by itself, with more time, and a view it still reports `page-missing` is a finding, not a reason to run it again\. Run it again, once, only after exit 3 \(a crash, or Chromium closed\), or after exit 2 once its cause \(a flag\) is fixed; exit 1, the build failed, is recorded as failed with the build's error, not run again\./;
+  const once = /Run visual-pack once\. It captures each view that failed to capture once more by itself, with more time, and a view it still reports `page-missing` is a finding, not a reason to run it again\. Run it again, once, only after exit 3 \(a crash, or Chromium closed\), or after exit 2 once its cause \(a flag\) is fixed; exit 1, the build failed, is recorded as failed with the build error, not run again\./;
   for (const step of [{ buildDir: '/x/build' }, {}]) assert.match(briefFor({ stage: 'visualPack', role: 'reviewer', keys: ['701'], pr: 'guide-docs#61', head: HEAD, ...step }, w.settings), once);
   for (const stage of ['locales', 'resync', 'enReview']) assert.doesNotMatch(briefFor({ stage, role: stage === 'enReview' ? 'reviewer' : 'translator', keys: ['701'], pr: 'guide-docs#61', head: HEAD }, w.settings), /visual-pack once/);
 });
