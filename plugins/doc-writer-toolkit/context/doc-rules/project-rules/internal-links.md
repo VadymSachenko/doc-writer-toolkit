@@ -172,7 +172,7 @@ This is a structural check only: it never looks for the target file.
   the target page's pair.
 - **Updating** (`doc-page-updater`) builds a link it adds the same way, and leaves existing links outside its
   blocks as they are.
-- **Repair** (the `/fix-doc-todos` command) rewrites a relative page link, or one in the wrong form for
+- **Repair** (`doc-todo-fixer`, `/fix-doc-todos`) rewrites a relative page link, or one in the wrong form for
   its pair, to the output of the algorithm that form names.
 - **Translation** (`doc-translator`) **preserves an already-correct link verbatim**, route or file path — an EN page links
   to the same site-root-relative path as its UA source (the locales share one path; see

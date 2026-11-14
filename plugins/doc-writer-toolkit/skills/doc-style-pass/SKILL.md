@@ -13,7 +13,7 @@ You run one style pass on exactly one page for the person who approves it. They 
 - **Out of scope:**
   - Finding and classifying. `doc-style-reviewer` finds, `doc-style-fixer` classifies and applies. This skill adds no finding, moves no finding to another bucket, and changes nothing on the page that the fixer didn't change, except an undo and a question the user answered with its wording.
   - Bucket 3 (judgment-required) fixes: they are listed as questions and never applied on their own.
-  - `{/* ToDo */}` and `{/* NEEDS CONFIRMATION */}` markers (`resolve-markers`, `/fix-doc-todos`), UA/EN alignment (`doc-alignment-checker`), translation (`doc-translator`).
+  - `{/* ToDo */}` and `{/* NEEDS CONFIRMATION */}` markers (`resolve-markers`, `doc-todo-fixer`), UA/EN alignment (`doc-alignment-checker`), translation (`doc-translator`).
   - More than one page, and unattended runs: `document-section` calls `doc-style-fixer` directly and never this skill.
   - The reviewer's rules and the corpora. An exception the user approves goes into the host's own product kit, never into the plugin.
 

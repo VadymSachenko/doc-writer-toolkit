@@ -85,13 +85,13 @@ flowchart TD
 | SME notes | `convert-sme-input` | Turns a transcript or raw notes into a structured `.sources/sme-interview.md` |
 | Ticket flow | `ticket-flow` | Shows each docs ticket's state and next step, prints the daily runner's plan, and runs the named tickets by hand (outside the WIP limits) through the `ticket-state` runner |
 
-The full per-page pipeline from an SME video to a style-reviewed draft (`/doc-from-interview`) and the link-TODO repair (`/fix-doc-todos`) are commands, listed below. See [`SKILLS-INDEX.md`](plugins/doc-writer-toolkit/SKILLS-INDEX.md) for the canonical list with invocation examples.
+The full per-page pipeline from an SME video to a style-reviewed draft (`sme-interview-to-doc`, `/doc-from-interview`) and the link-TODO repair (`doc-todo-fixer`, `/fix-doc-todos`) are skills run through their commands, listed below. See [`SKILLS-INDEX.md`](plugins/doc-writer-toolkit/SKILLS-INDEX.md) for the canonical list with invocation examples.
 
 ## Commands quick reference
 
 | Command | Underlying skill |
 |---|---|
-| `/doc-from-interview` | `extract-sme-screenshots` → `convert-sme-input` → the writer chosen by `type:` (`concept-doc-writer`, `user-guide-writer` or `api-doc-writer`) → `doc-style-reviewer` → `doc-style-fixer` |
+| `/doc-from-interview` | `sme-interview-to-doc`: `extract-sme-screenshots` → `convert-sme-input` → the writer chosen by `type:` (`concept-doc-writer`, `user-guide-writer` or `api-doc-writer`) → `doc-style-reviewer` → `doc-style-fixer` |
 | `/create-api-doc` | `api-doc-writer` |
 | `/check-section-readiness` | `section-readiness` |
 | `/plan-section` | `section-planner` |
@@ -100,7 +100,7 @@ The full per-page pipeline from an SME video to a style-reviewed draft (`/doc-fr
 | `/review-doc-style` | `doc-style-reviewer` |
 | `/fix-doc-style` | `doc-style-fixer` |
 | `/style-pass` | `doc-style-pass`: `doc-style-reviewer` → `doc-style-fixer` → one numbered list |
-| `/fix-doc-todos` | its own steps resolve link-type `{/* ToDo */}` markers, then `doc-alignment-checker` |
+| `/fix-doc-todos` | `doc-todo-fixer`: resolves link-type `{/* ToDo */}` markers, then `doc-alignment-checker` |
 | `/translate-doc` | `doc-translator` |
 | `/check-doc-alignment` | `doc-alignment-checker` |
 | `/translate-locales` | `locale-translator` |
