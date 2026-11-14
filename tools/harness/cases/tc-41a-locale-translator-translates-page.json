@@ -1,0 +1,129 @@
+{
+  "id": "tc-41a-locale-translator-translates-page",
+  "description": "locale-translator on one UA page and one further locale (tr), no build: the page is written at the locale's path with every bold label the app's own string, links and headings unchanged, no Ukrainian letters; the page state is recorded at the committed UA blob and the scripted checks pass on it; term memory and a run report exist; the UA and EN pages are untouched and nothing is committed. Runs the skill directly; /translate-locales has its own case (tc-41b).",
+  "fixture": {
+    "shape": "single",
+    "locales": [
+      "tr"
+    ]
+  },
+  "setup": [
+    "mkdir -p labels && cat > labels/tr.json <<'EOF'\n{\n  \"menu.transactions\": \"İşlemler\",\n  \"menu.settings\": \"Ayarlar\",\n  \"filters.open\": \"Filtreler\",\n  \"field.date\": \"Tarih\",\n  \"field.currency\": \"Para birimi\"\n}\nEOF\ngit add -A && git commit -q -m 'Case setup'",
+    "git rev-parse HEAD > .git/harness-setup-head"
+  ],
+  "prompt": "use locale-translator for `transactions/transactions` with `--locales tr --no-build`",
+  "options": {
+    "maxTurns": 120,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(node:*)",
+      "Bash(git:*)",
+      "Bash(ls:*)",
+      "Bash(mkdir:*)",
+      "Bash(wc:*)",
+      "Bash(head:*)",
+      "Bash(date:*)"
+    ],
+    "timeoutSeconds": 1800
+  },
+  "assertions": [
+    {
+      "type": "skill-called",
+      "skill": "locale-translator"
+    },
+    {
+      "name": "locale page written",
+      "type": "exists",
+      "path": "i18n/tr/docusaurus-plugin-content-docs-portal/current/transactions/transactions.md"
+    },
+    {
+      "type": "frontmatter",
+      "path": "i18n/tr/docusaurus-plugin-content-docs-portal/current/transactions/transactions.md"
+    },
+    {
+      "name": "no Ukrainian letters left",
+      "type": "no-match",
+      "path": "i18n/tr/docusaurus-plugin-content-docs-portal/current/transactions/transactions.md",
+      "pattern": "[А-Яа-яІіЇїЄєҐґ]"
+    },
+    {
+      "name": "bold labels are the app's strings",
+      "type": "match",
+      "path": "i18n/tr/docusaurus-plugin-content-docs-portal/current/transactions/transactions.md",
+      "pattern": "(?=[\\s\\S]*\\*\\*İşlemler\\*\\*)(?=[\\s\\S]*\\*\\*Filtreler\\*\\*)(?=[\\s\\S]*\\*\\*Tarih\\*\\*)"
+    },
+    {
+      "name": "links unchanged",
+      "type": "match",
+      "path": "i18n/tr/docusaurus-plugin-content-docs-portal/current/transactions/transactions.md",
+      "pattern": "(?=[\\s\\S]*\\]\\(/portal/settings/settings\\))(?=[\\s\\S]*\\]\\(/webhooks/webhooks\\))"
+    },
+    {
+      "name": "same number of H2 headings as UA",
+      "type": "command",
+      "run": "test \"$(grep -c '^## ' i18n/tr/docusaurus-plugin-content-docs-portal/current/transactions/transactions.md)\" = \"$(grep -c '^## ' portal/transactions/transactions.md)\""
+    },
+    {
+      "name": "state recorded at the committed UA blob",
+      "type": "command",
+      "run": "node -e 'const s=JSON.parse(require(\"fs\").readFileSync(\".doc-toolkit/pages/transactions/transactions.json\",\"utf8\"));const b=require(\"child_process\").execSync(\"git rev-parse HEAD:portal/transactions/transactions.md\").toString().trim();process.exit(s.locales&&s.locales.tr&&s.locales.tr.sourceBlob===b?0:1)'"
+    },
+    {
+      "name": "scripted checks pass on the written page",
+      "type": "command",
+      "run": "node ../../../.plugin/harness-*/scripts/locale-sync/locale-sync.mjs check transactions/transactions --locales tr",
+      "timeoutSeconds": 120
+    },
+    {
+      "name": "term memory written",
+      "type": "exists",
+      "path": ".doc-toolkit/terms/tr.tsv"
+    },
+    {
+      "name": "worker result line: translated",
+      "type": "command",
+      "run": "grep -Eq '\"status\": ?\"translated\"' .doc-toolkit/.run/*/tr/results.jsonl"
+    },
+    {
+      "name": "run report written",
+      "type": "command",
+      "run": "test -n \"$(ls .doc-toolkit/.run/*/report.md 2>/dev/null)\""
+    },
+    {
+      "name": "report names the run folder or report.md",
+      "type": "match",
+      "path": "output",
+      "pattern": "report\\.md"
+    },
+    {
+      "name": "asks nothing about the locale's wording",
+      "type": "no-match",
+      "path": "output",
+      "pattern": "(shall I|should I|do you want|would you like|can you confirm|please confirm|which (word|term|translation))",
+      "flags": "i"
+    },
+    {
+      "name": "UA page untouched",
+      "type": "command",
+      "run": "git diff --quiet -- portal/ && git diff --quiet -- i18n/en/"
+    },
+    {
+      "name": "EN page never read",
+      "type": "not-read",
+      "path": "i18n/en/docusaurus-plugin-content-docs-portal/current/transactions/transactions.md"
+    },
+    {
+      "type": "changed-only",
+      "paths": [
+        "i18n/tr/",
+        ".doc-toolkit/",
+        ".gitattributes"
+      ]
+    },
+    {
+      "name": "no commit made",
+      "type": "command",
+      "run": "test \"$(git rev-parse HEAD)\" = \"$(cat .git/harness-setup-head)\""
+    }
+  ]
+}

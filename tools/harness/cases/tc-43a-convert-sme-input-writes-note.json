@@ -1,0 +1,105 @@
+{
+  "id": "tc-43a-convert-sme-input-writes-note",
+  "description": "convert-sme-input run directly on a timestamped transcript with no video and no frames: it writes .sources/sme-interview.md in Ukrainian with the context and the documentation hand-off sections, keeps the facts, the exact error message, UI labels in bold and status values in code font, puts the SME's own doubt under the open questions, leaves the transcript alone and starts no screenshot extraction. /doc-from-interview covers the skill as a stage (tc-33b).",
+  "fixture": {
+    "shape": "single"
+  },
+  "setup": [
+    "mkdir -p portal/payments/.sources && cat > portal/payments/.sources/meeting-transcript.txt <<'EOF'\n(0:00 - 0:20)\nСьогодні розповім про сторінку Платежі. Тут партнер створює платежі та дивиться їхні статуси.\n\n(0:20 - 0:55)\nЩоб створити платіж, у меню вибираємо Платежі і натискаємо кнопку Створити платіж. Відкривається форма з полями Сума, Валюта і Призначення. Сума обов’язкова, валюта за замовчуванням гривня.\n\n(0:55 - 1:30)\nПісля натискання Зберегти платіж з’являється у списку зі статусом new. Далі статус змінюється на in queue, потім in work, а в кінці success або cancelled.\n\n(1:30 - 2:05)\nЛіміт одного платежу — 150000 гривень. Якщо сума більша, форма показує помилку під полем Сума: «Сума перевищує ліміт».\n\n(2:05 - 2:40)\nПлатіж у статусі new можна скасувати кнопкою Скасувати. Після in work скасувати вже не можна. Не впевнений, чи можна скасувати у статусі in queue, це треба уточнити в команди.\n\n(2:40 - 3:10)\nНад списком є кнопка Фільтри, там вибираємо статус. Цей екран ще не фінальний, дизайн фільтрів змінять.\nEOF\ngit add -A && git commit -q -m 'Case setup'"
+  ],
+  "prompt": "convert-sme-input: turn `portal/payments/.sources/meeting-transcript.txt` into `portal/payments/.sources/sme-interview.md`",
+  "options": {
+    "maxTurns": 40,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)",
+      "Bash(ls:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "type": "skill-called",
+      "skill": "convert-sme-input"
+    },
+    {
+      "name": "source note written",
+      "type": "exists",
+      "path": "portal/payments/.sources/sme-interview.md"
+    },
+    {
+      "name": "context section",
+      "type": "match",
+      "path": "portal/payments/.sources/sme-interview.md",
+      "pattern": "^### Загальний контекст\\s*$",
+      "flags": "m"
+    },
+    {
+      "name": "documentation hand-off section",
+      "type": "match",
+      "path": "portal/payments/.sources/sme-interview.md",
+      "pattern": "^### Згадати у документації\\s*$",
+      "flags": "m"
+    },
+    {
+      "name": "open questions section",
+      "type": "match",
+      "path": "portal/payments/.sources/sme-interview.md",
+      "pattern": "^### Питання або потребує уточнення\\s*$",
+      "flags": "m"
+    },
+    {
+      "name": "the SME's doubt is under the open questions",
+      "type": "match",
+      "path": "portal/payments/.sources/sme-interview.md",
+      "pattern": "^### Питання або потребує уточнення\\s*\\n(?:(?!^###)[\\s\\S])*in queue",
+      "flags": "m"
+    },
+    {
+      "name": "limit and exact error message kept",
+      "type": "match",
+      "path": "portal/payments/.sources/sme-interview.md",
+      "pattern": "(?=[\\s\\S]*150[ \\u00a0\\u202f]?000)(?=[\\s\\S]*Сума перевищує ліміт)"
+    },
+    {
+      "name": "UI labels in bold",
+      "type": "match",
+      "path": "portal/payments/.sources/sme-interview.md",
+      "pattern": "(?=[\\s\\S]*\\*\\*Створити платіж\\*\\*)(?=[\\s\\S]*\\*\\*Зберегти\\*\\*)(?=[\\s\\S]*\\*\\*Скасувати\\*\\*)"
+    },
+    {
+      "name": "status values in code font",
+      "type": "match",
+      "path": "portal/payments/.sources/sme-interview.md",
+      "pattern": "(?=[\\s\\S]*`new`)(?=[\\s\\S]*`in queue`)(?=[\\s\\S]*`in work`)(?=[\\s\\S]*`success`)(?=[\\s\\S]*`cancelled`)"
+    },
+    {
+      "name": "written in Ukrainian",
+      "type": "match",
+      "path": "portal/payments/.sources/sme-interview.md",
+      "pattern": "([А-Яа-яІіЇїЄєҐґ][^А-Яа-яІіЇїЄєҐґ]*){300}"
+    },
+    {
+      "name": "no vague section names",
+      "type": "no-match",
+      "path": "portal/payments/.sources/sme-interview.md",
+      "pattern": "^#{1,6} (Notes|Other|Misc)\\b",
+      "flags": "mi"
+    },
+    {
+      "name": "transcript left as it was",
+      "type": "command",
+      "run": "git diff --quiet -- portal/payments/.sources/meeting-transcript.txt"
+    },
+    {
+      "type": "skill-not-called",
+      "skill": "extract-sme-screenshots"
+    },
+    {
+      "type": "changed-only",
+      "paths": [
+        "portal/payments/.sources/",
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}

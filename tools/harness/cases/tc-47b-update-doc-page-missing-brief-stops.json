@@ -1,0 +1,45 @@
+{
+  "id": "tc-47b-update-doc-page-missing-brief-stops",
+  "description": "/update-doc-page with a brief path that doesn't exist: the command stops, names the missing file, edits no page and writes no report. Covers the command only.",
+  "fixture": {
+    "shape": "single"
+  },
+  "setup": [
+    "mkdir -p portal/payments && cat > portal/payments/payments.md <<'EOF'\n---\ntitle: Платежі\nsidebar_label: Платежі\n---\n\n# Платежі\n\nНа сторінці **Платежі** ви створюєте платежі та переглядаєте їх. {/* NEEDS CONFIRMATION: чи бачать цю сторінку всі ролі? */}\n\n## Створення платежу\n\nЩоб створити платіж, виконайте такі кроки:\n\n1. У меню виберіть **Платежі**.\n2. Натисніть **Створити платіж**.\n3. Заповніть форму. Форма містить три поля.\n4. Натисніть **Зберегти**.\n\n**Результат:** платіж з’являється у списку зі статусом `new`.\n\n## Довідкова інформація\n\n| Поле | Опис |\n|---|---|\n| **Сума** | Сума платежу в гривнях. |\n| **Валюта** | Валюта платежу. |\n| **Призначення** | Текст призначення платежу. |\nEOF\ngit add -A && git commit -q -m 'Case setup'"
+  ],
+  "prompt": "/{plugin}:update-doc-page portal/payments/payments.md portal/payments/.sources/no-such-brief.md",
+  "options": {
+    "maxTurns": 30,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)",
+      "Bash(ls:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "names the missing brief",
+      "type": "match",
+      "path": "output",
+      "pattern": "no-such-brief"
+    },
+    {
+      "name": "says it is missing",
+      "type": "match",
+      "path": "output",
+      "pattern": "doesn.t exist|does not exist|not found|no such|missing|couldn.t find|isn.t there|absent",
+      "flags": "i"
+    },
+    {
+      "name": "no report written",
+      "type": "absent",
+      "path": "portal/payments/.sources/update-report.md"
+    },
+    {
+      "type": "unchanged",
+      "ignore": [
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}

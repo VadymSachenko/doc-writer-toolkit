@@ -1,0 +1,104 @@
+{
+  "id": "tc-46b-fix-doc-todos-applies-confirmed-links",
+  "description": "/fix-doc-todos with the go-ahead for the link markers given in the prompt: the settings-page markers are replaced by a root-relative link in the UA and EN pages and in the API pair's page, the content-gap marker and the NEEDS CONFIRMATION markers stay as they were, the report says what the alignment check (the command's last step) found, and nothing outside the three pages changes. The command runs doc-alignment-checker in some runs and checks by hand in others, so the case does not assert the skill call. Covers the command itself.",
+  "fixture": {
+    "shape": "multi"
+  },
+  "setup": [
+    "printf '\\nПро валюту за замовчуванням читайте в налаштуваннях. {/* ToDo: link to the settings page */}\\n' >> portal/transactions/transactions.md && printf '\\nFor the default currency, see the settings. {/* ToDo: link to the settings page */}\\n' >> i18n/en/docusaurus-plugin-content-docs-portal/current/transactions/transactions.md && printf '\\n{/* ToDo: describe the retry intervals */}\\n' >> docs/webhooks/webhooks.md && git add -A && git commit -q -m 'Case setup'"
+  ],
+  "prompt": "/{plugin}:fix-doc-todos\n\nAnswers in advance, so don't stop to ask: I confirm the link markers (bucket A) as you would propose them, in every file where they occur. There is nothing for buckets B and C. Apply them now.",
+  "options": {
+    "maxTurns": 80,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Bash(node:*)",
+      "Bash(sort:*)"
+    ],
+    "timeoutSeconds": 1200
+  },
+  "assertions": [
+    {
+      "name": "settings link marker gone from UA",
+      "type": "no-match",
+      "path": "portal/transactions/transactions.md",
+      "pattern": "ToDo: link to the settings page"
+    },
+    {
+      "name": "settings link marker gone from EN",
+      "type": "no-match",
+      "path": "i18n/en/docusaurus-plugin-content-docs-portal/current/transactions/transactions.md",
+      "pattern": "ToDo: link to the settings page"
+    },
+    {
+      "name": "settings link marker gone from the API page",
+      "type": "no-match",
+      "path": "docs/webhooks/webhooks.md",
+      "pattern": "ToDo: link to the settings page"
+    },
+    {
+      "name": "the API page links the settings page by route",
+      "type": "match",
+      "path": "docs/webhooks/webhooks.md",
+      "pattern": "\\]\\(/portal/settings/settings\\)"
+    },
+    {
+      "name": "UA sentence now carries the link",
+      "type": "match",
+      "path": "portal/transactions/transactions.md",
+      "pattern": "Про валюту за замовчуванням читайте в[^\\n]*\\]\\(/portal/settings/settings\\)"
+    },
+    {
+      "name": "EN sentence now carries the link",
+      "type": "match",
+      "path": "i18n/en/docusaurus-plugin-content-docs-portal/current/transactions/transactions.md",
+      "pattern": "For the default currency, see[^\\n]*\\]\\(/portal/settings/settings\\)"
+    },
+    {
+      "type": "links",
+      "path": "portal/transactions/transactions.md",
+      "form": "root-relative"
+    },
+    {
+      "type": "links",
+      "path": "i18n/en/docusaurus-plugin-content-docs-portal/current/transactions/transactions.md",
+      "form": "root-relative"
+    },
+    {
+      "type": "links",
+      "path": "docs/webhooks/webhooks.md",
+      "form": "root-relative"
+    },
+    {
+      "name": "content-gap marker left",
+      "type": "match",
+      "path": "docs/webhooks/webhooks.md",
+      "pattern": "\\{/\\* ToDo: describe the retry intervals \\*/\\}"
+    },
+    {
+      "name": "NEEDS CONFIRMATION markers left",
+      "type": "command",
+      "run": "grep -q 'NEEDS CONFIRMATION: default currency' portal/settings/settings.md && grep -q 'NEEDS CONFIRMATION: default currency' i18n/en/docusaurus-plugin-content-docs-portal/current/settings/settings.md"
+    },
+    {
+      "name": "report says what the alignment check found",
+      "type": "match",
+      "path": "output",
+      "pattern": "align",
+      "flags": "i"
+    },
+    {
+      "type": "changed-only",
+      "paths": [
+        "portal/transactions/",
+        "i18n/en/docusaurus-plugin-content-docs-portal/current/transactions/",
+        "docs/webhooks/",
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}

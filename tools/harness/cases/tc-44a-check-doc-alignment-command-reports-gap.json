@@ -1,0 +1,47 @@
+{
+  "id": "tc-44a-check-doc-alignment-command-reports-gap",
+  "description": "/check-doc-alignment is a thin wrapper of doc-alignment-checker: given a page from the repo root without .md and main:ua, it loads the skill, resolves the API reference pair, reports the one H2 section the EN page misses, compares with no portal page and edits nothing. Covers the command, which also loads the skill; the skill's own cases are tc-16, tc-19, tc-21 and tc-28.",
+  "fixture": {
+    "shape": "multi"
+  },
+  "prompt": "/{plugin}:check-doc-alignment docs/transactions/transactions main:ua",
+  "options": {
+    "maxTurns": 40,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)",
+      "Bash(node:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "type": "skill-called",
+      "skill": "doc-alignment-checker"
+    },
+    {
+      "name": "reports the missing section",
+      "type": "match",
+      "path": "output",
+      "pattern": "Отримання транзакції|Get a transaction",
+      "flags": "i"
+    },
+    {
+      "name": "names the pair",
+      "type": "match",
+      "path": "output",
+      "pattern": "api-reference"
+    },
+    {
+      "name": "does not compare with the portal EN page",
+      "type": "no-match",
+      "path": "output",
+      "pattern": "docusaurus-plugin-content-docs-portal/current/transactions"
+    },
+    {
+      "type": "unchanged",
+      "ignore": [
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}
