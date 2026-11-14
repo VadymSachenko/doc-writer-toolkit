@@ -2,9 +2,11 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { loadSettings, readDocusaurusI18n, requirePairs, selectPairs } from '../../ui-labels/lib/config.mjs';
 import { CliError, exists, unique } from '../../ui-labels/lib/util.mjs';
+import { FIXED_WAITS_MS, worstViewMs } from './capture.mjs';
 
 const num = (flag, value, fallback, { min = 1 } = {}) => {
   if (value === undefined) return fallback;
+  if (String(value).trim() === '') throw new CliError(`--${flag} needs a value.`, { code: 2 });
   const n = Number(value);
   if (!Number.isInteger(n) || n < min) throw new CliError(`--${flag} must be a whole number of at least ${min}, got '${value}'.`, { code: 2 });
   return n;
@@ -26,9 +28,15 @@ export function normalizeBaseUrl(value) {
 
 // The retry of a view that failed to capture: each wait gets RETRY_FACTOR × --timeout (120 s at the default), so a view
 // that is only slow is captured; the whole retry ends within RETRY_BUDGET_MS, so the pack stays far below the 4 h a
-// ticket-flow session may run (the README, "The worst case of a whole pack").
+// ticket-flow session may run (the README, "The worst case of a whole pack"). Unless --retry-timeout is given, one
+// view's worst case is held to a RETRY_SHARE-th of the budget, and never below --timeout: a large --timeout must not
+// leave the retry room for two views only.
 export const RETRY_FACTOR = 4;
 export const RETRY_BUDGET_MS = 30 * 60 * 1000;
+export const RETRY_SHARE = 6;
+
+// --retry-timeout's default for a --timeout and a --retry-budget.
+export const defaultRetryTimeout = (timeoutMs, budgetMs) => Math.max(timeoutMs, Math.min(RETRY_FACTOR * timeoutMs, Math.floor((budgetMs / RETRY_SHARE - FIXED_WAITS_MS) / 2)));
 
 const CONFIG_FILES = ['docusaurus.config.ts', 'docusaurus.config.js', 'docusaurus.config.mjs', 'docusaurus.config.cjs'];
 
@@ -70,6 +78,11 @@ export async function loadPackSettings(values, env = process.env) {
   const pairs = selectPairs(requirePairs(settings), values.pair);
   const { defaultLocale, columns, known } = await resolveColumns(settings);
   const timeoutMs = num('timeout', values.timeout, 30000, { min: 1000 });
+  const retryBudgetMs = num('retry-budget', values['retry-budget'], RETRY_BUDGET_MS, { min: 0 });
+  const retryTimeoutMs = num('retry-timeout', values['retry-timeout'], defaultRetryTimeout(timeoutMs, retryBudgetMs), { min: timeoutMs });
+  if (values['retry-timeout'] !== undefined && retryBudgetMs > 0 && worstViewMs(retryTimeoutMs) > retryBudgetMs) {
+    throw new CliError(`--retry-timeout ${retryTimeoutMs} does not fit --retry-budget ${retryBudgetMs}: one view's worst case, 2 × ${retryTimeoutMs} + ${FIXED_WAITS_MS} ms, is longer than the whole retry. Give a smaller --retry-timeout or a larger --retry-budget.`, { code: 2 });
+  }
   const baseUrl = normalizeBaseUrl(values['base-url'] ?? settings.claude['site base url'] ?? (await readBaseUrl(settings)) ?? '/');
   return {
     ...settings,
@@ -85,8 +98,8 @@ export async function loadPackSettings(values, env = process.env) {
     maxHeight: num('max-height', values['max-height'], 8000, { min: 500 }),
     jobs: num('jobs', values.jobs, 4),
     timeoutMs,
-    retryTimeoutMs: num('retry-timeout', values['retry-timeout'], RETRY_FACTOR * timeoutMs, { min: timeoutMs }),
-    retryBudgetMs: num('retry-budget', values['retry-budget'], RETRY_BUDGET_MS, { min: 0 }),
+    retryTimeoutMs,
+    retryBudgetMs,
     playwrightFrom: path.resolve(values['playwright-from'] ?? env.VISUAL_PACK_PLAYWRIGHT_FROM ?? settings.root),
     dryRun: Boolean(values['dry-run']),
     json: Boolean(values.json),

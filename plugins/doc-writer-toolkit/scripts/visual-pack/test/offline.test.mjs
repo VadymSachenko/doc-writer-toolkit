@@ -421,13 +421,18 @@ test('a pack with no view retried prints the same summary as before the retry ex
 // ------------------------------------------------------------------ the captures, with a stand-in browser
 // A browser with the calls captureAll makes. `plan` maps a URL path to its attempts, in order: { status, error }, where
 // `error` is thrown by the screenshot. It records each attempt, the timeouts each wait of each attempt was given, and how
-// many views were open at once. `clock` (an object with `t`, in ms) moves by `stepMs` at each load; `dead` makes every
-// new context fail, as a browser that died does.
-function standInBrowser(plan, { clock = null, stepMs = 0, dead = null } = {}) {
-  const seen = { attempts: {}, timeouts: [], open: 0, events: [] };
+// many views were open at once. `clock` (an object with `t`, in ms) moves by `stepMs` at each load. `contextError` makes
+// every new context fail while the browser stays connected; `dieAfter` lets that many contexts open, then the browser is
+// gone: `isConnected()` is false and every new context fails.
+const CLOSED = 'browser.newContext: Target page, context or browser has been closed';
+function standInBrowser(plan, { clock = null, stepMs = 0, contextError = null, dieAfter = null } = {}) {
+  const seen = { attempts: {}, timeouts: [], open: 0, events: [], contexts: 0 };
   const browser = {
+    isConnected: () => dieAfter === null || seen.contexts < dieAfter,
     async newContext() {
-      if (dead) throw new Error(dead);
+      if (dieAfter !== null && seen.contexts >= dieAfter) throw new Error(CLOSED);
+      if (contextError) throw new Error(contextError);
+      seen.contexts += 1;
       let url = null;
       let fallback = null;
       return {
@@ -560,18 +565,52 @@ test('captureAll: the retry starts a view only while its worst case ends within 
   ]);
   assert.match(summaryText(report), /\nRetry: 2 page views that failed to capture were captured once more, with more time: 2 captured, 0 not\. 2 page views that failed to capture were not tried again: the retry's time ran out\.\n/);
 
-  // a budget of 0: no view is tried again
-  const none = await captureWith({ '/a': fail, '/en/a': [{}], '/b': [{}], '/en/b': [{}] }, { retryBudgetMs: 0 });
-  assert.deepEqual([none.seen.attempts['/a'], none.captures[0].retrySkipped, none.captures[0].error], [1, true, TIMEOUT_SHOT]);
+  assert.deepEqual(asReport(captures).pages.flatMap((p) => Object.values(p.captures).map((c) => c.retrySkipped)).filter(Boolean).length, 2, 'each view left says so in its cell');
 });
 
-test('captureAll: a browser that died makes each view\'s error, not the end of the run', async () => {
-  const dead = 'browser.newContext: Target page, context or browser has been closed';
-  const { captures, seen } = await captureWith({ '/a': [{}], '/en/a': [{}], '/b': [{}], '/en/b': [{}] }, {}, { dead });
+test('captureAll: a retry budget of 0 is no retry at all: nothing tried, nothing said, no retry time', async () => {
+  const fail = [{ error: TIMEOUT_SHOT }, {}];
+  const logged = [];
+  const original = console.error;
+  console.error = (...args) => logged.push(args.join(' '));
+  let none;
+  try {
+    none = await captureWith({ '/a': fail, '/en/a': [{}], '/b': [{}], '/en/b': [{}] }, { retryBudgetMs: 0 });
+  } finally {
+    console.error = original;
+  }
+  assert.deepEqual(logged, [], 'no "capturing again" line');
+  assert.equal(none.retrySeconds, null);
+  assert.deepEqual([none.seen.attempts['/a'], none.captures[0].retried, Boolean(none.captures[0].retrySkipped), none.captures[0].error], [1, false, false, TIMEOUT_SHOT]);
+  const report = asReport(none.captures, { buildSeconds: null, captureSeconds: 1, retrySeconds: none.retrySeconds, totalSeconds: 1 });
+  assert.deepEqual([report.summary.retried, report.summary.notRetried], [0, 0]);
+  const text = summaryText(report);
+  assert.doesNotMatch(text, /Retry:|time ran out|the retry/);
+  assert.match(text, /\nTime: build skipped \(existing build\), capture 1 s\.\n/);
+});
+
+test('captureAll: a new context that fails while the browser lives is that view\'s error, not the end of the run', async () => {
+  const error = 'browser.newContext: some failure of this context';
+  const { captures, seen } = await captureWith({ '/a': [{}], '/en/a': [{}], '/b': [{}], '/en/b': [{}] }, {}, { contextError: error });
   assert.equal(captures.length, 4);
-  assert.ok(captures.every((c) => c.error === dead && c.retried && c.firstError === dead && !c.shot), 'tried again, and reported with its error');
+  assert.ok(captures.every((c) => c.error === error && c.retried && c.firstError === error && !c.shot), 'tried again, and reported with its error');
   assert.deepEqual(seen.events, [], 'no page was opened');
-  assert.deepEqual(asReport(captures).findings.map((f) => f.detail), Array(4).fill(`could not be captured: ${dead}`));
+  assert.deepEqual(asReport(captures).findings.map((f) => f.detail), Array(4).fill(`could not be captured: ${error}`));
+});
+
+test('captureAll: a browser that died ends the run (exit 3, no sheet), after the first pass or after the retry', async () => {
+  const ended = (e) => e.exitCode === 3 && /Chromium closed during the captures; no sheet was written/.test(e.message);
+  // dead before the first pass ends: two views failed with it, and none is tried again
+  const first = standInBrowser({ '/a': [{}], '/en/a': [{}], '/b': [{}], '/en/b': [{}] }, { dieAfter: 2 });
+  const { seen } = first;
+  const out = tmp('visual-pack-capture');
+  await assert.rejects(
+    captureAll({ browser: first.browser, server: { origin: 'http://127.0.0.1:1' }, net: newNetworkStats(), settings: { viewport: { width: 1280, height: 800 }, maxHeight: 8000, jobs: 4, timeoutMs: 45000 }, pages: PLAN_PAGES, columns: ['uk', 'en'], shotsDir: path.join(out, 'shots'), outDir: out }),
+    ended,
+  );
+  assert.equal(seen.contexts, 2, 'no retry was started');
+  // dead during the retry: the first pass was whole, the retry lost the browser
+  await assert.rejects(captureWith({ '/a': [{ error: TIMEOUT_SHOT }, {}], '/en/a': [{ error: TIMEOUT_SHOT }, {}], '/b': [{}], '/en/b': [{}] }, {}, { dieAfter: 5 }), ended);
 });
 
 test('captureAll: the run\'s timeout reaches every wait of a view, the screenshot too; no failure, no retry', async () => {
@@ -584,16 +623,26 @@ test('captureAll: the run\'s timeout reaches every wait of a view, the screensho
   assert.deepEqual(kinds('default'), [180000, 180000, 180000, 180000], 'any other wait of the view gets it too');
 });
 
-test('settings: the retry\'s timeout is 4 × --timeout unless given, never below it; its budget is 30 min unless given', async () => {
+test('settings: the retry\'s timeout is 4 × --timeout, held to a sixth of the budget and never below --timeout; its budget is 30 min unless given', async () => {
   const { dir, range } = makeHost();
   const d = await loadPackSettings({ root: dir, range }, {});
   assert.deepEqual([d.timeoutMs, d.retryTimeoutMs, d.retryBudgetMs], [30000, 120000, 1800000]);
-  const t = await loadPackSettings({ root: dir, range, timeout: '60000' }, {});
-  assert.equal(t.retryTimeoutMs, 240000, 'it follows --timeout');
+  assert.ok(worstViewMs(d.retryTimeoutMs) <= d.retryBudgetMs / 6);
+  // 4 × 60 s would make one view's worst case 493 s, over a sixth of 30 min (300 s): held to (300 s - 13 s) / 2
+  assert.equal((await loadPackSettings({ root: dir, range, timeout: '60000' }, {})).retryTimeoutMs, 143500);
+  // the --timeout the measured pack's session used: the retry keeps it rather than going below it, and two views at a
+  // time each fit the budget about four times over
+  const big = await loadPackSettings({ root: dir, range, timeout: '180000' }, {});
+  assert.equal(big.retryTimeoutMs, 180000);
+  assert.ok(Math.floor(big.retryBudgetMs / worstViewMs(big.retryTimeoutMs)) >= 4);
+  assert.equal((await loadPackSettings({ root: dir, range, 'retry-budget': '600000' }, {})).retryTimeoutMs, 43500, 'a smaller budget, a smaller default');
   const o = await loadPackSettings({ root: dir, range, timeout: '20000', 'retry-timeout': '50000', 'retry-budget': '0' }, {});
   assert.deepEqual([o.retryTimeoutMs, o.retryBudgetMs], [50000, 0]);
   await assert.rejects(loadPackSettings({ root: dir, range, timeout: '60000', 'retry-timeout': '30000' }), (e) => e.exitCode === 2 && /--retry-timeout/.test(e.message));
+  // a --retry-timeout given whose one view cannot fit the budget: refused, rather than a retry that tries nothing
+  await assert.rejects(loadPackSettings({ root: dir, range, 'retry-timeout': '900000' }), (e) => e.exitCode === 2 && /does not fit --retry-budget/.test(e.message));
   await assert.rejects(loadPackSettings({ root: dir, range, 'retry-budget': '-1' }), (e) => e.exitCode === 2);
+  await assert.rejects(loadPackSettings({ root: dir, range, 'retry-budget': '' }), (e) => e.exitCode === 2 && /--retry-budget needs a value/.test(e.message), 'an empty value is not 0');
 });
 
 // ------------------------------------------------------------------ the local server

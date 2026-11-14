@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { log } from '../../ui-labels/lib/util.mjs';
+import { CliError, log } from '../../ui-labels/lib/util.mjs';
 import { loadImages, measureDom } from './dom.mjs';
 
 const withoutHash = (url) => String(url).split('#')[0];
@@ -8,8 +8,9 @@ const withoutHash = (url) => String(url).split('#')[0];
 // A view's fixed waits: the network going idle after the load, and the images (dom.mjs, loadImages).
 const NETWORK_IDLE_MS = 5000;
 const IMAGES_MS = 8000;
+export const FIXED_WAITS_MS = NETWORK_IDLE_MS + IMAGES_MS;
 // The longest a view waits when each of its waits may take `timeoutMs`: the load, the screenshot and the fixed waits.
-export const worstViewMs = (timeoutMs) => 2 * timeoutMs + NETWORK_IDLE_MS + IMAGES_MS;
+export const worstViewMs = (timeoutMs) => 2 * timeoutMs + FIXED_WAITS_MS;
 // Views captured at once on the retry, at most. In the measured pack, two at a time captured 63 of 80 views even with
 // the screenshot held to 30 s; the retry gives each wait more time than that (--retry-timeout).
 export const RETRY_JOBS = 2;
@@ -83,6 +84,14 @@ async function captureOne({ browser, server, net, settings, target, shotPath }) 
   return result;
 }
 
+// A browser that died ends the run (exit 3, no sheet). Its views would all fail, twice, and read as that many pages
+// missing: a crash is not a finding.
+function checkBrowser(browser) {
+  if (typeof browser.isConnected === 'function' && !browser.isConnected()) {
+    throw new CliError('Chromium closed during the captures; no sheet was written. Run the pack again.', { code: 3 });
+  }
+}
+
 // A view to capture again: it failed with an error (a timeout, a crash), not with an answer. A page that answered 4xx
 // or 5xx is a finding as it stands, even when its screenshot failed too.
 export const failedToCapture = (result) => Boolean(result.error) && !(result.status >= 400);
@@ -91,7 +100,8 @@ export const failedToCapture = (result) => Boolean(result.error) && !(result.sta
 // more, with more time for each wait (`settings.retryTimeoutMs`), RETRY_JOBS at a time, after all the others. The retry
 // starts a view only while its worst case still ends within `settings.retryBudgetMs` of the retry's start; a view it
 // cannot start stays as first reported (`retrySkipped`). A retried result says so (`retried`, and the first try's
-// `firstError`). `clock` is for the tests.
+// `firstError`). A budget of 0 is no retry at all. A browser that died ends the run, after either pass. `clock` is for
+// the tests.
 // -> { captures: one result per target, in the order of the targets; retrySeconds: the second pass, null when none }.
 export async function captureAll({ browser, server, net, settings, pages, columns, shotsDir, outDir, clock = Date.now }) {
   const targets = [];
@@ -111,9 +121,10 @@ export async function captureAll({ browser, server, net, settings, pages, column
     }
   };
   await Promise.all(Array.from({ length: Math.min(settings.jobs, targets.length) }, worker));
+  checkBrowser(browser);
 
   const queue = results.flatMap((r, i) => (failedToCapture(r) ? [i] : []));
-  if (!queue.length) return { captures: results, retrySeconds: null };
+  if (!queue.length || settings.retryBudgetMs === 0) return { captures: results, retrySeconds: null };
   const retry = { ...settings, timeoutMs: settings.retryTimeoutMs ?? settings.timeoutMs };
   const started = clock();
   const deadline = started + (settings.retryBudgetMs ?? Infinity);
@@ -126,6 +137,7 @@ export async function captureAll({ browser, server, net, settings, pages, column
     }
   };
   await Promise.all(Array.from({ length: jobs }, retryWorker));
+  checkBrowser(browser);
   for (const i of queue) results[i] = { ...results[i], retrySkipped: true };
   return { captures: results, retrySeconds: Math.round((clock() - started) / 100) / 10 };
 }

@@ -53,7 +53,7 @@ function cell(report, page, pageIdx, locale) {
   if (capture?.shot) {
     body = `<a href="${hrefOf(capture.shot)}"><img src="${hrefOf(capture.shot)}" alt="${escapeHtml(`${page.key} in ${locale}`)}" loading="lazy"></a>${capture.cropped ? '<div class="muted">cropped at the height limit</div>' : ''}${capture.retried ? `<div class="muted">captured on the second try (the first: ${escapeHtml(capture.firstError)})</div>` : ''}`;
   } else {
-    body = `<div class="muted">not captured${capture?.retried ? ', twice' : ''}${capture?.error ? `: ${escapeHtml(capture.error)}` : ''}</div>`;
+    body = `<div class="muted">not captured${capture?.retried ? ', twice' : ''}${capture?.retrySkipped ? " (not tried again: the retry's time ran out)" : ''}${capture?.error ? `: ${escapeHtml(capture.error)}` : ''}</div>`;
   }
   return `<td id="${cellId(pageIdx, locale)}">${body}${badges ? `<div>${badges}</div>` : ''}</td>`;
 }
