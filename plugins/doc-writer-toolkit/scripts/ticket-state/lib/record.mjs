@@ -14,7 +14,7 @@ import { changedLines, commentProblems, languageMessage, markersAt, markersMessa
 import { HOLD_KINDS, OWN_KINDS, checkWriteOpen, docDirsOf, evidenceChecks, heldGivenBack, heldPending, inputOf, passFailed, passFor, passProblems, prAfterPass, refuse, settledOf } from './answer-pass.mjs';
 import { appendMisses, checkSource, missLine, sourceOfEvidence } from './misses.mjs';
 import { companyReposOn } from './company-repos.mjs';
-import { addFindings, checkFindings } from './findings.mjs';
+import { addFindings, checkFindings, knownApps } from './findings.mjs';
 
 // `record <key> --stage <s> --status running|done|failed`: one stage result, written only when the tracker, the forge
 // and the files support it (context/ticket-flow.md, "When a record is accepted"). On any problem nothing is written.
@@ -66,7 +66,7 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
   const run = json(runIn, 'run');
   const at = new Date(now).toISOString();
   // Findings outside the ticket (lib/findings.mjs), checked before anything is read or written: the runner files them.
-  const findings = checkFindings(result.sideFindings);
+  const findings = checkFindings(result.sideFindings, { apps: knownApps(settings) });
 
   let ledger = readLedger(settings.state, key);
   // The tracker client is made on first use: a record refused before it needs the tracker needs no credentials.

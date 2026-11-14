@@ -78,7 +78,7 @@ export function trackerAdapter({ cards = [], comments = {}, release = [], action
     }
     return c;
   };
-  const labels = [...new Set(cards.flatMap((c) => c.labels.map((l) => l.name)).concat(['high', 'low', 'needs info', 'Guide', 'Api', 'Docs', 'Portal UI', 'Portal API']))].map((n) => ({ id: `label-${n}`, name: n, color: null }));
+  const labels = [...new Set(cards.flatMap((c) => c.labels.map((l) => l.name)).concat(['high', 'low', 'needs info', 'Guide', 'Api', 'Docs', 'Portal UI', 'Portal API', 'Bug', 'Backend', 'Admin']))].map((n) => ({ id: `label-${n}`, name: n, color: null }));
   return {
     kind: 'memory',
     log,

@@ -10,25 +10,78 @@ import { parseUsage } from '../lib/allowance.mjs';
 import { DEFAULT_LABELS, renderSections } from '../lib/pr-description.mjs';
 import { SCRIPT_COMMANDS, refusalOf } from '../lib/role-hook.mjs';
 import { HOOK_VARIABLE } from '../lib/role-hook.mjs';
-import { checkFindings, fingerprint, findingsPath, followFindings, readFindings, renderTemplate } from '../lib/findings.mjs';
+import { BUG_SECTIONS, checkFindings, fingerprint, findingsPath, followFindings, readBugTemplate, readFindings, renderTemplate } from '../lib/findings.mjs';
 import { validateSettings } from '../lib/settings.mjs';
 
-// Findings outside the ticket (TASK-050): a session's side finding becomes a card in the intake list, linked to the
-// ticket, never a line of the PR's open questions; a finding an open card holds already is linked, not filed again; a
-// note goes to the run report; a question about the ticket stays in the open questions. An invented host and invented
-// texts throughout.
+// Findings outside the ticket (TASK-050): a session's side finding becomes a card in the list the host names for its
+// kind (a parked list the pipeline never reads for a page or UI finding, a bug list outside the flow for an app bug),
+// linked to the ticket, never a line of the PR's open questions; an app bug's card is built from the host's bug template
+// file; a finding an open card holds already is linked, not filed again; a note goes to the run report; a question about
+// the ticket stays in the open questions. An invented host and invented texts throughout.
 
 const HEADER = '🤖 **[BOT]**';
 const HEAD = 'b'.repeat(40);
 const PAGE = 'docs/x/a.md';
+// The host's bug template: a fenced block with a lead line and six sections, each with example text, then the
+// instructions after a `---` line, inside the block.
+const BUG_FILE = 'rules/bug-template.md';
+const BUG_TEMPLATE = [
+  '# Card template: bug',
+  '',
+  'Copy the block below into the card. Sections are independent.',
+  '',
+  '---',
+  '',
+  '````markdown',
+  'BR',
+  '',
+  '### Module / screen',
+  '**Users** → **Edit**',
+  '',
+  '### Who reported',
+  'Someone from a partner chat',
+  '',
+  '### Under which role',
+  '`OPERATOR`. Under `ADMIN` it saves.',
+  '',
+  '### Now (what is wrong)',
+  'EXAMPLE-NOW: the value is not saved.',
+  '',
+  '### Expected',
+  'EXAMPLE-EXPECTED: the value is saved.',
+  '',
+  '### How to reproduce / example',
+  'EXAMPLE-STEPS: open, type, save.',
+  '',
+  '---',
+  '',
+  '## ⬇️ Instructions: delete everything below',
+  '',
+  '**Labels:** add the type label and the app label.',
+  '````',
+  '',
+].join('\n');
 const TEMPLATE_CARD = {
+  lists: { page: 'drafts', ui: 'Parked', appBug: 'Side lane' },
+  labels: { page: ['Docs'], appBug: { all: ['Bug'], be: ['Backend'] } },
+  apps: ['Admin'],
+  kinds: { page: 'Docs', ui: 'Undocumented UI', appBug: 'App bug' },
   name: '<kind>: <title>',
   desc: '## Description\n\n<text>\n\n- **Where:** <where>\n- **Page:** `<repo>` `<page>`\n- **Sources:** <refs>\n- **Found while on:** <ticket>\n- **PR:** <pr>',
+  templates: { appBug: { file: BUG_FILE, sections: [...BUG_SECTIONS], reporter: 'The tech writer, while on <ticketName>: <ticket>\nPR: <pr>' } },
   onTicket: 'Outside the ticket: <kind>, a card of its own: <card>',
   onExisting: 'Seen again while on <ticket>: <title>',
-  kinds: { page: 'Docs', ui: 'Undocumented UI', appBug: 'App bug' },
 };
-const withCard = (extra = {}) => ({ commentHeader: HEADER, tracker: { ...rawSettings().tracker, findingCard: TEMPLATE_CARD }, ...extra });
+const withCard = (extra = {}, findingCard = TEMPLATE_CARD) => ({ commentHeader: HEADER, tracker: { ...rawSettings().tracker, findingCard }, ...extra });
+// The host's bug template file, in the host root.
+const bugFile = (w, text = BUG_TEMPLATE) => {
+  fs.mkdirSync(path.join(w.settings.root, path.dirname(BUG_FILE)), { recursive: true });
+  fs.writeFileSync(path.join(w.settings.root, BUG_FILE), text);
+};
+// An app bug, as a session records it.
+const BUG = { kind: 'appBug', title: 'The partner ID is not saved when a user is edited', app: 'guide', side: 'be', module: 'Users → Edit', role: 'Not checked', now: 'Saving shows an error and the ID is not kept.', expected: 'The ID is saved, as it is when the user is created.', repro: 'Users → a user → Edit → Partner ID → Save. Request id 0b6c2f1e-8a4d-4c1e-9f3a-2d5e7b9a1c3f.', refs: ['api/users.ts#L88'] };
+// No list of cards is read on the parked list (the stand-in throws on it too) or the bug list.
+const noListRead = (w) => assert.ok(!w.tracker.reads.some((r) => r[0] === 'cardsIn' && [LISTS.drafts.id, LISTS.side.id].includes(r[1])), JSON.stringify(w.tracker.reads));
 const ROUNDS = (extra = {}) => withCard({ forge: { ...rawSettings().forge, triggerWords: ['helper'], reviewRounds: { labels: { readers: { developer: 'For the developer', writer: 'For the writer' } } } }, ...extra });
 const BASE = { start: 'done', plan: 'done', write: 'done', uaReview: 'done', pr: 'done' };
 const RESULT = JSON.stringify({ type: 'result', subtype: 'success', is_error: false, num_turns: 4, total_cost_usd: 0.5, duration_ms: 60000, session_id: 'session-1', usage: { input_tokens: 100, output_tokens: 50 }, permission_denials: [] });
@@ -73,7 +126,7 @@ const commentsOn = (w, c) => w.tracker.log.filter((x) => x[0] === 'comment' && (
 
 // ------------------------------------------------------------------ AC: a side finding is a card, not a PR line
 
-test('AC: a round\'s side finding becomes a card in the intake list, linked both ways, and no line of the PR\'s open questions; its question about the ticket stays there; its note goes to the run report', async () => {
+test('AC: a round\'s side finding becomes a card in the list its kind goes to, linked both ways, and no line of the PR\'s open questions; its question about the ticket stays there; its note goes to the run report', async () => {
   const { c, forgePr, w } = roundWorld(1301);
   const spawnClaude = async () => {
     await runRecord({ settings: w.settings, clients: w.clients(), key: '1301', stage: 'answerComments', pr: 'guide-docs#81', status: 'done', now: NOW, result: JSON.stringify({
@@ -94,11 +147,14 @@ test('AC: a round\'s side finding becomes a card in the intake list, linked both
   assert.match(forgePr.body, /\*\*\d+\.\*\* Is the limit 50 for every payment method\?/);
   assert.ok(!forgePr.body.includes('five interface languages') && !forgePr.body.includes('languages.md') && !forgePr.body.includes('cache is cleared'), forgePr.body);
 
-  // The tracker: one card in the intake list, its text from the host's template, naming the ticket and the PR.
+  // The tracker: one card in the parked list (a status the pipeline never reads), its text from the host's template,
+  // naming the ticket and the PR, with the kind's label; no card of that list read.
   const made = created(w);
   assert.equal(made.length, 1);
-  const [, placeId, name, desc] = made[0];
-  assert.equal(placeId, LISTS.intake.id);
+  const [, placeId, name, desc, labelIds] = made[0];
+  assert.equal(placeId, LISTS.drafts.id);
+  assert.deepEqual(labelIds, ['label-Docs']);
+  noListRead(w);
   assert.equal(name, 'Docs: The export page still lists five interface languages');
   assert.equal(desc, ['## Description', '', OTHER_PAGE.text, '', '- **Where:** Interface language', '- **Page:** `guide-docs` `docs/settings/languages.md`', '- **Sources:** docs/settings/languages.md#L12', `- **Found while on:** ${c.url}`, '- **PR:** https://forge.example/acme/guide-docs/pull/81'].join('\n'));
   const filed = w.tracker.cards.at(-1);
@@ -109,7 +165,7 @@ test('AC: a round\'s side finding becomes a card in the intake list, linked both
   assert.deepEqual(lines.map((x) => [x.ticket, x.id, x.outcome, x.card?.url ?? null]), [['1301', 'f1', 'filed', filed.url], ['1301', 'f2', 'noted', null]]);
   assert.ok(out.log.some((e) => e.kind === 'findings' && e.outcome === 'filed'), 'the run log says what was filed');
   const report = fs.readFileSync(path.join(w.settings.root, out.reportFile), 'utf8');
-  assert.match(report, /## Findings outside the tickets\n\n- 1301: page «The export page still lists five interface languages», filed: https:\/\/tracker\.example\/c\/\S+\n- 1301: note: The test cabinet shows the old menu until the cache is cleared\./);
+  assert.match(report, /## Findings outside the tickets\n\n- 1301: page «The export page still lists five interface languages», filed in Parked: https:\/\/tracker\.example\/c\/\S+\n- 1301: note: The test cabinet shows the old menu until the cache is cleared\./);
 
   // Routed once: the next step of the ticket files nothing again.
   await route(w, ['1301']);
@@ -123,7 +179,7 @@ test('AC: a question about the ticket stays in the open questions, and the pr re
   ledger(w, c, { stages: BASE, prs: [{ repo: 'guide-docs', branch: 'ticket-1302', targets: ['guide'], review: 'sme', stage: 'writing' }] });
   await runRecord({ settings: w.settings, clients: w.clients(), key: '1302', stage: 'pr', status: 'done', now: NOW, result: JSON.stringify({
     prs: [{ repo: 'guide-docs', branch: 'ticket-1302', number: 82, expertReview: { recommended: true, why: 'one question only the developer can answer' }, review: { id: 501 }, questions: [QUESTION] }],
-    sideFindings: [{ kind: 'appBug', title: 'The bank list accepts a bank that is not on it', text: 'A test request with a bank outside the list returned 200, then the transaction failed.', where: 'PUT /t/:otp/banks' }],
+    sideFindings: [{ kind: 'appBug', title: 'The bank list accepts a bank that is not on it', app: 'Guide', module: 'PUT /t/:otp/banks', now: 'A test request with a bank outside the list returned 200, then the transaction failed.', expected: 'A bank outside the list is refused with 400.' }],
     posted: [501],
   }) });
   const l = read(w, '1302');
@@ -146,6 +202,7 @@ test('AC: the same finding on a second ticket is linked to the open card, not fi
   await route(w, ['1311']);
   const first = w.tracker.cards.at(-1);
   assert.equal(created(w).length, 1);
+  assert.equal(first.placeId, LISTS.drafts.id, 'filed in the parked list, which the pipeline never reads');
 
   // Another ticket, other words in the text and the title's case and stops changed: the same fingerprint.
   await findingsOf(w, '1312', [{ ...OTHER_PAGE, title: 'the export page still lists FIVE interface languages!', text: 'Seen again from another ticket.' }]);
@@ -153,7 +210,8 @@ test('AC: the same finding on a second ticket is linked to the open card, not fi
   assert.equal(created(w).length, 1, 'no second card');
   assert.deepEqual(events.map((e) => e.outcome), ['linked']);
   assert.deepEqual(commentsOn(w, b), [`${HEADER}\n\nOutside the ticket: Docs, a card of its own: ${first.url}`]);
-  assert.deepEqual(commentsOn(w, first), [`${HEADER}\n\nSeen again while on ${b.url}: the export page still lists FIVE interface languages!`], 'the card names the second ticket');
+  assert.deepEqual(commentsOn(w, first), [`${HEADER}\n\nSeen again while on ${b.url}: the export page still lists FIVE interface languages!`], 'the card names the second ticket: the runner filed it, so the parked list is no bar to a comment');
+  noListRead(w);
   assert.deepEqual(readFindings(w.settings.state).map((x) => [x.ticket, x.outcome, x.card.url, x.by]), [['1311', 'filed', first.url, undefined], ['1312', 'linked', first.url, 'fingerprint, as 1311 f1']]);
   assert.equal(commentsOn(w, a).length, 1);
   // The pipeline's own comments on a ticket's card are kept as its own, so no rule reads them as a person's.
@@ -179,21 +237,113 @@ test('AC: the same finding on a second ticket is linked to the open card, not fi
 test('AC: a finding the session matched to an open card (an app bug filed by people on another board) is linked, not filed; a card it named that is archived is filed again', async () => {
   const bug = card({ name: 'Uzbek disputes menu reads "conversations"', board: WATCH, list: { id: '5f00000000000000000a0101' } });
   const old = card({ name: 'An old bug', status: 'ready', closed: true });
-  const w = world({ cards: [bug, old], extra: withCard() });
+  // A person's card in the parked list: it holds the finding, but the pipeline writes nothing on it.
+  const draft = card({ name: 'A draft of someone', status: 'drafts' });
+  const w = world({ cards: [bug, old, draft], extra: withCard() });
+  bugFile(w);
   const t = plainTicket(w, 1321);
-  const finding = { kind: 'appBug', title: 'The disputes menu has the wrong Uzbek name', text: 'The app string reads "conversations".', where: 'Operator cabinet, uz, the main menu' };
-  await findingsOf(w, '1321', [{ ...finding, card: bug.url }, { ...finding, title: 'Another bug', card: old.url }, { ...finding, title: 'A third bug', card: 'https://tracker.example/c/NoSuchCard' }, { ...finding, title: 'A fourth bug', card: t.url }]);
+  const finding = { kind: 'appBug', title: 'The disputes menu has the wrong Uzbek name', app: 'Guide', side: 'fe', module: 'The main menu, uz', now: 'The app string reads "conversations".', expected: 'It reads "disputes", as in the other locales.' };
+  await findingsOf(w, '1321', [{ ...finding, card: bug.url }, { ...finding, title: 'Another bug', card: old.url }, { ...finding, title: 'A third bug', card: 'https://tracker.example/c/NoSuchCard' }, { ...finding, title: 'A fourth bug', card: t.url }, { ...finding, title: 'A fifth bug', card: draft.url }]);
   const events = await route(w, ['1321']);
-  assert.deepEqual(events.map((e) => e.outcome), ['linked', 'filed', 'filed', 'filed']);
+  assert.deepEqual(events.map((e) => e.outcome), ['linked', 'filed', 'filed', 'filed', 'linked']);
   assert.equal(created(w).length, 3, 'the ones whose card is archived, gone, or the ticket itself');
+  assert.ok(created(w).every((x) => x[1] === LISTS.side.id), 'app bugs go to the bug list');
   assert.deepEqual(commentsOn(w, bug), [], 'a card on another board gets no comment: the module writes only on its board');
+  assert.deepEqual(commentsOn(w, draft), [], "a person's card in a list the pipeline never reads gets no comment");
   assert.deepEqual(commentsOn(w, t).map((x) => x.split('\n\n')[1]).slice(0, 2), [`Outside the ticket: App bug, a card of its own: ${bug.url}`, `Outside the ticket: App bug, a card of its own: ${w.tracker.cards.at(-3).url}`]);
   const lines = readFindings(w.settings.state);
-  assert.deepEqual(lines.map((x) => [x.outcome, x.by ?? null]), [['linked', 'session'], ['filed', null], ['filed', null], ['filed', null]]);
-  assert.equal(read(w, '1321').posted.card.length, 4, "each link comment on the ticket's card is the pipeline's own");
+  assert.deepEqual(lines.map((x) => [x.outcome, x.by ?? null]), [['linked', 'session'], ['filed', null], ['filed', null], ['filed', null], ['linked', 'session']]);
+  assert.equal(read(w, '1321').posted.card.length, 5, "each link comment on the ticket's card is the pipeline's own");
   assert.match(lines[1].notes[0], /the card the session named \(.+\) is archived/);
   assert.match(lines[2].notes[0], /the card the session named \(.+NoSuchCard\) is gone/);
   assert.match(lines[3].notes[0], /is this ticket's own card/);
+  noListRead(w);
+});
+
+// ------------------------------------------------------------------ an app bug: the host's bug template
+
+test('AC: an app bug becomes a card in the bug list, built from the host\'s bug template: its lead and sections in order, each from the finding, no example text and no instructions; the type, side and app labels', async () => {
+  const w = world({ extra: withCard() });
+  bugFile(w);
+  const t = plainTicket(w, 1371);
+  await findingsOf(w, '1371', [BUG, { ...BUG, title: 'A second bug, its role and place unknown', side: undefined, module: undefined, role: undefined, repro: undefined, refs: undefined }]);
+  assert.deepEqual((await route(w, ['1371'])).map((e) => e.outcome), ['filed', 'filed']);
+  const [[, placeId, name, desc, labelIds], [, , , bare, bareLabels]] = created(w);
+  assert.equal(placeId, LISTS.side.id);
+  assert.equal(name, BUG.title, "the card's name is the problem, as the session said it");
+  assert.equal(desc, [
+    'BR',
+    '',
+    '### Module / screen\nUsers → Edit',
+    '',
+    `### Who reported\nThe tech writer, while on ${t.name}: ${t.url}`,
+    '',
+    '### Under which role\nNot checked',
+    '',
+    `### Now (what is wrong)\n${BUG.now}`,
+    '',
+    `### Expected\n${BUG.expected}`,
+    '',
+    `### How to reproduce / example\n${BUG.repro}\napi/users.ts#L88`,
+  ].join('\n'));
+  assert.ok(!/EXAMPLE|Someone from|Instructions|Labels:|Copy the block/.test(desc), 'nothing of the example or the instructions');
+  assert.deepEqual(labelIds, ['label-Bug', 'label-Backend', 'label-Guide'], 'the type label, the side the settings name, the app');
+  // A section the finding leaves empty is left out; the others keep their order.
+  assert.deepEqual(bare.split('\n\n').map((x) => x.split('\n')[0]), ['BR', '### Who reported', '### Now (what is wrong)', '### Expected']);
+  assert.deepEqual(bareLabels, ['label-Bug', 'label-Guide']);
+  assert.deepEqual(readFindings(w.settings.state).map((x) => [x.outcome, x.list, x.labels]), [['filed', 'Side lane', ['Bug', 'Backend', 'Guide']], ['filed', 'Side lane', ['Bug', 'Guide']]]);
+  noListRead(w);
+});
+
+test('an app bug: the record refuses one without what is wrong or what is expected, with an unknown app, or with confidential data outside the last section', async () => {
+  const w = world({ extra: withCard() });
+  plainTicket(w, 1372);
+  const bad = async (f, re) => {
+    await assert.rejects(findingsOf(w, '1372', [f]), (e) => e.exitCode === 2 && re.test(e.message), JSON.stringify(f));
+  };
+  await bad({ ...BUG, expected: undefined }, /an "appBug" finding says "now" \(what is wrong\) and "expected"/);
+  await bad({ ...BUG, now: undefined }, /without "now" it is no bug report/);
+  await bad({ ...BUG, app: undefined }, /names its "app": one of Guide, Api, Portal UI, Portal API, Admin/);
+  await bad({ ...BUG, app: 'Billing' }, /"app" is one of/);
+  await bad({ ...BUG, side: 'db' }, /"side" is "fe" or "be"/);
+  await bad({ ...BUG, text: 'x' }, /a "appBug" finding has no "text".+"now"/);
+  await bad({ ...BUG, now: 'Order 0b6c2f1e-8a4d-4c1e-9f3a-2d5e7b9a1c3f fails.' }, /"now" holds what looks like an id \(UUID\)/);
+  await bad({ ...BUG, expected: 'The response is {"status": "ok"}.' }, /"expected" holds what looks like JSON/);
+  await bad({ ...BUG, module: 'Payouts to UA213223130000026007233566001' }, /"module" holds what looks like an account number/);
+  await bad({ ...BUG, title: 'Card 4111 1111 1111 1111 is refused' }, /"title" holds what looks like a card number/);
+  await bad({ ...BUG, now: 'select id from users where ... returns nothing' }, /"now" holds what looks like SQL/);
+  assert.equal(read(w, '1372').sideFindings, undefined, 'nothing written by a refused record');
+  // In the last section, the same data is what it is for; the app is matched without case.
+  await findingsOf(w, '1372', [{ ...BUG, app: 'admin', repro: 'POST /users {"id": "0b6c2f1e-8a4d-4c1e-9f3a-2d5e7b9a1c3f"}; select * from users' }]);
+  assert.equal(read(w, '1372').sideFindings[0].app, 'Admin');
+});
+
+test('an app bug whose bug template can\'t be used, or a kind with no list, files no card: the report says why', async () => {
+  const noUi = { ...TEMPLATE_CARD, lists: { page: 'drafts', appBug: 'Side lane' } };
+  const w = world({ extra: withCard({}, noUi) });
+  plainTicket(w, 1373);
+  const ui = { kind: 'ui', title: 'The archive has a new filter', text: 'No page lists the «Operator» filter.', where: 'Archive, filters' };
+  await findingsOf(w, '1373', [{ ...BUG, title: 'Bug one' }, ui]);
+  assert.deepEqual((await route(w, ['1373'])).map((e) => e.outcome), ['unfiled', 'unfiled']);
+  bugFile(w, '# A template\n\nNo block here.\n');
+  await findingsOf(w, '1373', [{ ...BUG, title: 'Bug two' }]);
+  await route(w, ['1373']);
+  bugFile(w, BUG_TEMPLATE.replace('### Expected\n', ''));
+  await findingsOf(w, '1373', [{ ...BUG, title: 'Bug three' }]);
+  await route(w, ['1373']);
+  assert.deepEqual(w.tracker.log, [], 'no write at all');
+  const { renderFindings } = await import('../lib/findings.mjs');
+  const text = renderFindings(readFindings(w.settings.state), () => true).join('\n');
+  assert.match(text, /appBug «Bug one»: Saving shows an error and the ID is not kept\. No card: the bug template `rules\/bug-template\.md` can't be read \(ENOENT\)/);
+  assert.match(text, /ui «The archive has a new filter»: .+ No card: the host names no list for ui findings \(`tracker\.findingCard\.lists\.ui`\)/);
+  assert.match(text, /appBug «Bug two»: .+ No card: the bug template `rules\/bug-template\.md` has no fenced markdown block/);
+  assert.match(text, /appBug «Bug three»: .+ No card: the bug template `rules\/bug-template\.md` has 5 ### sections, and templates\.appBug\.sections names 6/);
+});
+
+test('the bug template: the block\'s lead and headings, cut at its instructions', () => {
+  assert.deepEqual(readBugTemplate(BUG_TEMPLATE), { lead: 'BR', headings: ['Module / screen', 'Who reported', 'Under which role', 'Now (what is wrong)', 'Expected', 'How to reproduce / example'] });
+  assert.deepEqual(readBugTemplate('```md\n### One\nx\n### Two\n```\n### Not in the block'), { lead: '', headings: ['One', 'Two'] });
+  assert.match(readBugTemplate('````markdown\nBR\n````').error, /no ### section/);
 });
 
 test('a finding whose open card is another ticket: the comment on that card is kept as the pipeline\'s in that ticket\'s ledger, unless another run holds its lock', async () => {
@@ -261,7 +411,7 @@ test('record: sideFindings are checked before anything is written; a card\'s wor
   await bad({ ...OTHER_PAGE, kind: 'bug' }, /"kind" is one of page, ui, appBug, note/);
   await bad({ ...OTHER_PAGE, repo: undefined }, /a "page" finding names its "repo" and its "page"/);
   await bad({ kind: 'ui', title: 'x', text: 'y' }, /a "ui" finding says "where"/);
-  await bad({ kind: 'appBug', text: 'y', where: 'z' }, /needs its "title"/);
+  await bad({ kind: 'appBug', app: 'Guide', now: 'y', expected: 'z' }, /needs its "title"/);
   await bad({ ...OTHER_PAGE, title: 'two\nlines' }, /"title" is one line/);
   await bad({ ...OTHER_PAGE, refs: ['.claude/skills/rules.md'] }, /never names the toolkit, the model or their files/);
   await bad({ ...OTHER_PAGE, text: 'Found by Claude.' }, /never names the toolkit/);
@@ -283,19 +433,37 @@ test('record: sideFindings are checked before anything is written; a card\'s wor
 
 // ------------------------------------------------------------------ the settings and the template
 
-test('settings: the card template is the host\'s, with no default; each text names what links the card and the ticket', () => {
+test('settings: the card template is the host\'s, with no default; each text names what links the card and the ticket; a kind\'s list needs its texts', () => {
   const root = tmp();
   const load = (findingCard) => validateSettings(rawSettings({ tracker: { ...rawSettings().tracker, findingCard } }), { root, stateRootDefault: '.flow/' });
   assert.equal(load(undefined).findingCard, null);
-  assert.deepEqual(load(TEMPLATE_CARD).findingCard, TEMPLATE_CARD);
+  const loaded = load(TEMPLATE_CARD);
+  assert.deepEqual(loaded.findingCard, TEMPLATE_CARD);
+  // The tracker may create a card in the lists named, and only those (besides the intake status).
+  assert.deepEqual(loaded.tracker.createIn, ['drafts', 'Parked', 'Side lane']);
   assert.deepEqual(load({ ...TEMPLATE_CARD, kinds: undefined }).findingCard.kinds, {});
+  // No list: nothing is filed, and no card text is needed.
+  assert.deepEqual(load({ onTicket: 'Out: <card>', onExisting: 'Again: <ticket>' }).findingCard.lists, {});
+  const bug = TEMPLATE_CARD.templates.appBug;
   for (const [over, re] of [
     [{ desc: 'No link here.' }, /findingCard\.desc must have <ticket> in it/],
     [{ onTicket: 'No card here.' }, /findingCard\.onTicket must have <card> in it/],
     [{ name: 'A card' }, /findingCard\.name must have <title> in it/],
+    [{ name: undefined }, /findingCard\.name is a text, needed when lists names page or ui/],
     [{ onExisting: '' }, /findingCard\.onExisting is a text/],
     [{ colour: 'red' }, /findingCard\.colour is not a key/],
     [{ kinds: { bug: 'Bug' } }, /findingCard\.kinds is \{ page, ui, appBug \}/],
+    [{ lists: { note: 'Parked' } }, /findingCard\.lists is \{ page, ui, appBug \}/],
+    [{ labels: { page: { all: ['Docs'] } } }, /findingCard\.labels is \{ page, ui, appBug \}, each a list of label names/],
+    [{ labels: { appBug: { db: ['x'] } } }, /findingCard\.labels is/],
+    [{ apps: 'Admin' }, /findingCard\.apps is a list of app labels/],
+    [{ templates: {} }, /lists names appBug, so templates\.appBug names the bug template/],
+    [{ templates: { appBug: { ...bug, file: '' } } }, /templates\.appBug\.file is the bug template's path/],
+    [{ templates: { appBug: { ...bug, sections: ['module', 'now', 'expected'] } } }, /templates\.appBug\.sections must have reporter/],
+    [{ templates: { appBug: { ...bug, sections: [...BUG_SECTIONS, 'now'] } } }, /each once/],
+    [{ templates: { appBug: { ...bug, sections: ['steps', ...BUG_SECTIONS] } } }, /templates\.appBug\.sections is the field each ### section/],
+    [{ templates: { appBug: { ...bug, reporter: 'The tech writer' } } }, /templates\.appBug\.reporter is the text of who found it, with <ticket>/],
+    [{ templates: { page: bug } }, /templates is \{ appBug: \{ file, sections, reporter \} \}/],
   ]) assert.throws(() => load({ ...TEMPLATE_CARD, ...over }), (e) => re.test(e.message), JSON.stringify(over));
 });
 
@@ -317,6 +485,10 @@ test('the brief tells the writer, the reviewer and the translator where a findin
     const brief = briefFor({ stage, role, keys: ['1362'] }, w.settings);
     assert.match(brief, /Give it in the record's `sideFindings`/, `${role} ${stage}`);
     assert.match(brief, /Never create a card yourself/);
+    assert.match(brief, /only a clear defect of the UI or the backend that you have evidence for/);
+    assert.match(brief, /`app` is the app's label \(Guide, Api, Portal UI, Portal API, Admin\)/);
+    assert.match(brief, /The host's bug template, `rules\/bug-template\.md`, says how each section is filled/);
+    assert.match(brief, /The runner files each as a card \(page in «drafts», ui in «Parked», appBug in «Side lane»\)/);
     assert.ok(brief.includes(`- ${filed.url} page «The export page still lists five interface languages»`), `${role} ${stage}: the filed card is listed`);
   }
   assert.ok(!briefFor({ stage: 'triage', role: 'triage', keys: ['1362'] }, w.settings).includes('sideFindings'));

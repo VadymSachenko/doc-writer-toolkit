@@ -637,6 +637,34 @@ test('createCard: any other status, an empty name, or an unknown label is refuse
   assert.equal(s.fake.writes().length, 0);
 }));
 
+// The lists `findingCard.lists` names (the ticket flow's cards for findings outside a ticket): a list of the board by its
+// name, or a status by its key, even one the settings never read. No card of either list is read.
+const FINDING_LISTS = trackerSettings({ findingCard: { lists: { page: 'drafts', ui: 'drafts', appBug: 'side lane' } } });
+
+test('createCard: in a list findingCard.lists names, by its name or a status key, never reading its cards; any other list is refused', async () => {
+  const s = await setup({ settings: FINDING_LISTS });
+  try {
+    assert.deepEqual(validateTracker(FINDING_LISTS).createIn, ['drafts', 'side lane']);
+    const bug = await s.tracker.createCard({ list: 'side lane', name: 'A button does nothing', desc: 'Text', labels: ['Billing'] });
+    assert.deepEqual([bug.list.id, bug.list.name, bug.status, bug.labels], [L.bugs, 'Side lane', null, ['Billing']]);
+    const parked = await s.tracker.createCard({ list: 'drafts', name: 'A stale page' });
+    assert.deepEqual([parked.list.id, parked.status], [L.drafts, 'drafts']);
+    assert.deepEqual(s.fake.writes().map((w) => w.form.idList), [L.bugs, L.drafts]);
+    for (const list of ['Ready', 'ready', 'Inbox', 'Doing']) await rejects(s.tracker.createCard({ list, name: 'x' }), 'intake');
+    assert.ok(!s.fake.requests.some((r) => r.method === 'GET' && /\/lists\/[^/]+\/cards/.test(r.path)), 'no list of cards is read');
+    // Named by the settings but on no list of the board: refused, nothing written.
+    const t = await setup({ settings: trackerSettings({ findingCard: { lists: { appBug: 'Bugs' } } }) });
+    try {
+      await rejects(t.tracker.createCard({ list: 'Bugs', name: 'x' }), 'unknown');
+      assert.equal(t.fake.writes().length, 0);
+    } finally {
+      await t.close();
+    }
+  } finally {
+    await s.close();
+  }
+});
+
 // ------------------------------------------------------------------ dry run
 
 test('dry run: every write is printed with the secrets removed and none is sent', async () => {

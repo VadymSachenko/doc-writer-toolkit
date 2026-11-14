@@ -82,6 +82,10 @@ export function validateTracker(t, targets = [], header = null) {
     fail("tracker.credentials must name the two environment variables: { \"key\": \"…\", \"token\": \"…\" } and, optionally, \"envFile\"");
   }
   const { owner, members } = validateMembers(t.owner, targets);
+  // The lists a card may be created in besides the `intake` status: the ones `findingCard.lists` names, where the ticket
+  // flow's runner files the problems its sessions find outside a ticket (a status, or a list of the board by its name).
+  const findingLists = isObject(t.findingCard?.lists) ? Object.values(t.findingCard.lists) : [];
+  const createIn = [...new Set(findingLists.filter((v) => typeof v === 'string' && v.trim()).map((v) => v.trim()))];
   return {
     kind: t.kind,
     board: t.board,
@@ -93,6 +97,7 @@ export function validateTracker(t, targets = [], header = null) {
     priority: validatePriority(t.priority),
     owner,
     members,
+    createIn,
     commentHeader: validateCommentHeader(header),
     credentials: { key: c.key, token: c.token, envFile: c.envFile ?? '.env' },
   };
