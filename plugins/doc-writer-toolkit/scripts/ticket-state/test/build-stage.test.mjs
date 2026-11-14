@@ -418,6 +418,17 @@ process.exitCode = process.argv[2] === 'fail' ? 3 : 0;
   const failed = await runSiteBuild({ cwd: dir, command: [process.execPath, script, 'fail'], timeoutMs: 20000, env });
   assert.equal(failed.code, 3);
   assert.equal(buildEnv({ PATH: '/bin' }).NODE_OPTIONS, `--require ${JSON.stringify(EXIT_WHEN_BUILT)}`);
+  // A build that stopped partway (a top-level await that never settles) still fails with Node's own 13, and work a
+  // `beforeExit` listener starts still runs.
+  const stalled = path.join(dir, 'stalled.mjs');
+  fs.writeFileSync(stalled, 'await new Promise(() => {});\n');
+  assert.equal((await runSiteBuild({ cwd: dir, command: [process.execPath, stalled], timeoutMs: 20000, env })).code, 13);
+  const late = path.join(dir, 'late.mjs');
+  fs.writeFileSync(late, `let once = false;
+process.on('beforeExit', () => { if (!once) { once = true; setTimeout(() => console.log('late work ran'), 50); } });
+`);
+  const r = await runSiteBuild({ cwd: dir, command: [process.execPath, late], timeoutMs: 20000, env });
+  assert.deepEqual([r.code, r.tail], [0, ['late work ran']]);
 });
 
 test('settings: build.command and the rest come from the shared file; a text command is split into words; a bad one is refused', async () => {
