@@ -1,6 +1,6 @@
 {
   "id": "tc-46b-fix-doc-todos-applies-confirmed-links",
-  "description": "/fix-doc-todos with the go-ahead for the link markers given in the prompt: the settings-page markers are replaced by a root-relative link in the UA and EN pages and in the API pair's page, the content-gap marker and the NEEDS CONFIRMATION markers stay as they were, the report says what the alignment check (the last step of doc-todo-fixer) found, and nothing outside the three pages changes. The flow runs doc-alignment-checker in some runs and checks by hand in others, so the case does not assert the skill call. Covers the command and doc-todo-fixer together.",
+  "description": "/fix-doc-todos with the go-ahead for the link markers given in the prompt: the settings-page markers are replaced by a root-relative link in the UA and EN pages and in the API pair's page, the content-gap marker and the NEEDS CONFIRMATION markers stay as they were, the report says what the alignment check (the last step of doc-todo-fixer) found, and nothing outside the three pages changes. The alignment check runs through the doc-alignment-checker skill (asserted). Covers the command and doc-todo-fixer together.",
   "fixture": {
     "shape": "multi"
   },
@@ -22,6 +22,10 @@
     "timeoutSeconds": 1200
   },
   "assertions": [
+    {
+      "type": "skill-called",
+      "skill": "doc-alignment-checker"
+    },
     {
       "name": "settings link marker gone from UA",
       "type": "no-match",

@@ -1,9 +1,9 @@
 ---
-name: document-section
-description: 'Takes one documentation section folder to UA pages reviewed and approved, and EN pages translated and aligned. Chains the existing skills: section-readiness, app-explorer, section-planner, the writer for each page, resolve-markers, doc-style-fixer, doc-style-reviewer, doc-translator and doc-alignment-checker. Keeps a ledger in .sources/section-state.json through the section-state script, resumes where a run stopped, and stops only at the approval gates; the plan is never pre-approved. Never commits, deletes or moves a page, and never edits the sidebar. Explicit invocation only: use explicitly ("/document-section docs/reports", "use document-section on portal/settings").'
+name: section-documenter
+description: 'Takes one documentation section folder to UA pages reviewed and approved, and EN pages translated and aligned. Chains the existing skills: section-readiness, app-explorer, section-planner, the writer for each page, resolve-markers, doc-style-fixer, doc-style-reviewer, doc-translator and doc-alignment-checker. Keeps a ledger in .sources/section-state.json through the section-state script, resumes where a run stopped, and stops only at the approval gates; the plan is never pre-approved. Never commits, deletes or moves a page, and never edits the sidebar. Explicit invocation only: use explicitly ("/document-section docs/reports", "use section-documenter on portal/settings").'
 ---
 
-# document-section
+# section-documenter
 
 You are running one section folder through the whole documentation chain. Every stage is a skill that already knows its job: you run them in order, keep the ledger, and stop at the gates. Do not re-implement any skill's logic here, and never answer a skill's questions for the user.
 
@@ -163,5 +163,5 @@ This skill triggers only when named explicitly, or through `/document-section`.
 
 - "/document-section docs/reports"
 - "/document-section portal/settings interview:skip apply:mechanical,substantive"
-- "use document-section on docs/reports" (again after a stop: it resumes from the ledger)
+- "use section-documenter on docs/reports" (again after a stop: it resumes from the ledger)
 - "/document-section docs/reports approve:all"

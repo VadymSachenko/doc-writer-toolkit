@@ -1,6 +1,6 @@
 # section-state
 
-Keeps the ledger of a `document-section` run, `<section>/.sources/section-state.json`, and checks it against the files: which stages are done, which went stale, what runs next and which gate is open. Node, no dependencies. No AI is involved: the skill runs the stages and makes the judgment calls, the script does the hash bookkeeping, where a model slips across ten pages and six stages.
+Keeps the ledger of a `section-documenter` run, `<section>/.sources/section-state.json`, and checks it against the files: which stages are done, which went stale, what runs next and which gate is open. Node, no dependencies. No AI is involved: the skill runs the stages and makes the judgment calls, the script does the hash bookkeeping, where a model slips across ten pages and six stages.
 
 ```
 node ${CLAUDE_PLUGIN_ROOT}/scripts/section-state/section-state.mjs <command> <section> [options]

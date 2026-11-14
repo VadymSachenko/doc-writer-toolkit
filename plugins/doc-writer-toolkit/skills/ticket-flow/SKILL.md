@@ -10,7 +10,7 @@ You are the person's way into the ticket flow from a conversation. The scheduled
 ## Scope
 
 - **In scope:** `ticket-state status` read back in plain words; the runner's dry run, shown as a plan; a manual run of the named tickets after the user confirms it; `handover` of a ticket to the pipeline or back to the owner; the stale-lock release the runner offers; a change to the owner's local settings asked in plain words ("one at a time", "pause the pipeline", "start at 6:30"), through `ticket-state set`.
-- **Out of scope:** the stages' own work (triage, planning, writing, the review chain), which the role sessions do inside the run; the morning report's reading, which the `ticket-report` skill owns; installing the watcher (`launchd.mjs`, in the script's README); the shared settings file (board, lists, targets, host jobs), which the host commits. The section chain is `document-section`; a single page update is `doc-page-updater`.
+- **Out of scope:** the stages' own work (triage, planning, writing, the review chain), which the role sessions do inside the run; the morning report's reading, which the `ticket-report-reader` skill owns; installing the watcher (`launchd.mjs`, in the script's README); the shared settings file (board, lists, targets, host jobs), which the host commits. The section chain is `section-documenter`; a single page update is `doc-page-updater`.
 
 ## Arguments
 

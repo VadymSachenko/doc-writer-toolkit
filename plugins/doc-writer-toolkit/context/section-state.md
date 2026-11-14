@@ -1,11 +1,11 @@
 ---
 name: section-state
-description: The ledger of a document-section run, .sources/section-state.json — its fields, when a stage counts as done, what makes a done stage stale, and the gates derived from it. The scripts/section-state script reads and writes it; the document-section skill never edits it by hand. Referenced, never copied.
+description: The ledger of a section-documenter run, .sources/section-state.json — its fields, when a stage counts as done, what makes a done stage stale, and the gates derived from it. The scripts/section-state script reads and writes it; the section-documenter skill never edits it by hand. Referenced, never copied.
 ---
 
 # Section state
 
-`document-section` runs one section folder through a chain of skills and stops at approval gates. Between invokes it keeps a ledger in `<section>/.sources/section-state.json`. The ledger records only what the files can't show: verdicts, approvals, and the hash of each file when a stage finished. On every invoke the ledger is checked against the files, and **the files win**.
+`section-documenter` runs one section folder through a chain of skills and stops at approval gates. Between invokes it keeps a ledger in `<section>/.sources/section-state.json`. The ledger records only what the files can't show: verdicts, approvals, and the hash of each file when a stage finished. On every invoke the ledger is checked against the files, and **the files win**.
 
 The ledger is written and read only through `${CLAUDE_PLUGIN_ROOT}/scripts/section-state/section-state.mjs` (`status` and `record`, see its `README.md`). A stale stage is never stored: `status` derives it on every call.
 
