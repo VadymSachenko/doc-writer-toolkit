@@ -116,3 +116,64 @@ export function makeBuild({ tripPort } = {}) {
   }
   return dir;
 }
+
+// A second host for the slow screenshot: its last commit adds one page, guide/slow, in uk, en and ru.
+export function makeSlowHost() {
+  const dir = tmp('visual-pack-slow-host');
+  sh(dir, 'init', '-q', '-b', 'main');
+  write(dir, 'CLAUDE.md', CLAUDE_MD);
+  write(dir, 'docusaurus.config.js', DOCUSAURUS_CONFIG);
+  sh(dir, 'add', '-A');
+  sh(dir, 'commit', '-q', '-m', 'Initial');
+  const page = (title) => `---\ntitle: ${title}\n---\n\n# ${title}\n`;
+  write(dir, 'docs/guide/slow.md', page('Довга сторінка'));
+  write(dir, `${EN_ROOT}/guide/slow.md`, page('Long page'));
+  write(dir, `${RU_ROOT}/guide/slow.md`, page('Длинная страница'));
+  sh(dir, 'add', '-A');
+  sh(dir, 'commit', '-q', '-m', 'Add the slow page');
+  return { dir, range: 'HEAD~1..HEAD' };
+}
+
+const SLOW = {
+  uk: ['Довга сторінка', 'Ця сторінка довго готується до знімка екрана, як найдовші сторінки довідника.'],
+  en: ['Long page', 'This page takes a long time to get ready for its screenshot, like the longest reference pages.'],
+  ru: ['Длинная страница', 'Эта страница долго готовится к снимку экрана, как самые длинные страницы справочника.'],
+};
+
+// A page whose screenshot waits `stallMs` and nothing else does. The capture reads the DOM first (measureDom clones
+// every block, and a clone of <shot-stall> is constructed detached, after the load); right after that read, the page
+// takes its body away for `stallMs`. The screenshot waits for a body, so it waits that long. The read itself is over,
+// and no CPU is spent while the page waits.
+function slowPageHtml(locale, stallMs) {
+  const [title, p1] = SLOW[locale];
+  const stall = stallMs
+    ? `<p>${p1} <shot-stall></shot-stall></p><script>
+(() => {
+  let armed = false;
+  customElements.define('shot-stall', class extends HTMLElement {
+    constructor() {
+      super();
+      if (armed || this.isConnected || document.readyState !== 'complete') return;
+      armed = true;
+      queueMicrotask(() => {
+        const body = document.body;
+        body.remove();
+        setTimeout(() => document.documentElement.append(body), ${Number(stallMs)});
+      });
+    }
+  });
+})();
+</script>`
+    : `<p>${p1}</p>`;
+  return `<!doctype html><html lang="${locale}"><head><meta charset="utf-8"><title>${title}</title><style>${CSS}</style></head><body><main><article><div class="theme-doc-markdown markdown"><h1>${title}</h1>${stall}</div></article></main></body></html>`;
+}
+
+// The built site for the slow host. `stallMs` maps a locale to how long its screenshot waits (none: no wait);
+// `locales` are the locales the build has, so a locale left out answers 404.
+export function makeSlowBuild({ stallMs = {}, locales = ['uk', 'en', 'ru'] } = {}) {
+  const dir = tmp('visual-pack-slow-build');
+  write(dir, 'index.html', '<!doctype html><title>Home</title><main><article><h1>Home</h1></article></main>');
+  write(dir, '404.html', '<!doctype html><title>Not found</title><main><article><h1>Page Not Found</h1></article></main>');
+  for (const locale of locales) write(dir, `${locale === 'uk' ? '' : `${locale}/`}guide/slow/index.html`, slowPageHtml(locale, stallMs[locale] ?? 0));
+  return dir;
+}
