@@ -12,7 +12,8 @@ import { withHeader, withoutHeader } from './comment-header.mjs';
 //     matches no place stops the run;
 //   - `listCards`, `readCard` and `downloadAttachment` refuse a status the settings mark `neverRead`;
 //   - `move` runs only a (from, to) pair the settings list in `transitions`;
-//   - `createCard` creates only in the `intake` status;
+//   - `createCard` creates only in the `intake` status, or in a list the settings name for the findings outside a ticket
+//     (`findingCard.lists`, `createIn`), which it never lists;
 //   - an empty comment or description is refused;
 //   - every comment starts with the settings' `commentHeader`, when they set one, and a comment is looked up by its
 //     first words without it (lib/comment-header.mjs);
@@ -105,6 +106,7 @@ export function createTracker({ adapter, tracker, dryRun = false, now = () => Da
   const priorityNames = tracker.priority ?? { high: 'high', low: 'low' };
   const header = tracker.commentHeader ?? null;
   const boards = [board, ...tracker.watchBoards];
+  const createIn = tracker.createIn ?? [];
 
   const knownStatus = (status) => {
     if (!(status in statusSpec)) throw new Refusal('unknown', `'${status}' is not a status in the settings. Known: ${Object.keys(statusSpec).join(', ')}.`);
@@ -424,17 +426,37 @@ export function createTracker({ adapter, tracker, dryRun = false, now = () => Da
       return { card: card.id, comment: String(comment), mark, added, removed: others.map((r) => r.mark), changed: Boolean(added.length || others.length) };
     },
 
-    // Only the `intake` status: a card that people made lands there and the triage reads it.
-    async createCard({ status, name, desc = '', labels = [] }) {
-      if (status !== 'intake') throw new Refusal('intake', `cards are created only in the 'intake' status, not '${status ?? ''}'`, { status: status ?? null });
-      if (!('intake' in statusSpec)) throw new Refusal('intake', "the settings have no 'intake' status");
+    // Only the `intake` status: a card that people made lands there and the triage reads it. Or, with `list`, a list the
+    // settings name for the findings outside a ticket (`findingCard.lists`): a status by its key, or a list of the board
+    // by its name. Creating a card there reads none of the list's cards.
+    async createCard({ status, list, name, desc = '', labels = [] }) {
+      const into = list === undefined || list === null ? null : String(list).trim();
+      if (into !== null) {
+        if (!createIn.includes(into)) throw new Refusal('intake', `cards are created only in the 'intake' status or a list findingCard.lists names, not '${into}'`, { list: into });
+      } else {
+        if (status !== 'intake') throw new Refusal('intake', `cards are created only in the 'intake' status, not '${status ?? ''}'`, { status: status ?? null });
+        if (!('intake' in statusSpec)) throw new Refusal('intake', "the settings have no 'intake' status");
+      }
       if (!bare(name)) throw new Refusal('empty', 'a card needs a name');
       const res = await resolve();
-      const target = res.statuses.intake.target;
-      if (!target) throw new Refusal('intake', "the 'intake' status names no list without a pattern");
+      let target;
+      if (into === null) {
+        target = res.statuses.intake.target;
+        if (!target) throw new Refusal('intake', "the 'intake' status names no list without a pattern");
+      } else if (into in statusSpec) {
+        target = res.statuses[into].target;
+        if (!target) throw new Refusal('unknown', `status '${into}' names no list without a pattern, so there is no list to create in`, { list: into });
+      } else {
+        // An exact name wins; otherwise names are compared without case and spacing.
+        const exact = res.places.filter((p) => p.name.trim() === into);
+        const hits = exact.length === 1 ? exact : res.places.filter((p) => norm(p.name) === norm(into));
+        if (!hits.length) throw new Refusal('unknown', `no list '${into}' on the board`, { list: into });
+        if (hits.length > 1) throw new Refusal('ambiguous', `${hits.length} lists named '${into}' on the board`, { list: into });
+        [target] = hits;
+      }
       const picked = await labelIds(board, labels);
       const made = await adapter.createCard({ placeId: target.id, name, desc, labelIds: picked.map((l) => l.id) });
-      return { id: made.id, shortLink: made.shortLink, url: made.url, status: 'intake', list: target, labels: picked.map((l) => l.name) };
+      return { id: made.id, shortLink: made.shortLink, url: made.url, status: statusOf(res, target.id), list: target, labels: picked.map((l) => l.name) };
     },
   };
 

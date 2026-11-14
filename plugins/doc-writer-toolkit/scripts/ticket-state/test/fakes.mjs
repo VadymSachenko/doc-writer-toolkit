@@ -78,7 +78,7 @@ export function trackerAdapter({ cards = [], comments = {}, release = [], action
     }
     return c;
   };
-  const labels = [...new Set(cards.flatMap((c) => c.labels.map((l) => l.name)).concat(['high', 'low', 'needs info', 'Guide', 'Api', 'Docs', 'Portal UI', 'Portal API']))].map((n) => ({ id: `label-${n}`, name: n, color: null }));
+  const labels = [...new Set(cards.flatMap((c) => c.labels.map((l) => l.name)).concat(['high', 'low', 'needs info', 'Guide', 'Api', 'Docs', 'Portal UI', 'Portal API', 'Bug', 'Backend', 'Admin']))].map((n) => ({ id: `label-${n}`, name: n, color: null }));
   return {
     kind: 'memory',
     log,
@@ -128,8 +128,12 @@ export function trackerAdapter({ cards = [], comments = {}, release = [], action
       c.memberIds = [...c.memberIds, memberId];
     },
     setDescription: async (ref, text) => log.push(['setDescription', ref, text]),
-    createCard: async () => {
-      throw new Error('not in these tests');
+    // A card the runner files for a finding outside a ticket (lib/findings.mjs), in the list the module chose.
+    createCard: async ({ placeId, name, desc, labelIds }) => {
+      log.push(['createCard', placeId, name, desc, labelIds]);
+      const made = card({ name, desc, list: { id: placeId } });
+      cards.push(made);
+      return { id: made.id, shortLink: made.shortLink, url: made.url };
     },
     me: async () => ({ id: MEMBERS[0].id, username: MEMBERS[0].username }),
     reactions: async (comment) => {

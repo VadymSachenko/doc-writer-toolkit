@@ -13,6 +13,7 @@ import { CHECKS } from './gates.mjs';
 import { DEFAULT_EXCLUDE, DEFAULT_TICKET_FILES } from './doc-evidence.mjs';
 import { validateLearning } from './learn-settings.mjs';
 import { validateCompanyRepos } from './company-repos.mjs';
+import { validateFindingCard } from './findings.mjs';
 
 // The ticket flow settings: the shared file the host commits (`.claude/ticket-flow.json`, or the `Ticket flow
 // settings:` field of CLAUDE.md, or --settings), read at HEAD (`trustedShared`), and the owner's local file next to it
@@ -379,6 +380,9 @@ export function validateSettings(merged, { root, stateRootDefault }) {
     triageMarker: typeof rawTracker.triageMarker === 'string' && rawTracker.triageMarker.trim() ? rawTracker.triageMarker : null,
     needsInfoLabel: tracker.labels.needsInfo ?? null,
   };
+  // The card the runner files for a finding outside a ticket, and the comments that link it (lib/findings.mjs): a team
+  // text, in the team's language, so it has no default: with none the runner files no card and the report lists it.
+  const findingCard = validateFindingCard(rawTracker.findingCard, fail);
   // The comment on the card when the chain is done and it goes back to the final review status.
   const readyComment = typeof rawTracker.readyComment === 'string' && rawTracker.readyComment.trim() ? rawTracker.readyComment : 'Ready for merge';
   // The comment a PR gets each time it enters the expert's review (and the text the report gives to send a quiet
@@ -479,6 +483,7 @@ export function validateSettings(merged, { root, stateRootDefault }) {
     docRepos: validateDocRepos(merged.docRepos),
     docEvidence: validateDocEvidence(merged.docEvidence),
     readyComment,
+    findingCard,
     reviewComment,
     idComments,
     triggerWords,

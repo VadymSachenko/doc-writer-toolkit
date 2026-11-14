@@ -34,8 +34,9 @@ const SCRIPT_FLAGS = { 'ui-labels/ui-labels.mjs': ['--source'], 'visual-pack/vis
 // runner sets it, and the ready label, from the records (lib/pr-labels.mjs); the runner settles the pipeline's own place
 // threads and removes its own superseded comments after a round (lib/pr-rounds.mjs). The command is the script's first
 // positional word: an option's value (`--label remove-label`) is not it. `booleans`: the script's options that take no
-// value (forge.mjs `OPTIONS`; a test keeps the two in step).
-export const SCRIPT_COMMANDS = { 'forge/forge.mjs': { denied: ['add-label', 'remove-label', 'resolve-thread', 'delete-comment'], booleans: ['--dry-run', '--draft', '--with-body', '--drop-outside', '--outside-in-body', '--skip-diff-check', '--help', '-h'] } };
+// value (forge.mjs and tracker.mjs `OPTIONS`; a test keeps them in step). A card for a finding outside the ticket is the
+// runner's to create (lib/findings.mjs): a role gives it in its record's `sideFindings`.
+export const SCRIPT_COMMANDS = { 'tracker/tracker.mjs': { denied: ['create-card'], booleans: ['--dry-run', '--all-boards', '--overwrite', '--help', '-h'] }, 'forge/forge.mjs': { denied: ['add-label', 'remove-label', 'resolve-thread', 'delete-comment'], booleans: ['--dry-run', '--draft', '--with-body', '--drop-outside', '--outside-in-body', '--skip-diff-check', '--help', '-h'] } };
 function subcommandOf(words, booleans) {
   for (let i = 0; i < words.length; i++) {
     const v = words[i].value;
