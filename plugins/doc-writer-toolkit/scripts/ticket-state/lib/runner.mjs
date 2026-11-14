@@ -449,7 +449,7 @@ export function briefFor(step, settings) {
     `Write your files with Write and Edit only in: ${writableFor(step, settings).join(', ')}${noWorktree ? `, and the \`.sources/\` folders of the target ${step.clones?.some((c) => c.read) ? 'repos (in a read checkout, its `.sources/` folders: they are the clone\'s)' : 'clones'}` : ''}.`,
     noWorktree && plainKeys(step).length ? `A Playwright spec on this step goes in the target clone's \`screenshot-tests/\`, named ${plainKeys(step).map((k) => `\`_plan-${k}-<what>.spec.ts\``).join(' or ')}. Use that name, import shared helpers from that folder rather than editing them, and run it from that repo (\`cd\` there as a call of its own, then \`npx playwright test screenshot-tests/<file>\`).` : null,
     `Settings (merged): \`${ts} config ${at}\``,
-    `The ticket now: \`${ts} status ${at} --ticket ${step.keys[0]}\``,
+    NO_STATUS_STAGES.includes(step.stage) ? null : `The ticket now: \`${ts} status ${at} --ticket ${step.keys[0]}\``,
     rules ? `Host rules:\n${rules}` : null,
     '',
     'When the stage ends, record it, one command per call, for each ticket:',
@@ -475,12 +475,18 @@ export function gateLines(step, settings) {
   return out;
 }
 
+// The stages whose brief gives all they need, so it names no `ticket-state status` call and says none is needed (a
+// call took 23 to 115 s in the measured sessions). `locales`: the PR, the worktree, the push and the record are in the
+// brief, and the locale-translator finds its pages itself; a measured session that never called it recorded fine.
+export const NO_STATUS_STAGES = ['locales'];
+const NO_STATUS_LINE = 'This brief gives all the stage needs: no `ticket-state status` call is needed.';
+
 // What the brief says about the site's build. A PR's chain builds the site once, at its `build` stage, which the runner
 // runs itself: the locales stage runs the locale-translator with no build of its own, and the visual pack reuses the
 // build of its head when there is one. A session that builds the site itself (a re-sync, a visual pack with no build to
 // reuse) runs under the build lock, which the runner holds for it.
 export function buildLines(step) {
-  if (step.stage === 'locales') return ['Run the locale-translator with `--no-build`: the runner builds the site once for this PR, at the chain\'s `build` stage after `labelSync`, so this stage builds nothing.', ...workerLines(step), 'This brief gives all the stage needs: no `ticket-state status` call is needed.'];
+  if (step.stage === 'locales') return ['Run the locale-translator with `--no-build`: the runner builds the site once for this PR, at the chain\'s `build` stage after `labelSync`, so this stage builds nothing.', ...workerLines(step), NO_STATUS_LINE];
   if (step.stage === 'resync') return [...workerLines(step), buildLockLine(step)];
   if (step.stage === 'visualPack' && step.buildDir) return [`The chain's \`build\` stage built this head into ${step.buildDir}: run visual-pack with \`--build-dir ${step.buildDir}\`, so the site is not built again.`];
   if (step.stage === 'visualPack') return [buildLockLine(step)];
@@ -898,9 +904,16 @@ export const SESSION_TIMEOUT_MS = 4 * 3600 * 1000;
 // completion notice starts the next turn. But only for `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` after the last turn
 // (600 000 ms by default; read in the 2.1.321 binary, probed at 60 000 ms): then it stops the agents, says so on stderr
 // and exits as a session that ended on text (a measured stage's first wave of 8 workers was cut off so after 10
-// minutes, and its pages redone). The clock starts again at each turn, so the ceiling is the longest a session waits
-// with no notice: above the longest single worker measured (56 minutes), below the session timeout, so a hung worker
-// still ends in an exit the runner resumes once, never in the kill.
+// minutes, and its pages redone). The stop takes the session's background shells too (`resync`'s build, when run in
+// the background), but the ceiling is held off while a background shell is within its own time limit (2.1.321 source;
+// probed: a 150-second shell at 60 000 ms was not stopped, nor an agent beside it). The clock starts again at each turn, so the ceiling is the longest a session waits
+// with no notice: above the longest single worker measured (56 minutes) and below the session timeout. A hung worker
+// so ends in an exit the runner resumes once, when the last turn came less than the timeout less the ceiling (2 h)
+// after the start; a later last turn meets the kill first, which is never resumed. The resumed process gets a ceiling
+// fitted to the time left (`resumeCeilingMs`). The variable is not a documented setting: a CLI that drops it stops the
+// workers at its own 10 minutes again, in the first process and in the resumed one, so a stage whose workers still
+// need more after the resume fails with nothing recorded; the runner copies the CLI's stderr line into the run's note
+// (`cliStopLine`), so the run log shows why.
 export const WORKER_STAGES = ['locales', 'resync'];
 export const BG_WAIT_VARIABLE = 'CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS';
 export const BG_WAIT_CEILING_MS = 2 * 3600 * 1000;
@@ -1009,15 +1022,36 @@ export function continuationFor(step) {
   const branch = step.worktrees?.length ? 'commit and push your changes as the brief says, post what the stage posts, and record it' : 'record it as the brief says';
   return [
     `The stage \`${step.stage}\` of ticket${step.keys.length > 1 ? 's' : ''} ${keys} is not finished: nothing is recorded for it. Your last message was text with no tool call, and the session ended: in this mode a turn that ends on text ends the session once no background work of yours is left running.`,
-    'If a notice lists background agents of yours as stopped, continue each one with SendMessage to its id (load the tool with ToolSearch if it is not there yet): its transcript keeps its progress, so start no new agent for the same work. Tell it that the session\'s time limit stopped it, not a person, and to go on from its last finished step, redoing the one in flight. Only an agent that can\'t be continued is replaced, by a new one for the work it left open. Then end your turn with one short line: the session waits for the agents you run, and each one\'s completion notice starts your next turn by itself. Never check on them in a loop (ListAgents, git status or git diff, Monitor, sleep).',
+    'If a notice lists background agents of yours as stopped, continue each one with SendMessage to its id (load the tool with ToolSearch if it is not there yet): its transcript keeps its progress, so start no new agent for the same work. Tell it that the session\'s time limit stopped it, not a person, and to go on from its last finished step, redoing the one in flight. Only an agent that can\'t be continued (SendMessage to it fails) is replaced, by a new one for the work it left open, never while it might still run. Then end your turn with one short line: the session waits for the agents you run, and each one\'s completion notice starts your next turn by itself. Never check on them in a loop (ListAgents, git status or git diff, Monitor, sleep).',
     `Continue the stage from where it stopped and finish it: ${branch}, with the record command in the brief.`,
     'If it truly cannot be finished, record it failed with the reason (`--status failed --note <the reason>`).',
   ].join('\n');
 }
 
 // The resumed session's command: the first one's model, effort, settings, tools, hook, folders and environment, with
-// the continuation in place of the brief.
-export const resumeCommand = (cmd, session, step) => ({ ...cmd, args: ['-p', continuationFor(step), '--resume', session, ...cmd.args.slice(2)] });
+// the continuation in place of the brief. `left`, the time the first process left of the session timeout: a session
+// with the raised wait (`BG_WAIT_VARIABLE`) gets a ceiling of at most that less a margin (`resumeCeilingMs`). The
+// clock counts from the resumed session's last turn, not from its start: workers that go quiet soon after the resume
+// are stopped by the CLI, with its own exit and result, before the runner's kill; a last turn more than the margin
+// into the resumed process can still meet the kill.
+export const resumeCommand = (cmd, session, step, { left = null } = {}) => ({
+  ...cmd,
+  args: ['-p', continuationFor(step), '--resume', session, ...cmd.args.slice(2)],
+  ...(cmd.env?.[BG_WAIT_VARIABLE] !== undefined && typeof left === 'number' ? { env: { ...cmd.env, [BG_WAIT_VARIABLE]: String(resumeCeilingMs(left)) } } : {}),
+});
+// The margin a resumed process keeps between its ceiling and the runner's kill: the CLI stops the work, the session
+// takes its last turn (a stopped worker's notice) and writes its result event. Never below a second: `0` means no
+// ceiling at all.
+export const RESUME_MARGIN_MS = 10 * 60 * 1000;
+export const resumeCeilingMs = (left) => Math.max(1000, Math.min(BG_WAIT_CEILING_MS, left - RESUME_MARGIN_MS));
+
+// The line the CLI writes on stderr when it stops a session's background work at its wait ceiling (2.1.321: "Background
+// tasks still running 10m after the last turn (subagent "…"); stopping them. Set …"), or null. The runner copies it
+// into the run's note, so a step that failed for it says so.
+export function cliStopLine(stderr) {
+  const line = String(stderr ?? '').split('\n').map((l) => l.trim()).find((l) => /^Background tasks still running\b.*\bstopping them\b/.test(l));
+  return line ? line.slice(0, 300) : null;
+}
 
 // One run's figures from a session and its resumption. Turns, duration, tokens and denials are per process and add up.
 // The CLI restores a resumed session's cost (probed on 2.1.319: its `total_cost_usd` counts both processes), so the
@@ -2712,8 +2746,11 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         // The step's wall-clock time, from the session's start to its process's end: `duration_ms` is the CLI's own
         // count, which leaves out what the session waited for after its last turn (a background build, say).
         let wallMs = null;
+        // The CLI's own line when it stopped the session's background work at its wait ceiling, per process.
+        const stops = [];
         try {
           res = await spawnOne(cmd);
+          stops.push(cliStopLine(res.stderr));
           r = parseResult(res.stdout) ?? {};
           busy = busyNow();
           // A session that stopped on a text message with nothing recorded is resumed once a step: only the first
@@ -2726,7 +2763,8 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
           const left = SESSION_TIMEOUT_MS - (clock() - began);
           if (attempt === 0 && !busy && left > 0 && endedOnText(res, r) && unrecorded(step, seqBefore) && !recordRefused(r.session, { root: settings.root, transcripts: io.transcripts, env: io.claudeEnv ?? process.env }) && !(movedEarly = await movedUnder(step))) {
             say({ kind: 'resume', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, role: step.role, model, session: r.session, note: 'the session ended on a text message with the stage unrecorded: resumed once' });
-            const again = await spawnOne(resumeCommand(cmd, r.session, step), { timeoutMs: left });
+            const again = await spawnOne(resumeCommand(cmd, r.session, step, { left }), { timeoutMs: left });
+            stops.push(cliStopLine(again.stderr));
             const r2 = parseResult(again.stdout) ?? {};
             resumed = { session: r2.session ?? null };
             r = addUp(r, r2);
@@ -2768,9 +2806,12 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         if (outcome === 'failed' && step.stage === 'answerPass') for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, stage: 'answerPass', status: 'failed', pr: step.pr, note: 'the session failed: the pass gives up what it held', result: JSON.stringify({ giveUp: true }), now: clock() }).catch(() => {});
         // What the ticket looks like now the session is over, so its own unrecorded writes never count as a person's.
         const marks = outcome !== 'failed' || !ledgered ? {} : await marksOf(step);
-        const run = { stage: step.stage, role: step.role, model, effort: cmd.effort, trigger: manual ? 'manual' : trigger, start, durationMs: r.durationMs, wallMs, turns: r.turns, costUsd: r.costUsd, tokens: r.tokens, weekPercent: { before, after }, session: r.session, ...(resumed ? { resumed: true, ...(resumed.session ? { resumedSession: resumed.session } : {}) } : {}), outcome, share: Number((1 / step.keys.length).toFixed(4)), ...(attempt ? { retryOf: settings.roles[step.role].model } : {}), ...(r.denials ? { denials: r.denials } : {}), ...(outcome === 'failed' ? { failures } : {}), ...(moved ? { note: moved.note.slice(0, 300) } : {}) };
+        // The run's note: a moved branch's, and the CLI's line for background work it stopped (one per process).
+        const cliStops = stops.filter(Boolean);
+        const note = [moved?.note.slice(0, 300), ...cliStops.map((l, i) => (cliStops.length > 1 ? `process ${i + 1}: ${l}` : l))].filter(Boolean).join('; ').slice(0, 600) || null;
+        const run = { stage: step.stage, role: step.role, model, effort: cmd.effort, trigger: manual ? 'manual' : trigger, start, durationMs: r.durationMs, wallMs, turns: r.turns, costUsd: r.costUsd, tokens: r.tokens, weekPercent: { before, after }, session: r.session, ...(resumed ? { resumed: true, ...(resumed.session ? { resumedSession: resumed.session } : {}) } : {}), outcome, share: Number((1 / step.keys.length).toFixed(4)), ...(attempt ? { retryOf: settings.roles[step.role].model } : {}), ...(r.denials ? { denials: r.denials } : {}), ...(outcome === 'failed' ? { failures } : {}), ...(note ? { note } : {}) };
         for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, run: JSON.stringify({ ...run, ...(marks[k] ? { after: marks[k] } : {}) }), pr: step.pr, now: clock() }).catch(() => {});
-        const entry = { kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, role: step.role, model, exit: res.code, ...(resumed ? { resumed: true } : {}), ...(r.denials ? { denials: r.denials } : {}) };
+        const entry = { kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, role: step.role, model, exit: res.code, ...(resumed ? { resumed: true } : {}), ...(r.denials ? { denials: r.denials } : {}), ...(cliStops.length ? { cliStop: cliStops.join(' | ') } : {}) };
         if (outcome === 'done') {
           say({ ...entry, outcome });
           return { ...pick(step), model, outcome };

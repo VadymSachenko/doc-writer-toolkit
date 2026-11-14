@@ -26,7 +26,7 @@ Load nothing else. Never read the EN page, another locale's page, the label stor
 
 Work through the units in the given order. Keep these in your run folder: `<id>.blocks.txt` (your block translations), `<id>.candidate.md` or `<id>.candidate.json`, `<id>.unverified.json`, and `results.jsonl` (one line per unit). Turn `/` and `:` in an id into `__` for file names.
 
-**Files.** Every file you write goes in your own run folder: JSON you build, notes. Never write in the docs repo (not even an empty scratch file in its root: the run's `LS stray` check lists every one), in the parent run folder, in another locale's folder or in `/tmp`. `results.jsonl` may already hold lines from an earlier batch of your locale, or from an earlier worker of your locale that was stopped: add each line by reading the file (when it exists) and writing it back with the Write tool, every line it had unchanged and the new one at the end. Never drop or change a line already there.
+**Files.** Every file you write goes in your own run folder: JSON you build, notes. Never write in the docs repo (not even an empty scratch file in its root: the run's `LS stray` check lists every one), in the parent run folder, in another locale's folder or in `/tmp`. `results.jsonl` may already hold lines from an earlier batch of your locale, or from an earlier worker of your locale that was stopped: add each line by reading the file (when it exists) and writing it back with the Write tool, every line it had unchanged and the new one at the end. Never drop or change a line already there. Only one worker of a locale runs at a time, so no one else writes the file meanwhile.
 
 ### 1. Get the blocks
 
@@ -115,7 +115,7 @@ Add one JSON line to `<run folder>/results.jsonl`, keeping every line it already
 1. `LS blocks <id>` lists `entries` (one per `current.json` entry: `entryKey`, `field`, `ua`), `labels` (the label's decision) and `terms`.
 2. Write `<id>.candidate.json`: `{ "<entryKey>": "<translated message>" }` for every entry. A label bound to a key with `write` is `write`, verbatim. Otherwise translate the label as a short navigation title (a noun phrase, through the term rows), and the generated-index title and description as prose.
 3. `LS check <id> --candidate <run folder>/<id>.candidate.json` (add `--unverified-file` when the label row says `missing`), fix at most twice, then `LS record <id> --candidate <run folder>/<id>.candidate.json` with the same flags.
-4. Append the result line with `"kind":"category"`.
+4. Add the result line with `"kind":"category"` ("Files" above).
 
 ## Never
 
@@ -127,7 +127,7 @@ Add one JSON line to `<run folder>/results.jsonl`, keeping every line it already
 
 ## Continued after a stop
 
-When the coordinator tells you that the run's time limit stopped you and to go on, your earlier calls are above; the last one may read as refused by a user, which it wasn't. Go on from the unit that was in flight: run `LS blocks` for it again. `mode: "none"` means it was recorded before the stop: give it its result line from what you did, if `results.jsonl` has none for it yet. Then the units after it, in order. One line per unit: never a second line for a unit that has one.
+When the coordinator tells you to go on after a stop, your earlier calls are above; when it says the run's time limit stopped you, the last one may read as refused by a user, which it wasn't. Go on from the unit that was in flight: run `LS blocks` for it again. `mode: "none"` means it was recorded before the stop: finish what came after its record from what you did. If you translated domain terms that had no row and hadn't run step 7 ("New terms") for that unit, run it now, so they reach term memory. Then give the unit its result line, if `results.jsonl` has none for it yet. Then the units after it, in order. One line per unit: never a second line for a unit that has one.
 
 ## When the queue is done
 
