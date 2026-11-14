@@ -2,7 +2,7 @@ import { CliError } from '../../ui-labels/lib/util.mjs';
 import { existingBlobs } from './git.mjs';
 import { abs, listUaPages, localePagePath, readIfExists, readState } from './pages.mjs';
 import { resolveTargets, selectPages } from './settings.mjs';
-import { cachedBlob, classify, modeOf } from './plan.mjs';
+import { cachedBlob, cachedBlobs, classify, modeOf } from './plan.mjs';
 import { addedOn, composeChanges, diffBodies, diffFrontmatter, introducedBold, spliceLinkPaths } from './diff.mjs';
 import { boldSpans, parsePage, splitCode } from './parse.mjs';
 import { parseCategory, readCategoryTarget } from './categories.mjs';
@@ -24,11 +24,17 @@ export async function runBlocks(s, { selectors = [], overwrite = false, withOld 
   const redoLines = redo && redo !== 'all' ? parseLines(redo) : null;
   const ctx = await rowContext(s, targets);
   if (!ctx.labels) warnings.push('No label store: bound labels have no string to write. Run the UI label check first.');
+  // One git process each, not one per unit and locale: which recorded bases still exist, then the UA texts and those bases.
+  const states = [];
+  for (const unit of units) states.push(await readState(unit));
+  const recorded = states.flatMap((state) => targets.map((locale) => state.locales[locale]?.sourceBlob)).filter(Boolean);
+  const present = await existingBlobs(s.root, recorded);
+  await cachedBlobs(s.root, [...units.map((u) => u.blob), ...recorded.filter((h) => present.has(h))]);
   const results = [];
-  for (const unit of units) {
-    const state = await readState(unit);
+  for (const [i, unit] of units.entries()) {
+    const state = states[i];
     for (const locale of targets) {
-      results.push(unit.kind === 'category' ? await categoryBlocksFor(s, unit, locale, state, { overwrite, ctx, redo }) : await blocksFor(s, unit, locale, state, { overwrite, withOld, ctx, redo, redoLines }));
+      results.push(unit.kind === 'category' ? await categoryBlocksFor(s, unit, locale, state, { overwrite, ctx, redo }) : await blocksFor(s, unit, locale, state, { overwrite, withOld, ctx, redo, redoLines, present }));
     }
   }
   return { results, warnings };
@@ -116,11 +122,11 @@ async function redoBlocksFor(s, page, head, targetText, state, locale, ctx, line
   };
 }
 
-async function blocksFor(s, page, locale, state, { overwrite, withOld, ctx, redo, redoLines }) {
+async function blocksFor(s, page, locale, state, { overwrite, withOld, ctx, redo, redoLines, present }) {
   const file = localePagePath(locale, page);
   const targetText = await readIfExists(abs(s, file));
   const entry = state.locales[locale];
-  const baseExists = entry?.sourceBlob ? (await existingBlobs(s.root, [entry.sourceBlob])).has(entry.sourceBlob) : false;
+  const baseExists = entry?.sourceBlob ? present.has(entry.sourceBlob) : false;
   const cell = classify({ entry, blob: page.blob, targetExists: targetText !== null, baseExists, overwrite });
   const head = { kind: 'page', page: page.ref, path: page.path, blob: page.blob, locale, target: { path: file, exists: targetText !== null }, state: cell.state, reason: cell.reason };
 

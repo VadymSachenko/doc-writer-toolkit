@@ -3,7 +3,7 @@ import { exists, readJson } from '../../ui-labels/lib/util.mjs';
 import { existingBlobs, headCommit, uncommitted } from './git.mjs';
 import { abs, listUaPages, localePagePath, makeUnit, readState, statePath, walkFiles } from './pages.mjs';
 import { resolveTargets, resolveSelector, selectPages, localeRoot } from './settings.mjs';
-import { cachedBlob, classify, estimateWords, fullWords, modeOf } from './plan.mjs';
+import { cachedBlob, cachedBlobs, classify, estimateWords, fullWords, modeOf } from './plan.mjs';
 import { parseCategory, readCategoryTarget } from './categories.mjs';
 import { sidebarOverrides, sidebarWarning } from './sidebar.mjs';
 
@@ -48,6 +48,8 @@ export async function runStatus(s, { selectors = [], overwrite = false, threshol
   for (const p of units) states.set(p.ref, await readState(p));
   const recorded = [...states.values()].flatMap((st) => Object.values(st.locales).map((e) => e?.sourceBlob));
   const present = await existingBlobs(s.root, recorded);
+  // The texts the size estimate and the category labels read, with one git process instead of one per unit.
+  await cachedBlobs(s.root, [...units.map((u) => u.blob), ...recorded.filter((h) => present.has(h))]);
   // Units of every declared pair, also when --pair narrows the run: for the notes on states of another pair.
   const narrowed = s.pairs.length < s.declaredPairs.length;
   const declared = narrowed ? await listUaPages(s, s.declaredPairs) : { all, categories };

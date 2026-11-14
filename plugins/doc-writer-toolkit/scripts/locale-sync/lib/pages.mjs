@@ -31,8 +31,16 @@ export async function listUaPages(s, pairs = s.pairs) {
   return out;
 }
 
+// The committed files of a pair's UA content root, listed once per process: a command lists the pages, then the link
+// index lists them again. Nothing in this script commits, so HEAD does not move while it runs.
+const trees = new WeakMap();
+function uaTree(ps) {
+  if (!trees.has(ps)) trees.set(ps, lsTree(ps.root, ps.ua));
+  return trees.get(ps);
+}
+
 async function listPairUnits(ps) {
-  const files = await lsTree(ps.root, ps.ua);
+  const files = await uaTree(ps);
   const all = [];
   const categories = [];
   const unsupported = [];

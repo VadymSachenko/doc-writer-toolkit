@@ -73,11 +73,20 @@ export function usageMatcher(term) {
   return new RegExp(`(?<!${WORD})${body}(?!${WORD})`, 'iu');
 }
 
-// The entries whose UA term occurs in `text` (T4): never the whole file.
+// The entries whose UA term occurs in `text` (T4): never the whole file. A full matcher takes milliseconds to compile
+// (the `\p{L}` classes under `iu`), and term memory has hundreds of entries, so each word's stem is looked for first, as
+// a plain literal with the same flags. The full pattern contains those literals, so a term whose stems are not all in
+// the text cannot match it: the result is the same, and only the few terms whose stems occur compile the full matcher.
 export function matchTerms(entries, text) {
   const t = text.normalize('NFC');
-  return entries.filter((e) => termMatcher(e.ua).test(t));
+  return entries.filter((e) => stemsOccur(e.ua, t) && termMatcher(e.ua).test(t));
 }
+const stemsOccur = (ua, t) =>
+  ua
+    .normalize('NFC')
+    .trim()
+    .split(/\s+/)
+    .every((word) => new RegExp(esc(stem(word).text), 'iu').test(t));
 
 // Entries to add: a TSV file in the term-memory format, or JSON ({ ua: target } or [{ ua, target }]).
 async function readAdditions(file) {
