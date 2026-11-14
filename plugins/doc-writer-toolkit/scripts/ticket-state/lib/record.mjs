@@ -14,6 +14,7 @@ import { changedLines, commentProblems, languageMessage, markersAt, markersMessa
 import { HOLD_KINDS, OWN_KINDS, checkWriteOpen, docDirsOf, evidenceChecks, heldGivenBack, heldPending, inputOf, passFailed, passFor, passProblems, prAfterPass, refuse, settledOf } from './answer-pass.mjs';
 import { appendMisses, checkSource, missLine, sourceOfEvidence } from './misses.mjs';
 import { companyReposOn } from './company-repos.mjs';
+import { addFindings, checkFindings } from './findings.mjs';
 
 // `record <key> --stage <s> --status running|done|failed`: one stage result, written only when the tracker, the forge
 // and the files support it (context/ticket-flow.md, "When a record is accepted"). On any problem nothing is written.
@@ -64,6 +65,8 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
   const result = json(resultIn, 'result') ?? {};
   const run = json(runIn, 'run');
   const at = new Date(now).toISOString();
+  // Findings outside the ticket (lib/findings.mjs), checked before anything is read or written: the runner files them.
+  const findings = checkFindings(result.sideFindings);
 
   let ledger = readLedger(settings.state, key);
   // The tracker client is made on first use: a record refused before it needs the tracker needs no credentials.
@@ -168,6 +171,9 @@ export async function runRecord({ settings, clients, key: keyIn, stage, status, 
     for (const c of result.commits) if (/^[0-9a-f]{7,40}$/.test(String(c)) && !(pr.idCommits ??= []).some((x) => x.sha === String(c))) pr.idCommits.push({ sha: String(c), at });
   }
   for (const f of result.files ?? []) addFile(f.path, f.kind, stage, f.bytes);
+  // The PR a finding came from: the record's own, else the ticket's only PR (a `pr` record names none).
+  const onlyPr = !pr && l.prs?.length === 1 && l.prs[0].number ? l.prs[0] : null;
+  addFindings(l, findings, { stage, pr: pr ? prId(pr) : onlyPr ? prId(onlyPr) : null, seq: l.seq, at });
   if (startedBy && stage === 'start') l.startedBy = startedBy;
   // The group a start runs with, whatever its status: the runner's record before the session puts the ticket under the
   // group's lock at once.

@@ -34,6 +34,8 @@ disallowedTools:
 
 You run one stage of a PR's final review chain on its branch, in a worktree of it. The UA pages are the source. The toolkit's skills do the work: `doc-translator` (`--sync --base <the PR's base>` for pages EN already has), `locale-translator` for the further locales, `doc-alignment-checker`, the UI label check (`context/ui-labels.md`).
 
+A wrong app string in a locale (the app's own dictionary, which the pages follow all the same), or a problem on a page the branch doesn't change, goes in the record's `sideFindings` (the shared rules), never into a page the branch doesn't change or the PR.
+
 ## The stages
 
 | Stage | What you do | Record |

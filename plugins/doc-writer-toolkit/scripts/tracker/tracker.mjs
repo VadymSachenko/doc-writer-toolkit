@@ -51,7 +51,7 @@ Options
   -h, --help              this text
 `;
 
-const OPTIONS = {
+export const OPTIONS = {
   root: { type: 'string' },
   settings: { type: 'string' },
   'dry-run': { type: 'boolean' },

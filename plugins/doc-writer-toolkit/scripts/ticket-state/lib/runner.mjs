@@ -33,6 +33,7 @@ import { followLabels, labelSnapshot } from './pr-labels.mjs';
 import { authorsFrom, collectOnce, viewsFrom } from './learn-log.mjs';
 import { idCommentText, syncIds } from './id-sync.mjs';
 import { followRounds, roundSnapshot } from './pr-rounds.mjs';
+import { findingLines, followFindings } from './findings.mjs';
 import { pickMarks, settleMarks } from './reactions.mjs';
 import { PLACE_SOURCES } from './gates.mjs';
 import { FILES_SHOWN, ticketCommits, ticketCommitsFor } from './ticket-commits.mjs';
@@ -192,6 +193,8 @@ export const scriptFlagsDenied = (roots = []) => [...new Set(roots.flatMap((r) =
     return flags.flatMap((f) => [`Bash(${cmd} ${f})`, `Bash(${cmd} ${f} *)`, `Bash(${cmd} * ${f})`, `Bash(${cmd} * ${f} *)`, `Bash(${cmd} ${f}=*)`, `Bash(${cmd} * ${f}=*)`]);
   }),
   ...['add-label', 'remove-label'].flatMap((c) => [`Bash(node ${path.join(r, 'scripts', 'forge/forge.mjs')} ${c}:*)`, `Bash(node ${path.join(r, 'scripts', 'forge/forge.mjs')} * ${c} *)`]),
+  // A card for a finding outside the ticket is the runner's to create (lib/findings.mjs).
+  `Bash(node ${path.join(r, 'scripts', 'tracker/tracker.mjs')} create-card:*)`, `Bash(node ${path.join(r, 'scripts', 'tracker/tracker.mjs')} * create-card *)`,
 ]))];
 
 // The toolkit roots a session may run scripts from: the runner's own, which is the plugin every session loads
@@ -437,6 +440,7 @@ export function briefFor(step, settings) {
     ...(['plan', 'write'].includes(step.stage) && step.role === 'writer' ? [...holdLines(step, settings), ...(step.heldAnswers ?? [])] : []),
     ...(step.stage === 'pr' ? step.passLines ?? [] : []),
     ...gateLines(step, settings),
+    ...findingLines(step, settings),
     // The places' language, on whatever `checks` say: the description's places section is written from the record.
     step.role === 'writer' && ['pr', 'answerComments'].includes(step.stage) ? "A place's `claim`, `why` and `reason` are in the language of the page the place is on, in the words of its line comment: the description's places are written from them. Code names (endpoints, functions, fields) stay as they are, in backticks. `record` refuses a `claim` or `why` with no letter of the page's script outside code. Missing test data is no place by itself: make the setup the host's rules allow first, on the owner's test accounts, and run the check; a place left after it names in `why` the requests tried and the setup made." : null,
     step.cards ? `Cards, highest priority first:\n${step.cards.map((c) => `- ${c.key}: ${c.url ?? c.shortLink} (${c.priority})`).join('\n')}` : null,
@@ -1988,6 +1992,10 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         for (const note of await followLabels({ settings, clients, keys: step.keys, before, skip: step.dropped })) say({ kind: 'label', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, outcome: 'failed', note });
         // So do the description's sections, the place threads and the older summaries, with review rounds (lib/pr-rounds.mjs).
         for (const note of await followRounds({ settings, clients, keys: step.keys, before: roundsBefore, skip: step.dropped })) say({ kind: 'rounds', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, outcome: 'failed', note });
+        // The findings outside the ticket the step recorded: a card each in the intake list, or a link to the open card
+        // that holds it, or a line of the report (lib/findings.mjs). A tracker call that fails is a warning, tried again
+        // at the ticket's next step.
+        for (const e of await followFindings({ settings, clients, keys: step.keys, now: clock() }).catch((err) => [{ outcome: 'failed', note: `the findings were not routed: ${err.message}` }])) say({ kind: 'findings', group: step.group, keys: e.key ? [e.key] : step.keys, stage: step.stage, pr: step.pr ?? null, outcome: e.outcome, note: e.note });
         done.push(r);
         ran(r);
         // The branch moved under the step (a person's commit): its status is read again, and what it gives now runs. Twice

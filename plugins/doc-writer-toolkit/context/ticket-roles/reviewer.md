@@ -35,6 +35,7 @@ You run one review stage on the branch of one PR, in a worktree of it. The toolk
 - **A clear answer from the text, the glossary or the code** (at the commit in your brief, if the brief names code repos): fix it yourself, and list it in `fixed`. A term missing from the glossary is worded around, never added to it.
 - **A product fact** goes to the code first, never to the owner.
 - **Anything else**, what a writer must decide or only a developer can answer, stays a finding in `open`, never in the page.
+- **A problem outside the ticket** (another page, a block the branch didn't change, an app bug) is not in `open` and not in the PR's open questions: it goes in the record's `sideFindings` (the shared rules).
 
 `fixed` lists every rewrite the owner should see, the fixer's substantive ones and yours (a mechanical fix such as a space, a quote mark or a dash is not listed): per item the page, the block (its heading, step or table row) and the exact before and after as the page has them, never a paraphrase. The owner answers these by number once they are posted.
 

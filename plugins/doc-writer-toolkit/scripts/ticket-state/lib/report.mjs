@@ -6,6 +6,7 @@ import { readFeed } from './feed.mjs';
 import { reviewCommentFor } from './experts.mjs';
 import { duration as spell, mergedUntranslated } from './progress.mjs';
 import { renderAnswers } from './misses.mjs';
+import { readFindings, renderFindings } from './findings.mjs';
 
 // The morning report (design §7): a local file `<state>/reports/<date>.md`, written with no model call. Nothing goes to
 // the tracker or the forge. A separate skill reads it on demand.
@@ -68,7 +69,7 @@ const list = (rows, empty = 'none') => (rows.length ? rows.map((r) => `- ${r}`).
 
 // The report's text, from a status, the ledgers, the run log, the cards left in the host jobs' watch lists and the
 // weekly roles proposal.
-export function renderReport({ settings, st, date, runLog = [], watched = [], proposal = null, answers = null, ledgers = readAllLedgers(settings.state) }) {
+export function renderReport({ settings, st, date, runLog = [], watched = [], proposal = null, answers = null, ledgers = readAllLedgers(settings.state), findings = readFindings(settings.state) }) {
   const out = [];
   const byKey = new Map(ledgers.map((l) => [l.key, l]));
   out.push(`# Ticket flow, ${date}`, '');
@@ -218,6 +219,10 @@ export function renderReport({ settings, st, date, runLog = [], watched = [], pr
   for (const e of runLog.filter((x) => x.kind === 'legacyMarkdown' && x.outcome === 'removed')) removedLines.push(`${e.key}: the Markdown ledger \`${e.file}\` (closed; its JSON holds every line) ${e.to === 'deleted' ? 'deleted' : 'moved to the Trash'}`);
   for (const t of unmerged) removedLines.push(`${t.key}: a PR was closed unmerged, so its ${byKey.get(t.key).files.length} work file(s) stay (${mb(byKey.get(t.key).files.reduce((s, f) => s + (f.bytes ?? 0), 0))})`);
   out.push('## Work files removed after the merge', '', list(removedLines), ...(freed ? ['', `Space freed today: ${mb(freed)}.`] : []), '');
+
+  // The findings outside the tickets routed on the date (lib/findings.mjs): the cards filed and linked, the notes, and
+  // what no card was filed for. A routing that failed is among the failures below.
+  out.push(...renderFindings(findings, onDate));
 
   const failures = runLog.filter((e) => e.outcome === 'failed' || e.kind === 'guard');
   out.push('## Failures and guard stops', '', list(failures.map((e) => `${e.at} ${[e.key ?? e.group ?? (e.keys ?? []).join(', '), e.stage ?? e.what ?? (e.job ? `job ${e.job}` : null)].filter(Boolean).join(' ')}: ${e.note ?? e.reason ?? e.outcome}`)), '');
