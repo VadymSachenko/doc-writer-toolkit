@@ -279,6 +279,51 @@ test('AC-3: a slot that is not free (the open ticket waits for a reviewer or the
   }
 });
 
+// TASK-112: a merged hub setting (`limits.open` raised) changes nothing the print sees. The check that moves the hub runs
+// a pass under the usual guards; a move outside the start hours is kept for the first check inside them.
+const HUB_MOVED = { outcome: 'moved', base: 'main', from: 'a'.repeat(40), to: 'b'.repeat(40), commits: 1 };
+const LEVEL = { outcome: 'level', base: 'main', from: 'b'.repeat(40) };
+
+test('TASK-112: the check that moves the hub runs the start pass under its guards; a check with no move runs none', async () => {
+  const { w, cards } = flow();
+  seed(w, AT('14:50'), { starts: morningLeft('2026-11-10', ['801'], ['502']) });
+  const { check, calls, passes } = checker(w, { cards });
+  // A move that leaves no room (`limits.open` still 1): the pass is noted, no runner, no /usage.
+  let out = await check(AT('14:55'), { hub: HUB_MOVED });
+  assert.deepEqual([out.startPass.why, out.startPass.ran, out.startPass.skipped], ['the hub moved', false, '1 open (801) of 1']);
+  assert.deepEqual([passes().length, calls.usage], [0, 0]);
+  // The settings now give a second slot. A check with no move: as before, nothing a start reads changed.
+  w.settings.limits.open = 2;
+  out = await check(AT('15:00'), { hub: LEVEL });
+  assert.equal(out.startPass, undefined);
+  assert.equal(passes().length, 0);
+  // The check that moves the hub runs the pass: 502 starts, as a scheduled start.
+  out = await check(AT('15:05'), { hub: HUB_MOVED });
+  assert.equal(out.startPass.why, 'the hub moved');
+  assert.deepEqual(passes().map((r) => [r.trigger, r.startPass]), [['schedule', true]]);
+  assert.deepEqual(calls.sessions, ['start 502 schedule', 'plan 502 null']);
+  assert.match(oneLine(out), /start pass \(the hub moved\): handed on the start of 502 \(run [\w-]+\)/);
+  assert.equal(readFeed(w.settings.state).starts.deferred, null);
+  // The next check, level: no pass again.
+  out = await check(AT('15:10'), { hub: LEVEL });
+  assert.equal(out.startPass, undefined);
+  assert.equal(passes().length, 1);
+});
+
+test('TASK-112: a move before the start hours is kept, and the first check inside them runs the pass', async () => {
+  const { w, cards } = flow({ limits: { open: 2, startHours: '12-22' } });
+  seed(w, AT('10:50'), { starts: morningLeft('2026-11-10', ['801'], ['502']) });
+  const { check, passes } = checker(w, { cards });
+  let out = await check(AT('11:00'), { hub: HUB_MOVED });
+  assert.equal(out.startPass, undefined);
+  assert.equal(readFeed(w.settings.state).starts.deferred, 'the hub moved');
+  await check(AT('11:30'), { hub: LEVEL });
+  assert.deepEqual([passes().length, readFeed(w.settings.state).starts.deferred], [0, 'the hub moved']);
+  out = await check(AT('12:00'), { hub: LEVEL });
+  assert.equal(out.startPass.why, 'the hub moved');
+  assert.deepEqual([passes().length, read(w, '502').stages.start.status], [1, 'done']);
+});
+
 test('an intake card that arrives at 15:00 is triaged when its quiet hours end, with no event then', async () => {
   const { w, actions, cards } = flow({ ready: false });
   seed(w, AT('14:50'), { starts: morningLeft('2026-11-10', ['801'], []) });

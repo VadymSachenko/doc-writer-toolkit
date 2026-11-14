@@ -180,6 +180,10 @@ export function noRoomOf(wip) {
 // A start pass that failed before its first step is tried again after this long, not at every check.
 export const RETRY_MS = 30 * 60 * 1000;
 
+// A hub move as a reason for a start pass (TASK-112): a merged setting (`limits.open` raised, say) may let a ready group
+// start with no change the print sees. Kept as `deferred` until a pass runs or finds no room, since no print holds it.
+export const HUB_MOVED = 'the hub moved';
+
 // A ticket's group, by its ledger (a ticket with none, or one that doesn't read, is its own).
 function groupOfKey(state) {
   return (k) => {
@@ -737,7 +741,10 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
     // list, a new day, an intake card due, a change deferred. Inside `limits.startHours` only; outside them a change is
     // kept for the first check inside them (the morning run takes it over).
     async function startPassOf() {
+      // The check that moved the hub: a change of its own, outside the hours too (the first check inside them takes it).
+      if (hubMoved) next.starts = { ...(next.starts ?? {}), deferred: HUB_MOVED };
       const last = next.starts ?? null;
+      const moved = last?.deferred === HUB_MOVED;
       const cardMoved = unmapped.some((e) => e.board === settings.tracker.board && START_STATUSES.has(e.statusAfter ?? e.status));
       const dueAgain = Boolean(last?.nextDueAt) && checkStart >= Date.parse(last.nextDueAt);
       // The hours at this moment, not at the check's start: the watcher's own run may have taken past their end.
@@ -766,11 +773,11 @@ export async function runCheck({ settings, clients, io = {}, options = {} }) {
       const nextDueAt = view.intake?.waiting?.[0]?.quietAt ?? null;
       // A morning run that failed part way left no print: what this check sees is the day's from now on.
       if (last && !last.print && last.date === today) {
-        next.starts = { ...last, print, nextDueAt, deferred: null };
+        next.starts = { ...last, print, nextDueAt, deferred: moved ? HUB_MOVED : null };
         return null;
       }
       // A pass whose last try ended for a passing reason (no usage reading, no run slot) runs again with no change.
-      const why = changeOf(last?.print ?? null, print) ?? (last?.again && !holding ? `again: ${last.again}` : null);
+      const why = changeOf(last?.print ?? null, print) ?? (moved ? HUB_MOVED : null) ?? (last?.again && !holding ? `again: ${last.again}` : null);
       if (!why) {
         // Nothing that could let a start happen; what was seen is the view the next change is measured from.
         if (last) next.starts = { ...last, print, nextDueAt, deferred: null, retryAt: last.again ? last.retryAt ?? null : null };
