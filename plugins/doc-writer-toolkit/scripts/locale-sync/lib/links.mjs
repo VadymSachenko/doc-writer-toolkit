@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { abs, listUaPages, localePagePath, readIfExists } from './pages.mjs';
-import { cachedBlob } from './plan.mjs';
+import { cachedBlob, cachedBlobs } from './plan.mjs';
 import { parseFrontmatter, splitCode } from './parse.mjs';
 
 const posix = path.posix;
@@ -56,7 +56,9 @@ function linkIndex(s) {
         const byRoute = new Map();
         const byPath = new Map();
         const byForm = new Map(); // the two declared link forms (internal-links.md): URL prefix + path, and `/` + file path
-        for (const page of (await listUaPages(s, s.declaredPairs)).all) {
+        const pages = (await listUaPages(s, s.declaredPairs)).all;
+        await cachedBlobs(s.root, pages.map((p) => p.blob));
+        for (const page of pages) {
           const text = await cachedBlob(s.root, page.blob);
           const entry = { page, uaTitle: pageTitle(text) };
           byRoute.set(docRoute(page.ps, page, text), entry);

@@ -10,7 +10,9 @@ import { parsePage, canonicalTags, splitCode, boldSpans, assetRefs } from '../li
 import { composeChanges, diffBodies, diffFrontmatter } from '../lib/diff.mjs';
 import { docRoute, parseBuildErrors } from '../lib/report.mjs';
 import { setLastUpdate } from '../lib/record.mjs';
-import { usageMatcher } from '../lib/terms.mjs';
+import { matchTerms, termMatcher, usageMatcher } from '../lib/terms.mjs';
+import { blobText, blobTexts } from '../lib/git.mjs';
+import { cachedBlob, cachedBlobs } from '../lib/plan.mjs';
 import { gitBlobHash } from '../../ui-labels/lib/util.mjs';
 
 const run = promisify(execFile);
@@ -1648,6 +1650,110 @@ test('terms --usage matching: a short last word takes endings, a stem shared wit
   assert.ok(!hit('камсыздандыруу депозити', 'камсыздандыруу каржысы'));
   // a word of two letters is exact
   assert.ok(hit('иш', 'иш башталды') && !hit('иш', 'ишке'));
+});
+
+test('matchTerms: the stem prefilter keeps exactly the entries the full matcher keeps', () => {
+  const entries = ['дія', 'стан', 'транзакція', 'платіжне посилання', 'API', 'ID', 'C++', '[beta]', "обов'язкове поле", 'е-гаманець', 'фільтр', 'ключ доступу', 'звіт'].map((ua) => ({ ua, target: `t:${ua}` }));
+  const texts = [
+    'Дія недоступна, доки ТРАНЗАКЦІЇ в стані обробки.',
+    'Скопіюйте платіжного посилання й надішліть його.',
+    'Посилання платіжне не передається.', // both stems, the wrong order: the prefilter lets it through, the full matcher does not
+    'Поле API ID, режим C++ і [beta]; е-гаманці, обов’язкове поле.',
+    "Обов'язкового поля немає. Фільтри скинуто.",
+    'Станція, транзакційний, звітність, ключі доступу.', // stems inside longer words
+    'Фі́льтр, й — combining marks', // NFD input: matched after NFC
+    'Nothing here matches.',
+    '',
+  ];
+  for (const text of texts) {
+    const full = entries.filter((e) => termMatcher(e.ua).test(text.normalize('NFC')));
+    assert.deepEqual(matchTerms(entries, text), full, text);
+  }
+  const uas = (text) => matchTerms(entries, text).map((e) => e.ua);
+  assert.deepEqual(uas(texts[1]), ['платіжне посилання']);
+  assert.deepEqual(uas(texts[2]), []);
+  assert.ok(uas(texts[0]).includes('транзакція') && uas(texts[0]).includes('дія'));
+});
+
+// Writes each content as a loose blob of a new repository and returns its hash.
+async function blobRepo(contents) {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'locale-sync-blobs-'));
+  await git(dir, 'init', '-q');
+  const hashes = [];
+  for (const [i, c] of contents.entries()) {
+    await fs.writeFile(path.join(dir, `f${i}`), c);
+    hashes.push(await git(dir, 'hash-object', '-w', `f${i}`));
+  }
+  return { dir, hashes };
+}
+
+test('blobTexts: one git process reads the same text as one blob at a time', async () => {
+  const contents = [
+    'Фільтри — «пошук», ґанок, ї, є, 💳\n',
+    '',
+    'a' + 'ї'.repeat(100000) + '\n', // over a pipe chunk, with a two-byte letter split across chunks
+    Buffer.from([0x41, 0xff, 0x0a, 0xd0, 0x0a, 0xe2, 0x82]), // invalid UTF-8, a truncated letter at the end
+    '0123456789abcdef0123456789abcdef01234567 blob 5\nnot a header\n', // a body that looks like an answer
+    `${Date.now()} unique\n`,
+  ];
+  const { dir, hashes } = await blobRepo(contents);
+  const missing = 'deadbeef'.repeat(5);
+  const texts = await blobTexts(dir, [...hashes, missing, hashes[0], 'not a hash']);
+  assert.deepEqual([...texts.keys()], hashes);
+  for (const h of hashes) assert.equal(texts.get(h), await blobText(dir, h));
+  assert.equal(texts.get(hashes[1]), '');
+  assert.equal(texts.get(hashes[2]).length, 100002);
+  assert.equal(texts.has(missing), false);
+});
+
+test('cachedBlobs fills the cache cachedBlob reads; a blob it cannot read is read alone and fails as before', async () => {
+  const { dir, hashes } = await blobRepo([`Сторінка ${Date.now()}\n`, `Ще одна ${Date.now()}\n`, `Третя ${Date.now()}\n`]);
+  const missing = 'feedface'.repeat(5);
+  const nowhere = path.join(dir, 'no-such-folder');
+  await cachedBlobs(dir, [hashes[0], hashes[1], missing, null]);
+  // From the cache: a git call in a folder that does not exist would fail.
+  assert.equal(await cachedBlob(nowhere, hashes[0]), await blobText(dir, hashes[0]));
+  assert.equal(await cachedBlob(nowhere, hashes[1]), await blobText(dir, hashes[1]));
+  const expected = await blobText(dir, missing).then(() => null, (e) => e.message);
+  assert.ok(expected);
+  await assert.rejects(cachedBlob(dir, missing), (e) => e.message === expected);
+  // A batch that fails (no repository) caches nothing: each read goes to git alone, as before.
+  await cachedBlobs(nowhere, [hashes[2]]);
+  await assert.rejects(cachedBlob(nowhere, hashes[2]));
+});
+
+test('blocks and check start a few git processes whatever the number of pages and locales', async () => {
+  const f = await fixtureRepo({ extraPages: 6 });
+  const page = (i, word) => `---\ntitle: Сторінка ${i}\n---\n\n${word} ${i}.\n`;
+  const ru = 'i18n/ru/docusaurus-plugin-content-docs/current';
+  for (let i = 0; i < 6; i++) {
+    // Translated from the committed text in both locales, then UA changes: every cell is stale, from an existing base.
+    await f.write(`${TR_ROOT}/extra/p${i}/p${i}.md`, `---\ntitle: Sayfa ${i}\n---\n\nMetin ${i}.\n`);
+    await f.write(`${ru}/extra/p${i}/p${i}.md`, `---\ntitle: Страница ${i}\n---\n\nТекст ${i}.\n`);
+    await f.write(`.doc-toolkit/pages/extra/p${i}/p${i}.json`, { spans: {}, locales: { tr: trEntry(gitBlobHash(page(i, 'Текст'))), ru: trEntry(gitBlobHash(page(i, 'Текст'))) } });
+    await f.write(`docs/extra/p${i}/p${i}.md`, page(i, 'Новий текст'));
+  }
+  await f.commit();
+  // A `git` first on PATH that logs each process, then runs the real one.
+  const bin = await fs.mkdtemp(path.join(os.tmpdir(), 'locale-sync-gitlog-'));
+  const realGit = (await run('sh', ['-c', 'command -v git'])).stdout.trim();
+  await fs.writeFile(path.join(bin, 'git'), `#!/bin/sh\nprintf '%s\\n' "$*" >> "${bin}/log"\nexec "${realGit}" "$@"\n`, { mode: 0o755 });
+  const counted = async (...args) => {
+    await fs.rm(path.join(bin, 'log'), { force: true });
+    const { stdout } = await run('node', [CLI, ...args], { cwd: f.dir, env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}` } }).catch((e) => e);
+    const log = (await fs.readFile(path.join(bin, 'log'), 'utf8')).trim().split('\n');
+    const n = (re) => log.filter((l) => re.test(l)).length;
+    return { out: JSON.parse(stdout), n, total: log.length };
+  };
+
+  const b = await counted('blocks', 'extra', '--locales', 'tr,ru');
+  assert.deepEqual(b.out.results.map((r) => r.mode), Array(12).fill('incremental'));
+  assert.deepEqual([b.n(/cat-file --batch-check/), b.n(/cat-file blob/), b.n(/ls-tree/)], [1, 0, 1], 'one existence check, no blob read alone, one tree listing');
+  assert.ok(b.n(/cat-file --batch$/) <= 2 && b.total <= 6, `${b.total} git processes`);
+
+  const c = await counted('check', 'extra/p0', '--locales', 'tr');
+  assert.equal(c.out.results.length, 1);
+  assert.ok(c.n(/cat-file blob/) <= 1 && c.n(/cat-file --batch$/) === 1 && c.total <= 5, `${c.total} git processes`);
 });
 
 test('status: warns when a locale current.json keeps Ukrainian sidebar labels that no _category_.json owns', async () => {

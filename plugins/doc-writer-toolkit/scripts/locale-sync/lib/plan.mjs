@@ -1,4 +1,4 @@
-import { blobText } from './git.mjs';
+import { blobText, blobTexts } from './git.mjs';
 import { diffBodies, diffFrontmatter } from './diff.mjs';
 import { parsePage, splitCode, wordCount } from './parse.mjs';
 
@@ -28,6 +28,22 @@ const textCache = new Map();
 export async function cachedBlob(root, hash) {
   if (!textCache.has(hash)) textCache.set(hash, blobText(root, hash));
   return textCache.get(hash);
+}
+
+// Reads the blobs a loop is about to need with one git process (`blobTexts`), into the cache `cachedBlob` reads: a git
+// process costs a tenth of a second or more on some machines, and a loop over every UA page would start one per page.
+// Await it before the loop. Whatever the batch does not return (a missing object, a failed batch) stays uncached, so
+// `cachedBlob` reads it alone and fails as it always did.
+export async function cachedBlobs(root, hashes) {
+  const list = [...new Set(hashes)].filter((h) => h && !textCache.has(h));
+  if (!list.length) return;
+  let texts;
+  try {
+    texts = await blobTexts(root, list);
+  } catch {
+    return;
+  }
+  for (const [hash, text] of texts) if (!textCache.has(hash)) textCache.set(hash, Promise.resolve(text));
 }
 
 export const fullWords = (text) => wordCount(splitCode(text).prose.join('\n'));
