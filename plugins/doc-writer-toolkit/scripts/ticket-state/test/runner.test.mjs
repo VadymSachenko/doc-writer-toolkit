@@ -12,6 +12,7 @@ import { parseUsage } from '../lib/allowance.mjs';
 import { BRANCH_DENIED, PLUGIN_ROOT, PUSH_DENIED, PUSH_DENIED_PLAIN, ROLE_DIR, scriptRoots, scriptRulesFor, agentsFile, briefFor, collectSteps, commandFor, nextModelUp, proposeRoles, readRole, runDaily } from '../lib/runner.mjs';
 import { localDate } from '../lib/report.mjs';
 import { jobCommand } from '../lib/jobs.mjs';
+import { resumeCommand } from '../lib/runner.mjs';
 import { notificationsOf } from '../lib/notify.mjs';
 import { readCheckoutPath } from '../lib/worktree.mjs';
 
@@ -610,13 +611,31 @@ test('AC-5: a host job can\'t push, change a branch or fetch, in the plain or gi
   assert.ok(!denied.some((r) => /^Bash\(.*\*.*:\*\)$/.test(r) && !/^Bash\([^*]*:\*\)$/.test(r)), 'no rule the CLI never matches');
 });
 
-test('a role session loads the hub\'s layers, not the owner\'s, and no plugin from the toolkit it runs', () => {
+test('AC-2 (D-157): every session the runner starts loads the plugin from the toolkit it runs; a role session the hub\'s layers, not the owner\'s', async () => {
   const { w } = busyWorld();
-  for (const role of ['triage', 'writer', 'reviewer', 'translator']) {
-    const { cmd } = rulesOf(role, w);
-    assert.equal(flag(cmd, '--setting-sources'), 'project,local', role);
-    assert.ok(!cmd.args.includes('--plugin-dir'), `${role}: the plugin comes from the hub's own enabledPlugins, at the version the hub installed`);
+  const pluginDirs = (cmd) => cmd.args.flatMap((a, i) => (a === '--plugin-dir' ? [cmd.args[i + 1]] : []));
+  const step = (stage, role, worktrees) => ({ stage, role, keys: role === 'learner' ? [] : ['502'], group: '502', worktrees });
+  const sessions = {
+    ...Object.fromEntries(['triage', 'writer', 'reviewer', 'translator'].map((role) => [role, rulesOf(role, w).cmd])),
+    'a plan step, no worktree': commandFor(step('plan', 'writer', []), w.settings, { agentsPath: '/x/agents.json', roots: ROOTS }),
+    'a baseFix': commandFor(step('baseFix', 'writer', [TREE]), w.settings, { agentsPath: '/x/agents.json', roots: ROOTS }),
+    'the learner': commandFor(step('learn-week', 'learner', []), w.settings, { agentsPath: '/x/agents.json', roots: ROOTS, brief: 'x' }),
+  };
+  sessions['a resumed session'] = resumeCommand(sessions.writer, 'session-1', step('write', 'writer', [TREE]));
+  for (const [what, cmd] of Object.entries(sessions)) {
+    assert.deepEqual(pluginDirs(cmd), [PLUGIN_ROOT], `${what}: once, the runner's own toolkit`);
+    assert.equal(flag(cmd, '--setting-sources'), 'project,local', what);
   }
+  const job = jobCommand({ name: 'notes', every: 60, run: { skill: 'notes-writer' } }, { settings: w.settings });
+  assert.deepEqual(pluginDirs(job), [PLUGIN_ROOT], 'a skill job');
+  assert.ok(!job.args.includes('--setting-sources'), 'a skill job keeps every layer, as before');
+  assert.deepEqual(pluginDirs(jobCommand({ name: 'tidy', every: 60, run: { script: 'tools/tidy.mjs' } }, { settings: w.settings })), [], 'a script job starts no claude');
+  // The runner's own route: every session a run starts carries it.
+  const seen = [];
+  const spawnClaude = async (cmd) => (seen.push(cmd), { code: 1, stdout: '', stderr: 'stop' });
+  await runDaily({ settings: w.settings, clients: w.clients(), io: { readUsage: () => usageAt(5), now: () => NOW, spawnClaude }, options: { morning: true } });
+  assert.ok(seen.length >= 2, 'the morning triage and a start at least');
+  for (const cmd of seen) assert.deepEqual(pluginDirs(cmd), [PLUGIN_ROOT], briefOf(cmd).slice(0, 60));
 });
 
 test('writes are an allow list: a role\'s worktrees and the state tmp/, with no unscoped file-writing rule', () => {

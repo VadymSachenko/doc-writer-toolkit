@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { parseShell, segmentMatches } from '../lib/shell-words.mjs';
 import { HOOK_VARIABLE, SCRIPT_COMMANDS, commandsOfRules, hookSettings, refusalOf } from '../lib/role-hook.mjs';
 import { ROLE_HOOK, ROLE_SCRIPTS, TOOLS_DENIED, briefFor, commandFor, downloadDirsFor, spawnClaude } from '../lib/runner.mjs';
+import { PLUGIN_ROOT, scriptRoots } from '../lib/runner.mjs';
 import { ROLE_SESSION_VARIABLE, DOWNLOAD_DIRS_VARIABLE, TRACKER_TEST_VARIABLE } from '../lib/env.mjs';
 import { isBareGit, jobCommand, validateJobs } from '../lib/jobs.mjs';
 import { loadSettings, localOnly, sharedAtHead } from '../lib/settings.mjs';
@@ -273,6 +274,50 @@ test('per-role scripts: triage gets ticket-state and the tracker only; each role
     for (const c of ['open-pr --repo x', 'comment --repo x', 'add-label --label y', '--repo x pr-state', 'reply --repo x', 'suggest --repo x', 'request-reviewers --repo x']) assert.ok(refusalOf(`node ${R}/scripts/forge/forge.mjs ${c}`, cfg[role], { cwd: root }), `${role}: ${c}`);
   }
   assert.ok(refusalOf(`node ${R}/scripts/forge/forge.mjs review-on-lines --repo x`, cfg.translator, { cwd: root }), 'translator: review-on-lines');
+});
+
+test('AC-3 (D-157): a script a skill names by ${CLAUDE_PLUGIN_ROOT}, the session\'s --plugin-dir, passes the rules and the hook from that root; what is refused today stays refused', () => {
+  const w = world({ extra: { workFolder: 'work/tickets/<key>' } });
+  // The runner's roots as it reads them, with an installed copy on the machine: the owner's own sessions load that one.
+  const home = tmp('home-');
+  const installed = '/c/plugins/cache/doc-writer-toolkit/doc-writer-toolkit/old';
+  fs.mkdirSync(path.join(home, '.claude', 'plugins'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.claude', 'plugins', 'installed_plugins.json'), JSON.stringify({ plugins: { 'doc-writer-toolkit@doc-writer-toolkit': [{ scope: 'user', installPath: installed }] } }));
+  const roots = scriptRoots(w.settings, { home, env: {} });
+  assert.deepEqual(roots, [PLUGIN_ROOT, installed], 'the roots are as before');
+  const root = w.settings.root;
+  const sessionOf = (role) => {
+    const cmd = commandFor(stepOf(role, w), w.settings, { agentsPath: '/x/agents.json', roots });
+    const live = cmd.args[cmd.args.indexOf('--plugin-dir') + 1];
+    const allowed = cmd.args.slice(cmd.args.indexOf('--allowedTools') + 1, cmd.args.indexOf('--disallowedTools'));
+    return { live, allowed, cfg: JSON.parse(cmd.env[HOOK_VARIABLE]) };
+  };
+  const sub = (s) => (s.includes(' ') ? '' : s === 'ticket-state/browser-lock.mjs' ? ' take' : ' --help');
+  for (const role of ['triage', 'writer', 'reviewer', 'translator']) {
+    const { live, allowed, cfg } = sessionOf(role);
+    assert.equal(live, PLUGIN_ROOT, role);
+    assert.ok(cfg.roots.includes(live), `${role}: the hook's roots hold the session's plugin`);
+    for (const s of ROLE_SCRIPTS[role]) {
+      const line = `node ${path.join(live, 'scripts', s)}${sub(s)}`;
+      assert.equal(refusalOf(line, cfg, { cwd: root }), null, `${role}: the hook on ${line}`);
+      assert.ok(allowed.includes(`Bash(node ${path.join(live, 'scripts', s)}:*)`), `${role}: the rule for ${s}`);
+    }
+    // Refused as today, from the live root: a script not the role's, a `../` walk, `set`, a cd into the toolkit, a bare node.
+    const own = new Set(ROLE_SCRIPTS[role].map((s) => s.split(' ')[0]));
+    for (const s of ['locale-sync/locale-sync.mjs', 'visual-pack/visual-pack.mjs', 'section-state/section-state.mjs', 'tracker/tracker.mjs'].filter((x) => !own.has(x))) assert.ok(refusalOf(`node ${path.join(live, 'scripts', s)} status`, cfg, { cwd: root }), `${role}: ${s}`);
+    for (const c of [`node ${live}/scripts/../../../../tmp/x.mjs`, `node ${live}/scripts/ticket-state/ticket-state.mjs set mode off`, `node ${live}/scripts/ticket-state/ticket-state.mjs handover 502`, `cd ${live}`, `node -e 1`]) assert.ok(refusalOf(c, cfg, { cwd: root }), `${role}: ${c}`);
+  }
+  const t = sessionOf('translator');
+  assert.equal(refusalOf(`node ${t.live}/scripts/locale-sync/locale-sync.mjs status`, t.cfg, { cwd: root }), null, 'the translator runs the locale pipeline from the live root');
+  assert.ok(refusalOf(`node ${t.live}/scripts/locale-sync/locale-sync.mjs status`, sessionOf('triage').cfg, { cwd: root }), 'triage does not');
+  assert.ok(refusalOf(`node ${t.live}/scripts/ui-labels/ui-labels.mjs check --source 'command sh x'`, t.cfg, { cwd: root }), 'ui-labels --source runs code');
+  const v = sessionOf('reviewer');
+  assert.ok(refusalOf(`node ${v.live}/scripts/visual-pack/visual-pack.mjs --playwright-from /tmp/x`, v.cfg, { cwd: root }), 'visual-pack --playwright-from runs code');
+  const wr = sessionOf('writer');
+  assert.ok(refusalOf(`node ${wr.live}/scripts/forge/forge.mjs add-label --label y`, wr.cfg, { cwd: root }), 'add-label is the runner\'s');
+  // The installed copy keeps today's verdicts too: nothing about its rules changed.
+  assert.equal(refusalOf(`node ${installed}/scripts/locale-sync/locale-sync.mjs status`, t.cfg, { cwd: root }), null);
+  assert.ok(refusalOf(`node ${installed}/scripts/locale-sync/locale-sync.mjs status`, sessionOf('triage').cfg, { cwd: root }));
 });
 
 test('a host\'s tracked rule opens a command it names in the hook too, unless a role never runs it', () => {

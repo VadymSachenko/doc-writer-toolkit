@@ -3,7 +3,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { CliError } from './errors.mjs';
 import { childEnv, scriptEnv } from './env.mjs';
-import { jobDenied } from './runner.mjs';
+import { jobDenied, pluginArgs } from './runner.mjs';
 
 // Host jobs (D-054): the host declares "when list X gets new cards and stays quiet for N hours, run job Y", or "run job
 // Y every N minutes"; Y is a script or a skill. The watcher knows nothing about what a job does. A job:
@@ -120,6 +120,8 @@ export function jobCommand(job, { settings, state = {}, claude = 'claude', node 
     `/${job.run.skill}${job.run.args ? ` ${Array.isArray(job.run.args) ? job.run.args.join(' ') : job.run.args}` : ''}\n\n${context}`,
     '--output-format', 'json',
     '--permission-prompts', 'none',
+    // The plugin from the toolkit the runner runs, as in a role session (`pluginArgs`): the job's skill and its scripts.
+    ...pluginArgs(),
     ...(job.run.model ? ['--model', job.run.model] : []),
     ...(job.run.effort ? ['--effort', job.run.effort] : []),
     ...(job.run.maxTurns ? ['--max-turns', String(job.run.maxTurns)] : []),
