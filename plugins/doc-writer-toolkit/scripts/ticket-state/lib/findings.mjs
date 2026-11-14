@@ -77,7 +77,8 @@ const filled = (v) => typeof v === 'string' && v.trim() !== '';
 const CONFIDENTIAL = [
   ['an id (UUID)', /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i],
   ['JSON', /[{[]\s*"[^"\n]+"\s*:/],
-  ['SQL', /\b(select\b[\s\S]*\bfrom|insert\s+into|update\b[\s\S]*\bset|delete\s+from)\b/i],
+  // A statement's shape, not its words: "select the bank from the list" and "after you set a limit" are prose.
+  ['SQL', /\bselect\s+\*|\bselect\s[\s\S]*?\bfrom\s+\S+[\s\S]*?\bwhere\b|\binsert\s+into\s+\S+[\s\S]*?\bvalues\b|\bupdate\s+\S+\s+set\s+\S+\s*=|\bdelete\s+from\s+\S+\s+where\b/i],
   ['an account number (IBAN)', /\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b/],
   ['a card number', /\b\d(?:[ -]?\d){12,18}\b/],
 ];

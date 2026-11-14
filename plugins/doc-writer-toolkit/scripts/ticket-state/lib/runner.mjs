@@ -1992,7 +1992,7 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         for (const note of await followLabels({ settings, clients, keys: step.keys, before, skip: step.dropped })) say({ kind: 'label', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, outcome: 'failed', note });
         // So do the description's sections, the place threads and the older summaries, with review rounds (lib/pr-rounds.mjs).
         for (const note of await followRounds({ settings, clients, keys: step.keys, before: roundsBefore, skip: step.dropped })) say({ kind: 'rounds', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, outcome: 'failed', note });
-        // The findings outside the ticket the step recorded: a card each in the intake list, or a link to the open card
+        // The findings outside the ticket the step recorded: a card each in the list the settings give its kind, or a link to the open card
         // that holds it, or a line of the report (lib/findings.mjs). A tracker call that fails is a warning, tried again
         // at the ticket's next step.
         for (const e of await followFindings({ settings, clients, keys: step.keys, now: clock() }).catch((err) => [{ outcome: 'failed', note: `the findings were not routed: ${err.message}` }])) say({ kind: 'findings', group: step.group, keys: e.key ? [e.key] : step.keys, stage: step.stage, pr: step.pr ?? null, outcome: e.outcome, note: e.note });

@@ -312,6 +312,8 @@ test('an app bug: the record refuses one without what is wrong or what is expect
   await bad({ ...BUG, module: 'Payouts to UA213223130000026007233566001' }, /"module" holds what looks like an account number/);
   await bad({ ...BUG, title: 'Card 4111 1111 1111 1111 is refused' }, /"title" holds what looks like a card number/);
   await bad({ ...BUG, now: 'select id from users where ... returns nothing' }, /"now" holds what looks like SQL/);
+  await bad({ ...BUG, now: 'update payouts set status = 1 fails' }, /"now" holds what looks like SQL/);
+  for (const now of ['Select the bank from the list: nothing happens', 'The page does not update after you set a limit']) assert.doesNotThrow(() => checkFindings([{ ...BUG, now }], { apps: [BUG.app] }), now);
   assert.equal(read(w, '1372').sideFindings, undefined, 'nothing written by a refused record');
   // In the last section, the same data is what it is for; the app is matched without case.
   await findingsOf(w, '1372', [{ ...BUG, app: 'admin', repro: 'POST /users {"id": "0b6c2f1e-8a4d-4c1e-9f3a-2d5e7b9a1c3f"}; select * from users' }]);
