@@ -8,7 +8,7 @@ import { briefFor, runDaily, scriptedCalls } from '../lib/runner.mjs';
 import { parseUsage } from '../lib/allowance.mjs';
 import { HOLDER, buildLockDir, buildLockState, freeBuildLock, pidAlive, takeBuildLock } from '../lib/build-lock.mjs';
 import { allLocks } from '../lib/locks.mjs';
-import { runSiteBuild } from '../lib/site-build.mjs';
+import { EXIT_WHEN_BUILT, buildEnv, runSiteBuild } from '../lib/site-build.mjs';
 import { localDate } from '../lib/report.mjs';
 
 // The chain's `build` is the runner's own step: the host's build command in the PR's worktree, under the build lock,
@@ -400,6 +400,24 @@ setInterval(() => {}, 1000);
   // A command that can't start: exit 127, with the reason.
   const missing = await runSiteBuild({ cwd: dir, command: [path.join(dir, 'no-such-bin')], timeoutMs: 5000 });
   assert.equal(missing.code, 127);
+});
+
+test('TASK-110: runSiteBuild\'s Node processes exit when their work is done, with their own code, the host\'s NODE_OPTIONS kept, and Docusaurus keeps no persistent cache', async () => {
+  const dir = tmp('exit-');
+  const script = path.join(dir, 'build.mjs');
+  fs.writeFileSync(script, `console.log(JSON.stringify({ options: process.env.NODE_OPTIONS, cache: process.env.DOCUSAURUS_NO_PERSISTENT_CACHE, ci: process.env.CI, heap: (await import('node:v8')).getHeapStatistics().heap_size_limit, hooks: process.listenerCount('beforeExit') }));
+process.exitCode = process.argv[2] === 'fail' ? 3 : 0;
+`);
+  const env = { ...process.env, NODE_OPTIONS: '--max-old-space-size=3000' };
+  const ok = await runSiteBuild({ cwd: dir, command: [process.execPath, script], timeoutMs: 20000, env });
+  assert.equal(ok.code, 0);
+  const seen = JSON.parse(ok.tail.at(-1));
+  assert.equal(seen.options, `--max-old-space-size=3000 --require ${JSON.stringify(EXIT_WHEN_BUILT)}`);
+  assert.equal(Math.round(seen.heap / 2 ** 20) >= 3000, true, 'the host\'s own option still applies');
+  assert.deepEqual([seen.cache, seen.ci, seen.hooks], ['true', '1', 1]);
+  const failed = await runSiteBuild({ cwd: dir, command: [process.execPath, script, 'fail'], timeoutMs: 20000, env });
+  assert.equal(failed.code, 3);
+  assert.equal(buildEnv({ PATH: '/bin' }).NODE_OPTIONS, `--require ${JSON.stringify(EXIT_WHEN_BUILT)}`);
 });
 
 test('settings: build.command and the rest come from the shared file; a text command is split into words; a bad one is refused', async () => {
