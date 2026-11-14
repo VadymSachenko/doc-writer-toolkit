@@ -3,7 +3,7 @@ description: 'Show the ticket flow''s morning report for a date (today by defaul
 argument-hint: "[yyyy-mm-dd | today | yesterday]"
 ---
 
-Use the `ticket-report` skill to show the ticket flow's report.
+Use the `ticket-report-reader` skill to show the ticket flow's report.
 
 - **Arguments:** $ARGUMENTS — the date, or nothing for today. Pass it through unchanged.
 

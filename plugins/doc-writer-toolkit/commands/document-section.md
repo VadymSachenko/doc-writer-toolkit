@@ -3,7 +3,7 @@ description: 'Run one section folder through the whole chain (readiness, app exp
 argument-hint: "<section-folder> [interview:skip] [apply:mechanical|apply:mechanical,substantive] [approve:<id,…|all>] [page:<id>]"
 ---
 
-Use the `document-section` skill to document one section folder end to end.
+Use the `section-documenter` skill to document one section folder end to end.
 
 - **Arguments:** $ARGUMENTS — the section folder (from the repo root, or `<pair>:<folder>`), then the optional `interview:skip`, `apply:`, `approve:` and `page:`. Pass them through unchanged.
 

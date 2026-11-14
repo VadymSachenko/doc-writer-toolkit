@@ -24,7 +24,7 @@ plugins/doc-writer-toolkit/
   context/locale-translation.md          # rules for translating into the further (non-EN) locales
   context/ui-labels.md                   # the UI label check procedure every docs task starts with
   context/changed-blocks.md              # what "the changed part of a page" means (scope mode, sync, locale-sync)
-  context/section-state.md               # the document-section ledger: fields, done and stale rules, gates
+  context/section-state.md               # the section-documenter ledger: fields, done and stale rules, gates
   context/ticket-flow.md                 # the ticket flow: statuses, ticket states, the next-step rule, the ticket ledger, locks, limits
   context/ticket-roles/                  # the role prompts the ticket runner hands to `claude -p` (triage, writer, reviewer, translator, unattended rules)
   context/google-developer-style-guide/  # distilled GDSG corpus (routed loading)
@@ -33,7 +33,7 @@ plugins/doc-writer-toolkit/
   scripts/locale-sync/                   # Node, no deps: stale detection, changed blocks, checks, state (README + tests)
   scripts/doc-align/                     # Node, no deps: UA/EN structural counts, heading ids and names-table check for doc-alignment-checker (README + tests)
   scripts/screenshot-locales/            # Node, no deps: screenshot locales, per-locale paths, staging, all-or-nothing promotion (README + tests)
-  scripts/section-state/                 # Node, no deps: the document-section ledger, status and record (README + tests)
+  scripts/section-state/                 # Node, no deps: the section-documenter ledger, status and record (README + tests)
   scripts/pipeline-measures/             # Node, no deps: read-only measures of a docs pipeline from git, gh and the tracker (README + tests)
   scripts/tracker/                       # Node, no deps: the ticket tracker in statuses and transitions, a Trello adapter behind an interface (README + tests)
   scripts/forge/                         # Node, no deps: the forge (PRs, review comments, labels, the event feed) over gh, a GitHub adapter behind an interface (README + tests)
@@ -144,7 +144,7 @@ Four skills move a whole menu *section* (not just one page) toward publish-ready
 
 `/explore-and-resolve` chains `app-explorer` → `resolve-markers`.
 
-`document-section` (`/document-section`) chains the whole section: readiness → explore → plan → (gate G1, the plan) → write each page → resolve markers → fix → review (two rounds at most) → (gate G5, UA approval, then the user's commit) → EN translation → alignment. Business logic is in the skill; the command is thin. It keeps a ledger in `<section>/.sources/section-state.json`, meant to be committed in the host repo, through `scripts/section-state/` (no AI): `status` checks the ledger against git blob hashes of the files and derives what is stale, what runs next and which gate is open; `record` writes one stage result, and only when the files support it. The files win over the ledger. `context/section-state.md` holds the ledger's fields and its done and stale rules. The plan gate is never pre-approvable; the writers' interview and the fixer's bucket 2 choices stay with those skills (`interview:skip` and `apply:mechanical,substantive` pass on their existing rules). Further locales, screenshot cleanup, updating a complete page and API reference pages (`api-doc-writer` saves to the API reference root and writes English only) are not in the chain: the final report lists or suggests them.
+`section-documenter` (`/document-section`) chains the whole section: readiness → explore → plan → (gate G1, the plan) → write each page → resolve markers → fix → review (two rounds at most) → (gate G5, UA approval, then the user's commit) → EN translation → alignment. Business logic is in the skill; the command is thin. It keeps a ledger in `<section>/.sources/section-state.json`, meant to be committed in the host repo, through `scripts/section-state/` (no AI): `status` checks the ledger against git blob hashes of the files and derives what is stale, what runs next and which gate is open; `record` writes one stage result, and only when the files support it. The files win over the ledger. `context/section-state.md` holds the ledger's fields and its done and stale rules. The plan gate is never pre-approvable; the writers' interview and the fixer's bucket 2 choices stay with those skills (`interview:skip` and `apply:mechanical,substantive` pass on their existing rules). Further locales, screenshot cleanup, updating a complete page and API reference pages (`api-doc-writer` saves to the API reference root and writes English only) are not in the chain: the final report lists or suggests them.
 
 ### Screenshot locales
 

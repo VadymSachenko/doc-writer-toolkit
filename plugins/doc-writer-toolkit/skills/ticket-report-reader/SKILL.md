@@ -1,9 +1,9 @@
 ---
-name: ticket-report
-description: 'Reads the ticket flow''s morning report for a date (today by default) from the host''s state folder and shows it: what waits for the owner first, then the rest as written. Read only: it writes no report, runs no step and changes no setting. Explicit invocation only: use explicitly ("/ticket-report", "ticket-report 2026-11-10", "use ticket-report for yesterday"); never on a loose question about the pipeline or a card.'
+name: ticket-report-reader
+description: 'Reads the ticket flow''s morning report for a date (today by default) from the host''s state folder and shows it: what waits for the owner first, then the rest as written. Read only: it writes no report, runs no step and changes no setting. Explicit invocation only: use explicitly ("/ticket-report", "ticket-report-reader 2026-11-10", "use ticket-report-reader for yesterday"); never on a loose question about the pipeline or a card.'
 ---
 
-# ticket-report
+# ticket-report-reader
 
 You show the person the ticket flow's report for one day. The runner writes it with no model call, `<state>/reports/<date>.md`; you read it and put what needs the person first. You never write or refresh it, and never act on what it says.
 
@@ -57,5 +57,5 @@ Then the report as written, unchanged. Don't reorder its sections, round its num
 ## Explicit invocation examples
 
 - "/ticket-report"
-- "ticket-report 2026-11-10"
-- "use ticket-report for yesterday"
+- "ticket-report-reader 2026-11-10"
+- "use ticket-report-reader for yesterday"

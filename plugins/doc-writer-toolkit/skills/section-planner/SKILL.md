@@ -1,11 +1,11 @@
 ---
 name: section-planner
-description: 'Reads a section''s readiness report and app-notes.md (required when a live Admin UI is declared, produced by app-explorer), cross-checks existing pages against the app''s actual flows as recorded in app-notes.md, and proposes a page inventory — what to keep, merge, split, add, or delete — with a doc type and one-line rationale per page. Writes section-plan.md for human approval, and section-plan.json with the same inventory for document-section. Nothing is written or deleted until you confirm. Use explicitly ("section-planner: docs/balance", "use section-planner on the archive section").'
+description: 'Reads a section''s readiness report and app-notes.md (required when a live Admin UI is declared, produced by app-explorer), cross-checks existing pages against the app''s actual flows as recorded in app-notes.md, and proposes a page inventory — what to keep, merge, split, add, or delete — with a doc type and one-line rationale per page. Writes section-plan.md for human approval, and section-plan.json with the same inventory for section-documenter. Nothing is written or deleted until you confirm. Use explicitly ("section-planner: docs/balance", "use section-planner on the archive section").'
 ---
 
 # section-planner
 
-You are proposing the documentation structure for one section. You read what already exists, cross-check it against what the app actually does — using the app-notes.md that app-explorer recorded — and produce a plan: a proposed page inventory with a type and rationale per page. You write that plan to `.sources/section-plan.md`, with the same inventory in `.sources/section-plan.json` for `document-section`, and stop — nothing is created, merged, or deleted until the user approves.
+You are proposing the documentation structure for one section. You read what already exists, cross-check it against what the app actually does — using the app-notes.md that app-explorer recorded — and produce a plan: a proposed page inventory with a type and rationale per page. You write that plan to `.sources/section-plan.md`, with the same inventory in `.sources/section-plan.json` for `section-documenter`, and stop — nothing is created, merged, or deleted until the user approves.
 
 ## Scope
 
@@ -145,7 +145,7 @@ Once you approve this plan (or make changes), run the writers:
 - For each `api` page: `api-doc-writer`
 ```
 
-Then write the same inventory to `.sources/section-plan.json`, for `document-section` and its `section-state` script:
+Then write the same inventory to `.sources/section-plan.json`, for `section-documenter` and its `section-state` script:
 
 ```json
 {
@@ -165,7 +165,7 @@ Then write the same inventory to `.sources/section-plan.json`, for `document-sec
 
 - One entry per row of the inventory table, with the same values. `order` is the `#` column.
 - `path`, `mergesFrom` and `splitsFrom` are page paths from the repo root (the section folder plus the slug), not slugs.
-- An `api` entry's `path` is where `api-doc-writer` saves it, under the API reference root (`project-paths.md`), which may be outside the section. `document-section` lists `api` pages for a separate `api-doc-writer` run and doesn't write them.
+- An `api` entry's `path` is where `api-doc-writer` saves it, under the API reference root (`project-paths.md`), which may be outside the section. `section-documenter` lists `api` pages for a separate `api-doc-writer` run and doesn't write them.
 - A `delete` entry has the existing page's `path` and no `docType`. A `split` has one entry per new page, each with the same `splitsFrom`.
 - `sourceEvidence` is `inferred` for a proposal neither `app-notes.md` nor `sme-interview.md` backs.
 

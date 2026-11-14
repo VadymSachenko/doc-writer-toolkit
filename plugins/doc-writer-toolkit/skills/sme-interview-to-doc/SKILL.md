@@ -14,7 +14,7 @@ This skill is **thin orchestration**. Every phase hands off to a skill that alre
 - **In scope:** one doc folder (the folder containing `.sources/`) and the one page written from it: configuration and prerequisites (Phase 0), screenshots from the recording (Phase 1), the structured source notes (Phase 2), the check against the source code (Phase 3), live UI screenshots (Phase 4), the page (Phase 5), the style check and fix (Phase 6) and the report (Phase 7).
 - **Out of scope:**
   - The work of each phase, which its skill owns: frames and transcripts (`extract-sme-screenshots`), the source note (`convert-sme-input`), the template, interview, image selection, screening and self-review (`concept-doc-writer`, `user-guide-writer`, `api-doc-writer`), the review and the fixes (`doc-style-reviewer`, `doc-style-fixer`).
-  - A whole section folder (`document-section`), markers left in the page (`resolve-markers`, `doc-todo-fixer`), unused frames (`cleanup-unused-screenshots`), the EN page (`doc-translator`).
+  - A whole section folder (`section-documenter`), markers left in the page (`resolve-markers`, `doc-todo-fixer`), unused frames (`cleanup-unused-screenshots`), the EN page (`doc-translator`).
 
 ## Arguments
 
