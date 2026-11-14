@@ -102,7 +102,7 @@ Before saving each file, check the edit against the rules above:
 
 ## Step 6 — Alignment check
 
-For every doc slug where changes were made, invoke the `doc-alignment-checker` skill to verify that the UA and EN versions remain structurally aligned. Report any gaps found.
+For every doc slug where changes were made, invoke the `doc-alignment-checker` skill (the Skill tool, once per slug) to verify that the UA and EN versions remain structurally aligned. Don't compare the pages by hand or run `scripts/doc-align/` directly instead: the skill is the check. Report any gaps found.
 
 ---
 
