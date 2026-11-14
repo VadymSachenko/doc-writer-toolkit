@@ -82,7 +82,7 @@ With `--dry-run`, run `UL check` only and report whether an import and sync are 
 
 The units of the run are every page and category row with at least one `new` or `stale` cell. Each locale's queue is its own `new` / `stale` cells, in the order `status` lists them.
 
-6. **Id-only changes, with no worker.** Run `LS splice` (with the run's pages and locales) and save the output. It carries every cell whose only UA changes are heading ids and the link fragments rewritten to them (`${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/heading-anchors.md`, "What locale-sync splices") into the locale file, and records it when its checks pass. This is the one place the run writes and records pages without a worker. Append one line per result to `<run>/<locale>/results.jsonl`: `{"unit":"<id>","kind":"page","status":"synced","mode":"splice","blocks":<spliced count>,"failures":[]}`, or `"status":"failed"` with the `failures` when `recorded` is false. Those cells leave the queues; the queues are the `toTranslate` cells. A cell with splices and other changes stays in its queue: the worker's `apply` writes its splices with its translated blocks.
+6. **Id-only changes, with no worker.** Run `LS splice` (with the run's pages and locales) and save the output. It carries every cell whose only UA changes are heading ids and the link fragments rewritten to them (`${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/heading-anchors.md`, "What locale-sync splices") into the locale file, and records it when its checks pass. This is the one place the run writes and records pages without a worker. Add one line per result to `<run>/<locale>/results.jsonl` with the Write tool: Read the file when it exists and write it back with every line it had and the new lines at the end (an unattended run refuses `>>` and heredocs): `{"unit":"<id>","kind":"page","status":"synced","mode":"splice","blocks":<spliced count>,"failures":[]}`, or `"status":"failed"` with the `failures` when `recorded` is false. Those cells leave the queues; the queues are the `toTranslate` cells. A cell with splices and other changes stays in its queue: the worker's `apply` writes its splices with its translated blocks.
 
 ### Step 3 — Binding pass (once for all locales)
 
@@ -113,7 +113,7 @@ The units of the run are every page and category row with at least one `new` or 
 ### Step 5 — Translation workers (one per locale, in parallel)
 
 1. Split each locale's queue into batches of at most 8 units and about 6,000 UA words (the `words` of its cells). Most runs are one batch per locale.
-2. Start one worker per locale for its first batch, all in the same message so they run in parallel, in the background, using `--worker-model` if given. Give each worker this prompt, with the locale-specific lines last so the shared part stays identical:
+2. Start one worker per locale for its first batch, all in the same message so they run in parallel, in the background, using `--worker-model` if given. A locale whose worker is running never gets a second one. Give each worker this prompt, with the locale-specific lines last so the shared part stays identical:
 
    ```
    You are a translation worker of a locale-translator run.
@@ -128,8 +128,12 @@ The units of the run are every page and category row with at least one `new` or 
 
    Each `<id>` is the unit's id exactly as `status` printed it (`<pair>:<id>` when the host has several root pairs).
 
-3. When a worker finishes, start that locale's next batch, until every queue is done. A locale whose worker fails or stops keeps its previous files and state; the other locales go on.
-4. If the run is interrupted, run it again: `status` shows what is still stale, because every page passed and recorded is `current`.
+3. **Wait for the workers by ending your turn.** Once they are started, end your turn with one short line. Each worker's completion notice comes back by itself and starts your next turn; ending a turn while your workers run doesn't end the run. Never check on them in a loop: no `ListAgents`, no `git status` or `git diff` on their files, no `sleep`, no `Monitor` and no loop that waits for a file (a worker's `results.jsonl` exists after its first unit, long before it is done). Each check re-reads your whole context and slows the workers' scripts, and it tells you nothing the notice won't.
+   - In a non-interactive run (`claude -p`), the CLI waits for background workers after the last turn only up to its ceiling, `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` (10 minutes by default), and then stops them. Whoever starts such a run sets the variable above the longest worker it expects, never to 0 (no limit), so a hung worker still ends the session.
+   - A notice that lists a worker as **stopped** (the session ended or was resumed before it finished): continue that worker with SendMessage to its id. Its transcript keeps its progress, so start no new worker for the locale. Tell it to go on from its last finished unit, running `LS blocks` again for the unit that was in flight (`mode: "none"` means it is already recorded). In an unattended run (`claude -p`), also tell it that the run's time limit stopped it, not a person. A worker the user stopped is continued only when the user asks.
+   - Only a worker that can't be continued (SendMessage to it fails) is replaced, by a new one for the units `status` still shows stale in its locale, never by a whole new wave. Never while the stopped one might still run: one locale's `results.jsonl` takes one writer at a time, since each line is added by rewriting the file.
+4. When a worker finishes, start that locale's next batch, until every queue is done. A locale whose worker fails or stops keeps its previous files and state; the other locales go on.
+5. If the run is interrupted, run it again: `status` shows what is still stale, because every page passed and recorded is `current`.
 
 Don't translate, check or record pages yourself, and don't read the workers' candidate files. Their results are in `<run>/<locale>/results.jsonl`, one line per unit.
 
