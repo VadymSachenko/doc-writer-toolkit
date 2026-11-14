@@ -1,0 +1,80 @@
+{
+  "id": "tc-47a-update-doc-page-applies-brief",
+  "description": "/update-doc-page is a thin wrapper of doc-page-updater: with a page and a brief path it adds the new field's table row and fixes the sentence that counts the fields, keeps the marker, writes update-report.md next to the brief naming the change, runs none of the review, fix or translation skills, and changes nothing else. Covers the command, which also loads the skill; the skill's own cases are tc-13 and tc-17.",
+  "fixture": {
+    "shape": "single"
+  },
+  "setup": [
+    "mkdir -p portal/payments && cat > portal/payments/payments.md <<'EOF'\n---\ntitle: Платежі\nsidebar_label: Платежі\n---\n\n# Платежі\n\nНа сторінці **Платежі** ви створюєте платежі та переглядаєте їх. {/* NEEDS CONFIRMATION: чи бачать цю сторінку всі ролі? */}\n\n## Створення платежу\n\nЩоб створити платіж, виконайте такі кроки:\n\n1. У меню виберіть **Платежі**.\n2. Натисніть **Створити платіж**.\n3. Заповніть форму. Форма містить три поля.\n4. Натисніть **Зберегти**.\n\n**Результат:** платіж з’являється у списку зі статусом `new`.\n\n## Довідкова інформація\n\n| Поле | Опис |\n|---|---|\n| **Сума** | Сума платежу в гривнях. |\n| **Валюта** | Валюта платежу. |\n| **Призначення** | Текст призначення платежу. |\nEOF\nmkdir -p portal/payments/.sources && cat > portal/payments/.sources/change-brief.md <<'EOF'\n# Change brief — comment field\n\n## Page\nportal/payments/payments.md\n\n## What changed\n- The payment form has a new optional field **Коментар**: a note that only your team sees. — source: ticket #13\n\n## Where in the page\nlet the updater decide\n\n## Terms\n- **Коментар** (UA) / **Comment** (EN) — an optional note on a payment\n\n## Do not touch\n- The intro paragraph and its marker.\nEOF\ngit add -A && git commit -q -m 'Case setup'"
+  ],
+  "prompt": "/{plugin}:update-doc-page portal/payments/payments.md portal/payments/.sources/change-brief.md",
+  "options": {
+    "maxTurns": 60,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)",
+      "Bash(node:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "type": "skill-called",
+      "skill": "doc-page-updater"
+    },
+    {
+      "name": "table row added",
+      "type": "match",
+      "path": "portal/payments/payments.md",
+      "pattern": "^\\| \\*\\*Коментар\\*\\* \\|",
+      "flags": "m"
+    },
+    {
+      "name": "the field count is no longer three",
+      "type": "no-match",
+      "path": "portal/payments/payments.md",
+      "pattern": "три поля"
+    },
+    {
+      "name": "nothing else changed",
+      "type": "diff-lines",
+      "path": "portal/payments/payments.md",
+      "allow": "три поля|Форма містить"
+    },
+    {
+      "name": "marker kept",
+      "type": "match",
+      "path": "portal/payments/payments.md",
+      "pattern": "\\{/\\* NEEDS CONFIRMATION: чи бачать цю сторінку всі ролі\\? \\*/\\}"
+    },
+    {
+      "name": "report written next to the brief",
+      "type": "exists",
+      "path": "portal/payments/.sources/update-report.md"
+    },
+    {
+      "name": "report names the new field",
+      "type": "match",
+      "path": "portal/payments/.sources/update-report.md",
+      "pattern": "Коментар"
+    },
+    {
+      "type": "skill-not-called",
+      "skill": "doc-style-reviewer"
+    },
+    {
+      "type": "skill-not-called",
+      "skill": "doc-style-fixer"
+    },
+    {
+      "type": "skill-not-called",
+      "skill": "doc-translator"
+    },
+    {
+      "type": "changed-only",
+      "paths": [
+        "portal/payments/",
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}

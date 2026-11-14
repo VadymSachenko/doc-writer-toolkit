@@ -1,0 +1,38 @@
+{
+  "id": "tc-44b-check-doc-alignment-asks-for-main",
+  "description": "/check-doc-alignment without a main: argument: the command asks which version is the source of truth before it checks anything, so no alignment report is written and nothing changes. Covers the command only.",
+  "fixture": {
+    "shape": "multi"
+  },
+  "prompt": "/{plugin}:check-doc-alignment docs/transactions/transactions",
+  "options": {
+    "maxTurns": 30,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)",
+      "Bash(node:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "asks which version is main",
+      "type": "match",
+      "path": "output",
+      "pattern": "(which|what)[\\s\\S]{0,120}(main|source of truth)|(main|source of truth)[\\s\\S]{0,160}(UA|EN|Ukrainian|English)",
+      "flags": "i"
+    },
+    {
+      "name": "no alignment report yet",
+      "type": "no-match",
+      "path": "output",
+      "pattern": "Отримання транзакції|Get a transaction",
+      "flags": "i"
+    },
+    {
+      "type": "unchanged",
+      "ignore": [
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}

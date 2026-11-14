@@ -1,0 +1,52 @@
+{
+  "id": "tc-40b-create-api-doc-missing-brief-stops",
+  "description": "/create-api-doc is a thin wrapper of api-doc-writer: it binds the slug to the input file /api-docs/api-references/<slug>.md. With no such file it stops, names the file, and writes no page. A live run of the page itself is tc-40a. Covers the command only.",
+  "fixture": {
+    "shape": "single"
+  },
+  "setup": [
+    "printf '%s\\n' '- **API reference root:** `api-reference/`' >> CLAUDE.md && git add -A && git commit -q -m 'Case setup'"
+  ],
+  "prompt": "/{plugin}:create-api-doc refund-payment",
+  "options": {
+    "maxTurns": 30,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)",
+      "Bash(ls:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "names the missing input file",
+      "type": "match",
+      "path": "output",
+      "pattern": "api-docs/api-references/refund-payment(\\.md)?"
+    },
+    {
+      "name": "says the file is missing",
+      "type": "match",
+      "path": "output",
+      "pattern": "doesn.t exist|does not exist|not found|no such|missing|couldn.t find|isn.t there|absent",
+      "flags": "i"
+    },
+    {
+      "name": "no draft started",
+      "type": "no-match",
+      "path": "output",
+      "pattern": "Inputs are complete|Drafting now",
+      "flags": "i"
+    },
+    {
+      "name": "no API page written",
+      "type": "absent",
+      "path": "api-reference"
+    },
+    {
+      "type": "unchanged",
+      "ignore": [
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}

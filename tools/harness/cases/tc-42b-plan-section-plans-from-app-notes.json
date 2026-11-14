@@ -1,0 +1,108 @@
+{
+  "id": "tc-42b-plan-section-plans-from-app-notes",
+  "description": "/plan-section is a thin wrapper of section-planner: with Admin UI: playwright declared and app-notes.md present, it plans from the recorded evidence without opening the app, writes both plan files and no page, shows the plan and waits for the approval. Covers the command, which also loads the skill.",
+  "fixture": {
+    "shape": "single"
+  },
+  "setup": [
+    "mkdir -p portal/reports/reports && cat > portal/reports/reports/reports.md <<'EOF'\n---\ntitle: Звіти\nsidebar_label: Звіти\n---\n\n# Звіти\n\n{/* ToDo: що таке звіти і для чого вони */}\nEOF",
+    "mkdir -p portal/reports/export-report && cat > portal/reports/export-report/export-report.md <<'EOF'\n---\ntitle: Експорт звіту\nsidebar_label: Експорт звіту\n---\n\n# Експорт звіту\n\n{/* ToDo: кроки експорту звіту */}\nEOF",
+    "mkdir -p portal/reports/.sources && cat > portal/reports/.sources/sme-interview.md <<'EOF'\n# SME interview — Звіти\n\n- Система формує звіт щодня. Звіт містить кількість платежів, їхню суму і валюту.\n- Щоб експортувати звіт, у меню виберіть **Звіти**, натисніть **Експорт** і виберіть формат: CSV або XLSX.\n- Файл завантажується на ваш комп’ютер.\nEOF",
+    "mkdir -p portal/reports/.sources && cat > portal/reports/.sources/section-readiness.json <<'EOF'\n{\n  \"section\": \"portal/reports\",\n  \"generatedFrom\": \"section-readiness\",\n  \"verdict\": \"skeleton\",\n  \"verdictReason\": \"all 2 pages are unfilled stubs with ToDo markers\",\n  \"project\": {\n    \"contentLanguage\": \"uk\",\n    \"contentRoot\": \"portal/\",\n    \"uaUrlPrefix\": \"/portal/\"\n  },\n  \"appAccess\": {\n    \"liveUI\": \"available\",\n    \"apiSeed\": \"not-declared\",\n    \"existingAppNotes\": \"present\"\n  },\n  \"pages\": [\n    {\n      \"path\": \"portal/reports/reports/reports.md\",\n      \"state\": \"stub\",\n      \"docType\": \"concept\",\n      \"markerCount\": 1,\n      \"reason\": \"unfilled stub; 1 ToDo marker\"\n    },\n    {\n      \"path\": \"portal/reports/export-report/export-report.md\",\n      \"state\": \"stub\",\n      \"docType\": \"user-guide\",\n      \"markerCount\": 1,\n      \"reason\": \"unfilled stub; 1 ToDo marker\"\n    }\n  ],\n  \"sources\": {\n    \"videos\": [],\n    \"transcripts\": [],\n    \"smeInterview\": \"present\",\n    \"appNotes\": \"present\",\n    \"framesFolders\": [],\n    \"screenshotCount\": 0,\n    \"sectionPlan\": \"absent\",\n    \"sectionState\": \"absent\"\n  },\n  \"summary\": {\n    \"pageCount\": 2,\n    \"stubCount\": 2,\n    \"completeCount\": 0,\n    \"totalMarkers\": 2\n  }\n}\nEOF",
+    "printf '%s\\n' '- **Admin UI:** playwright' >> CLAUDE.md",
+    "mkdir -p portal/reports/.sources && cat > portal/reports/.sources/app-notes.md <<'EOF'\n# App notes — Звіти\n\n**Explored:** 2026-03-04\n**Test environment:** https://app.test.example\n**Scenarios seeded:** none\n\n---\n\n## Screens observed\n\n### Звіти\n\n**Path:** меню **Звіти**\n**States captured:** loaded\n\n**UI elements:**\n- Buttons: Експорт, Розклад\n- Columns: Дата, Кількість платежів, Сума, Валюта\n- Icon-only controls: none\n\n**Screenshots:** none\n\n**Notes:** the list shows one report per day.\n\n---\n\n### Експорт\n\n**Path:** **Звіти** → **Експорт**\n**States captured:** loaded\n\n**UI elements:**\n- Fields: Формат (CSV, XLSX)\n- Buttons: Завантажити\n\n**Notes:** the file downloads to the user's computer.\n\n---\n\n### Розклад\n\n**Path:** **Звіти** → **Розклад**\n**States captured:** loaded\n\n**UI elements:**\n- Fields: Періодичність (щодня, щотижня), Адреса електронної пошти\n- Buttons: Зберегти\n\n**Notes:** a scheduled report is sent by e-mail. This flow is in no existing page.\n\n---\n\n## Answers to open questions\n\nNone.\n\n---\n\n## New findings\n\n- The **Розклад** button sets up a scheduled report: the report arrives by e-mail daily or weekly.\n\n---\n\n## Unanswered questions\n\nNone.\nEOF",
+    "git add -A && git commit -q -m 'Case setup'"
+  ],
+  "prompt": "/{plugin}:plan-section portal/reports",
+  "options": {
+    "maxTurns": 60,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)",
+      "Bash(node:*)",
+      "Bash(grep:*)",
+      "Bash(ls:*)",
+      "Bash(mkdir:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "type": "skill-called",
+      "skill": "section-planner"
+    },
+    {
+      "name": "plan markdown written",
+      "type": "exists",
+      "path": "portal/reports/.sources/section-plan.md"
+    },
+    {
+      "name": "plan JSON written",
+      "type": "exists",
+      "path": "portal/reports/.sources/section-plan.json"
+    },
+    {
+      "name": "plan is based on the app notes",
+      "type": "command",
+      "run": "node -e 'const fs=require(\"fs\");const p=JSON.parse(fs.readFileSync(\"portal/reports/.sources/section-plan.json\",\"utf8\"));process.exit(Array.isArray(p.basedOn)&&p.basedOn.some(x=>/app-notes/.test(x))?0:1)'"
+    },
+    {
+      "name": "plan JSON has the schema's header",
+      "type": "command",
+      "run": "node -e 'const fs=require(\"fs\");const p=JSON.parse(fs.readFileSync(\"portal/reports/.sources/section-plan.json\",\"utf8\"));process.exit(p.schemaVersion===1&&p.status===\"awaiting-approval\"&&p.section===\"portal/reports\"&&Array.isArray(p.pages)&&p.pages.length>=2&&Array.isArray(p.openQuestions)?0:1)'"
+    },
+    {
+      "name": "every entry has an action, order, rationale and a doc type",
+      "type": "command",
+      "run": "node -e 'const fs=require(\"fs\");const p=JSON.parse(fs.readFileSync(\"portal/reports/.sources/section-plan.json\",\"utf8\"));process.exit(p.pages.every(x=>[\"keep\",\"merge\",\"split\",\"add\",\"delete\"].includes(x.action)&&typeof x.order===\"number\"&&x.rationale&&(x.action===\"delete\"||[\"concept\",\"user-guide\",\"api\"].includes(x.docType)))?0:1)'"
+    },
+    {
+      "name": "every existing page has an action",
+      "type": "command",
+      "run": "node -e 'const fs=require(\"fs\");const p=JSON.parse(fs.readFileSync(\"portal/reports/.sources/section-plan.json\",\"utf8\"));const e=[\"portal/reports/reports/reports.md\",\"portal/reports/export-report/export-report.md\"];process.exit(e.every(f=>p.pages.some(x=>x.path===f||(x.mergesFrom||[]).includes(f)||x.splitsFrom===f))?0:1)'"
+    },
+    {
+      "name": "slugs are kebab-case, folder and file agree",
+      "type": "command",
+      "run": "node -e 'const fs=require(\"fs\");const p=JSON.parse(fs.readFileSync(\"portal/reports/.sources/section-plan.json\",\"utf8\"));process.exit(p.pages.filter(x=>x.action!==\"delete\").every(x=>{const m=/^portal\\/reports\\/([a-z0-9]+(?:-[a-z0-9]+)*)\\/([a-z0-9]+(?:-[a-z0-9]+)*)\\.md$/.exec(x.path);return m&&m[1]===m[2]})?0:1)'"
+    },
+    {
+      "name": "the plan table has one row per JSON entry",
+      "type": "command",
+      "run": "node -e 'const fs=require(\"fs\");const p=JSON.parse(fs.readFileSync(\"portal/reports/.sources/section-plan.json\",\"utf8\"));const md=fs.readFileSync(\"portal/reports/.sources/section-plan.md\",\"utf8\");process.exit(((md.match(/^\\|\\s*\\d+\\s*\\|/gm)||[]).length===p.pages.length)?0:1)'"
+    },
+    {
+      "name": "plan file says awaiting approval",
+      "type": "match",
+      "path": "portal/reports/.sources/section-plan.md",
+      "pattern": "\\*\\*Status:\\*\\* awaiting approval",
+      "flags": "i"
+    },
+    {
+      "name": "no page created, renamed or deleted",
+      "type": "changed-only",
+      "paths": [
+        "portal/reports/.sources/",
+        ".doc-toolkit/"
+      ]
+    },
+    {
+      "name": "stops for the approval",
+      "type": "match",
+      "path": "output",
+      "pattern": "approv",
+      "flags": "i"
+    },
+    {
+      "type": "skill-not-called",
+      "skill": "app-explorer"
+    },
+    {
+      "type": "skill-not-called",
+      "skill": "user-guide-writer"
+    },
+    {
+      "type": "skill-not-called",
+      "skill": "concept-doc-writer"
+    }
+  ]
+}

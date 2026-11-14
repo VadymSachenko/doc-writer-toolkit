@@ -1,0 +1,58 @@
+{
+  "id": "tc-41b-translate-locales-dry-run-writes-nothing",
+  "description": "/translate-locales --dry-run is a thin wrapper of locale-translator: it reports what is due (the label snapshot is not yet imported, both pages are new for tr) and writes nothing, not even the state folder. The run itself is tc-41a. Covers the command only.",
+  "fixture": {
+    "shape": "single",
+    "locales": [
+      "tr"
+    ]
+  },
+  "setup": [
+    "mkdir -p labels && cat > labels/tr.json <<'EOF'\n{\n  \"menu.transactions\": \"İşlemler\",\n  \"menu.settings\": \"Ayarlar\",\n  \"filters.open\": \"Filtreler\",\n  \"field.date\": \"Tarih\",\n  \"field.currency\": \"Para birimi\"\n}\nEOF\ngit add -A && git commit -q -m 'Case setup'"
+  ],
+  "prompt": "/{plugin}:translate-locales --dry-run",
+  "options": {
+    "maxTurns": 40,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(node:*)",
+      "Bash(git:*)",
+      "Bash(ls:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "type": "skill-called",
+      "skill": "locale-translator"
+    },
+    {
+      "name": "names both pages",
+      "type": "match",
+      "path": "output",
+      "pattern": "(?=[\\s\\S]*transactions/transactions)(?=[\\s\\S]*settings/settings)"
+    },
+    {
+      "name": "counts 2 pages for tr",
+      "type": "match",
+      "path": "output",
+      "pattern": "\\btr\\b[^\\n]{0,160}\\b(2|two)\\b|\\b(2|two)\\b[^\\n]{0,160}\\btr\\b",
+      "flags": "i"
+    },
+    {
+      "name": "says the label import is due",
+      "type": "match",
+      "path": "output",
+      "pattern": "import|snapshot",
+      "flags": "i"
+    },
+    {
+      "name": "no locale page written",
+      "type": "absent",
+      "path": "i18n/tr"
+    },
+    {
+      "name": "nothing written at all",
+      "type": "unchanged"
+    }
+  ]
+}
