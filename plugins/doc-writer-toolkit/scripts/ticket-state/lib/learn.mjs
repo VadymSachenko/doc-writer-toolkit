@@ -817,7 +817,7 @@ async function weekStep({ settings, clients, io, data, week, git, now, log, out 
     out.week = { due: false, week, error: why };
   };
   // The host copies of general rules the toolkit's own files hold now (the switch, by the rule's `learned:` id in the
-  // installed plugin's file): removed in this week's PRs.
+  // file of the plugin the sessions load, the runner's own: `pluginArgs`): removed in this week's PRs.
   const { PLUGIN_ROOT } = await import('./runner.mjs');
   const root = io.pluginRoot ?? PLUGIN_ROOT;
   const pending = new Set(data.prs.filter((p) => p.state === 'open').flatMap((p) => (p.removes ?? []).map((rid) => `${p.repo}|${rid}`)));

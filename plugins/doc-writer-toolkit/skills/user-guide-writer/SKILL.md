@@ -29,6 +29,7 @@ Load these files at the start of the task. Do not load others unless the user re
 - `<kit>/glossary-ua.md` (`uk`) or `<kit>/glossary-en.md` (`en`) — canonical terminology for the resolved language, read with `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/glossary-format.md`.
 - `<kit>/product-facts.md` — cross-cutting facts about the product and its API. Always applicable background.
 - `<kit>/product-rules.md`, if present — rules for this product only (its name, key terms, UI section names). Rank 0, like `formatting-conventions.md`.
+- `<kit>/example-values.md`, if present — only when the page has a code sample or an example value (a name or a number a step tells the reader to enter): read with `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/example-values-format.md` and follow its writers' row.
 
 **Project rules:**
 - **`uk` only** → `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/native-ukrainian.md` — rank-0 natural-Ukrainian prose rules (literal-English syntax, ambiguous reference, mechanical repetition, «вікно» not «діалог», self-reference «ця сторінка» not «цей посібник», discretionary dashes). Load only on a `uk` page; it has no `en` counterpart. Drives the native-Ukrainian reread in Step 8.
