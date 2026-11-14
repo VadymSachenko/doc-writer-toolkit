@@ -1,6 +1,6 @@
 {
   "id": "tc-46b-fix-doc-todos-applies-confirmed-links",
-  "description": "/fix-doc-todos with the go-ahead for the link markers given in the prompt: the settings-page markers are replaced by a root-relative link in the UA and EN pages and in the API pair's page, the content-gap marker and the NEEDS CONFIRMATION markers stay as they were, the report says what the alignment check (the command's last step) found, and nothing outside the three pages changes. The command runs doc-alignment-checker in some runs and checks by hand in others, so the case does not assert the skill call. Covers the command itself.",
+  "description": "/fix-doc-todos with the go-ahead for the link markers given in the prompt: the settings-page markers are replaced by a root-relative link in the UA and EN pages and in the API pair's page, the content-gap marker and the NEEDS CONFIRMATION markers stay as they were, the report says what the alignment check (the last step of doc-todo-fixer) found, and nothing outside the three pages changes. The flow runs doc-alignment-checker in some runs and checks by hand in others, so the case does not assert the skill call. Covers the command and doc-todo-fixer together.",
   "fixture": {
     "shape": "multi"
   },

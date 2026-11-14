@@ -186,6 +186,6 @@ Before finishing:
 
 - "use convert-sme-input on `docs/payments/.sources/`"
 - "convert-sme-input: turn `.sources/meeting-transcript.txt` into `sme-interview.md`"
-- By name, from `/doc-from-interview` (its conversion step).
+- By name, from `sme-interview-to-doc` (`/doc-from-interview`, its conversion step).
 
 A loose request ("here are my meeting notes") doesn't start this skill: ask whether to run it.

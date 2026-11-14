@@ -1,6 +1,6 @@
 {
   "id": "tc-46a-fix-doc-todos-asks-before-acting",
-  "description": "/fix-doc-todos on two root pairs: it scans every root, sorts the markers into buckets, proposes the link for the ones that point to an existing page (a route with the target pair's prefix), reports the content gap and the NEEDS CONFIRMATION markers as not fixable here (pointing to resolve-markers), asks for the go-ahead and changes no file. The command holds its own logic, so this case covers the command itself.",
+  "description": "/fix-doc-todos on two root pairs: it scans every root, sorts the markers into buckets, proposes the link for the ones that point to an existing page (a route with the target pair's prefix), reports the content gap and the NEEDS CONFIRMATION markers as not fixable here (pointing to resolve-markers), asks for the go-ahead and changes no file. The command hands off to doc-todo-fixer, so this case covers the command and that skill together.",
   "fixture": {
     "shape": "multi"
   },

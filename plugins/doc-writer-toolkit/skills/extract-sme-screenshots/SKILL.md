@@ -151,6 +151,6 @@ This is also what a manual "second pass" after `convert-sme-input` finishes look
 
 - "use extract-sme-screenshots on `docs/payments/.sources/demo.mp4`"
 - "extract-sme-screenshots: pull frames at 1:20 and 4:05 from the recording in `.sources/`"
-- By name, from `/doc-from-interview` (its extraction step) and from `convert-sme-input` (targeted extraction).
+- By name, from `sme-interview-to-doc` (`/doc-from-interview`, its extraction step) and from `convert-sme-input` (targeted extraction).
 
 A loose request ("I dropped a recording, get the screenshots") doesn't start this skill: ask whether to run it.
