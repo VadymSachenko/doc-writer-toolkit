@@ -941,9 +941,9 @@ export function spawnClaude({ bin, args, cwd, env: session = {} }, { timeoutMs =
       clearTimeout(timer);
       resolve({ code: 127, stdout, stderr: `${stderr}${e.message}` });
     });
-    child.on('close', (code) => {
+    child.on('close', (code, signal) => {
       clearTimeout(timer);
-      resolve({ code: code ?? 1, stdout, stderr, ...(timedOut ? { timedOut } : {}) });
+      resolve({ code: code ?? 1, stdout, stderr, ...(timedOut ? { timedOut } : {}), ...(signal ? { signal } : {}) });
     });
   });
 }
@@ -1012,6 +1012,34 @@ export function recordRefused(session, { root, transcripts = null, env = process
     }
   }
   return false;
+}
+
+// The API error a session ended on, in one line, or null: the result event's `api_error_status`, or the transcript's
+// last assistant entry marked `isApiErrorMessage` (on 2.1.321 a refusal at the API's edge, "Failed to authenticate. API
+// Error: 403 …", ended the session that way, with exit 1). Not the model's failure. Only positive evidence counts: a
+// transcript that isn't found or can't be read says nothing.
+export function apiErrorOf(r, { root, transcripts = null, env = process.env } = {}) {
+  if (r?.apiError != null) return `API error ${r.apiError}`;
+  if (!/^[A-Za-z0-9_][\w.-]*$/.test(String(r?.session ?? ''))) return null;
+  const file = transcriptDirs({ root, transcripts, env }).map((d) => path.join(d, `${r.session}.jsonl`)).find((f) => fs.existsSync(f));
+  if (!file) return null;
+  let last = null;
+  try {
+    for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
+      try {
+        const o = JSON.parse(line);
+        if (o?.type === 'assistant') last = o;
+      } catch {
+        // not an entry
+      }
+    }
+  } catch {
+    return null;
+  }
+  if (last?.isApiErrorMessage !== true) return null;
+  const c = last.message?.content;
+  const text = typeof c === 'string' ? c : Array.isArray(c) ? c.map((b) => (typeof b?.text === 'string' ? b.text : '')).join(' ') : '';
+  return (text.trim().split('\n')[0] || `API error ${last.apiErrorStatus ?? ''}`.trim()).slice(0, 200);
 }
 
 // The prompt a resumed session gets: what stopped it, and how the stage ends. A session whose background agents the
@@ -1600,8 +1628,8 @@ export function proposeRoles(ledgers, settings, now = Date.now()) {
   const since = new Date(now - 7 * 86400000).toISOString();
   const proposals = [];
   for (const role of ROLES) {
-    // A session that ended on a busy browser lock, or on a branch a person moved under it, says nothing about the model: left out.
-    const runs = ledgers.flatMap((l) => l.runs ?? []).filter((r) => r.role === role && r.outcome !== 'busy' && r.outcome !== 'moved' && String(r.start ?? '') >= since);
+    // A session that ended on a busy browser lock, on a branch a person moved under it, or on an API error says nothing about the model: left out.
+    const runs = ledgers.flatMap((l) => l.runs ?? []).filter((r) => r.role === role && !['busy', 'moved', 'apiError'].includes(r.outcome) && String(r.start ?? '') >= since);
     if (!runs.length) continue;
     const steps = runs.filter((r) => !r.retryOf).length;
     const retried = runs.filter((r) => r.retryOf).length;
@@ -2808,6 +2836,11 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         // stale): not the model's failure. None is counted, no bigger model is tried, and the step's status is read again.
         const moved = outcome === 'failed' ? movedEarly ?? (await movedUnder(step)) : null;
         if (moved) outcome = 'moved';
+        // A session the API refused or broke off (an error of the API, not of the model): none counted, no bigger model,
+        // which the same refusal would meet, no hold. The step runs again at a later check; the stage's daily session cap
+        // (`limits.sessionsPerStageDay`) still bounds a refusal that lasts.
+        const apiError = outcome === 'failed' ? apiErrorOf(r, { root: settings.root, transcripts: io.transcripts, env: io.claudeEnv ?? process.env }) : null;
+        if (apiError) outcome = 'apiError';
         if (outcome === 'failed') failures += 1;
         // The answer pass is not retried on a bigger model: a failed session gives up what the pass held (a retry would
         // keep the questions hidden, and its record could only be refused once the input is let go). Recorded before
@@ -2817,8 +2850,11 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         const marks = outcome !== 'failed' || !ledgered ? {} : await marksOf(step);
         // The run's note: a moved branch's, and the CLI's line for background work it stopped (one per process).
         const cliStops = stops.filter(Boolean);
-        const note = [moved?.note.slice(0, 300), ...cliStops.map((l, i) => (cliStops.length > 1 ? `process ${i + 1}: ${l}` : l))].filter(Boolean).join('; ').slice(0, 600) || null;
-        const run = { stage: step.stage, role: step.role, model, effort: cmd.effort, trigger: manual ? 'manual' : trigger, start, durationMs: r.durationMs, wallMs, turns: r.turns, costUsd: r.costUsd, tokens: r.tokens, weekPercent: { before, after }, session: r.session, ...(resumed ? { resumed: true, ...(resumed.session ? { resumedSession: resumed.session } : {}) } : {}), outcome, share: Number((1 / step.keys.length).toFixed(4)), ...(attempt ? { retryOf: settings.roles[step.role].model } : {}), ...(r.denials ? { denials: r.denials } : {}), ...(outcome === 'failed' ? { failures } : {}), ...(note ? { note } : {}) };
+        // A process that gave no result keeps its exit code and the end of what it wrote to stderr.
+        const silent = parseResult(res.stdout) === null;
+        const stderrTail = silent ? String(res.stderr ?? '').trim().slice(-300) : '';
+        const note = [moved?.note.slice(0, 300), apiError, silent && stderrTail ? `stderr: ${stderrTail}` : null, ...cliStops.map((l, i) => (cliStops.length > 1 ? `process ${i + 1}: ${l}` : l))].filter(Boolean).join('; ').slice(0, 600) || null;
+        const run = { stage: step.stage, role: step.role, model, effort: cmd.effort, trigger: manual ? 'manual' : trigger, start, durationMs: r.durationMs, wallMs, turns: r.turns, costUsd: r.costUsd, tokens: r.tokens, weekPercent: { before, after }, session: r.session, ...(resumed ? { resumed: true, ...(resumed.session ? { resumedSession: resumed.session } : {}) } : {}), outcome, share: Number((1 / step.keys.length).toFixed(4)), ...(attempt ? { retryOf: settings.roles[step.role].model } : {}), ...(r.denials ? { denials: r.denials } : {}), ...(outcome === 'failed' ? { failures } : {}), ...(silent ? { exit: res.code, ...(res.signal ? { signal: res.signal } : {}), ...(res.timedOut ? { timedOut: true } : {}) } : {}), ...(note ? { note } : {}) };
         for (const k of step.keys) if (readLedger(settings.state, k)) await runRecord({ settings, clients, key: k, run: JSON.stringify({ ...run, ...(marks[k] ? { after: marks[k] } : {}) }), pr: step.pr, now: clock() }).catch(() => {});
         const entry = { kind: 'step', group: step.group, keys: step.keys, stage: step.stage, pr: step.pr ?? null, role: step.role, model, exit: res.code, ...(resumed ? { resumed: true } : {}), ...(r.denials ? { denials: r.denials } : {}), ...(cliStops.length ? { cliStop: cliStops.join(' | ') } : {}) };
         if (outcome === 'done') {
@@ -2835,6 +2871,10 @@ async function runDailyRun({ settings, clients, io = {}, options = {} }, holder)
         if (outcome === 'busy') {
           say({ ...entry, outcome, note: 'the browser lock was held by someone else: runs again at a later check' });
           return { ...pick(step), model, outcome };
+        }
+        if (outcome === 'apiError') {
+          say({ ...entry, outcome, note: `${apiError}: not the model's failure; runs again at a later check` });
+          return { ...pick(step), model, outcome, note: apiError };
         }
         const up = nextModelUp(model, settings.modelLadder);
         if (failures < 2 && attempt === 0 && up && step.stage !== 'answerPass' && guard(`${step.stage} retry`, step.group)) {
