@@ -163,8 +163,8 @@ export const jobDenied = (settings, roots = scriptRoots(settings)) => [...new Se
 
 // The scripts a stage runs, by name: `node <root>/scripts/<script>` (`ticket-state` for `record`, `status` and `config`
 // only: its other commands are the owner's, and `set` would widen the next session's rules), from the toolkit the runner runs (the brief's
-// "scripts folder") and from the installed plugin the session's skills name (`${CLAUDE_PLUGIN_ROOT}`). A literal path
-// as a prefix rule: never a wildcard, which `../` would walk out of.
+// "scripts folder", and the session's `${CLAUDE_PLUGIN_ROOT}`: `--plugin-dir`, `pluginArgs`) and from the installed
+// plugin (`scriptRoots`). A literal path as a prefix rule: never a wildcard, which `../` would walk out of.
 export const NODE_SCRIPTS = ['ticket-state/ticket-state.mjs record', 'ticket-state/ticket-state.mjs status', 'ticket-state/ticket-state.mjs config', 'tracker/tracker.mjs', 'forge/forge.mjs', 'locale-sync/locale-sync.mjs', 'ui-labels/ui-labels.mjs', 'doc-align/doc-align.mjs', 'screenshot-locales/screenshot-locales.mjs', 'section-state/section-state.mjs', 'visual-pack/visual-pack.mjs', 'video-parts/video-parts.mjs', 'ticket-state/browser-lock.mjs'];
 // Each role's own, from what its stages and the skills it runs call. Triage reads and answers cards and writes nothing else;
 // the writer's skills run the UI label check and the screenshot paths; the translator's run the locale pipeline and the
@@ -194,8 +194,9 @@ export const scriptFlagsDenied = (roots = []) => [...new Set(roots.flatMap((r) =
   ...['add-label', 'remove-label'].flatMap((c) => [`Bash(node ${path.join(r, 'scripts', 'forge/forge.mjs')} ${c}:*)`, `Bash(node ${path.join(r, 'scripts', 'forge/forge.mjs')} * ${c} *)`]),
 ]))];
 
-// The toolkit roots a session may run scripts from: the runner's own, and every install of the plugin the hub's
-// sessions load (the owner's, or the hub's project install), from Claude Code's list of installed plugins.
+// The toolkit roots a session may run scripts from: the runner's own, which is the plugin every session loads
+// (`pluginArgs`), and every install of the plugin on the machine for the hub (the owner's, or the hub's project
+// install), from Claude Code's list of installed plugins: the owner's own sessions load that one.
 export function scriptRoots(settings, { home = os.homedir(), env = process.env } = {}) {
   const roots = [PLUGIN_ROOT];
   try {
@@ -292,6 +293,14 @@ export function checkoutDeniedFor(settings) {
 // owner's. The owner's layer allows Edit and Write with no scope and adds folders of its own, and no deny list can hold
 // those in. `--setting-sources` also decides CLAUDE.md and `.claude/skills/`: with `project` gone they go too.
 export const ROLE_SETTING_SOURCES = 'project,local';
+
+// Which copy of the plugin a session the runner starts loads (D-157): the toolkit the runner runs from, so a merge and
+// the live switch deliver the skills, and the scripts they name by `${CLAUDE_PLUGIN_ROOT}`, along with the runner's side.
+// Probed (CLI 2.1.321): a `--plugin-dir` plugin with the name of an installed, enabled one replaces it in that session,
+// under `project,local` and under every setting source: each skill once, `${CLAUDE_PLUGIN_ROOT}` this folder. A session
+// started without the flag (the owner's own) keeps the installed copy. Every role session, the learner and a skill job
+// carry it; `claude -p /usage` (`readUsageTried`) runs no skill and doesn't.
+export const pluginArgs = () => ['--plugin-dir', PLUGIN_ROOT];
 
 // A file-writing tool with no scope, in a role file or in `roles.<role>.allowedTools`: dropped, so that a session's
 // writes are only `writeAllowedFor`'s. A scoped rule an owner adds stays.
@@ -843,6 +852,7 @@ export function commandFor(step, settings, { model, agentsPath, claude = 'claude
     '--max-turns', String(role.maxTurns ?? 100),
     ...(role.maxBudgetUsd !== undefined ? ['--max-budget-usd', String(role.maxBudgetUsd)] : []),
     '--setting-sources', ROLE_SETTING_SOURCES,
+    ...pluginArgs(),
     // The hook that reads each Bash command as a shell would (lib/role-hook.mjs), on top of the rules below.
     '--settings', JSON.stringify(hookSettings(ROLE_HOOK)),
     '--permission-prompts', 'none',

@@ -13,6 +13,7 @@ import { findNames, looseKey, mergeRows, parseNamesTable, searchable } from '../
 import { headingIdMismatches, proposeIds, renameIds, withExplicitId } from '../lib/ids.mjs';
 import { isIdOnlyChange } from '../lib/idonly.mjs';
 import { codeDiff, fenceBlock, fenceParts } from '../lib/fences.mjs';
+import { parseExamplePairs } from '../lib/examples.mjs';
 
 const run = promisify(execFile);
 const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'doc-align.mjs');
@@ -706,6 +707,250 @@ test('CLI: --names reads the names table from one or more glossaries', async () 
   const missing = await cli(files.ua, files.en, '--names', path.join(dir, 'nope.md'));
   assert.equal(missing.code, 2);
   assert.match(missing.out.error, /file not found/);
+});
+
+// Check 6 with an example values file (--examples): its existing pairs count as the same value on the pages they list
+// (context/doc-rules/example-values-format.md). Invented values.
+const EXAMPLES = `---
+name: Example values
+---
+
+## System values
+
+| Value | Field | Source |
+|---|---|---|
+| \`Оплата послуг\` | \`paymentPurpose\` | code: \`payments-api\`@1a2b3c4:\`defaults.go\` |
+| \`Платіж відхилено\` | \`errorReason\` | code: \`payments-api\`@1a2b3c4:\`errors.go\` |
+
+## Example values
+
+| Kind | Value | Fields |
+|---|---|---|
+| Person's name | \`Olena Marchenko\` | \`recipient\` |
+
+## Existing pairs
+
+| UA value | EN value | Type | Pages |
+|---|---|---|---|
+| \`Петренко Олег\` | \`John Smith\` | example | \`api/create-payment\` |
+| \`TEST Petrenko Oleh\` | \`John Smith\` | example | \`api/create-payment\` |
+| \`Кошти не надійшли.\` | \`The funds did not arrive.\` | example | \`api/create-payment\`, \`disputes/disputes\` |
+| \`Оплата послуг\` | \`Service payment\` | system | \`api/create-payment\` |
+`;
+
+const examplesOf = (text, file = 'example-values.md') => ({ file, ...parseExamplePairs(text) });
+// The two pages' paths: the pairs hold for the page whose path is listed in their Pages column.
+const AT = { mainPath: 'docs/api/create-payment.md', secondaryPath: 'i18n/en/docusaurus-plugin-content-docs/current/api/create-payment.md' };
+const ENAT = { mainPath: AT.secondaryPath, secondaryPath: AT.mainPath };
+const withEx = (text = EXAMPLES, at = AT) => ({ ...at, examples: examplesOf(text) });
+
+const XUA = `# Платіж
+
+## Запит {/* #request */}
+
+\`\`\`bash
+curl -X POST https://api.example/pay -d '{"recipient": "Петренко Олег", "comment": "Кошти не надійшли."}'
+\`\`\`
+
+## Відповідь {/* #response */}
+
+\`\`\`jsonc
+{
+  "recipient": "Петренко Олег", // отримувач
+  "sender": "TEST Petrenko Oleh",
+  "paymentPurpose": "Оплата послуг",
+  "phoneNumber": "+380000000001"
+}
+\`\`\`
+`;
+
+const XEN = `# Payment
+
+## Request
+
+\`\`\`bash
+curl -X POST https://api.example/pay -d '{"recipient": "John Smith", "comment": "The funds did not arrive."}'
+\`\`\`
+
+## Response
+
+\`\`\`jsonc
+{
+  "recipient": "John Smith", // recipient
+  "sender": "John Smith",
+  "paymentPurpose": "Service payment",
+  "phoneNumber": "+380000000001"
+}
+\`\`\`
+`;
+
+const check6 = (r) => r.bugs.filter((f) => f.check === 6).map((f) => [f.flag, f.line]);
+
+test('Check 6 with --examples: the pairs table', () => {
+  const t = parseExamplePairs(EXAMPLES);
+  assert.equal(t.found, true);
+  assert.deepEqual(t.rows.map((r) => [r.ua, r.en, r.type, r.pages, r.line]), [
+    ['Петренко Олег', 'John Smith', 'example', ['api/create-payment'], 22],
+    ['TEST Petrenko Oleh', 'John Smith', 'example', ['api/create-payment'], 23],
+    ['Кошти не надійшли.', 'The funds did not arrive.', 'example', ['api/create-payment', 'disputes/disputes'], 24],
+    ['Оплата послуг', 'Service payment', 'system', ['api/create-payment'], 25],
+  ]);
+  assert.deepEqual(t.invalid, []);
+  // The Ukrainian heading reads the same; a value with a backtick or a pipe; pages with or without code font.
+  const ua = parseExamplePairs('## Наявні пари\n\n| Значення UA | Значення EN | Тип | Сторінки |\n|---|---|---|---|\n| `` a`b `` | `c\\|d` | | a/a, `b/b` |\n');
+  assert.deepEqual(ua.rows.map((r) => [r.ua, r.en, r.type, r.pages]), [['a`b', 'c|d', 'example', ['a/a', 'b/b']]]);
+  assert.deepEqual(parseExamplePairs('## Example values\n\n| Kind | Value |\n|---|---|\n| a | `b` |\n'), { found: false, rows: [], invalid: [] });
+  assert.deepEqual(parseExamplePairs('## Existing pairs\n\nNone yet.\n\n## Other\n'), { found: true, rows: [], invalid: [] });
+});
+
+test('Check 6 with --examples: a row that is no pair is skipped, so its differences stay bugs', () => {
+  const head = '## System values\n\n| Value | Field | Source |\n|---|---|---|\n| `Платіж відхилено` | `errorReason` | code |\n\n## Existing pairs\n\n| UA value | EN value | Type | Pages |\n|---|---|---|---|\n';
+  const rows = [
+    ['| `x` | `x` | example | a/a |', /the same/],
+    ['| `y` | | example | a/a |', /needs both/],
+    ['| `z` | `w` | other | a/a |', /neither 'example' nor 'system'/],
+    ['| `Іваненко` | `Ivanenko` | example | |', /needs the pages/],
+    ['| `Сидоренко` | `Sydorenko` | example | a/a.md |', /has an extension/],
+    ['| `Коваль` | `Koval` | example | /a/a |', /not a path relative to the content root/],
+    ['| `Мельник` | `Melnyk` | example | ../a/a |', /'\.' or '\.\.' segment/],
+    ['| `Ткач` | `Tkach` | example | a/*, b/b |', /not a path relative/],
+    ['| `Платіж відхилено` | `Payment declined` | example | a/a |', /is a system value \(line 5\)/],
+    ['| `Олена` | `Olena` | example | a/a |', /more than one EN value \(lines 20, 21\)/],
+    ['| `Олена` | `Helen` | example | b/b |', /more than one EN value/],
+    ['| `Бондар` | `Bondar` | example | a/a |', null],
+    ['| `Бондар` | `Bondar` | example | b/b |', /listed twice \(line 22\)/],
+  ];
+  const t = parseExamplePairs(head + rows.map(([r]) => r).join('\n') + '\n');
+  assert.deepEqual(t.rows.map((r) => r.ua), ['Бондар']);
+  const expected = rows.map(([, re], i) => [11 + i, re]).filter(([, re]) => re);
+  assert.equal(t.invalid.length, expected.length);
+  expected.forEach(([line, re], i) => {
+    assert.equal(t.invalid[i].line, line);
+    assert.match(t.invalid[i].reason, re);
+  });
+  // A `system` pair may name a system value: that is what it is for.
+  assert.deepEqual(parseExamplePairs(head + '| `Платіж відхилено` | `Payment declined` | system | a/a |\n').invalid, []);
+  // In a comparison, each invalid row is a warning on its line, and the difference it would have covered stays a bug.
+  const bad = compare(XUA, XEN, withEx(EXAMPLES.replace('| system | `api/create-payment` |', '| system | |')));
+  assert.deepEqual(bad.warnings.map((w) => [w.flag, w.line, w.file]), [['EXAMPLE-PAIR-INVALID', 25, 'example-values.md']]);
+  assert.deepEqual(check6(bad), [['CODE-BLOCK-MISMATCH', 15]]);
+});
+
+test('Check 6 with --examples: a listed pair is the same value on its pages, in either direction of main (AC-1)', () => {
+  // Without the file, every pair is a code-block bug: the two blocks differ from their first data line.
+  assert.deepEqual(check6(compare(XUA, XEN, AT)), [['CODE-BLOCK-MISMATCH', 6], ['CODE-BLOCK-MISMATCH', 13]]);
+  const r = compare(XUA, XEN, withEx());
+  assert.deepEqual(check6(r), []);
+  assert.ok(r.passed.some((p) => p.check === 6 && p.name === 'Code blocks keep their code'));
+  assert.deepEqual(r.examples, {
+    pairs: 4,
+    here: 4,
+    matched: [
+      { ua: 'Петренко Олег', en: 'John Smith', type: 'example', lines: 2 },
+      { ua: 'TEST Petrenko Oleh', en: 'John Smith', type: 'example', lines: 1 },
+      { ua: 'Кошти не надійшли.', en: 'The funds did not arrive.', type: 'example', lines: 1 },
+      { ua: 'Оплата послуг', en: 'Service payment', type: 'system', lines: 1 },
+    ],
+  });
+  // EN as main: the pairs still go from UA to EN.
+  assert.deepEqual(check6(compare(XEN, XUA, withEx(EXAMPLES, ENAT))), []);
+  // An EN page that copied the UA value passes too: a system value stays verbatim, and data used to stay.
+  const copied = edit(XEN, '"paymentPurpose": "Service payment"', '"paymentPurpose": "Оплата послуг"');
+  const c = compare(XUA, copied, withEx());
+  assert.deepEqual(check6(c), []);
+  assert.deepEqual(c.warnings, []);
+  assert.ok(!c.examples.matched.some((m) => m.type === 'system'));
+  // An EN page that kept the UA value of an `example` pair is not a code-block bug, but a warning on each such line:
+  // the translator writes the EN value, so a re-translated block that put the UA value back is caught.
+  const keptEn = edit(edit(XEN, '"recipient": "John Smith", //', '"recipient": "Петренко Олег", //'), '"John Smith", "comment"', '"Петренко Олег", "comment"');
+  const kept = compare(XUA, keptEn, withEx());
+  assert.deepEqual(check6(kept), []);
+  assert.deepEqual(kept.warnings.map((w) => [w.flag, w.line, w.file]), [['EXAMPLE-PAIR-NOT-APPLIED', 6, AT.secondaryPath], ['EXAMPLE-PAIR-NOT-APPLIED', 13, AT.secondaryPath]]);
+  assert.match(kept.warnings[0].description, /keeps the UA value 'Петренко Олег' of an existing pair; its EN value is 'John Smith'/);
+  // EN as main: the warning points at the EN file, which is then main.
+  const keptMain = compare(edit(XEN, '"recipient": "John Smith", //', '"recipient": "Петренко Олег", //'), XUA, withEx(EXAMPLES, ENAT));
+  assert.deepEqual(keptMain.warnings.map((w) => [w.flag, w.line, w.file]), [['EXAMPLE-PAIR-NOT-APPLIED', 13, ENAT.mainPath]]);
+  // The same identical lines without the file are no finding at all.
+  assert.deepEqual(compare(XUA, edit(XEN, '"recipient": "John Smith", //', '"recipient": "Петренко Олег", //'), AT).warnings, []);
+  // Without --examples the report has no examples field.
+  assert.equal(compare(XUA, XEN, AT).examples, undefined);
+});
+
+test('Check 6 with --examples: off its pages, a pair changes nothing', () => {
+  // Another page: the same differences are the same bugs, with no warning.
+  const other = { mainPath: 'docs/api/refund.md', secondaryPath: 'i18n/en/docusaurus-plugin-content-docs/current/api/refund.md' };
+  const r = compare(XUA, XEN, withEx(EXAMPLES, other));
+  assert.deepEqual(check6(r), check6(compare(XUA, XEN, other)));
+  assert.deepEqual(r.warnings, []);
+  assert.deepEqual(r.examples, { pairs: 4, here: 0, matched: [] });
+  // The system pair holds on api/create-payment only: on the disputes page a translated system value is a bug, while
+  // the comment pair, which lists the disputes page too, still holds there.
+  const dUa = '# Диспут\n\n```json\n{ "comment": "Кошти не надійшли.", "paymentPurpose": "Оплата послуг" }\n```\n';
+  const dEn = '# Dispute\n\n```json\n{ "comment": "The funds did not arrive.", "paymentPurpose": "Service payment" }\n```\n';
+  const disputes = { mainPath: 'docs/disputes/disputes.md', secondaryPath: 'i18n/en/docusaurus-plugin-content-docs/current/disputes/disputes.md' };
+  assert.deepEqual(check6(compare(dUa, dEn, withEx(EXAMPLES, disputes))), [['CODE-BLOCK-MISMATCH', 4]]);
+  assert.deepEqual(check6(compare(dUa, dEn.replace('"Service payment"', '"Оплата послуг"'), withEx(EXAMPLES, disputes))), []);
+  // A page in the content root's form, with the root in front, or an .mdx file: matched by the path's end.
+  for (const page of ['docs/api/create-payment', 'create-payment']) {
+    assert.deepEqual(check6(compare(XUA, XEN, withEx(EXAMPLES.replaceAll('`api/create-payment`', `\`${page}\``)))), [], page);
+  }
+  assert.deepEqual(check6(compare(XUA, XEN, withEx(EXAMPLES, { mainPath: 'docs/api/create-payment.mdx', secondaryPath: 'en/api/create-payment.mdx' }))), []);
+  // A path that only ends with the same letters is another page.
+  assert.equal(compare(XUA, XEN, withEx(EXAMPLES, { mainPath: 'docs/api/old-create-payment.md', secondaryPath: 'en/api/old-create-payment.md' })).examples.here, 0);
+});
+
+test('Check 6 with --examples: every other difference is still a bug (AC-1)', () => {
+  const examples = withEx();
+  for (const [what, ua, en, line] of [
+    ['a value outside the file', XUA, edit(XEN, '"+380000000001"', '"+380000000002"'), 16],
+    ["an EN value other than the pair's", XUA, edit(XEN, '"recipient": "John Smith", //', '"recipient": "Jane Smith", //'), 13],
+    ["a pair's UA value changed on the UA side", edit(XUA, '"recipient": "Петренко Олег", //', '"recipient": "Петренко Ольга", //'), XEN, 13],
+    ['a pair written the other way round', edit(XUA, '"sender": "TEST Petrenko Oleh"', '"sender": "John Smith"'), edit(XEN, '"sender": "John Smith"', '"sender": "TEST Petrenko Oleh"'), 14],
+    ["a pair's UA value inside a longer string", edit(XUA, '"TEST Petrenko Oleh"', '"Петренко Олег Іванович"'), edit(XEN, '"sender": "John Smith"', '"sender": "John Smith Іванович"'), 14],
+    ["a pair's UA value in single quotes inside a JSON string", edit(XUA, '"TEST Petrenko Oleh"', `"Платник 'Петренко Олег' не відповів"`), edit(XEN, '"sender": "John Smith"', `"sender": "Платник 'John Smith' не відповів"`), 14],
+    ["a pair's UA value in backticks inside a JSON string", edit(XUA, '"TEST Petrenko Oleh"', '"Платник `Петренко Олег` не відповів"'), edit(XEN, '"sender": "John Smith"', '"sender": "Платник `John Smith` не відповів"'), 14],
+    ['other quotes on the EN side', XUA, edit(XEN, '"recipient": "John Smith", //', "\"recipient\": 'John Smith', //"), 13],
+    ['a key, not a value', XUA, edit(XEN, '"recipient": "John Smith", //', '"recipientName": "John Smith", //'), 13],
+  ]) {
+    assert.deepEqual(check6(compare(ua, en, examples)), [['CODE-BLOCK-MISMATCH', line]], what);
+  }
+  // A pair's EN value in a comment is reader text, translated: not compared.
+  assert.deepEqual(check6(compare(XUA, edit(XEN, '// recipient', '// John Smith'), examples)), []);
+  // A language with single-quoted strings: a whole single-quoted value is a pair.
+  const js = (v) => `# A\n\n\`\`\`js\nconst recipient = '${v}'; // хто\n\`\`\`\n`;
+  assert.deepEqual(check6(compare(js('Петренко Олег'), js('John Smith').replace('// хто', '// who'), examples)), []);
+});
+
+test('Check 6 with --examples: no pairs section, no UA page', () => {
+  const none = compare(XUA, XEN, withEx('## Example values\n'));
+  assert.deepEqual(flags(none), ['CODE-BLOCK-MISMATCH', 'CODE-BLOCK-MISMATCH', 'EXAMPLE-PAIRS-MISSING']);
+  assert.equal(none.warnings[0].file, 'example-values.md');
+  assert.deepEqual(none.examples, { pairs: 0, here: 0, matched: [] });
+  // Two pages with no Cyrillic: a pair has a direction, so it is not used.
+  assert.ok(flags(compare(XEN, XEN, withEx())).includes('EXAMPLES-SKIPPED'));
+});
+
+test('CLI: --examples reads the existing pairs of an example values file', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'doc-align-'));
+  const files = { ua: path.join(dir, 'docs', 'api', 'create-payment.md'), en: path.join(dir, 'en', 'api', 'create-payment.md'), ex: path.join(dir, 'example-values.md') };
+  await fs.mkdir(path.dirname(files.ua), { recursive: true });
+  await fs.mkdir(path.dirname(files.en), { recursive: true });
+  await fs.writeFile(files.ua, XUA);
+  await fs.writeFile(files.en, XEN);
+  await fs.writeFile(files.ex, EXAMPLES);
+  const r = await cli(files.ua, files.en, '--examples', files.ex);
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(Object.keys(r.out), ['main', 'secondary', 'ua', 'bugs', 'warnings', 'passed', 'examples']);
+  assert.deepEqual(r.out.bugs, []);
+  assert.deepEqual([r.out.examples.pairs, r.out.examples.here], [4, 4]);
+  const plain = await cli(files.ua, files.en);
+  assert.equal(plain.out.bugs.filter((b) => b.check === 6).length, 2);
+  const missing = await cli(files.ua, files.en, '--examples', path.join(dir, 'nope.md'));
+  assert.equal(missing.code, 2);
+  assert.match(missing.out.error, /file not found/);
+  const ids = await cli(files.ua, files.en, '--propose-ids', '--examples', files.ex);
+  assert.equal(ids.code, 2);
+  assert.match(ids.out.error, /--examples does not go with --propose-ids/);
 });
 
 // --propose-ids: the missing UA heading ids, taken from the EN anchors, and the links to the old fragments

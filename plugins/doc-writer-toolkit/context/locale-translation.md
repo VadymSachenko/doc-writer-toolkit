@@ -54,7 +54,7 @@ This file holds no product terms (they come from the label store and term memory
 | Frontmatter keys, and the values of every key not listed on the right | The frontmatter values of `title`, `description`, `sidebar_label`, `pagination_label`, `tags` and `keywords`. `title` and `description` must end up different from UA. |
 | `last_update`: `locale-sync record` sets it, never the worker | |
 | `{/* #anchor */}` and every `{/* … */}` comment that isn't a marker | Marker text. `{/* ToDo: … */}` and `{/* NEEDS CONFIRMATION: … */}` keep their keyword, and the text after the colon is translated. The number of markers doesn't change. |
-| Data in a code block (JSON values, request and response bodies, strings), Ukrainian letters included | The reader text of a code block: diagram labels, comments and the descriptions of a folder tree, as `code-blocks.md` defines them. That file is the rule for code blocks here and for UA → EN alike. |
+| Data in a code block (JSON values, request and response bodies, strings), Ukrainian letters included, as UA writes it. The pairs are for EN only: a further locale never takes a pair's EN value (`${CLAUDE_PLUGIN_ROOT}/context/doc-rules/example-values-format.md`) | The reader text of a code block: diagram labels, comments and the descriptions of a folder tree, as `code-blocks.md` defines them. That file is the rule for code blocks here and for UA → EN alike. |
 
 The UA page is never modified.
 

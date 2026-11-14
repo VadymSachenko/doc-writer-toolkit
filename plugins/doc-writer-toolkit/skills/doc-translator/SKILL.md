@@ -33,6 +33,7 @@ Load these files at the start of the task.
 - **Product kit** (the host's own files; `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`, "Product kit", resolves the folder and says what to do when none is declared or a file is missing):
   - `<kit>/glossary-en.md` — canonical EN terminology, read with `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/glossary-format.md`. Use it to replace UA terms with their correct EN equivalents. Below, `glossary-en.md` means this file.
   - `<kit>/product-rules.md`, if present — rules for this product only, such as how its name is written. Rank 0, like `formatting-conventions.md`.
+  - `<kit>/example-values.md`, if present — the system values and the existing pairs, which decide the values in code blocks, read with `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/example-values-format.md`. That file says what this skill does with them. Follow it; do not restate it here.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` — rank-0 project formatting conventions. Core section and English section apply. Outranks this skill's own body for any rule both cover.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` — the shared page-to-page link contract. Translation **preserves an already-correct route verbatim** (see "Never translate" and Step 4); do not re-derive or localize a path.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/heading-anchors.md` — the shared heading-id contract (see Heading IDs below).
@@ -60,7 +61,7 @@ Load these files at the start of the task.
 **Never translate:**
 - The code part of a code block (` ``` `): the code, ids, keywords, arrows, comment markers, whitespace and line count stay byte-for-byte (`code-blocks.md`)
 - Inline code (`` `backtick` ``) — preserve exactly
-- JSON keys and values, and every other data value inside code blocks, Ukrainian letters included
+- JSON keys and values, and every other data value inside code blocks, Ukrainian letters included. The one exception is the kit's existing pairs: on a page a pair lists, a string literal whose whole value is the UA value of an `example` pair becomes that pair's EN value (`example-values-format.md`, which says when a pair holds)
 - HTTP methods and paths (`POST /transaction/create`)
 - Reader-replaced placeholders: `*`\``UPPER_CASE`\``*`
 - MDX component names and attribute names (`<details>`, `<summary>`, `:::note`, `<Icon>`, etc.)
@@ -296,7 +297,8 @@ Before saving, check:
 - The EN `title:` is the semantic equivalent of the UA title, and an EN `sidebar_label:` of the UA one (`naming-conventions.md`); the output path, filename, and any `slug:` field are unchanged from the source's shared path — the page was not re-slugged or moved
 - Every page-to-page link path is byte-identical to the UA source (`internal-links.md`); no route was localized or "corrected"
 - Each diagram keeps its structure: the same ids, keywords, arrows, directives, styling lines and number of lines as the source; only its labels changed (`code-blocks.md`)
-- Every other code block keeps its code part byte-for-byte: the code, the data, the comment markers, the whitespace and the number of lines; only its comments and tree descriptions changed
+- Every other code block keeps its code part byte-for-byte: the code, the data, the comment markers, the whitespace and the number of lines; only its comments and tree descriptions changed, and the `example` pairs that hold for this page (`example-values-format.md`) have their EN value
+- Every system value, in a code block or in inline code, is the UA page's value, verbatim, even when an existing pair lists it (`example-values-format.md`)
 - No `{/* #anchor */}` comments appear in EN headings
 - Every EN heading's id, generated from its text or explicit `\{#id}` (an existing `{#id}` counts too), equals its UA heading's comment id (`heading-anchors.md`)
 - No explicit `\{#id}` contains a `{…}` placeholder (`heading-anchors.md` rule 9); a placeholder in the UA comment is reported, not carried into EN
@@ -359,6 +361,7 @@ After saving, report:
 - Any `{/* NEEDS CONFIRMATION */}` items (including unconfirmed glossary terms)
 - Any `{/* ToDo */}` items carried over from the source
 - Any UA terms found in prose that had no glossary entry (flag these for the user to decide)
+- The existing pairs whose EN value was written (UA value → EN value, with the lines), and each Cyrillic value in a code block that the example values file doesn't list, copied verbatim (`example-values-format.md`); or "none". With no example values file, say so
 - Any errors in the Ukrainian source (step numbering, broken links, typos) — copied as-is into the EN output; listed here for human review. Do not fix source errors.
 
 ## When the source file has unresolved markers
