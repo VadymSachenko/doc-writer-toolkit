@@ -27,7 +27,7 @@ Run it from the docs repo (or pass `--root`) with the branch checked out: the wo
 
    **Why these numbers.** In the measured pack, two views at a time captured 63 of 80 even with the screenshot held to 30 s, and each of the 17 left failed on that 30 s. 120 s a wait gives such a view four times the room. 30 min covers 44 failed views, two at a time, at up to about a minute each.
 
-   **Run the pack once.** Run it again only when it ended without writing its sheet (an exit other than 0 or 10). A view still `page-missing` after the retry is a finding, not a reason to run the pack again.
+   **Run the pack once.** Run it again, once, only after exit 3 (a crash, or Chromium closed), or after exit 2 once its cause (a flag) is fixed; exit 1, the build failed, is recorded as failed with the build's error, not run again. A view still `page-missing` after the retry is a finding, not a reason to run the pack again.
 5. **The findings,** from the DOM and the same page in the default locale (the reference, always a column):
 
 | Finding | Level | Rule |

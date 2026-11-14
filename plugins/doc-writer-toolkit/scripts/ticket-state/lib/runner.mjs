@@ -432,7 +432,7 @@ export function briefFor(step, settings) {
     step.stale ? `The UA pages changed after this stage last ran (${step.stale} file(s)): run it again on the current head${pagesRead(step, settings)}.` : null,
     ...buildLines(step),
     ...videoImportLines(step),
-    step.stage === 'visualPack' ? 'Run visual-pack once. It captures each view that failed to capture once more by itself, with more time, and a view it still reports `page-missing` is a finding, not a reason to run it again. Run it again only when it ended without writing its sheet (an exit other than 0 or 10).' : null,
+    step.stage === 'visualPack' ? 'Run visual-pack once. It captures each view that failed to capture once more by itself, with more time, and a view it still reports `page-missing` is a finding, not a reason to run it again. Run it again, once, only after exit 3 (a crash, or Chromium closed), or after exit 2 once its cause (a flag) is fixed; exit 1, the build failed, is recorded as failed with the build's error, not run again.' : null,
     ...(step.stage === 'answerPass' ? passLines(step, settings) : []),
     ...(['plan', 'write'].includes(step.stage) && step.role === 'writer' ? [...holdLines(step, settings), ...(step.heldAnswers ?? [])] : []),
     ...(step.stage === 'pr' ? step.passLines ?? [] : []),
