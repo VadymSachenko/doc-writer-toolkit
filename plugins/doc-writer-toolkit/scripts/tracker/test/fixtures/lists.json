@@ -1,0 +1,14 @@
+[
+  { "id": "5f00000000000000000a0001", "name": "Inbox", "closed": false, "pos": 1 },
+  { "id": "5f00000000000000000a0002", "name": "Drafts", "closed": false, "pos": 2 },
+  { "id": "5f00000000000000000a0003", "name": "Ready", "closed": false, "pos": 3 },
+  { "id": "5f00000000000000000a0004", "name": "Doing", "closed": false, "pos": 4 },
+  { "id": "5f00000000000000000a0005", "name": "Blocked", "closed": false, "pos": 5 },
+  { "id": "5f00000000000000000a0006", "name": "SME check", "closed": false, "pos": 6 },
+  { "id": "5f00000000000000000a0007", "name": "Final check", "closed": false, "pos": 7 },
+  { "id": "5f00000000000000000a0008", "name": "Finished", "closed": false, "pos": 8 },
+  { "id": "5f00000000000000000a0009", "name": "Closed, Oct 2026", "closed": false, "pos": 9 },
+  { "id": "5f00000000000000000a000a", "name": "Closed Sep, 2026", "closed": false, "pos": 10 },
+  { "id": "5f00000000000000000a000b", "name": "Not needed", "closed": false, "pos": 11 },
+  { "id": "5f00000000000000000a000c", "name": "Side lane", "closed": false, "pos": 12 }
+]

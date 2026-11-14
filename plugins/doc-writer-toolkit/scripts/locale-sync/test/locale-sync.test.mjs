@@ -10,7 +10,9 @@ import { parsePage, canonicalTags, splitCode, boldSpans, assetRefs } from '../li
 import { composeChanges, diffBodies, diffFrontmatter } from '../lib/diff.mjs';
 import { docRoute, parseBuildErrors } from '../lib/report.mjs';
 import { setLastUpdate } from '../lib/record.mjs';
-import { usageMatcher } from '../lib/terms.mjs';
+import { matchTerms, termMatcher, usageMatcher } from '../lib/terms.mjs';
+import { blobText, blobTexts } from '../lib/git.mjs';
+import { cachedBlob, cachedBlobs } from '../lib/plan.mjs';
 import { gitBlobHash } from '../../ui-labels/lib/util.mjs';
 
 const run = promisify(execFile);
@@ -349,6 +351,145 @@ test('blocks: import and plain code blocks are verbatim, mermaid is not', () => 
   assert.deepEqual([mer.kind, mer.verbatim], ['code', false]);
 });
 
+// A page with code blocks that hold reader text (code-blocks.md): Ukrainian comments, which a translation translates,
+// and Cyrillic data, which it keeps.
+const CODE_TAIL_UA = `
+\`\`\`bash
+# Скинути всі фільтри (їх може бути кілька)
+curl -X POST https://example.com/filters/reset   # повторіть за потреби
+\`\`\`
+
+\`\`\`json
+{ "owner": "Олена Коваль", "note": "Без змін, їх два" }
+\`\`\`
+
+\`\`\`sh
+# reset the cache
+rm -rf .cache
+\`\`\`
+`;
+const CODE_TAIL_TR = `
+\`\`\`bash
+# Tüm filtreleri sıfırla (birden fazla olabilir)
+curl -X POST https://example.com/filters/reset   # gerekirse tekrarlayın
+\`\`\`
+
+\`\`\`json
+{ "owner": "Олена Коваль", "note": "Без змін, їх два" }
+\`\`\`
+
+\`\`\`sh
+# reset the cache
+rm -rf .cache
+\`\`\`
+`;
+const UA_CODE = UA + CODE_TAIL_UA;
+const TR_CODE = TR + CODE_TAIL_TR;
+
+test('blocks: a code block with Ukrainian comments goes to the worker; data and code without them are copied (AC-3)', () => {
+  const change = (from, to) => plan(UA_CODE, edit(UA_CODE, from, to), TR_CODE).changes.map((c) => [c.kind, c.verbatim]);
+  assert.deepEqual(change('# Скинути всі фільтри', '# Скинути фільтри'), [['code', false]], 'a changed Ukrainian comment');
+  assert.deepEqual(change('https://example.com/filters/reset', 'https://example.com/filters/clear'), [['code', false]], 'changed code in a block with Ukrainian comments');
+  assert.deepEqual(change('"note": "Без змін, їх два"', '"note": "Без змін"'), [['code', true]], 'Cyrillic data is not reader text');
+  assert.deepEqual(change('rm -rf .cache', 'rm -rf .cache/*'), [['code', true]], 'comments with no Cyrillic stay as written');
+});
+
+test('check: a translated comment passes; the code part, the line count and leftover Ukrainian in a comment are checked; data keeps its letters (AC-3)', async () => {
+  const f = await fixtureRepo();
+  await writeState(f);
+  await f.write('docs/filters/filters.md', UA_CODE);
+  await f.commit();
+  assert.equal((await cli(f.dir, 'link-assets', 'filters', '--locales', 'tr,ru')).code, 0);
+  const check = async (text) => {
+    await f.write(`${TR_ROOT}/filters/filters.md`, text);
+    const r = await cli(f.dir, 'check', 'filters', '--locales', 'tr');
+    return { code: r.code, checks: r.out.results[0].checks, failures: r.out.results[0].failures, warnings: r.out.results[0].warnings };
+  };
+  let r = await check(TR_CODE);
+  assert.equal(r.code, 0, JSON.stringify(r.failures));
+  assert.deepEqual(r.warnings, [], 'the Cyrillic JSON value is data, not untranslated text');
+
+  for (const [name, from, to] of [
+    ['a code token', 'curl -X POST', 'curl -X PUT'],
+    ['the whitespace before a comment', 'reset   # gerekirse', 'reset # gerekirse'],
+    ['a line added', 'rm -rf .cache\n', 'rm -rf .cache\nls\n'],
+    ['a comment that moved into the code', '# Tüm filtreleri sıfırla (birden fazla olabilir)\n', 'echo Tüm filtreleri sıfırla\n'],
+    ['a JSON value', '"owner": "Олена Коваль"', '"owner": "Olena Koval"'],
+  ]) {
+    r = await check(edit(TR_CODE, from, to));
+    assert.deepEqual([r.code, r.checks], [1, ['code']], name);
+  }
+
+  r = await check(edit(TR_CODE, '# Tüm filtreleri sıfırla (birden fazla olabilir)', '# Скинути всі фільтри (їх може бути кілька)'));
+  assert.deepEqual([r.code, r.checks], [1, ['ukrainian-letters']]);
+  assert.deepEqual(r.failures[0].hits.map((h) => [h.line, h.letters]), [[TR_CODE.split('\n').indexOf('# Tüm filtreleri sıfırla (birden fazla olabilir)') + 1, 'ї']]);
+  // Cyrillic without a Ukrainian-only letter in a comment of a Latin-script translation is a warning, as in prose.
+  r = await check(edit(TR_CODE, '# gerekirse tekrarlayın', '# повторіть за потреби'));
+  assert.equal(r.code, 0);
+  assert.match(r.warnings.join('\n'), /Cyrillic text remains/);
+
+  // ru: its own letters may stay in a comment, and the JSON value's «ї» is data, not a leftover.
+  const RU_FILE = 'i18n/ru/docusaurus-plugin-content-docs/current/filters/filters.md';
+  await f.write(RU_FILE, RU + CODE_TAIL_UA.replace('# Скинути всі фільтри (їх може бути кілька)', '# Сбросить все фильтры (их может быть несколько)').replace('# повторіть за потреби', '# повторите при необходимости'));
+  r = await cli(f.dir, 'check', 'filters', '--locales', 'ru');
+  assert.equal(r.code, 0, JSON.stringify(r.out.results[0].failures));
+});
+
+test('locale-sync translates a Ukrainian comment through blocks and apply, keeps the code, and records the page (AC-3)', async () => {
+  const f = await fixtureRepo();
+  await f.write('docs/filters/filters.md', UA_CODE);
+  await f.commit();
+  await f.write(`${TR_ROOT}/filters/filters.md`, TR_CODE);
+  await writeState(f, { tr: trEntry(gitBlobHash(UA_CODE)) });
+  assert.equal((await cli(f.dir, 'link-assets', 'filters', '--locales', 'tr')).code, 0);
+  const ua2 = edit(edit(UA_CODE, '# повторіть за потреби', '# повторіть, якщо сервер не відповів'), 'rm -rf .cache', 'rm -rf .cache/tmp');
+  await f.write('docs/filters/filters.md', ua2);
+  await f.commit();
+
+  const b = (await cli(f.dir, 'blocks', 'filters', '--locales', 'tr')).out.results[0];
+  assert.equal(b.mode, 'incremental');
+  assert.deepEqual(b.changes.map((c) => [c.kind, c.verbatim]), [['code', false], ['code', true]]);
+  const [bash] = b.changes;
+  assert.ok(bash.target.text.includes('# gerekirse tekrarlayın'), 'the worker sees the current translation of the block');
+  await f.write('t.json', { [bash.id]: bash.target.text.replace('# gerekirse tekrarlayın', '# sunucu yanıt vermezse tekrarlayın') });
+  let r = await cli(f.dir, 'apply', 'filters', '--locales', 'tr', '--translations', 't.json', '--out', 'cand.md');
+  assert.equal(r.code, 0, JSON.stringify(r.out));
+  const want = edit(edit(TR_CODE, '# gerekirse tekrarlayın', '# sunucu yanıt vermezse tekrarlayın'), 'rm -rf .cache', 'rm -rf .cache/tmp');
+  assert.equal(await f.read('cand.md'), want, 'the comment is translated, the copied block is the UA code');
+  r = await cli(f.dir, 'record', 'filters', '--locales', 'tr', '--candidate', 'cand.md');
+  assert.equal(r.code, 0, JSON.stringify(r.out));
+
+  // A worker that changes the code while translating the comment is stopped by the checks.
+  await f.write('docs/filters/filters.md', edit(ua2, '# Скинути всі фільтри', '# Скинути фільтри'));
+  await f.commit();
+  const b2 = (await cli(f.dir, 'blocks', 'filters', '--locales', 'tr')).out.results[0];
+  await f.write('t.json', { [b2.changes[0].id]: b2.changes[0].target.text.replace('# Tüm filtreleri', '# Filtreleri').replace('-X POST', '-X PUT') });
+  assert.equal((await cli(f.dir, 'apply', 'filters', '--locales', 'tr', '--translations', 't.json', '--out', 'cand.md')).code, 0);
+  r = await cli(f.dir, 'record', 'filters', '--locales', 'tr', '--candidate', 'cand.md');
+  assert.notEqual(r.code, 0);
+  assert.ok(JSON.stringify(r.out).includes('"code"'), JSON.stringify(r.out));
+});
+
+test('blocks --redo and terms --usage: a translated comment is reader text, data is not (AC-3)', async () => {
+  const f = await fixtureRepo();
+  await f.write('docs/filters/filters.md', UA_CODE);
+  await f.commit();
+  await f.write(`${TR_ROOT}/filters/filters.md`, TR_CODE);
+  await writeState(f, { tr: trEntry(gitBlobHash(UA_CODE)) });
+  assert.equal((await cli(f.dir, 'link-assets', 'filters', '--locales', 'tr')).code, 0);
+  const at = (s) => TR_CODE.split('\n').findIndex((l) => l.includes(s)) + 1;
+
+  // The UA block decides: its comments are Ukrainian, so the translated block is picked; the JSON and the sh block are copied.
+  const r = (await cli(f.dir, 'blocks', 'filters', '--locales', 'tr', '--redo', `${at('curl -X POST')},${at('"owner"')},${at('rm -rf')}`)).out.results[0];
+  assert.deepEqual(r.changes.map((c) => [c.kind, c.ua.text.split('\n')[1]]), [['code', '# Скинути всі фільтри (їх може бути кілька)']]);
+  assert.deepEqual(r.skipped.map((x) => x.reason), ['code or import, copied verbatim', 'code or import, copied verbatim']);
+
+  // terms --usage finds a term in a comment, never in the code or the data.
+  const u = (await cli(f.dir, 'terms', '--usage', 'tekrarlayın', 'example', '--locales', 'tr')).out;
+  assert.deepEqual(u.pages[0].hits.map((h) => [h.line, h.match]), [[at('gerekirse tekrarlayın'), ['tekrarlayın']]]);
+  assert.equal(u.pages[0].redo, String(at('```bash')));
+});
+
 // ------------------------------------------------------------------ small helpers
 
 test('setLastUpdate changes only the target date, in the UA date format', () => {
@@ -531,7 +672,7 @@ test('blocks: full for a new page, incremental with exact target text, none when
   await f.write('docs/filters/filters.md', ua2);
   await f.commit();
   r = (await cli(f.dir, 'blocks', 'filters', '--locales', 'tr', '--with-old')).out.results[0];
-  assert.deepEqual([r.mode, r.source, r.noop, r.summary], ['incremental', { kind: 'blob-diff', from: uaBlob(), to: uaBlob(ua2) }, false, { replace: 1, add: 0, remove: 0, unmapped: 0, words: r.summary.words }]);
+  assert.deepEqual([r.mode, r.source, r.noop, r.summary], ['incremental', { kind: 'blob-diff', from: uaBlob(), to: uaBlob(ua2) }, false, { replace: 1, add: 0, remove: 0, spliced: 0, unmapped: 0, words: r.summary.words }]);
   assert.deepEqual([r.changes[0].target.text, r.changes[0].uaOld.text, r.changes[0].ua.text], ['- Eylemler yalnızca **İşlemde** durumunda kullanılabilir.', '- Дії доступні лише в статусі **В роботі**.', '- Дії доступні лише для записів у статусі **В роботі**.']);
 
   // Only formatting changed in UA: the page is stale (new blob) but there is nothing to translate.
@@ -1511,6 +1652,110 @@ test('terms --usage matching: a short last word takes endings, a stem shared wit
   assert.ok(hit('иш', 'иш башталды') && !hit('иш', 'ишке'));
 });
 
+test('matchTerms: the stem prefilter keeps exactly the entries the full matcher keeps', () => {
+  const entries = ['дія', 'стан', 'транзакція', 'платіжне посилання', 'API', 'ID', 'C++', '[beta]', "обов'язкове поле", 'е-гаманець', 'фільтр', 'ключ доступу', 'звіт'].map((ua) => ({ ua, target: `t:${ua}` }));
+  const texts = [
+    'Дія недоступна, доки ТРАНЗАКЦІЇ в стані обробки.',
+    'Скопіюйте платіжного посилання й надішліть його.',
+    'Посилання платіжне не передається.', // both stems, the wrong order: the prefilter lets it through, the full matcher does not
+    'Поле API ID, режим C++ і [beta]; е-гаманці, обов’язкове поле.',
+    "Обов'язкового поля немає. Фільтри скинуто.",
+    'Станція, транзакційний, звітність, ключі доступу.', // stems inside longer words
+    'Фі́льтр, й — combining marks', // NFD input: matched after NFC
+    'Nothing here matches.',
+    '',
+  ];
+  for (const text of texts) {
+    const full = entries.filter((e) => termMatcher(e.ua).test(text.normalize('NFC')));
+    assert.deepEqual(matchTerms(entries, text), full, text);
+  }
+  const uas = (text) => matchTerms(entries, text).map((e) => e.ua);
+  assert.deepEqual(uas(texts[1]), ['платіжне посилання']);
+  assert.deepEqual(uas(texts[2]), []);
+  assert.ok(uas(texts[0]).includes('транзакція') && uas(texts[0]).includes('дія'));
+});
+
+// Writes each content as a loose blob of a new repository and returns its hash.
+async function blobRepo(contents) {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'locale-sync-blobs-'));
+  await git(dir, 'init', '-q');
+  const hashes = [];
+  for (const [i, c] of contents.entries()) {
+    await fs.writeFile(path.join(dir, `f${i}`), c);
+    hashes.push(await git(dir, 'hash-object', '-w', `f${i}`));
+  }
+  return { dir, hashes };
+}
+
+test('blobTexts: one git process reads the same text as one blob at a time', async () => {
+  const contents = [
+    'Фільтри — «пошук», ґанок, ї, є, 💳\n',
+    '',
+    'a' + 'ї'.repeat(100000) + '\n', // over a pipe chunk, with a two-byte letter split across chunks
+    Buffer.from([0x41, 0xff, 0x0a, 0xd0, 0x0a, 0xe2, 0x82]), // invalid UTF-8, a truncated letter at the end
+    '0123456789abcdef0123456789abcdef01234567 blob 5\nnot a header\n', // a body that looks like an answer
+    `${Date.now()} unique\n`,
+  ];
+  const { dir, hashes } = await blobRepo(contents);
+  const missing = 'deadbeef'.repeat(5);
+  const texts = await blobTexts(dir, [...hashes, missing, hashes[0], 'not a hash']);
+  assert.deepEqual([...texts.keys()], hashes);
+  for (const h of hashes) assert.equal(texts.get(h), await blobText(dir, h));
+  assert.equal(texts.get(hashes[1]), '');
+  assert.equal(texts.get(hashes[2]).length, 100002);
+  assert.equal(texts.has(missing), false);
+});
+
+test('cachedBlobs fills the cache cachedBlob reads; a blob it cannot read is read alone and fails as before', async () => {
+  const { dir, hashes } = await blobRepo([`Сторінка ${Date.now()}\n`, `Ще одна ${Date.now()}\n`, `Третя ${Date.now()}\n`]);
+  const missing = 'feedface'.repeat(5);
+  const nowhere = path.join(dir, 'no-such-folder');
+  await cachedBlobs(dir, [hashes[0], hashes[1], missing, null]);
+  // From the cache: a git call in a folder that does not exist would fail.
+  assert.equal(await cachedBlob(nowhere, hashes[0]), await blobText(dir, hashes[0]));
+  assert.equal(await cachedBlob(nowhere, hashes[1]), await blobText(dir, hashes[1]));
+  const expected = await blobText(dir, missing).then(() => null, (e) => e.message);
+  assert.ok(expected);
+  await assert.rejects(cachedBlob(dir, missing), (e) => e.message === expected);
+  // A batch that fails (no repository) caches nothing: each read goes to git alone, as before.
+  await cachedBlobs(nowhere, [hashes[2]]);
+  await assert.rejects(cachedBlob(nowhere, hashes[2]));
+});
+
+test('blocks and check start a few git processes whatever the number of pages and locales', async () => {
+  const f = await fixtureRepo({ extraPages: 6 });
+  const page = (i, word) => `---\ntitle: Сторінка ${i}\n---\n\n${word} ${i}.\n`;
+  const ru = 'i18n/ru/docusaurus-plugin-content-docs/current';
+  for (let i = 0; i < 6; i++) {
+    // Translated from the committed text in both locales, then UA changes: every cell is stale, from an existing base.
+    await f.write(`${TR_ROOT}/extra/p${i}/p${i}.md`, `---\ntitle: Sayfa ${i}\n---\n\nMetin ${i}.\n`);
+    await f.write(`${ru}/extra/p${i}/p${i}.md`, `---\ntitle: Страница ${i}\n---\n\nТекст ${i}.\n`);
+    await f.write(`.doc-toolkit/pages/extra/p${i}/p${i}.json`, { spans: {}, locales: { tr: trEntry(gitBlobHash(page(i, 'Текст'))), ru: trEntry(gitBlobHash(page(i, 'Текст'))) } });
+    await f.write(`docs/extra/p${i}/p${i}.md`, page(i, 'Новий текст'));
+  }
+  await f.commit();
+  // A `git` first on PATH that logs each process, then runs the real one.
+  const bin = await fs.mkdtemp(path.join(os.tmpdir(), 'locale-sync-gitlog-'));
+  const realGit = (await run('sh', ['-c', 'command -v git'])).stdout.trim();
+  await fs.writeFile(path.join(bin, 'git'), `#!/bin/sh\nprintf '%s\\n' "$*" >> "${bin}/log"\nexec "${realGit}" "$@"\n`, { mode: 0o755 });
+  const counted = async (...args) => {
+    await fs.rm(path.join(bin, 'log'), { force: true });
+    const { stdout } = await run('node', [CLI, ...args], { cwd: f.dir, env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}` } }).catch((e) => e);
+    const log = (await fs.readFile(path.join(bin, 'log'), 'utf8')).trim().split('\n');
+    const n = (re) => log.filter((l) => re.test(l)).length;
+    return { out: JSON.parse(stdout), n, total: log.length };
+  };
+
+  const b = await counted('blocks', 'extra', '--locales', 'tr,ru');
+  assert.deepEqual(b.out.results.map((r) => r.mode), Array(12).fill('incremental'));
+  assert.deepEqual([b.n(/cat-file --batch-check/), b.n(/cat-file blob/), b.n(/ls-tree/)], [1, 0, 1], 'one existence check, no blob read alone, one tree listing');
+  assert.ok(b.n(/cat-file --batch$/) <= 2 && b.total <= 6, `${b.total} git processes`);
+
+  const c = await counted('check', 'extra/p0', '--locales', 'tr');
+  assert.equal(c.out.results.length, 1);
+  assert.ok(c.n(/cat-file blob/) <= 1 && c.n(/cat-file --batch$/) === 1 && c.total <= 5, `${c.total} git processes`);
+});
+
 test('status: warns when a locale current.json keeps Ukrainian sidebar labels that no _category_.json owns', async () => {
   const f = await fixtureRepo();
   // write-translations output for an autogenerated sidebar: the folder labels in UA, in both locales.
@@ -1962,4 +2207,198 @@ test('check: an unknown Page link form is a configuration error (exit 2)', async
   const r = await cli(f.dir, 'check', 'filters', '--locales', 'tr');
   assert.equal(r.code, 2);
   assert.match(r.out.error, /'Page link form: relative' is not a page link form\. Use route or file-path\./);
+});
+
+// ------------------------------------------------------------------ id-only changes spliced by the script (heading-anchors.md)
+
+// The page before its `## Робота з записами` heading got an id: no comment, and a link to the old fragment (the slug of
+// the UA text, which has no Ukrainian-only letters, so the translations pass their checks). The translations copy the
+// link verbatim and have no comment either.
+const OLD_LINK_UA = '- Докладніше — на сторінці [Огляд](/overview/).';
+const OLD_LINK_TR = '- Ayrıntılar için [Genel bakış](/overview/) sayfasına bakın.';
+const OLD_LINK_RU = '- Подробнее — на странице [Обзор](/overview/).';
+const legacy = (text, from, to, link, linkLine) => edit(edit(text, `${from} {/* #operations */}`, to), link, linkLine);
+const UA_A = legacy(UA, '## Операції', '## Робота з записами', OLD_LINK_UA, '- Докладніше — на сторінці [Огляд](/overview/) і в розділі [Операції](#робота-з-записами).');
+const TR_A = legacy(TR, '## İşlemler', '## İşlemler', OLD_LINK_TR, '- Ayrıntılar için [Genel bakış](/overview/) sayfasına ve [İşlemler](#робота-з-записами) bölümüne bakın.');
+const RU_A = legacy(RU, '## Операции', '## Операции', OLD_LINK_RU, '- Подробнее — на странице [Обзор](/overview/) и в разделе [Операции](#робота-з-записами).');
+const UA_B = edit(edit(UA_A, '## Робота з записами\n', '## Робота з записами {/* #operations */}\n'), '(#робота-з-записами)', '(#operations)');
+
+test('splice: an id added to a ## with subsections gives only the comment line in the target (AC-4)', () => {
+  const b = edit(UA_A, '## Робота з записами\n', '## Робота з записами {/* #operations */}\n');
+  const { changes, unmapped, spliced } = plan(UA_A, b, TR_A);
+  assert.deepEqual([changes, unmapped], [[], []], 'no block goes to a translator');
+  assert.equal(spliced.length, 1);
+  const s = spliced[0];
+  assert.deepEqual([s.id, s.op, s.kind, s.anchor, s.target.text, s.write], ['s1', 'replace', 'anchor', { from: null, to: 'operations' }, '## İşlemler', '## İşlemler {/* #operations */}']);
+  assert.equal(s.target.lines[0], s.target.lines[1], 'the heading line only, not its section');
+  assert.equal(TR_A.split('\n')[s.target.lines[0] - 1], '## İşlemler');
+  assert.deepEqual(s.headingPath, ['Робота з записами']);
+});
+
+test('splice: a changed comment is spliced the same way; a removed one is not an id-only change (AC-4)', () => {
+  const changed = plan(UA, edit(UA, '## Операції {/* #operations */}', '## Операції {/* #operations-list */}'), TR);
+  assert.deepEqual([changed.changes, changed.unmapped], [[], []]);
+  assert.deepEqual([changed.spliced[0].anchor, changed.spliced[0].write], [{ from: 'operations', to: 'operations-list' }, '## İşlemler {/* #operations-list */}']);
+
+  const removed = plan(UA, edit(UA, '## Операції {/* #operations */}', '## Операції'), TR);
+  assert.deepEqual([removed.spliced, removed.changes.map((c) => c.kind)], [[], ['section']]);
+});
+
+test('splice: a heading whose text and anchor both change is still re-translated (AC-4)', () => {
+  const { changes, spliced } = plan(UA_A, edit(UA_A, '## Робота з записами\n', '## Дії над записами {/* #operations */}\n'), TR_A);
+  assert.equal(spliced.length, 0);
+  assert.deepEqual(changes.map((c) => [c.op, c.kind]), [['replace', 'section']]);
+  assert.ok(changes[0].ua.text.includes('### Додаткові дії'), 'the whole section, subsections included');
+});
+
+test('splice: a rewritten link fragment is spliced and its sentence is untouched (AC-4)', () => {
+  const { changes, unmapped, spliced } = plan(UA_A, UA_B, TR_A);
+  assert.deepEqual([changes, unmapped], [[], []]);
+  const link = spliced.find((s) => s.kind === 'link');
+  assert.deepEqual([link.block, link.fragments], ['item', [{ from: '#робота-з-записами', to: '#operations' }]]);
+  assert.equal(link.target.text, '- Ayrıntılar için [Genel bakış](/overview/) sayfasına ve [İşlemler](#робота-з-записами) bölümüne bakın.');
+  assert.equal(link.write, '- Ayrıntılar için [Genel bakış](/overview/) sayfasına ve [İşlemler](#operations) bölümüne bakın.');
+  assert.deepEqual(spliced.map((s) => s.kind).sort(), ['anchor', 'link']);
+});
+
+test('splice: rewritten fragments never push a section to the whole-body rule; a fragment no heading explains is a change', () => {
+  // Two of three items changed only in a fragment: still two splices, not the whole section body.
+  const a = edit(UA_A, '- Фільтр `status` приймає значення `done`.', '- Фільтр `status` приймає значення `done`, див. [операції](#робота-з-записами).');
+  const t = edit(TR_A, '- `status` filtresi `done` değerini kabul eder.', '- `status` filtresi `done` değerini kabul eder, bkz. [işlemler](#робота-з-записами).');
+  const b = edit(a, '## Робота з записами\n', '## Робота з записами {/* #operations */}\n').replaceAll('(#робота-з-записами)', '(#operations)');
+  const r = plan(a, b, t);
+  assert.deepEqual([r.changes.length, r.spliced.filter((s) => s.kind === 'link').length], [0, 2]);
+
+  // A fragment rewritten to an anchor that no heading of this change got: a translator writes the block (as before).
+  const other = plan(UA, edit(UA, '- Докладніше — на сторінці [Огляд](/overview/).', '- Докладніше — на сторінці [Огляд](/overview/#what-to-know).'), TR);
+  assert.equal(other.spliced.length, 0);
+  const moved = plan(UA_A, edit(UA_A, '(#робота-з-записами)', '(#reference)'), TR_A);
+  assert.deepEqual([moved.spliced, moved.changes.map((c) => c.kind)], [[], ['item']]);
+  // A link to another page is spliced only when the caller can vouch for that page's ids.
+  const cross = (verifyLink) => {
+    const pa = parsePage(UA);
+    const pb = parsePage(edit(UA, '[Огляд](/overview/)', '[Огляд](/overview/#overview-page)'));
+    const pa2 = parsePage(edit(UA, '[Огляд](/overview/)', '[Огляд](/overview/#огляд)'));
+    return composeChanges({ pageA: pa2, pageB: pb, pageT: parsePage(edit(TR, '[Genel bakış](/overview/)', '[Genel bakış](/overview/#огляд)')), groups: diffBodies(pa2, pb), fmChanges: [], verifyLink });
+  };
+  assert.deepEqual(cross(null).changes.map((c) => c.kind), ['item']);
+  const ok = cross((p, from, to) => p === '/overview/' && from === 'огляд' && to === 'overview-page');
+  assert.deepEqual([ok.changes.length, ok.spliced[0].write], [0, '- Ayrıntılar için [Genel bakış](/overview/#overview-page) sayfasına bakın.']);
+});
+
+test('splice: a heading id and a real change in its section: the comment is spliced, the block goes to the translator', () => {
+  const b = edit(UA_B, 'Ви також можете скинути фільтри.', 'Ви також можете скинути всі фільтри.');
+  const { changes, spliced } = plan(UA_A, b, TR_A);
+  assert.deepEqual(changes.map((c) => c.kind), ['paragraph']);
+  assert.deepEqual(spliced.map((s) => s.kind).sort(), ['anchor', 'link']);
+});
+
+test('splice: a target heading whose anchor already differs from the old UA fails, and nothing is spliced on the page (AC-4)', () => {
+  const t = edit(TR_A, '## İşlemler\n', '## İşlemler {/* #islemler */}\n');
+  const { changes, unmapped, spliced } = plan(UA_A, UA_B, t);
+  assert.deepEqual([changes, spliced], [[], []]);
+  assert.equal(unmapped.length, 2);
+  assert.match(unmapped.find((u) => u.kind === 'anchor').reason, /'islemler' in the translation but missing in the old UA page/);
+  assert.match(unmapped.find((u) => u.kind === 'link').reason, /nothing is spliced on this page/);
+});
+
+async function spliceFixture() {
+  const f = await fixtureRepo();
+  await f.write('docs/filters/filters.md', UA_A);
+  const OTHER_A = '---\ntitle: Інша\n---\n\nДивіться [операції з фільтрами](/filters/#робота-з-записами).\n';
+  const OTHER_TR = '---\ntitle: Diğer\n---\n\n[Filtre işlemlerine](/filters/#робота-з-записами) bakın.\n';
+  const OTHER_RU = '---\ntitle: Другая\n---\n\nСмотрите [операции с фильтрами](/filters/#робота-з-записами).\n';
+  await f.write('docs/other/other.md', OTHER_A);
+  await f.commit('legacy pages');
+  await f.write(`${TR_ROOT}/filters/filters.md`, TR_A);
+  await f.write('i18n/ru/docusaurus-plugin-content-docs/current/filters/filters.md', RU_A);
+  await f.write(`${TR_ROOT}/other/other.md`, OTHER_TR);
+  await f.write('i18n/ru/docusaurus-plugin-content-docs/current/other/other.md', OTHER_RU);
+  await writeState(f, { tr: trEntry(uaBlob(UA_A)), ru: trEntry(uaBlob(UA_A)) });
+  await f.write('.doc-toolkit/pages/other/other.json', { spans: {}, locales: { tr: trEntry(uaBlob(OTHER_A)), ru: trEntry(uaBlob(OTHER_A)) } });
+  for (const p of ['filters', 'other']) assert.equal((await cli(f.dir, 'link-assets', p)).code, 0);
+  for (const p of ['filters', 'other']) assert.equal((await cli(f.dir, 'check', p)).code, 0, `${p} passes before the change`);
+  // The id-only change: the heading gets its id, and the links on this page and on another page follow it.
+  await f.write('docs/filters/filters.md', UA_B);
+  await f.write('docs/other/other.md', OTHER_A.replace('#робота-з-записами', '#operations'));
+  await f.commit('ids');
+  return { f, OTHER_A, OTHER_TR, OTHER_RU };
+}
+
+test('splice command: id-only pages are carried into every locale with no worker; headings passes and record advances them (AC-4)', async () => {
+  const { f, OTHER_TR, OTHER_RU } = await spliceFixture();
+  const st = (await cli(f.dir, 'status')).out;
+  assert.deepEqual(st.pages.map((p) => [p.page, p.locales.tr.state, p.locales.tr.words]), [['filters/filters', 'stale', 0], ['other/other', 'stale', 0]]);
+
+  const bl = (await cli(f.dir, 'blocks', 'filters', '--locales', 'tr')).out.results[0];
+  assert.deepEqual([bl.mode, bl.noop, bl.spliceOnly, bl.changes, bl.summary.spliced, bl.summary.words], ['incremental', false, true, [], 2, 0]);
+  const ob = (await cli(f.dir, 'blocks', 'other', '--locales', 'tr')).out.results[0];
+  assert.deepEqual([ob.spliceOnly, ob.spliced[0].fragments], [true, [{ from: '/filters/#робота-з-записами', to: '/filters/#operations' }]], 'a link to another page whose heading got the id');
+
+  const r = await cli(f.dir, 'splice', '--date', '2026-11-04');
+  assert.equal(r.code, 0, JSON.stringify(r.out, null, 2));
+  assert.deepEqual(r.out.results.map((x) => [x.page, x.locale, x.recorded]).sort(), [['filters/filters', 'ru', true], ['filters/filters', 'tr', true], ['other/other', 'ru', true], ['other/other', 'tr', true]]);
+  assert.deepEqual(r.out.toTranslate, []);
+
+  const date = (t) => t.replace('date: 10/7/2026', 'date: 11/4/2026');
+  const wantTr = date(edit(edit(TR_A, '## İşlemler\n', '## İşlemler {/* #operations */}\n'), '(#робота-з-записами)', '(#operations)'));
+  assert.equal(await f.read(`${TR_ROOT}/filters/filters.md`), wantTr, 'only the comment, the fragment and the date changed');
+  const wantRu = date(edit(edit(RU_A, '## Операции\n', '## Операции {/* #operations */}\n'), '(#робота-з-записами)', '(#operations)'));
+  assert.equal(await f.read('i18n/ru/docusaurus-plugin-content-docs/current/filters/filters.md'), wantRu);
+  assert.equal(await f.read(`${TR_ROOT}/other/other.md`), OTHER_TR.replace('#робота-з-записами', '#operations').replace('---\n\n', 'last_update:\n  date: 2026-11-04\n---\n\n'));
+  assert.ok((await f.read('i18n/ru/docusaurus-plugin-content-docs/current/other/other.md')).includes('[операции с фильтрами](/filters/#operations)'));
+  assert.ok(OTHER_RU);
+
+  const after = (await cli(f.dir, 'status')).out;
+  assert.ok(after.pages.every((p) => p.locales.tr.state === 'current' && p.locales.ru.state === 'current'));
+  const c = await cli(f.dir, 'check', 'filters', '--locales', 'tr');
+  assert.equal(c.code, 0);
+  assert.deepEqual([c.out.results[0].ok, c.out.results[0].checks], [true, []], 'headings and every other check pass');
+  assert.equal(JSON.parse(await f.read('.doc-toolkit/pages/filters/filters.json')).locales.tr.sourceBlob, uaBlob(UA_B));
+  assert.deepEqual((await cli(f.dir, 'splice')).out.results, [], 'nothing left to splice');
+});
+
+test('splice command: a page with other changes goes to the translator, and apply puts the splices in with its blocks', async () => {
+  const { f } = await spliceFixture();
+  const b = edit(UA_B, 'Ви також можете скинути фільтри.', 'Ви також можете скинути всі фільтри.');
+  await f.write('docs/filters/filters.md', b);
+  await f.commit('a real change too');
+  const r = await cli(f.dir, 'splice', 'filters', '--locales', 'tr');
+  assert.deepEqual([r.code, r.out.results, r.out.toTranslate], [0, [], [{ page: 'filters/filters', locale: 'tr', mode: 'incremental', noop: false, changes: 1, spliced: 2, unmapped: 0 }]]);
+  assert.equal(await f.read(`${TR_ROOT}/filters/filters.md`), TR_A, 'nothing written');
+
+  const bl = (await cli(f.dir, 'blocks', 'filters', '--locales', 'tr')).out.results[0];
+  await f.write('t.json', { [bl.changes[0].id]: 'Tüm filtreleri sıfırlayabilirsiniz.' });
+  await f.write('bad.json', { [bl.changes[0].id]: 'x', s1: 'y' });
+  assert.equal((await cli(f.dir, 'apply', 'filters', '--locales', 'tr', '--translations', 'bad.json', '--out', 'cand.md')).code, 2, 'a spliced block is never translated');
+  assert.equal((await cli(f.dir, 'apply', 'filters', '--locales', 'tr', '--out', 'cand.md')).code, 2, 'a block to translate needs --translations');
+  const ap = await cli(f.dir, 'apply', 'filters', '--locales', 'tr', '--translations', 't.json', '--out', 'cand.md');
+  assert.equal(ap.code, 0, JSON.stringify(ap.out));
+  const want = edit(edit(edit(TR_A, '## İşlemler\n', '## İşlemler {/* #operations */}\n'), '(#робота-з-записами)', '(#operations)'), 'Filtreleri sıfırlayabilirsiniz.', 'Tüm filtreleri sıfırlayabilirsiniz.');
+  assert.equal(await f.read('cand.md'), want);
+  assert.equal((await cli(f.dir, 'record', 'filters', '--locales', 'tr', '--candidate', 'cand.md')).code, 0);
+});
+
+test('splice command: a target heading whose anchor already differs fails; nothing is spliced or recorded (AC-4)', async () => {
+  const { f } = await spliceFixture();
+  await f.write(`${TR_ROOT}/filters/filters.md`, edit(TR_A, '## İşlemler\n', '## İşlemler {/* #islemler */}\n'));
+  const before = await f.read(`${TR_ROOT}/filters/filters.md`);
+  const r = await cli(f.dir, 'splice', 'filters', '--locales', 'tr');
+  assert.deepEqual([r.out.results, r.out.toTranslate.map((x) => [x.spliced, x.unmapped])], [[], [[0, 2]]]);
+  assert.equal(await f.read(`${TR_ROOT}/filters/filters.md`), before);
+  // Applied anyway, the candidate fails `headings` and is not recorded.
+  assert.equal((await cli(f.dir, 'apply', 'filters', '--locales', 'tr', '--out', 'cand.md')).code, 0);
+  const rec = await cli(f.dir, 'record', 'filters', '--locales', 'tr', '--candidate', 'cand.md');
+  assert.equal(rec.code, 1);
+  assert.ok(rec.out.results[0].failures.some((x) => x.check === 'headings'));
+  assert.equal(await f.read(`${TR_ROOT}/filters/filters.md`), before);
+  assert.equal(JSON.parse(await f.read('.doc-toolkit/pages/filters/filters.json')).locales.tr.sourceBlob, uaBlob(UA_A));
+});
+
+test('splice command: a fragment rewrite the other page does not explain goes to the translator', async () => {
+  const { f, OTHER_A } = await spliceFixture();
+  await f.write('docs/other/other.md', OTHER_A.replace('#робота-з-записами', '#no-such-heading'));
+  await f.commit('a fragment no heading has');
+  const r = await cli(f.dir, 'splice', 'other', '--locales', 'tr');
+  assert.deepEqual([r.out.results, r.out.toTranslate.map((x) => [x.page, x.changes, x.spliced])], [[], [['other/other', 1, 0]]]);
 });

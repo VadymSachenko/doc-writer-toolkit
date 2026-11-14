@@ -19,6 +19,7 @@ You are changing an existing, approved page so that it is true again after a pro
 - `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` — resolve the host project's declarations from the **host project path the caller passes** (or the current project if none is passed). Resolve the page's root pair there too. Refuse a page under any root pair's EN i18n root: this skill edits the authored language only.
 - The template matching the page's type, to know where a new block belongs: `${CLAUDE_PLUGIN_ROOT}/context/doc-templates/ua-user-guide-template.md`, `ua-concept-topic-template.md`, `api-reference-template.md` (or the EN equivalents on an `en` project). Detect the type from the page's structure and frontmatter. A template of the same name in `<kit>/templates/` replaces the plugin's (`project-paths.md`, "Product kit").
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` and, from the product kit (`project-paths.md`, "Product kit"), `<kit>/glossary-ua.md` (or `<kit>/glossary-en.md`) with `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/glossary-format.md`, and `<kit>/product-rules.md` if present — terms and formatting are rank 0.
+- `<kit>/example-values.md`, if present — only when a block you write has a code sample or an example value: read with `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/example-values-format.md` and follow its writers' row for each value you add. A value the page already has stays as it is.
 - `${CLAUDE_PLUGIN_ROOT}/context/changed-blocks.md` — the block vocabulary used in the report.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/procedure-steps.md` — only when you add or edit a procedure step: it follows that file, and steps outside your blocks keep their grouping.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` — only when a block you write links to another page (Step 2.8).
@@ -42,6 +43,9 @@ Run the UI label check in `${CLAUDE_PLUGIN_ROOT}/context/ui-labels.md` before an
 1. Read the brief. Every item under "What changed" must carry a source; an item without one, or marked unknown, becomes a marker (Step 2.3) — never prose.
 2. Read the page once, whole. Note its type, section order, table shapes, how it names the UI elements the brief mentions, and any existing markers.
 3. For each brief item decide: **already present** (no edit — the page already states it; report it), **extend** (add a row, item, sentence or paragraph inside an existing block), **replace** (the page says X, the brief says Y with a source — Y wins; report "replaced X with Y (source …)"), **add section** (no existing block fits; place it where the template puts that kind of content), or **marker** (unknown).
+
+   **A new item must fit its block**, for an "extend" and for an "add section". A block lists what its rows are, not what its lead-in says. A new row or list item belongs in a block only if it is the same kind of object as the rest: the columns of one table on the screen, the columns of one file, the fields of one window, the steps of one flow, the values of one parameter. A step or note on a flow the page describes is a normal edit. If an item would be the first of its kind in the block, or would start a list of something no page of these docs lists, and the brief's "Where in the page" doesn't say a person confirmed the place, don't edit that item: tell the caller what the block lists, what the item would add and what becomes false or is missing for the reader without it, and ask where it goes or whether it's needed at all. List it under "Not applied" with that question; the rest of the brief goes on. Don't add it and raise the doubt afterwards.
+
 4. Honour the brief's "Do not touch" list absolutely.
 5. **A renamed UI label is one item that covers every place the page shows it.** Search the whole page for the old string and plan each hit: prose, bold labels, steps, table cells, Markdown image alt texts (`![…]`), `alt="…"` and `title="…"` props, captions (`<figcaption>`, an italic caption line) and admonitions. A hit where the word names something other than the renamed control (an operation, a section's topic) stays, and goes under "Not applied" with that reason. Never leave a hit unplanned for someone else to find.
 
@@ -107,7 +111,7 @@ Counts from the report header, the list of changed sections, and every "Not appl
 
 ## Edge cases
 
-- The brief targets a section that does not exist → add it per the template's placement; report "added".
+- The brief targets a section that does not exist → check that it fits (Step 1), then add it per the template's placement; report "added".
 - The page is a multi-procedure guide and the brief adds a whole procedure → add it as a sibling of the existing ones with the same heading pattern; report "added".
 - The brief's fact contradicts an existing marker → apply the fact, remove that marker, report both.
 - A page under any pair's EN i18n root → refuse with the reason; suggest running on the UA page and then the translator's sync mode.

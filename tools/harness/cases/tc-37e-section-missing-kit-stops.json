@@ -1,6 +1,6 @@
 {
   "id": "tc-37e-section-missing-kit-stops",
-  "description": "A product kit declared as `doc-kit/` that doesn't exist: document-section stops in its Step 0, before readiness or any other stage, names the path, and changes nothing.",
+  "description": "A product kit declared as `doc-kit/` that doesn't exist: section-documenter stops in its Step 0, before readiness or any other stage, names the path, and changes nothing.",
   "fixture": {
     "shape": "single",
     "kit": {

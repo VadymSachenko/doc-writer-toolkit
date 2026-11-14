@@ -1,0 +1,9 @@
+{
+  "name": "video-parts",
+  "private": true,
+  "type": "module",
+  "description": "Cut the sound of a ticket's video into parts of at most the ticket flow's video.partMinutes minutes, for transcription, with ffmpeg run by fixed arguments and every path kept inside the ticket's work folder. No dependencies.",
+  "bin": { "video-parts": "./video-parts.mjs" },
+  "engines": { "node": ">=18.3" },
+  "scripts": { "test": "node --test test/video-parts.test.mjs" }
+}

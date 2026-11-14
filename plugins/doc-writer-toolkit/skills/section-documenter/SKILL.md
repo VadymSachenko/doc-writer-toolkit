@@ -1,9 +1,9 @@
 ---
-name: document-section
-description: 'Takes one documentation section folder to UA pages reviewed and approved, and EN pages translated and aligned. Chains the existing skills: section-readiness, app-explorer, section-planner, the writer for each page, resolve-markers, doc-style-fixer, doc-style-reviewer, doc-translator and doc-alignment-checker. Keeps a ledger in .sources/section-state.json through the section-state script, resumes where a run stopped, and stops only at the approval gates; the plan is never pre-approved. Never commits, deletes or moves a page, and never edits the sidebar. Explicit invocation only: use explicitly ("/document-section docs/reports", "use document-section on portal/settings").'
+name: section-documenter
+description: 'Takes one documentation section folder to UA pages reviewed and approved, and EN pages translated and aligned. Chains the existing skills: section-readiness, app-explorer, section-planner, the writer for each page, resolve-markers, doc-style-fixer, doc-style-reviewer, doc-translator and doc-alignment-checker. Keeps a ledger in .sources/section-state.json through the section-state script, resumes where a run stopped, and stops only at the approval gates; the plan is never pre-approved. Never commits, deletes or moves a page, and never edits the sidebar. Explicit invocation only: use explicitly ("/document-section docs/reports", "use section-documenter on portal/settings").'
 ---
 
-# document-section
+# section-documenter
 
 You are running one section folder through the whole documentation chain. Every stage is a skill that already knows its job: you run them in order, keep the ledger, and stop at the gates. Do not re-implement any skill's logic here, and never answer a skill's questions for the user.
 
@@ -129,7 +129,7 @@ Once for all pages at the gate (`gate.name` is `uaApproval`, the pages in `gate.
 3. Record `translate` running, then run `doc-translator <id>` (`<pair>:<id>` when the ledger has a `pair`):
    - the EN page exists (`enExists`) → `--sync --base <syncBase>`, the page's `syncBase` in `status` (the commit of its last translation, or `baseCommit` before the first). It asks nothing, and runs the alignment check itself (its sync step 6);
    - no EN page → a full translation.
-4. Record `translate` done. The script accepts the translator's `last_update.date` change in the UA page, and keeps `HEAD` as the next `syncBase`. Refused because the UA page changed beyond the date → back to Step 7 for that page.
+4. Record `translate` done. The script accepts the heading ids the translator added (its Step 5b), with the links rewritten to them: an id-only change (`heading-anchors.md`, "Id-only changes") keeps the approvals. It accepts a `last_update.date` change too, and keeps `HEAD` as the next `syncBase`. Refused because the UA page changed beyond that (a changed or removed id, a changed heading text, any other edit) → back to Step 7 for that page. Another approved page whose links the translator rewrote keeps its records the same way.
 5. Sync reports unmapped blocks → record `translate` failed with them, and go on.
 
 ### Step 11 — Align (each translated page)
@@ -163,5 +163,5 @@ This skill triggers only when named explicitly, or through `/document-section`.
 
 - "/document-section docs/reports"
 - "/document-section portal/settings interview:skip apply:mechanical,substantive"
-- "use document-section on docs/reports" (again after a stop: it resumes from the ledger)
+- "use section-documenter on docs/reports" (again after a stop: it resumes from the ledger)
 - "/document-section docs/reports approve:all"

@@ -45,7 +45,7 @@ flowchart TD
     %% Gap annotations
     STRUCT -.->|now: skills| DONE1["✓ section-readiness / section-planner\nbuilt — /check-section-readiness, /plan-section"]
     APPEXP -.->|built| GAP2["app-explorer built ✓ driving tool defined\n(Playwright MCP / collection runner) named + preflight-checked;\nhost project declares/connects it in config"]
-    STYLE_F -.->|built| DONE3["✓ document-section: the whole chain\nwith a resumable ledger — /document-section"]
+    STYLE_F -.->|built| DONE3["✓ section-documenter: the whole chain\nwith a resumable ledger — /document-section"]
 
     classDef skill fill:#d4edda,stroke:#28a745,color:#000
     classDef gap fill:#fff3cd,stroke:#ffc107,color:#000
@@ -67,7 +67,7 @@ flowchart TD
 | Readiness check | `section-readiness` | Classifies a section folder (skeleton / needs-revision / greenfield), emits a JSON verdict |
 | Explore app | `app-explorer` | Explores the live app + API-seeded state, writes `.sources/app-notes.md` |
 | Plan section | `section-planner` | Proposes IA (keep/merge/split/add) for a section, gated on approval |
-| Whole section | `document-section` | Chains readiness → explore → plan → write → resolve markers → fix → review → UA approval → translate → align for one section, with a resumable ledger; stops at the approval gates |
+| Whole section | `section-documenter` | Chains readiness → explore → plan → write → resolve markers → fix → review → UA approval → translate → align for one section, with a resumable ledger; stops at the approval gates |
 | Draft — concept | `concept-doc-writer` | Background topics: how a feature works, what a term means |
 | Draft — user guide | `user-guide-writer` | Task-based procedural docs for the product's UI |
 | Draft — API | `api-doc-writer` | One endpoint per page, API reference format |
@@ -83,23 +83,24 @@ flowchart TD
 | Icon-only controls | `identify-ui-icon` | Finds the Iconify id, SVG or screenshot crop for a control with no text; the writers call it by name |
 | Screenshots from a recording | `extract-sme-screenshots` | Pulls deduplicated screenshots (and, if needed, a transcript) from an SME recording in `.sources/` |
 | SME notes | `convert-sme-input` | Turns a transcript or raw notes into a structured `.sources/sme-interview.md` |
+| Ticket flow | `ticket-flow` | Shows each docs ticket's state and next step, prints the daily runner's plan, and runs the named tickets by hand (outside the WIP limits) through the `ticket-state` runner |
 
-The full per-page pipeline from an SME video to a style-reviewed draft (`/doc-from-interview`) and the link-TODO repair (`/fix-doc-todos`) are commands, listed below. See [`SKILLS-INDEX.md`](plugins/doc-writer-toolkit/SKILLS-INDEX.md) for the canonical list with invocation examples.
+The full per-page pipeline from an SME video to a style-reviewed draft (`sme-interview-to-doc`, `/doc-from-interview`) and the link-TODO repair (`doc-todo-fixer`, `/fix-doc-todos`) are skills run through their commands, listed below. See [`SKILLS-INDEX.md`](plugins/doc-writer-toolkit/SKILLS-INDEX.md) for the canonical list with invocation examples.
 
 ## Commands quick reference
 
 | Command | Underlying skill |
 |---|---|
-| `/doc-from-interview` | `extract-sme-screenshots` → `convert-sme-input` → the writer chosen by `type:` (`concept-doc-writer`, `user-guide-writer` or `api-doc-writer`) → `doc-style-reviewer` → `doc-style-fixer` |
+| `/doc-from-interview` | `sme-interview-to-doc`: `extract-sme-screenshots` → `convert-sme-input` → the writer chosen by `type:` (`concept-doc-writer`, `user-guide-writer` or `api-doc-writer`) → `doc-style-reviewer` → `doc-style-fixer` |
 | `/create-api-doc` | `api-doc-writer` |
 | `/check-section-readiness` | `section-readiness` |
 | `/plan-section` | `section-planner` |
-| `/document-section` | `document-section`: `section-readiness` → `app-explorer` → `section-planner` → the writer by `docType` → `resolve-markers` → `doc-style-fixer` → `doc-style-reviewer` → `doc-translator` → `doc-alignment-checker` |
+| `/document-section` | `section-documenter`: `section-readiness` → `app-explorer` → `section-planner` → the writer by `docType` → `resolve-markers` → `doc-style-fixer` → `doc-style-reviewer` → `doc-translator` → `doc-alignment-checker` |
 | `/explore-and-resolve` | `app-explorer` → `resolve-markers` |
 | `/review-doc-style` | `doc-style-reviewer` |
 | `/fix-doc-style` | `doc-style-fixer` |
 | `/style-pass` | `doc-style-pass`: `doc-style-reviewer` → `doc-style-fixer` → one numbered list |
-| `/fix-doc-todos` | its own steps resolve link-type `{/* ToDo */}` markers, then `doc-alignment-checker` |
+| `/fix-doc-todos` | `doc-todo-fixer`: resolves link-type `{/* ToDo */}` markers, then `doc-alignment-checker` |
 | `/translate-doc` | `doc-translator` |
 | `/check-doc-alignment` | `doc-alignment-checker` |
 | `/translate-locales` | `locale-translator` |

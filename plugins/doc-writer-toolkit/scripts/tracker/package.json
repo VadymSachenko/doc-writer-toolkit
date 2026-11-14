@@ -1,0 +1,9 @@
+{
+  "name": "tracker",
+  "private": true,
+  "type": "module",
+  "description": "A tracker module for a docs pipeline, in statuses and transitions: list cards, read a card, find a card, follow the board's actions, download an attachment, comment, move, label, describe, create. A Trello adapter sits behind the interface. No dependencies.",
+  "bin": { "tracker": "./tracker.mjs" },
+  "engines": { "node": ">=18.3" },
+  "scripts": { "test": "node --test test/tracker.test.mjs" }
+}

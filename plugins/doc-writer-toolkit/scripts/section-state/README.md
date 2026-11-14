@@ -1,12 +1,12 @@
 # section-state
 
-Keeps the ledger of a `document-section` run, `<section>/.sources/section-state.json`, and checks it against the files: which stages are done, which went stale, what runs next and which gate is open. Node, no dependencies. No AI is involved: the skill runs the stages and makes the judgment calls, the script does the hash bookkeeping, where a model slips across ten pages and six stages.
+Keeps the ledger of a `section-documenter` run, `<section>/.sources/section-state.json`, and checks it against the files: which stages are done, which went stale, what runs next and which gate is open. Node, no dependencies. No AI is involved: the skill runs the stages and makes the judgment calls, the script does the hash bookkeeping, where a model slips across ten pages and six stages.
 
 ```
 node ${CLAUDE_PLUGIN_ROOT}/scripts/section-state/section-state.mjs <command> <section> [options]
 ```
 
-Run it from the docs repo root (or pass `--root`). Needs Node 18.3+ and `git`. Tests: `npm test` in this folder (offline, throwaway git repos).
+Run it from the docs repo root (or pass `--root`). Needs Node 18.3+ and `git`. Tests: `npm test` in this folder (offline, throwaway git repos). It takes the id-only predicate from `../doc-align/lib/idonly.mjs`, so the two scripts must stay in the same plugin.
 
 The ledger's fields, the done and stale rules and the gates are in `${CLAUDE_PLUGIN_ROOT}/context/section-state.md`. This file covers the commands, flags and output.
 
@@ -37,7 +37,7 @@ Output is JSON on stdout. A refusal or a usage error prints `{"ok": false, "erro
 | `--pair <id>` | The root pair id, stored when the ledger is created. Only when the host declares more than one pair. |
 | `--saved-as <path>` | With `--stage write --status done` and one page: the writer saved the page at another path than the plan's. The ledger entry follows the file (new `id` and `enPath`) and the run log notes the plan's path. Nothing is renamed. A path outside the section is refused (exit 1). |
 
-What a `done` checks and records, the review rounds and the date check are in `${CLAUDE_PLUGIN_ROOT}/context/section-state.md` ("When a stage is done", "Review rounds", "What makes a done stage stale"). A `done` is written only when that holds. `running` and `failed` check nothing. `failed` on a page stage blocks the page (`blocked: { stage, reason }`); `running` or `done` at that stage clears it. `translate` done stores `HEAD` as the record's `head` and the page's `syncBase`.
+What a `done` checks and records, the review rounds and the date and id-only check are in `${CLAUDE_PLUGIN_ROOT}/context/section-state.md` ("When a stage is done", "Review rounds", "What makes a done stage stale"). A `done` is written only when that holds. `running` and `failed` check nothing. `failed` on a page stage blocks the page (`blocked: { stage, reason }`); `running` or `done` at that stage clears it. `translate` done stores `HEAD` as the record's `head` and the page's `syncBase`.
 
 **The plan file.** `section-plan.json` needs a `pages` array. Each entry has `action` (`keep`, `merge`, `split`, `add` or `delete`), `path` (the page from the repo root, inside the section and the UA root), `docType` (`concept`, `user-guide` or `api`; not for `delete`), `mergesFrom` (a non-empty array, for `merge`) and `splitsFrom` (a path, for `split`). `order` defaults to the entry's position. Other fields (`title`, `rationale`, …) are kept or ignored. An `api` entry is listed, not run, so its `path` may be anywhere (the API reference root). A plan path that differs from a readiness report's page only in the extension (`.md`, `.mdx`) is that page, at the readiness report's path.
 
@@ -67,7 +67,7 @@ What a `done` checks and records, the review rounds and the date check are in `$
       "enPath": "i18n/en/docusaurus-plugin-content-docs/current/reports/export-report/export-report.md",
       "action": "add", "docType": "user-guide", "order": 2, "from": [],
       "exists": true, "enExists": false,
-      "handEdited": false, "enHandEdited": false, "unknownDraft": false, "dateBump": false,
+      "handEdited": false, "enHandEdited": false, "unknownDraft": false, "dateBump": false, "idOnly": false,
       "blocked": null,
       "stages": { "write": "done", "fix": "done", "review": "done", "uaApproval": "pending", "translate": "pending", "align": "pending" },
       "results": {
@@ -99,13 +99,14 @@ What a `done` checks and records, the review rounds and the date check are in `$
 | `enHandEdited` | The EN page's hash differs from the one `translate` or `align` recorded. |
 | `unknownDraft` | `write` isn't done, yet the file exists with a hash the ledger doesn't know. |
 | `dateBump` | A `translate` is `running` or `failed`, and the UA page differs from the approved version only in its frontmatter dates: the translator saved before the run stopped. The records still hold. |
+| `idOnly` | The UA page was approved, and it differs from the approved version only by an id-only change (`context/doc-rules/project-rules/heading-anchors.md`, "Id-only changes"): heading ids a translator added, here or on a page whose links it rewrote. The records still hold. |
 | `reviewRound` | The round of the last review (`1` or `2`), or `null` before the first. |
 | `reviewAgain` | The last review is done, below round 2, with errors or deviations, and no fix ran after it: the page is due for `fix` again, and `uaApproval` is refused until the next review. |
 | `syncBase` | The `--base` for the page's next `doc-translator --sync`: the `HEAD` of its last `translate`, or `baseCommit` before the first. |
 | `listed` | The plan's deletes, merged-away and split pages, complete `keep` pages and `api` pages, from the ledger. |
 | `outside` | After plan approval: page files in the section that are neither pages of the run nor listed. |
 | `blocked` | `{ id, stage, reason }` per blocked page. |
-| `next` | `{ stage, pages }`: the first stage in chain order that isn't done or skipped, and for a page stage the pages it is due for (blocked pages left out). `stage` is `null` when the chain is complete. A section stage adds its `state`; `translate` adds `uncommitted`, the due pages whose UA file differs from `HEAD` (a `dateBump` page that differs only in its dates doesn't count). |
+| `next` | `{ stage, pages }`: the first stage in chain order that isn't done or skipped, and for a page stage the pages it is due for (blocked pages left out). `stage` is `null` when the chain is complete. A section stage adds its `state`; `translate` adds `uncommitted`, the due pages whose UA file differs from `HEAD` (a `dateBump` or `idOnly` page that differs from `HEAD` only in its dates or by an id-only change doesn't count). |
 | `gate` | `{ name, pages }` or `null`: `plan`, `unknownDraft`, `uaApproval` or `commit`. |
 | `warnings` | Hand edits, a missing page, evidence that changed after the plan approval, pages outside the run. |
 

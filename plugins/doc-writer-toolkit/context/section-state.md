@@ -1,11 +1,11 @@
 ---
 name: section-state
-description: The ledger of a document-section run, .sources/section-state.json — its fields, when a stage counts as done, what makes a done stage stale, and the gates derived from it. The scripts/section-state script reads and writes it; the document-section skill never edits it by hand. Referenced, never copied.
+description: The ledger of a section-documenter run, .sources/section-state.json — its fields, when a stage counts as done, what makes a done stage stale, and the gates derived from it. The scripts/section-state script reads and writes it; the section-documenter skill never edits it by hand. Referenced, never copied.
 ---
 
 # Section state
 
-`document-section` runs one section folder through a chain of skills and stops at approval gates. Between invokes it keeps a ledger in `<section>/.sources/section-state.json`. The ledger records only what the files can't show: verdicts, approvals, and the hash of each file when a stage finished. On every invoke the ledger is checked against the files, and **the files win**.
+`section-documenter` runs one section folder through a chain of skills and stops at approval gates. Between invokes it keeps a ledger in `<section>/.sources/section-state.json`. The ledger records only what the files can't show: verdicts, approvals, and the hash of each file when a stage finished. On every invoke the ledger is checked against the files, and **the files win**.
 
 The ledger is written and read only through `${CLAUDE_PLUGIN_ROOT}/scripts/section-state/section-state.mjs` (`status` and `record`, see its `README.md`). A stale stage is never stored: `status` derives it on every call.
 
@@ -136,7 +136,7 @@ The page's state comes from the readiness report. Nothing is deleted or moved: t
 | `resolve` | no page was written after it ran | the plan approval is done | each page's current hash as its `uaHash` |
 | `fix` | the record's `uaHash` equals the page's current hash | | the same as `write` |
 | `review`, `uaApproval` | the record's `uaHash` equals the page's current hash | `uaApproval`: no other review round is due | the hash it saw; `review` its round |
-| `translate` | the record's `uaHash` equals the current hash, and the EN page exists | the date check (below) | both hashes, as the stage's and the page's, and `HEAD` |
+| `translate` | the record's `uaHash` equals the current hash, and the EN page exists | the date and id-only check (below) | both hashes, as the stage's and the page's, and `HEAD` |
 | `align` | the record's `uaHash` and `enHash` equal the current hashes | the EN page exists | both hashes |
 
 A page stage is done only when the page stage before it is done, and a page stage's `done` also needs the plan approval to be done. A `done` is recorded only when all of that holds, so an approval can't be recorded on a page whose review is stale.
@@ -158,15 +158,17 @@ A review below round 2 with errors or deviations sends the page back to `fix` (`
 | The section's page set changed, or readiness or explore ran again, before plan approval | readiness, then the plan and its approval |
 | A plan file changed after approval | `planApproval`. Gate G1 comes back. Nothing written is touched; on the new approval, pages no longer in the plan are dropped from the ledger and reported |
 | The readiness report, the app notes or the page set changed after approval | nothing; `status` warns that the plan may be out of date |
-| The UA page changed outside the pipeline (its hash differs from `uaHash`) | that page's `fix`, `review`, `uaApproval`, `translate`, `align` |
+| The UA page changed outside the pipeline (its hash differs from `uaHash`), other than by an id-only change after its approval (below) | that page's `fix`, `review`, `uaApproval`, `translate`, `align` |
 | A pipeline write (`write`, `resolve`, `fix`) | that page's later stages, by chain order |
 | The EN page changed by hand (its hash differs from `enHash`) | `align` only. EN is never translated again over a hand edit without the user's word |
 | A page written after `resolve` ran | `resolve` |
 | A page added by hand after approval | nothing; `status` lists it under `outside` |
 
-Each pipeline write updates the page's `uaHash`, so the pipeline's own edits never look like hand edits. The translator also sets `last_update.date` in the UA page (`doc-translator`, Step 5). When `record --stage translate --status done` finds that the UA page differs from the approved version only in its frontmatter `date:` keys (a `date:` key at the start of a line, or in a flow map; not the text `date:` inside a value), the records made on the approved version carry over to the new hash, and nothing goes stale. The approved version must be in a commit reachable from `HEAD` for that check, not merely staged: the script reads it from git, and refuses the record otherwise.
+Each pipeline write updates the page's `uaHash`, so the pipeline's own edits never look like hand edits. The translator adds the missing UA heading ids, with the links to them on this and other pages (`doc-translator`, Step 5b): an **id-only change**, as `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/heading-anchors.md` defines it ("Id-only changes"), which keeps the approvals. It copies the UA `last_update.date` into EN and leaves the UA date alone; a translator of an earlier version set the UA date too. When `record --stage translate --status done` finds that the UA page differs from the approved version only by an id-only change, or only in its frontmatter `date:` keys (a `date:` key at the start of a line, or in a flow map; not the text `date:` inside a value), or both, the records made on the approved version carry over to the new hash, and nothing goes stale. A changed or removed id, a changed heading text or any other byte is an edit. The approved version must be in a commit reachable from `HEAD` for that check, not merely staged: the script reads it from git, and refuses the record otherwise.
 
-A translation that stopped after the translator saved (its record `running` or `failed`) leaves the same date-only difference. `status` reads it the same way: the records still hold (`dateBump`), the commit gate ignores the date, and the next `translate` done carries the records over.
+The predicate is `scripts/doc-align/lib/idonly.mjs`, the one implementation the scripts share. A link rewritten to another page's new id counts when that page is a page of the run whose heading got the id; the run keeps the version before the ids as the approval's `idBase` when it carries the records over.
+
+An approved page that another page's translation changed by an id-only change (its links rewritten to the new ids) keeps its records too: `status` reads it as unchanged (`idOnly`), and the commit gate doesn't count it. A translation that stopped after the translator saved (its record `running` or `failed`) leaves a date-only or id-only difference. `status` reads it the same way: the records still hold (`dateBump`, `idOnly`), the commit gate ignores it, and the next `translate` done carries the records over.
 
 ## Gates
 

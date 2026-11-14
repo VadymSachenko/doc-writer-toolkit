@@ -27,6 +27,7 @@ Load these files at the start of the task. Do not load others unless the user re
 - `<kit>/glossary-en.md` — canonical EN terminology, read with `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/glossary-format.md`.
 - `<kit>/product-facts.md` — cross-cutting facts about the product and its API. Always applicable background.
 - `<kit>/product-rules.md`, if present — rules for this product only (its name, key terms, UI section names). Rank 0, like `formatting-conventions.md`.
+- `<kit>/example-values.md`, if present — the values request and response samples use: system values and example values, read with `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/example-values-format.md`, which says what a writer does with them.
 
 **Project rules:**
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/formatting-conventions.md` — rank-0 project formatting conventions (what bold/italic/code font mean here, placeholder form, one-entity-one-render, code-entity vs. human concept). Outranks everything else loaded for this task, including this skill's own body. API reference pages are always English, so only its Core section and English section apply.
@@ -111,7 +112,8 @@ Wait for the user's answers before Step 5.
 Apply the API reference template. Single endpoint per page.
 
 Rules:
-- **Never invent API facts.** Fields, headers, error codes, status values — if a fact is not in the sources, flag it with `{/* NEEDS CONFIRMATION: ... */}`, don't guess. **Exception:** adjust obviously malformed example values in JSON samples (e.g. `Test`, `7777777`) to realistic values that correlate with field names and types. Flag every such adjustment with `// NEEDS CONFIRMATION: original value was <ORIGINAL_VALUE>` as an inline JSON comment. Use Ukraine-based values where applicable (Ukrainian phone format, common Ukrainian names, etc.).
+- **Never invent API facts.** Fields, headers, error codes, status values — if a fact is not in the sources, flag it with `{/* NEEDS CONFIRMATION: ... */}`, don't guess. **Exception, when the kit has no `example-values.md`:** adjust obviously malformed example values in JSON samples (e.g. `Test`, `7777777`) to realistic values that correlate with field names and types. Flag every such adjustment with `// NEEDS CONFIRMATION: original value was <ORIGINAL_VALUE>` as an inline JSON comment. Use Ukraine-based values where applicable (Ukrainian phone format, common Ukrainian names, etc.).
+- **When the kit has `example-values.md`,** values in request and response samples follow the writers' row of `example-values-format.md` ("What each skill does") instead. That covers a brief's sample too: a malformed or real-looking value in it (`Test`, `7777777`, a real person's name or number) becomes the file's value for that field, and each value replaced is a line in the Step 8 report. A value that an error example shows on purpose (the invalid input of a validation error) stays as the brief has it.
 - **Apply the glossary.** Replace synonyms with canonical EN terms (Partner, Transaction, Webhook, etc.).
 - **Sentence style, UI labels, status values, placeholders, code-vs-concept rendering:** follow `formatting-conventions.md`'s Core section (Ж1–Ж8) and its English section — do not restate them here.
 - **Icon-only controls**, when the page names one (a UI setting in Prerequisites, for example): follow Ж8 of `formatting-conventions.md`, Core and English. When the render needs an Iconify id or an icon crop that the evidence doesn't give, invoke the `identify-ui-icon` skill.
@@ -134,6 +136,7 @@ Before writing to disk, check:
 - On a `uk` page, every heading from `##` down ends with a well-formed, unique `{/* #id */}` per `heading-anchors.md`, and every `#…` link to a heading uses an id that exists
 - Every link to another doc page follows `internal-links.md` (its pair's UA URL prefix + path, no `.md`); no `./`/`../` page links, no hardcoded `/docs/` (asset links `./.assets/…` are exempt)
 - Every fact is traceable to an input source or a user answer from Step 4
+- With the kit's `example-values.md`: every value in a request or response sample follows the writers' row of `example-values-format.md`, each brief value replaced and each value added to Example values is named in the report, and no error example lost its intended invalid input. Without it: each adjusted value carries its `// NEEDS CONFIRMATION: original value was …` comment
 - All required template sections are present; optional ones are either filled or omitted (not left as empty placeholders)
 - UI labels, status values, placeholders, and code-vs-concept rendering follow `formatting-conventions.md` Ж1–Ж4
 - Every icon-only control the page names follows Ж8: a bold name from the evidence with a noun, or a description with a `NEEDS CONFIRMATION` marker

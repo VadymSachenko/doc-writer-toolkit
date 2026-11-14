@@ -39,16 +39,55 @@ verbatim, lands on the right heading in every locale.
    → `## Transaction statuses`), so Docusaurus generates the same id, even when a closer translation of
    the UA text exists: `## Перегляд транзакцій {/* #transaction-list */}` → `## Transaction list`. Give
    the EN heading the id explicitly only when the id's words can't head the section: the id names a
-   parent (`## Reference information {#reference-information-create-payment}`), or its words say
-   something the UA heading no longer says.
+   parent (`## Reference information \{#reference-information-create-payment}`), or its words say
+   something the UA heading no longer says. **Write an explicit id with the backslash, `\{#id}`.**
+   A bare `{#id}` is read by MDX as an expression and fails the build in some hosts ("Could not parse
+   expression with acorn"); `\{#id}` builds everywhere, and Docusaurus reads it as the heading's id. Readers
+   (the scripts, the checks) accept both forms, because existing pages may have either; no tool rewrites
+   one into the other.
 7. **Further locales.** The comment stays verbatim; only the heading text is translated.
 8. **Adding an id to an existing heading** changes that heading's fragment. Whoever adds it also
    rewrites, in the same change, every link that used the old fragment (search the content roots for
    `#<old fragment>`).
 9. **No placeholder left in an id.** A template's `{slug}` (or any `{…}`) left inside an explicit
-   `{#…}` id breaks the MDX build: MDX evaluates the inner braces as an expression
+   `\{#…}` id breaks the MDX build: MDX evaluates the inner braces as an expression
    (`ReferenceError: slug is not defined`). Inside a `{/* #… */}` comment it builds, but the id comes out
    wrong (`reference-information-{slug}`). Every id is filled in before the page is saved.
+10. **A missing id is added at EN translation.** See "Who adds a missing id".
+
+## Who adds a missing id
+
+The **translator** (`doc-translator`), while it translates the page to EN, whole or in sync mode. Every
+UA heading of the page from `##` down without a comment gets the **anchor of its EN heading**: the EN
+heading's explicit `\{#id}` (or `{#id}`), else the id Docusaurus generates from its text. So an existing EN anchor,
+which links may already use, never changes; a heading new to EN gets its id from the EN text the
+translator writes (rule 2). In the same change it rewrites every link to the heading's old fragment
+(rule 8). `scripts/doc-align` (`--propose-ids --write`) computes both, so the result is an id-only
+change (below).
+
+Nobody adds a missing id as a side job of another task: the writers give the headings they draft their
+comment (rule 2), and the updater adds one to an existing heading only when the brief asks.
+
+## Id-only changes
+
+Two predicates, defined here once. Skills and scripts cite them by name and never restate them. The id-only
+change has one implementation, `scripts/doc-align/lib/idonly.mjs` (`isIdOnlyChange`), which `section-state` uses.
+
+**Id-only change.** A UA change is id-only when its only differences from the approved version are (1)
+`{/* #id */}` comments added to headings that had none, and (2) link fragments rewritten from such a
+heading's old fragment to its new id. Anything else makes it a real change: a changed or removed id, a
+changed heading text, or any other edit. A heading's old fragment is the slug Docusaurus made of its
+text. A link to another page counts when its path resolves to a page of the same change whose heading
+got that id; one that doesn't resolve is a real change. An id-only change keeps the approvals: what was
+reviewed and approved on the page before it still stands.
+
+**What locale-sync splices.** The id-only change, plus a changed comment: (1) a `{/* #id */}` comment
+added to a heading that had none, or changed on a heading that had one, its level and text unchanged,
+and (2) link fragments rewritten from such a heading's old fragment (the slug of its text, or its old
+id) to its new id. A further locale copies the comment and every link target verbatim (rule 7), so
+`scripts/locale-sync` writes these into every locale with no translator. A changed comment is not an
+id-only change: it changes a published id (rule 4), so it is made only to correct an id that differs
+from the EN anchor.
 
 ## Examples
 
@@ -68,7 +107,7 @@ EN:
 ## Prerequisites
 ## Transaction statuses
 ## Archive page
-## Reference information {#reference-information-create-payment}
+## Reference information \{#reference-information-create-payment}
 
 Select the [filters](#reference-information-create-payment) you need.
 For more information, see [statuses](/archive/archive#transaction-statuses).
@@ -82,8 +121,10 @@ For more information, see [statuses](/archive/archive#transaction-statuses).
   comment when it rewords the heading; adds a comment to an existing heading only when the brief asks,
   and then follows rule 8.
 - **Translator** (`doc-translator`): rule 6. A UA heading without a comment is legacy content: derive
-  the EN heading from its text and report the missing id.
-- **Locale translation**: rule 7.
+  the EN heading from its text, then give the UA heading the EN anchor and rewrite the links to its old
+  fragment ("Who adds a missing id").
+- **Locale translation**: rule 7. `locale-sync` splices what "What locale-sync splices" covers, with no
+  translator.
 - **Checker** (`doc-alignment-checker`): reports a UA heading from `##` down without a well-formed
   comment, a repeated id, and an EN heading with a comment. Its report says what adding a missing id
-  changes (rule 8).
+  changes (rule 8) and that the translator's step adds it.

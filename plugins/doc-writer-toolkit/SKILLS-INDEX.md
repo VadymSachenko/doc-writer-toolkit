@@ -2,21 +2,23 @@
 
 Canonical list of what the plugin ships. One line per skill; the invocation phrasing is what triggers it (all skills are explicit-invocation only). `WORKFLOW.md` at the repo root maps these to the writing process.
 
-## Skills (19)
+## Skills (23)
 
 | Skill | What it does | Invoke with |
 |---|---|---|
 | `section-readiness` | Read-only scan of one section folder: pages classified stub vs complete, sources and screenshots inventoried, app access assessed; JSON report | "section-readiness: docs/transactions" |
 | `app-explorer` | Explores the live app for a section (API-seeded scenarios, Playwright screenshots, observed behaviour) and writes `.sources/app-notes.md` | "app-explorer: explore docs/transactions" |
 | `section-planner` | Proposes a page inventory for a section (keep / merge / split / add / delete) as `section-plan.md` and `section-plan.json`, gated on approval | "section-planner: docs/balance" |
-| `document-section` | Runs one section through the whole chain: readiness, explore, plan, then per page write, resolve markers, fix, review, UA approval, EN translation and alignment. Keeps a resumable ledger (`.sources/section-state.json`) and stops only at the approval gates; never commits | "/document-section docs/reports" |
+| `section-documenter` | Runs one section through the whole chain: readiness, explore, plan, then per page write, resolve markers, fix, review, UA approval, EN translation and alignment. Keeps a resumable ledger (`.sources/section-state.json`) and stops only at the approval gates; never commits | "/document-section docs/reports" |
 | `convert-sme-input` | Turns raw SME notes or transcripts into a structured `.sources/sme-interview.md` | "convert-sme-input: docs/routing/.sources/transcript.txt" |
 | `extract-sme-screenshots` | Extracts deduplicated screenshots (and, if needed, an auto-transcribed transcript) from a recording in a page's `.sources/` | "extract-sme-screenshots for docs/routing" |
+| `sme-interview-to-doc` | One page from a recorded SME interview (or an `app-notes.md`) to a style-checked draft: `extract-sme-screenshots` → `convert-sme-input` → the writer chosen by `type:` → `doc-style-reviewer` → `doc-style-fixer`, with optional code verification under a confidentiality rule and live UI screenshots | "/doc-from-interview docs/payments type:user-guide" |
 | `user-guide-writer` | Writes a procedural user guide page in the project's declared language (UA: Операції / Етапи structure) | "use user-guide-writer to document the Filter transactions page" |
 | `concept-doc-writer` | Writes a concept topic (background, lifecycle, how-it-works) in the declared language | "use concept-doc-writer to explain routing" |
 | `api-doc-writer` | Writes one API reference page per endpoint from an API brief | "use api-doc-writer to document Create payout transaction" |
 | `doc-page-updater` | Applies a change brief to an existing approved page with the smallest edit; writes `update-report.md` for the scoped review and sync translation that follow | "doc-page-updater: page docs/currencies/currencies.md, brief …/change-brief.md" |
 | `resolve-markers` | Resolves `{/* NEEDS CONFIRMATION */}` and `{/* ToDo */}` markers in a section from app-notes, SME notes, screenshots and the live app | "resolve-markers: docs/transactions" |
+| `doc-todo-fixer` | Scans every content root for `{/* ToDo */}` and `{/* NEEDS CONFIRMATION */}` markers, sorts them into four buckets and asks before acting, then resolves the ones a link to an existing page fixes and runs `doc-alignment-checker` on each changed page; facts go to `resolve-markers` | "/fix-doc-todos", "/fix-doc-todos docs/webhooks" |
 | `doc-style-reviewer` | Read-only style/grammar findings report under one guide profile (`gdsg`, `mssg-en`, `mssg-ua`, `ua-grammar`); scope mode reviews only changed blocks | "review-doc-style docs/balance/balance.md", "… --changed origin/main" |
 | `doc-style-fixer` | Applies a reviewer report: mechanical fixes in batch, substantive rewrites with consent (or pre-approved via `apply:`), judgment calls asked | "fix-doc-style docs/balance/balance.md apply:mechanical,substantive" |
 | `doc-style-pass` | One style pass for the person who approves the page: the review, then the fixer with `apply:mechanical,substantive`, then one numbered «before» → «after» list with the judgment questions after it. Undoes the items named by number, logs every decision in `<state root>/style-decisions.jsonl`, and proposes a `product-rules.md` exception line for a rule rejected in three passes in a row | "/style-pass docs/balance/balance.md", "… undo:2,5" |
@@ -25,25 +27,28 @@ Canonical list of what the plugin ships. One line per skill; the invocation phra
 | `doc-alignment-checker` | Checks a UA page and its EN counterpart for structural alignment | "check-doc-alignment balance/balance" |
 | `cleanup-unused-screenshots` | Moves candidate screenshots a page never referenced into `_unused/` (never deletes) | "cleanup-unused-screenshots for docs/routing" |
 | `identify-ui-icon` | Finds the picture for an icon-only control in the project's `Icon rendering:` form: an Iconify id (evidence first, then the Iconify API), its SVG, or a screenshot crop; falls back to a crop or a marker, never guesses an id and never names the control. The writers call it by name | "identify-ui-icon: the trash button in docs/payments/.assets/payments-page.png" |
+| `ticket-flow` | The manual entry point of the ticket flow: each docs ticket's state, next step and open gate from `ticket-state status`, the runner's plan (`--dry-run`), a manual run of the named tickets after the user confirms, `handover`, and a mode or limit change asked in plain words (`ticket-state set`). The runner decides every step; the skill records nothing itself | "ticket-flow status", "use ticket-flow to run ticket 1234", "ticket-flow settings: one at a time" |
+| `ticket-report-reader` | Reads the ticket flow's report of a date (today by default) from the host's state folder: what waits for the owner first, then the report as written. Writes nothing | "/ticket-report", "ticket-report-reader 2026-11-10" |
 
-## Commands (15)
+## Commands (16)
 
 | Command | Underlying skill(s) |
 |---|---|
 | `/check-section-readiness` | `section-readiness` |
 | `/plan-section` | `section-planner` |
-| `/document-section` | `document-section`: `section-readiness` → `app-explorer` → `section-planner` → the writer by `docType` → `resolve-markers` → `doc-style-fixer` → `doc-style-reviewer` → `doc-translator` → `doc-alignment-checker` |
+| `/document-section` | `section-documenter`: `section-readiness` → `app-explorer` → `section-planner` → the writer by `docType` → `resolve-markers` → `doc-style-fixer` → `doc-style-reviewer` → `doc-translator` → `doc-alignment-checker` |
 | `/explore-and-resolve` | `app-explorer` → `resolve-markers` |
-| `/doc-from-interview` | `extract-sme-screenshots` → `convert-sme-input` → the writer chosen by `type:` (`concept-doc-writer`, `user-guide-writer` or `api-doc-writer`) → `doc-style-reviewer` → `doc-style-fixer`, with optional code verification and live UI screenshots |
+| `/doc-from-interview` | `sme-interview-to-doc`: `extract-sme-screenshots` → `convert-sme-input` → the writer chosen by `type:` (`concept-doc-writer`, `user-guide-writer` or `api-doc-writer`) → `doc-style-reviewer` → `doc-style-fixer`, with optional code verification and live UI screenshots |
 | `/create-api-doc` | `api-doc-writer` |
 | `/update-doc-page` | `doc-page-updater` |
 | `/review-doc-style` | `doc-style-reviewer` |
 | `/fix-doc-style` | `doc-style-fixer` |
 | `/style-pass` | `doc-style-pass`: `doc-style-reviewer` → `doc-style-fixer` (`apply:mechanical,substantive`) → one numbered list to undo by number |
-| `/fix-doc-todos` | its own steps resolve link-type `{/* ToDo */}` markers across the project, then `doc-alignment-checker` checks each changed page |
+| `/fix-doc-todos` | `doc-todo-fixer`: resolves link-type `{/* ToDo */}` markers across the project, then `doc-alignment-checker` checks each changed page |
 | `/translate-doc` | `doc-translator` |
 | `/check-doc-alignment` | `doc-alignment-checker` |
 | `/translate-locales` | `locale-translator` |
 | `/identify-icon` | `identify-ui-icon` |
+| `/ticket-report` | `ticket-report-reader` |
 
-Commands are thin wrappers: they bind arguments to paths and hand off to the skill's workflow. Shared procedures every skill points to instead of copying: `context/project-paths.md` (content roots, language, the host's product kit), `context/style-guide-registry.md` (guide tokens and routed loading), `context/changed-blocks.md` (what "the changed part of a page" means), `context/ui-labels.md` (the UI label check at the start of a docs task), `context/locale-translation.md` (rules for translating into the further locales), `context/doc-rules/project-rules/screenshot-locales.md` (which locales a screenshot is captured in, and when a new set replaces the old one), `context/section-state.md` (the `document-section` ledger). The scripts the locale pipeline runs, `scripts/ui-labels/` and `scripts/locale-sync/`, the one `doc-alignment-checker` runs, `scripts/doc-align/`, the one the screenshot captures run, `scripts/screenshot-locales/`, and the one `document-section` runs, `scripts/section-state/`, each have a README.
+Commands are thin wrappers: they bind arguments to paths and hand off to the skill's workflow. Shared procedures every skill points to instead of copying: `context/project-paths.md` (content roots, language, the host's product kit), `context/style-guide-registry.md` (guide tokens and routed loading), `context/changed-blocks.md` (what "the changed part of a page" means), `context/ui-labels.md` (the UI label check at the start of a docs task), `context/locale-translation.md` (rules for translating into the further locales), `context/doc-rules/project-rules/screenshot-locales.md` (which locales a screenshot is captured in, and when a new set replaces the old one), `context/section-state.md` (the `section-documenter` ledger). The scripts the locale pipeline runs, `scripts/ui-labels/` and `scripts/locale-sync/`, the one `doc-alignment-checker` runs, `scripts/doc-align/`, the one the screenshot captures run, `scripts/screenshot-locales/`, and the one `section-documenter` runs, `scripts/section-state/`, each have a README.

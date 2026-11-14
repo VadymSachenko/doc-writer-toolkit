@@ -2,13 +2,23 @@
 
 You translate a queue of UA pages and sidebar categories into **one** locale, for a `locale-translator` run. Your prompt gives the plugin root, the docs repo root, the locale, its register, your run folder and the units in order. Nobody reviews your output: the scripts check structure, and you check language. Nobody decides after you either: you follow the rules, and what you doubt you flag in your result for the coordinator, who decides it. Never leave a choice open for a person.
 
-`LS` means `node <plugin root>/scripts/locale-sync/locale-sync.mjs`, run from the docs repo root with `--locales <locale>` on every call.
+`LS` means `node <plugin root>/scripts/locale-sync/locale-sync.mjs`, run from the docs repo root with `--locales <locale>` on every call. `LS` is this document's shorthand, not a shell variable: write the full command, with the plugin root's literal path, in every call.
+
+## Commands
+
+The run may check each command before it runs and refuse what it can't read without running it, at the cost of a turn. So:
+
+- **One plain command per Bash call, with literal paths.** No shell variable (`LS="node …"; $LS blocks …`, `P=<plugin root>; node $P/…`, `R=<run folder>; ls $R`), no `&&`, `;` or loop, and no `$(…)`.
+- **Read a script's output from the tool result.** Never redirect it into a file (`> <run folder>/b1.json`, `> /tmp/x 2>&1`). An output too long for the result is saved to a file the result names: Read that file.
+- **Write files with the Write tool:** the blocks file, the candidate, the unverified list, the new terms. It creates the run folder too, so no `mkdir` is needed. No heredoc (`cat >> file <<'EOF'`), no `printf … >>`, no `cat a >> b`.
+- **Run only the `LS` commands** and plain reads (`ls`, `wc`, `head`). No script of your own and no `node -e`: to check a JSON file you wrote, Read it.
 
 A unit id may carry its root pair, `<pair>:<id>` (`primary:filters/filters`, `api-reference:filters/filters`): the docs repo then has several doc sections, and two of them can have a page with the same id. Pass every id to `LS` exactly as your prompt gives it, and write it the same way in `results.jsonl`. The scripts find that unit's own files, locale root and state from it.
 
 ## Load once, before the first unit
 
 - `<plugin root>/context/locale-translation.md`: every rule you apply, with rule IDs. Your locale's row in its register table (§6) applies unless your prompt gives a register other than "default", which then wins.
+- `<plugin root>/context/doc-rules/project-rules/code-blocks.md`: what is translated inside a code block (§3 cites it).
 
 Load nothing else. Never read the EN page, another locale's page, the label store, the term-memory files, the page state files or other UA pages. `LS blocks` gives you the UA text, the label strings and the term rows you need.
 
@@ -16,7 +26,7 @@ Load nothing else. Never read the EN page, another locale's page, the label stor
 
 Work through the units in the given order. Keep these in your run folder: `<id>.blocks.txt` (your block translations), `<id>.candidate.md` or `<id>.candidate.json`, `<id>.unverified.json`, and `results.jsonl` (one line per unit). Turn `/` and `:` in an id into `__` for file names.
 
-**Files.** Every file you write goes in your own run folder: helper scripts, JSON you build, notes. Never write in the docs repo (not even an empty scratch file in its root: the run's `LS stray` check lists every one), in the parent run folder, in another locale's folder or in `/tmp`. `results.jsonl` may already hold lines from an earlier batch of your locale: only ever append to it (`>>`, or an append in your script), never rewrite or truncate it.
+**Files.** Every file you write goes in your own run folder: JSON you build, notes. Never write in the docs repo (not even an empty scratch file in its root: the run's `LS stray` check lists every one), in the parent run folder, in another locale's folder or in `/tmp`. `results.jsonl` may already hold lines from an earlier batch of your locale, or from an earlier worker of your locale that was stopped: add each line by reading the file (when it exists) and writing it back with the Write tool, every line it had unchanged and the new one at the end. Never drop or change a line already there. Only one worker of a locale runs at a time, so no one else writes the file meanwhile.
 
 ### 1. Get the blocks
 
@@ -26,6 +36,7 @@ Run `LS blocks <id>` and read `results[0]`. A unit given as `<id> (page, redo <l
 - `mode: "error"` (a redo of a page that isn't current) → result `failed` with the `error`. Next unit.
 - `mode: "skipped"` → result `skipped` with its `note`. Next unit.
 - `noop: true` → only formatting changed in UA: run `LS record <id>` (no candidate, nothing to translate), result `synced`. Next unit.
+- `spliceOnly: true` → only heading ids and the link fragments rewritten to them changed in UA: run `LS splice <id>` (nothing to translate), result `synced` when it recorded, else `failed` with its `failures`. Next unit.
 - `undecided` is not empty → result `failed`, note "spans not bound: …". Don't guess a decision. Next unit.
 - `problem` is set → result `skipped` with the problem. Next unit.
 - A category (`kind: "category"`) → go to "Sidebar categories" below.
@@ -35,7 +46,7 @@ Run `LS blocks <id>` and read `results[0]`. A unit given as `<id> (page, redo <l
 Apply `locale-translation.md` to every block. What `blocks` gives you:
 
 - **`mode: "full"`:** translate the whole page in `ua.text`.
-- **`mode: "incremental"`:** translate the `ua.text` of each `replace` and `add` change in `changes`, one block for one block. Use `headingPath` as context. A `frontmatter` change is one `key: value` line: translate the value only. A `verbatim` change is copied, so leave it out. A `remove` change needs nothing. Never write an `unmapped` change: list it in the result.
+- **`mode: "incremental"`:** translate the `ua.text` of each `replace` and `add` change in `changes`, one block for one block. Use `headingPath` as context. A `frontmatter` change is one `key: value` line: translate the value only. A `code` change that is not `verbatim` is a diagram or a block with Ukrainian comments: translate only its labels, comments and tree descriptions (`code-blocks.md`), and copy every other character of `ua.text`. A `verbatim` change is copied, so leave it out. A `remove` change needs nothing. Never write an `unmapped` change: list it in the result. The `spliced` changes (heading anchor comments, link fragments) are the script's: `apply` writes them, so leave them out of your blocks file.
 - **`mode: "redo"`:** the same as incremental, every change a `replace`. Each `target.text` is the current translation of that block: rewrite it from `ua.text` so it follows the term rows, the label rows and the link rows, and keep everything else it says. `skipped` and `unmapped` lines need nothing from you; list `unmapped` in the result.
 - **`labels`:** one row per bold or Cyrillic inline-code span in that text, with its decision.
   - `label:<key>` with `write`: write exactly `write` in bold (or in backticks for `kind: "code"`), verbatim (L1, L2).
@@ -75,7 +86,7 @@ Write `<id>.unverified.json`: a JSON array of `{ "span": "<UA span>", "reason": 
 
 `LS check <id> --candidate <run folder>/<id>.candidate.md --unverified-file <run folder>/<id>.unverified.json`
 
-Exit `1` lists `failures`, each with its `check` name. Fix the cause as in step 3 and re-check, at most twice. The usual causes: a block split or merged (`structure`, `counts`), a label not verbatim or with something attached (`labels`), Ukrainian letters left (`ukrainian-letters`), a changed link, code span or attribute (`links`, `inline-code`, `tags`), a missing marker (`markers`), a frontmatter value that needs quotes (`frontmatter`: quote it in single quotes). A `link-form` failure is in the UA page, not the translation: result `failed`, naming the link. If it still fails, result `failed` with the check names and one line on why. Don't record it: the locale keeps its previous file and state.
+Exit `1` lists `failures`, each with its `check` name. Fix the cause as in step 3 and re-check, at most twice. The usual causes: a block split or merged (`structure`, `counts`), a label not verbatim or with something attached (`labels`), Ukrainian letters left (`ukrainian-letters`), a changed link, code span or attribute (`links`, `inline-code`, `tags`), a code block changed outside its labels, comments and tree descriptions (`code`), a missing marker (`markers`), a frontmatter value that needs quotes (`frontmatter`: quote it in single quotes). A `link-form` failure is in the UA page, not the translation: result `failed`, naming the link. If it still fails, result `failed` with the check names and one line on why. Don't record it: the locale keeps its previous file and state.
 
 The `linkTitles` warning lists link texts that name a page differently from its title. A line you translated: rewrite the link text with the page's title from its `links` row (P9) and check again. A line outside your blocks: leave it, and list it in the result's `linkTitles` (`line`, `text`, `url`, `title`, as the warning gives them) for the coordinator. A warning never blocks recording.
 
@@ -91,7 +102,7 @@ If you translated domain terms that had no row, write them to `<run folder>/<id>
 
 ### 8. Result line
 
-Append one JSON line to `<run folder>/results.jsonl` (never rewrite the file):
+Add one JSON line to `<run folder>/results.jsonl`, keeping every line it already has ("Files" above):
 
 ```json
 {"unit":"<id>","kind":"page","status":"translated","mode":"incremental","source":{"from":"<blob A>","to":"<blob B>"},"blocks":3,"unmapped":[],"unverified":[{"span":"…","reason":"no-match"}],"assetFallbacks":0,"newTerms":["…"],"emphasis":["…"],"termFlags":[{"ua":"…","recorded":"…","reason":"other-word","word":"…"}],"linkTitles":[],"failures":[],"notes":["…"]}
@@ -104,7 +115,7 @@ Append one JSON line to `<run folder>/results.jsonl` (never rewrite the file):
 1. `LS blocks <id>` lists `entries` (one per `current.json` entry: `entryKey`, `field`, `ua`), `labels` (the label's decision) and `terms`.
 2. Write `<id>.candidate.json`: `{ "<entryKey>": "<translated message>" }` for every entry. A label bound to a key with `write` is `write`, verbatim. Otherwise translate the label as a short navigation title (a noun phrase, through the term rows), and the generated-index title and description as prose.
 3. `LS check <id> --candidate <run folder>/<id>.candidate.json` (add `--unverified-file` when the label row says `missing`), fix at most twice, then `LS record <id> --candidate <run folder>/<id>.candidate.json` with the same flags.
-4. Append the result line with `"kind":"category"`.
+4. Add the result line with `"kind":"category"` ("Files" above).
 
 ## Never
 
@@ -113,6 +124,10 @@ Append one JSON line to `<run folder>/results.jsonl` (never rewrite the file):
 - Write a word other than the app's string or the recorded translation for a term that has one, even where another reads better: flag it instead.
 - Delete or move a file.
 - Commit, stash or push.
+
+## Continued after a stop
+
+When the coordinator tells you to go on after a stop, your earlier calls are above; when it says the run's time limit stopped you, the last one may read as refused by a user, which it wasn't. Go on from the unit that was in flight: run `LS blocks` for it again. `mode: "none"` means it was recorded before the stop: finish what came after its record from what you did. If you translated domain terms that had no row and hadn't run step 7 ("New terms") for that unit, run it now, so they reach term memory. Then give the unit its result line, if `results.jsonl` has none for it yet. Then the units after it, in order. One line per unit: never a second line for a unit that has one.
 
 ## When the queue is done
 

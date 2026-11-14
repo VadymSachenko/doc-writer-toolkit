@@ -3,7 +3,9 @@
 // Copies the plugin to a scratch folder under a sentinel name and reads `claude --plugin-dir <copy> plugin details
 // <sentinel>`. The `Source: <sentinel>@inline` line proves the CLI read the tree under review, not an installed copy.
 // A component fails when its always-on estimate is `< 20`, or under half of what its description's length predicts
-// (about 4 characters a token): a description that doesn't parse loads as nothing.
+// (about 4 characters a token): a description that doesn't parse loads as nothing. A skill and a command of the same
+// name fail too: the table has no kind column, so they are two rows under one name, and a session lists one
+// description for both.
 // Exits 0 when all load, 1 when any doesn't, 2 when the check can't run (no `claude` CLI, or output it can't read).
 import fs from 'node:fs';
 import os from 'node:os';
@@ -36,7 +38,7 @@ export function tokens(estimate) {
   return Number(m[1].replace(/,/g, '')) * (m[2] ? 1000 : 1);
 }
 
-// Reads the Source line and the per-component table of `plugin details`.
+// Reads the Source line and the per-component table of `plugin details`: name -> its rows, in table order.
 export function parseDetails(output) {
   const source = /^\s*Source:\s*(\S+)/m.exec(output)?.[1] ?? null;
   const components = new Map();
@@ -45,36 +47,53 @@ export function parseDetails(output) {
     for (const row of output.slice(start).split('\n').slice(2)) {
       const m = /^\s+(\S+)\s+(< 20|~[\d.,]+k?)\s+(< 20|~[\d.,]+k?)\s*$/.exec(row);
       if (!m) break;
-      components.set(m[1], { alwaysOn: m[2] });
+      components.set(m[1], [...(components.get(m[1]) ?? []), { alwaysOn: m[2] }]);
     }
   }
   return { source, components };
 }
 
-// expected: Map(name -> description). Returns findings as strings.
+function rowProblem({ kind, name, description }, row) {
+  if (!row) return [`${kind} ${name}: not in the per-component table`];
+  const got = tokens(row.alwaysOn);
+  const predicted = Math.round(description.length / 4);
+  if (row.alwaysOn.startsWith('<') || got < predicted / 2) {
+    return [`${kind} ${name}: always-on ${row.alwaysOn} tokens, but its ${description.length}-character description predicts about ${predicted}; it loads without its description`];
+  }
+  return [];
+}
+
+const orders = (xs) => (xs.length <= 1 ? [xs] : xs.flatMap((x, i) => orders([...xs.slice(0, i), ...xs.slice(i + 1)]).map((o) => [x, ...o])));
+
+// expected: [{ kind, name, description }]. Returns findings as strings.
 export function verdict({ source, components }, expected, sentinel = SENTINEL) {
   const findings = [];
   if (source !== `${sentinel}@inline`) findings.push(`Source is '${source}', not '${sentinel}@inline': the CLI did not read the copy under review`);
-  for (const [name, description] of expected) {
-    const row = components.get(name);
-    if (!row) { findings.push(`${name}: not in the per-component table`); continue; }
-    const got = tokens(row.alwaysOn);
-    const predicted = Math.round(description.length / 4);
-    if (row.alwaysOn.startsWith('<') || got < predicted / 2) {
-      findings.push(`${name}: always-on ${row.alwaysOn} tokens, but its ${description.length}-character description predicts about ${predicted}; it loads without its description`);
+  const byName = new Map();
+  for (const c of expected) byName.set(c.name, [...(byName.get(c.name) ?? []), c]);
+  for (const [name, wanted] of byName) {
+    if (wanted.length > 1) findings.push(`${name}: a ${wanted.map((c) => c.kind).join(' and a ')} of the same name; the table can't tell them apart and a session lists one description for both`);
+    // The rows carry no kind: pair them with the components of that name in the order that gives the fewest findings.
+    const rows = components.get(name) ?? [];
+    const slots = [...rows, ...Array(Math.max(0, wanted.length - rows.length)).fill(undefined)];
+    let best = null;
+    for (const order of orders(slots)) {
+      const found = wanted.flatMap((c, i) => rowProblem(c, order[i]));
+      if (!best || found.length < best.length) best = found;
     }
+    findings.push(...best);
   }
   return findings;
 }
 
 export function expectedComponents(pluginDir) {
-  const expected = new Map();
+  const expected = [];
   for (const name of fs.readdirSync(path.join(pluginDir, 'skills')).sort()) {
     const file = path.join(pluginDir, 'skills', name, 'SKILL.md');
-    if (fs.existsSync(file)) expected.set(name, descriptionOf(fs.readFileSync(file, 'utf8')));
+    if (fs.existsSync(file)) expected.push({ kind: 'skill', name, description: descriptionOf(fs.readFileSync(file, 'utf8')) });
   }
   for (const file of fs.readdirSync(path.join(pluginDir, 'commands')).filter((f) => f.endsWith('.md')).sort()) {
-    expected.set(file.slice(0, -3), descriptionOf(fs.readFileSync(path.join(pluginDir, 'commands', file), 'utf8')));
+    expected.push({ kind: 'command', name: file.slice(0, -3), description: descriptionOf(fs.readFileSync(path.join(pluginDir, 'commands', file), 'utf8')) });
   }
   return expected;
 }
@@ -111,7 +130,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         for (const f of findings) console.log(f);
         console.error(findings.length
           ? `check-visibility: ${findings.length} finding(s)`
-          : `check-visibility: ok, ${expected.size} components loaded with their descriptions (Source: ${details.source})`);
+          : `check-visibility: ok, ${expected.length} components loaded with their descriptions (Source: ${details.source})`);
         process.exitCode = findings.length ? 1 : 0;
       }
     }

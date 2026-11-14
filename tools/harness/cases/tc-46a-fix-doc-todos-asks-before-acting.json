@@ -1,0 +1,68 @@
+{
+  "id": "tc-46a-fix-doc-todos-asks-before-acting",
+  "description": "/fix-doc-todos on two root pairs: it scans every root, sorts the markers into buckets, proposes the link for the ones that point to an existing page (a route with the target pair's prefix), reports the content gap and the NEEDS CONFIRMATION markers as not fixable here (pointing to resolve-markers), asks for the go-ahead and changes no file. The command hands off to doc-todo-fixer, so this case covers the command and that skill together.",
+  "fixture": {
+    "shape": "multi"
+  },
+  "setup": [
+    "printf '\\nПро валюту за замовчуванням читайте в налаштуваннях. {/* ToDo: link to the settings page */}\\n' >> portal/transactions/transactions.md && printf '\\nFor the default currency, see the settings. {/* ToDo: link to the settings page */}\\n' >> i18n/en/docusaurus-plugin-content-docs-portal/current/transactions/transactions.md && printf '\\n{/* ToDo: describe the retry intervals */}\\n' >> docs/webhooks/webhooks.md && git add -A && git commit -q -m 'Case setup'"
+  ],
+  "prompt": "/{plugin}:fix-doc-todos",
+  "options": {
+    "maxTurns": 50,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Bash(node:*)",
+      "Bash(sort:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "name": "scans both pairs: markers from both are named",
+      "type": "match",
+      "path": "output",
+      "pattern": "(?=[\\s\\S]*portal/transactions/transactions)(?=[\\s\\S]*docs/webhooks/webhooks)"
+    },
+    {
+      "name": "proposes the route of the settings page",
+      "type": "match",
+      "path": "output",
+      "pattern": "/portal/settings/settings"
+    },
+    {
+      "name": "reports the content gap as not fixable",
+      "type": "match",
+      "path": "output",
+      "pattern": "describe the retry intervals"
+    },
+    {
+      "name": "points to resolve-markers",
+      "type": "match",
+      "path": "output",
+      "pattern": "resolve-markers"
+    },
+    {
+      "name": "names the NEEDS CONFIRMATION markers",
+      "type": "match",
+      "path": "output",
+      "pattern": "NEEDS CONFIRMATION"
+    },
+    {
+      "name": "asks for the go-ahead",
+      "type": "match",
+      "path": "output",
+      "pattern": "confirm|approv",
+      "flags": "i"
+    },
+    {
+      "type": "unchanged",
+      "ignore": [
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}

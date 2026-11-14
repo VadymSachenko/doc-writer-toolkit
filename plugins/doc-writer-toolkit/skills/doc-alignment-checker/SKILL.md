@@ -19,8 +19,10 @@ Load these files at the start of the task. Do not load others unless the user re
 - Follow `${CLAUDE_PLUGIN_ROOT}/context/project-paths.md` to resolve the page's **root pair** (its **UA content root** and **EN i18n root**) and the **UA URL prefix of every declared pair**, for Check 5. Do not assume any default.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/internal-links.md` — the shared page-to-page link contract. Check 5 checks links against this file's algorithms, in the form the page's root pair declares (`Page link form:`); do not restate it here.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/heading-anchors.md` — the shared heading-id contract. Check 2 checks UA heading ids against it; do not restate it here.
+- `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/code-blocks.md` — the shared rule for what a translation changes inside a code block. Checks 6 and 9 read code blocks by it; do not restate it here.
 - `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/project-rules/naming-conventions.md` — the shared slug/title/filename convention. Check 11 checks title form and slug/filename agreement against this file; do not restate it here.
 - The product kit's names table, for Check 12: the `## Назви` / `## Names` section of `<kit>/glossary-ua.md` and `<kit>/glossary-en.md` (`${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`, "Product kit"; the format is `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/glossary-format.md`, "Names"). Read only that section. With no kit declared, say so and run Check 12 without a table.
+- The product kit's example values file, for Check 6: `<kit>/example-values.md`, if present. The script reads its existing pairs; you read it only when a Check 6 finding involves a value it lists. The format is `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/example-values-format.md`.
 - The UA page being checked (at the path resolved above).
 - The EN counterpart page (at the path resolved above).
 
@@ -46,15 +48,15 @@ Read both files. If either file does not exist, stop immediately and tell the us
 
 ## Step 1.5 — Run the structural script
 
-A Node script does the mechanical counting, so it is exact on long pages: dates, headings, heading ids, tables, code blocks, `<details>` blocks, markers, and image, link and admonition counts. Don't count these by hand when the script runs. Interpret its output.
+A Node script does the mechanical counting, so it is exact on long pages: dates, headings, heading ids, tables, code blocks and the Cyrillic left in the EN page's diagram labels and code comments, `<details>` blocks, markers, and image, link and admonition counts. Don't count these by hand when the script runs. Interpret its output.
 
 Run it with the main file first and the secondary file second:
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/doc-align/doc-align.mjs <main-file> <secondary-file> --names <kit>/glossary-ua.md --names <kit>/glossary-en.md
+node ${CLAUDE_PLUGIN_ROOT}/scripts/doc-align/doc-align.mjs <main-file> <secondary-file> --names <kit>/glossary-ua.md --names <kit>/glossary-en.md --examples <kit>/example-values.md
 ```
 
-Leave out each `--names` whose file isn't there, and both with no kit declared.
+Leave out each `--names` or `--examples` whose file isn't there, and all three with no kit declared.
 
 It prints one JSON report: `bugs[]`, `warnings[]` and `passed[]`. Each finding has a `check` (the Check number below), a `flag`, a `description`, a `line` and a `file`. The fields, flags and exit codes are in `${CLAUDE_PLUGIN_ROOT}/scripts/doc-align/README.md`. Read that file only when a finding is unclear.
 
@@ -65,7 +67,7 @@ It prints one JSON report: `bugs[]`, `warnings[]` and `passed[]`. Each finding h
 
 If the script can't run (no Node, or an exit other than `0`), count by hand as each Check below describes, and say in the report that the counts were done by hand.
 
-The semantic checks are always yours, whether the script ran or not: Check 4 (Type column language), Check 5 (link prefixes, per `internal-links.md`), Check 9 (Cyrillic text in the EN file), Check 10 (untranslated prose), Check 11 (naming) and the names the table lacks in Check 12.
+The semantic checks are always yours, whether the script ran or not: Check 4 (Type column language), Check 5 (link prefixes, per `internal-links.md`), Check 9 (Cyrillic text in the EN file's prose; the script covers its code blocks), Check 10 (untranslated prose), Check 11 (naming) and the names the table lacks in Check 12.
 
 ## Step 2 — Run all checks
 
@@ -85,11 +87,11 @@ Extract every heading (`#`, `##`, `###`, `####`) from both files in order. Count
 
 When comparing UA headings, strip the anchor comment (`{/* #slug */}`) before comparing structure. Additionally:
 
-- Every UA heading from `##` down must end with a well-formed `{/* #id */}` comment, per `heading-anchors.md`; the page title (`#`) takes none. The expected id is the one generated from the EN heading at the same position, or that heading's explicit `{#id}`. Flag a UA heading whose comment is missing or malformed, and an id used twice on the page.
+- Every UA heading from `##` down must end with a well-formed `{/* #id */}` comment, per `heading-anchors.md`; the page title (`#`) takes none. The expected id is the one generated from the EN heading at the same position, or that heading's explicit id (`\{#id}` or `{#id}`). Flag a UA heading whose comment is missing or malformed, and an id used twice on the page.
 - EN headings must **not** have `{/* … */}` anchor comments.
 
 **Flag:** `[HEADING COUNT/LEVEL MISMATCH]` — list the position and differing headings side by side.
-**Flag:** `[UA HEADING MISSING ANCHOR]` — show the heading and the expected anchor, and say that adding it changes the heading's fragment, so links to the old fragment change with it (`heading-anchors.md`, rule 8).
+**Flag:** `[UA HEADING MISSING ANCHOR]` — show the heading and the expected anchor, and say that adding it changes the heading's fragment, so links to the old fragment change with it (`heading-anchors.md`, rule 8). Say who adds it: `doc-translator`, Step 5b, which gives every UA heading of the page without an id its EN anchor and rewrites those links in the same change (`heading-anchors.md`, "Who adds a missing id"). Without a translation, the same script does it alone: `doc-align --propose-ids --write` (`${CLAUDE_PLUGIN_ROOT}/scripts/doc-align/README.md`). Don't add the id yourself: this skill edits nothing.
 
 Script flags: `HEADING-COUNT-MISMATCH`, `HEADING-LEVEL-MISMATCH`, `HEADING-ID-MISSING`, `HEADING-ID-MALFORMED`, `HEADING-ID-DUPLICATE`, `EN-HEADING-COMMENT`, `HEADING-ID-MISMATCH` (the EN heading's id differs from the UA id at the same position), `HEADING-ID-SKIPPED`.
 
@@ -118,13 +120,13 @@ Every page-to-page link in both files must have the form the page's root pair de
 
 **Flag:** `[LINK — INCORRECT PREFIX]` — show the full offending link and line number, and the pair's link form when it is `file-path`.
 
-### Check 6 — Code blocks are identical
+### Check 6 — Code blocks keep their code
 
-Extract every fenced code block (` ``` `) from both files in order. Their contents must be byte-for-byte identical (whitespace included). Code blocks are never translated.
+Extract every fenced code block (` ``` `) from both files in order. The counts must match, and each pair must have the same code part (`code-blocks.md`): a diagram the same ids, keywords, arrows and number of lines; any other block the same code, data, comment markers, whitespace and number of lines, byte for byte. Its reader text (diagram labels, comments, the descriptions of a folder tree) is translated, so a difference there is not a finding. Neither is an existing pair of the kit's example values file, on the pages it lists: there, a string literal whose whole value is the pair's UA value may be, on the EN side, that value or the pair's EN value (`example-values-format.md`). Any other difference in a value is.
 
 **Flag:** `[CODE BLOCK MISMATCH]` — show the position (nth code block) and a side-by-side diff of the differing lines.
 
-Script flag: `CODE-BLOCK-MISMATCH`. Its `line` is the first line that differs; you still write the diff.
+Script flag: `CODE-BLOCK-MISMATCH`. Its `line` is the first line whose code part differs; you still write the diff. A difference in an invented value that the file lacks: say that the value belongs in Example values (a new page) or Existing pairs (a page written before the file), and leave the decision to the user. `examples.matched` lists the pairs the script used; name them under **Passed**. Warnings `EXAMPLE-PAIR-NOT-APPLIED`, `EXAMPLE-PAIR-INVALID`, `EXAMPLE-PAIRS-MISSING` and `EXAMPLES-SKIPPED` go in the report as warnings, with what `example-values-format.md` says each one means.
 
 ### Check 7 — `<details>` block count matches
 
@@ -145,9 +147,11 @@ Script flags: `MARKER-MISSING-IN-SECONDARY`, `MARKER-MISSING-IN-MAIN`. It pairs 
 
 ### Check 9 — No Ukrainian prose in the EN file
 
-Scan the EN file for any Unicode characters in the Ukrainian/Cyrillic range (U+0400–U+04FF) that appear outside of fenced code blocks. Any such character is a bug.
+Scan the EN file for any Unicode characters in the Ukrainian/Cyrillic range (U+0400–U+04FF) outside fenced code blocks, and inside them in the reader text: a diagram label, a code comment or a tree description (`code-blocks.md`). Any such character is a bug. Cyrillic in a block's code part is data (a JSON value, a string) and stays.
 
 **Flag:** `[CYRILLIC TEXT IN EN FILE]` — show the line number and offending text.
+
+Script flag: `CYRILLIC-IN-EN-CODE-TEXT`, for the code blocks only, one per line with the text it found. The prose is yours.
 
 ### Check 10 — No untranslated prose in the UA file
 

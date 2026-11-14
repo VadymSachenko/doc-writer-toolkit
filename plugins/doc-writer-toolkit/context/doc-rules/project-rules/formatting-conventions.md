@@ -30,6 +30,7 @@ metadata:
 | Затверджені терміни та їхній рендер, таблиця назв організацій (Ж10) | `glossary-ua.md` / `glossary-en.md` набору продукту (`${CLAUDE_PLUGIN_ROOT}/context/project-paths.md`, «Product kit»); як читати таблицю — `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/glossary-format.md` |
 | Структура сторінки, шаблони | `${CLAUDE_PLUGIN_ROOT}/context/doc-templates/` |
 | Продуктові факти про API | `product-facts.md` набору продукту |
+| Значення в прикладах коду: що повертає система, що вигадують приклади, наявні пари UA → EN | `example-values.md` набору продукту; як читати й хто що робить — `${CLAUDE_PLUGIN_ROOT}/context/doc-rules/example-values-format.md` |
 | Правила лише для цього продукту: назва й скорочення, ключові заміни термінів, назви розділів інтерфейсу | `product-rules.md` набору продукту |
 
 ---

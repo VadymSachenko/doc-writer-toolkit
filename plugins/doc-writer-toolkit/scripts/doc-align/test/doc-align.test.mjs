@@ -7,9 +7,13 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { compare } from '../lib/compare.mjs';
-import { cellCount } from '../lib/parse.mjs';
-import { createSlugger, slugify, uaHeadingId } from '../lib/headings.mjs';
+import { cellCount, parse } from '../lib/parse.mjs';
+import { createSlugger, enHeadingIds, headingText, slugify, uaHeadingId } from '../lib/headings.mjs';
 import { findNames, looseKey, mergeRows, parseNamesTable, searchable } from '../lib/names.mjs';
+import { headingIdMismatches, proposeIds, renameIds, withExplicitId } from '../lib/ids.mjs';
+import { isIdOnlyChange } from '../lib/idonly.mjs';
+import { codeDiff, fenceBlock, fenceParts } from '../lib/fences.mjs';
+import { parseExamplePairs } from '../lib/examples.mjs';
 
 const run = promisify(execFile);
 const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'doc-align.mjs');
@@ -125,7 +129,8 @@ const ALL_PASSED = [
   'EN headings carry no comment',
   'EN heading ids match the UA ids',
   'Table count, columns and rows',
-  'Code blocks identical',
+  'Code blocks keep their code',
+  'No Cyrillic in EN diagram labels or code comments',
   '<details> block count',
   'ToDo markers paired',
   'NEEDS CONFIRMATION markers paired',
@@ -280,10 +285,16 @@ test('Check 3: table count, columns and rows', () => {
   assert.equal(cellCount('a | b'), 2);
 });
 
-test('Check 6: code blocks are identical', () => {
+test('Check 6: code blocks keep their code', () => {
   const content = compare(UA, edit(EN, '{ "status": "active" }', '{ "status": "inactive" }'), { secondaryPath: 'en.md' });
   assert.deepEqual(content.bugs, [
-    { check: 6, flag: 'CODE-BLOCK-MISMATCH', description: 'code block 1 differs from line 1 of the block (contents must be byte-for-byte identical)', line: 25, file: 'en.md' },
+    {
+      check: 6,
+      flag: 'CODE-BLOCK-MISMATCH',
+      description: 'code block 1 differs from line 1 of the block (the code, data and line count must be identical; only labels, comments and descriptions are translated)',
+      line: 25,
+      file: 'en.md',
+    },
   ]);
   // Whitespace counts.
   assert.deepEqual(flags(compare(UA, edit(EN, '{ "status": "active" }', '{ "status": "active" } '))), ['CODE-BLOCK-MISMATCH']);
@@ -293,6 +304,152 @@ test('Check 6: code blocks are identical', () => {
   const count = compare(UA, edit(EN, '```json\n{ "status": "active" }\n```\n', ''));
   assert.deepEqual(flags(count), ['CODE-BLOCK-MISMATCH']);
   assert.match(count.bugs[0].description, /main has 1 code block\(s\), secondary has 0/);
+});
+
+// A pair whose code blocks hold reader text (code-blocks.md): diagram labels, comments and a tree's descriptions are
+// translated in EN, the code and the data are not.
+const fence = (info, body) => `\`\`\`${info}\n${body}\n\`\`\`\n`;
+const CODE_UA = [
+  '# Заявки',
+  '',
+  '## Потік {/* #flow */}',
+  '',
+  fence('mermaid', '%%{init: {"theme": "base"}}%%\nflowchart TD\n    A[Нова заявка] --> B{Сума більша за ліміт?}\n    B -->|Так| C(("Перевірка"))\n    B -- ні --> D[Заявку прийнято]\n    subgraph S1["Ручна перевірка"]\n        C\n    end'),
+  fence('mermaid', 'sequenceDiagram\n    participant App as Застосунок\n    participant Srv as Ваш сервер\n    App->>Srv: Надіслати заявку\n    alt Відповідь 200\n        Srv-->>App: 200 OK\n    else Немає відповіді\n        Note over App,Srv: Повтор через 10 хвилин\n    end'),
+  fence('mermaid', 'stateDiagram-v2\n    [*] --> draft: створено\n    state "Чернетка" as draft\n    draft --> [*]'),
+  fence('bash', '# Запустити сервіс\nnode app.js --port 8080   # порт за замовчуванням\necho "# не коментар" ${#items}'),
+  fence('jsonc', '{\n  // Сума в копійках\n  "amount": 1500, /* обов\'язково */\n  "callback": "https://example.com/hook" // адреса для сповіщень\n}'),
+  fence('sql', "SELECT id FROM requests -- усі заявки\nWHERE note = 'не -- коментар';"),
+  fence('text', 'service/\n├── api/        — обробники запитів\n└── store/      — збереження заявок'),
+  fence('json', '{ "payer": "Олена Коваль", "purpose": "Оплата // рахунку 42", "url": "https://example.com/a" }'),
+].join('\n');
+const CODE_EN = [
+  '# Requests',
+  '',
+  '## Flow',
+  '',
+  fence('mermaid', '%%{init: {"theme": "base"}}%%\nflowchart TD\n    A[New request] --> B{Amount above the limit?}\n    B -->|Yes| C(("Review"))\n    B -- no --> D[Request accepted]\n    subgraph S1["Manual review"]\n        C\n    end'),
+  fence('mermaid', 'sequenceDiagram\n    participant App as App\n    participant Srv as Your server\n    App->>Srv: Send the request\n    alt Response 200\n        Srv-->>App: 200 OK\n    else No response\n        Note over App,Srv: Retry in 10 minutes\n    end'),
+  fence('mermaid', 'stateDiagram-v2\n    [*] --> draft: created\n    state "Draft" as draft\n    draft --> [*]'),
+  fence('bash', '# Start the service\nnode app.js --port 8080   # default port\necho "# не коментар" ${#items}'),
+  fence('jsonc', '{\n  // Amount in cents\n  "amount": 1500, /* required */\n  "callback": "https://example.com/hook" // notification address\n}'),
+  fence('sql', "SELECT id FROM requests -- all requests\nWHERE note = 'не -- коментар';"),
+  fence('text', 'service/\n├── api/        — request handlers\n└── store/      — request storage'),
+  fence('json', '{ "payer": "Олена Коваль", "purpose": "Оплата // рахунку 42", "url": "https://example.com/a" }'),
+].join('\n');
+const codeFindings = (en) => findings(compare(CODE_UA, en, { secondaryPath: 'en.md' })).filter((f) => f.check === 6 || f.check === 9);
+
+test('Check 6: translated diagram labels, comments and tree descriptions pass; the data keeps its Cyrillic (AC-1)', () => {
+  const r = compare(CODE_UA, CODE_EN, { mainPath: 'ua.md', secondaryPath: 'en.md' });
+  assert.deepEqual(codeFindings(CODE_EN), []);
+  assert.ok(passedNames(r).includes('Code blocks keep their code'));
+  assert.ok(passedNames(r).includes('No Cyrillic in EN diagram labels or code comments'));
+  // EN as main works the same.
+  assert.deepEqual(findings(compare(CODE_EN, CODE_UA)).filter((f) => f.check === 6 || f.check === 9), []);
+});
+
+test('Check 6: a changed id, arrow, keyword, line count, code token, value or whitespace fails (AC-1)', () => {
+  const cases = [
+    ['a flowchart id', 'A[New request] --> B{', 'A[New request] --> X{'],
+    ['a flowchart arrow', 'B -->|Yes|', 'B ==>|Yes|'],
+    ['a subgraph id', 'subgraph S1["Manual review"]', 'subgraph S2["Manual review"]'],
+    ['the init directive', '{"theme": "base"}', '{"theme": "dark"}'],
+    ['a sequence keyword', '    else No response', '    opt No response'],
+    ['a participant id', 'participant Srv as Your server', 'participant Server as Your server'],
+    ['a message arrow', 'App->>Srv: Send', 'App->Srv: Send'],
+    ['a state transition', '[*] --> draft: created', '[*] --> drafted: created'],
+    ['a diagram line added', '    draft --> [*]', '    draft --> [*]\n    draft --> draft'],
+    ['a code token next to a comment', 'node app.js --port 8080', 'node app.js --port 9090'],
+    ['whitespace before a comment', '8080   # default port', '8080 # default port'],
+    ['a comment marker', '  // Amount in cents', '  # Amount in cents'],
+    ['a JSON value in a commented block', '"amount": 1500', '"amount": 15'],
+    ['a string that holds //', "'не -- коментар'", "'not -- a comment'"],
+    ['a code line added', '// notification address\n}', '// notification address\n  // more\n}'],
+    ['a tree path', '├── api/        — request handlers', '├── handlers/   — request handlers'],
+    ['a JSON data value', '"payer": "Олена Коваль"', '"payer": "Olena Koval"'],
+    ['a URL in a JSON block', '"url": "https://example.com/a"', '"url": "https://example.org/a"'],
+  ];
+  for (const [name, from, to] of cases) {
+    const got = codeFindings(edit(CODE_EN, from, to));
+    assert.deepEqual(got.map((f) => f.flag), ['CODE-BLOCK-MISMATCH'], name);
+  }
+  // The finding points at the first line that differs.
+  const [f] = codeFindings(edit(CODE_EN, '8080   # default port', '8080 # default port'));
+  assert.equal(f.line, CODE_EN.split('\n').indexOf('node app.js --port 8080   # default port') + 1);
+  assert.match(f.description, /^code block 4 differs from line 2 of the block \(the code, data and line count/);
+  const [d] = codeFindings(edit(CODE_EN, 'A[New request] --> B{', 'A[New request] --> X{'));
+  assert.match(d.description, /the diagram ids, keywords, arrows and lines must be identical/);
+});
+
+test('Check 9: Cyrillic left in an EN diagram label, comment or tree description is a bug; data is not (AC-1)', () => {
+  const cases = [
+    ['a node label', 'A[New request]', 'A[Нова заявка]', 'Нова заявка'],
+    ['an edge label', '-->|Yes|', '-->|Так|', 'Так'],
+    ['a participant alias', 'as Your server', 'as Ваш сервер', 'Ваш сервер'],
+    ['a message', 'Send the request', 'Надіслати заявку', 'Надіслати заявку'],
+    ['a note', 'Retry in 10 minutes', 'Повтор через 10 хвилин', 'Повтор через 10 хвилин'],
+    ['a state label', 'state "Draft"', 'state "Чернетка"', 'Чернетка'],
+    ['a # comment', '# Start the service', '# Запустити сервіс', 'Запустити сервіс'],
+    ['a // comment', '// Amount in cents', '// Сума в копійках', 'Сума в копійках'],
+    ['a /* */ comment', '/* required */', "/* обов'язково */", "обов'язково"],
+    ['a -- comment', '-- all requests', '-- усі заявки', 'усі заявки'],
+    ['a tree description', '— request handlers', '— обробники запитів', 'обробники запитів'],
+  ];
+  for (const [name, from, to, text] of cases) {
+    const en = edit(CODE_EN, from, to);
+    const got = codeFindings(en);
+    assert.deepEqual(got.map((f) => [f.check, f.flag]), [[9, 'CYRILLIC-IN-EN-CODE-TEXT']], name);
+    assert.ok(got[0].description.includes(`'${text}'`), `${name}: ${got[0].description}`);
+    assert.equal(en.split('\n')[got[0].line - 1].includes(to.split('\n')[0]), true, `${name}: the line`);
+    assert.equal(got[0].file, 'en.md');
+  }
+  // Cyrillic in the code part (a JSON value, a string a comment marker sits in) is data, not a finding: CODE_EN has it.
+  assert.ok(CODE_EN.includes('"Олена Коваль"') && CODE_EN.includes('"# не коментар"'));
+  // The UA page is never checked for it, and with no way to tell which page is UA the check doesn't run.
+  const latin = (t) => t.replace(/\p{Script=Cyrillic}+/gu, 'x');
+  const r = compare(latin(CODE_EN), latin(CODE_EN));
+  assert.equal(r.ua, null);
+  assert.ok(!passedNames(r).includes('No Cyrillic in EN diagram labels or code comments'));
+});
+
+test('fences: the code part and the reader text of each kind of block', () => {
+  const parts = (info, body) => {
+    const p = fenceParts(info, body.split('\n'));
+    return [p.kind, p.code.join('\n'), p.texts.map((t) => t.text)];
+  };
+  assert.deepEqual(parts('mermaid', 'flowchart LR\n  A(("Коло")) -.  пунктир .-> B>Прапорець]\n  classDef warn fill:#f96'), [
+    'diagram',
+    'flowchart LR\n  A((…)) -.  … .-> B>…]\n  classDef warn fill:#f96',
+    ['Коло', 'пунктир', 'Прапорець'],
+  ]);
+  // Keywords of other diagram types are node ids in a flowchart; in a sequence diagram `link` is a kept line.
+  assert.deepEqual(parts('mermaid', 'flowchart LR\n  details[Деталі] --> link[Посилання]'), ['diagram', 'flowchart LR\n  details[…] --> link[…]', ['Деталі', 'Посилання']]);
+  assert.deepEqual(parts('mermaid', 'sequenceDiagram\n  link A: Панель @ https://example.com'), ['diagram', 'sequenceDiagram\n  link A: Панель @ https://example.com', []]);
+  // A subgraph title without an id is the title; one ASCII word is an id.
+  assert.deepEqual(parts('mermaid', 'graph TD\n  subgraph Перша група\n  end\n  subgraph g2\n  end'), ['diagram', 'graph TD\n  subgraph …\n  end\n  subgraph g2\n  end', ['Перша група']]);
+  // Frontmatter title, %% comments and a multi-line state note are text; the init directive is code.
+  assert.deepEqual(parts('mermaid', '---\ntitle: Життєвий цикл\n---\n%%{init: {"theme": "dark"}}%%\nstateDiagram-v2\n  %% коментар\n  note right of a\n    Примітка\n  end note'), [
+    'diagram',
+    '---\ntitle: …\n---\n%%{init: {"theme": "dark"}}%%\nstateDiagram-v2\n  %%…\n  note right of a\n    …\n  end note',
+    ['Життєвий цикл', 'коментар', 'Примітка'],
+  ]);
+  // A diagram type without its own rules keeps its indentation; the rest of each line is text.
+  assert.deepEqual(parts('mermaid', 'mindmap\n  root\n    Гілка'), ['diagram', 'mindmap\n  …\n    …', ['root', 'Гілка']]);
+  // A shebang is code; `#` inside a word or a string is not a comment.
+  assert.deepEqual(parts('sh', '#!/bin/sh\nx=${#arr} # довжина\necho "a # b"'), ['comments', '#!/bin/sh\nx=${#arr} #…\necho "a # b"', ['довжина']]);
+  // A block comment spans lines.
+  assert.deepEqual(parts('go', '/* Перший\n * другий */\nx := 1'), ['comments', '/*…\n…*/\nx := 1', ['Перший', '* другий']]);
+  assert.deepEqual(parts('html', '<p>Don\'t</p> <!-- примітка -->'), ['comments', "<p>Don't</p> <!--…-->", ['примітка']]);
+  // json has no comments, and a language not in the table is all code.
+  assert.deepEqual(parts('json', '{ "a": 1 } // Сума'), ['code', '{ "a": 1 } // Сума', []]);
+  assert.deepEqual(parts('http', '# Запит\nGET /a'), ['code', '# Запит\nGET /a', []]);
+  // Plain text: only the part after ` — ` is a description; the info string's first word is the language.
+  assert.deepEqual(parts('', 'a/ — опис\nb—c'), ['plain', 'a/ — …\nb—c', ['опис']]);
+  assert.equal(fenceParts('json title="Відповідь"', ['{}']).lang, 'json');
+  // An emptied label or comment is a difference.
+  assert.equal(codeDiff({ info: 'js', lines: ['x // а'] }, { info: 'js', lines: ['x //'] }), 0);
+  assert.equal(codeDiff({ info: 'js', lines: ['x // а'] }, { info: 'js', lines: ['x // b'] }), -1);
+  assert.deepEqual(fenceBlock(['~~~yaml title="x"', 'a: 1', '~~~']), { info: 'yaml title="x"', lines: ['a: 1'] });
 });
 
 test('Check 7: <details> block count', () => {
@@ -551,3 +708,583 @@ test('CLI: --names reads the names table from one or more glossaries', async () 
   assert.equal(missing.code, 2);
   assert.match(missing.out.error, /file not found/);
 });
+
+// Check 6 with an example values file (--examples): its existing pairs count as the same value on the pages they list
+// (context/doc-rules/example-values-format.md). Invented values.
+const EXAMPLES = `---
+name: Example values
+---
+
+## System values
+
+| Value | Field | Source |
+|---|---|---|
+| \`Оплата послуг\` | \`paymentPurpose\` | code: \`payments-api\`@1a2b3c4:\`defaults.go\` |
+| \`Платіж відхилено\` | \`errorReason\` | code: \`payments-api\`@1a2b3c4:\`errors.go\` |
+
+## Example values
+
+| Kind | Value | Fields |
+|---|---|---|
+| Person's name | \`Olena Marchenko\` | \`recipient\` |
+
+## Existing pairs
+
+| UA value | EN value | Type | Pages |
+|---|---|---|---|
+| \`Петренко Олег\` | \`John Smith\` | example | \`api/create-payment\` |
+| \`TEST Petrenko Oleh\` | \`John Smith\` | example | \`api/create-payment\` |
+| \`Кошти не надійшли.\` | \`The funds did not arrive.\` | example | \`api/create-payment\`, \`disputes/disputes\` |
+| \`Оплата послуг\` | \`Service payment\` | system | \`api/create-payment\` |
+`;
+
+const examplesOf = (text, file = 'example-values.md') => ({ file, ...parseExamplePairs(text) });
+// The two pages' paths: the pairs hold for the page whose path is listed in their Pages column.
+const AT = { mainPath: 'docs/api/create-payment.md', secondaryPath: 'i18n/en/docusaurus-plugin-content-docs/current/api/create-payment.md' };
+const ENAT = { mainPath: AT.secondaryPath, secondaryPath: AT.mainPath };
+const withEx = (text = EXAMPLES, at = AT) => ({ ...at, examples: examplesOf(text) });
+
+const XUA = `# Платіж
+
+## Запит {/* #request */}
+
+\`\`\`bash
+curl -X POST https://api.example/pay -d '{"recipient": "Петренко Олег", "comment": "Кошти не надійшли."}'
+\`\`\`
+
+## Відповідь {/* #response */}
+
+\`\`\`jsonc
+{
+  "recipient": "Петренко Олег", // отримувач
+  "sender": "TEST Petrenko Oleh",
+  "paymentPurpose": "Оплата послуг",
+  "phoneNumber": "+380000000001"
+}
+\`\`\`
+`;
+
+const XEN = `# Payment
+
+## Request
+
+\`\`\`bash
+curl -X POST https://api.example/pay -d '{"recipient": "John Smith", "comment": "The funds did not arrive."}'
+\`\`\`
+
+## Response
+
+\`\`\`jsonc
+{
+  "recipient": "John Smith", // recipient
+  "sender": "John Smith",
+  "paymentPurpose": "Service payment",
+  "phoneNumber": "+380000000001"
+}
+\`\`\`
+`;
+
+const check6 = (r) => r.bugs.filter((f) => f.check === 6).map((f) => [f.flag, f.line]);
+
+test('Check 6 with --examples: the pairs table', () => {
+  const t = parseExamplePairs(EXAMPLES);
+  assert.equal(t.found, true);
+  assert.deepEqual(t.rows.map((r) => [r.ua, r.en, r.type, r.pages, r.line]), [
+    ['Петренко Олег', 'John Smith', 'example', ['api/create-payment'], 22],
+    ['TEST Petrenko Oleh', 'John Smith', 'example', ['api/create-payment'], 23],
+    ['Кошти не надійшли.', 'The funds did not arrive.', 'example', ['api/create-payment', 'disputes/disputes'], 24],
+    ['Оплата послуг', 'Service payment', 'system', ['api/create-payment'], 25],
+  ]);
+  assert.deepEqual(t.invalid, []);
+  // The Ukrainian heading reads the same; a value with a backtick or a pipe; pages with or without code font.
+  const ua = parseExamplePairs('## Наявні пари\n\n| Значення UA | Значення EN | Тип | Сторінки |\n|---|---|---|---|\n| `` a`b `` | `c\\|d` | | a/a, `b/b` |\n');
+  assert.deepEqual(ua.rows.map((r) => [r.ua, r.en, r.type, r.pages]), [['a`b', 'c|d', 'example', ['a/a', 'b/b']]]);
+  assert.deepEqual(parseExamplePairs('## Example values\n\n| Kind | Value |\n|---|---|\n| a | `b` |\n'), { found: false, rows: [], invalid: [] });
+  assert.deepEqual(parseExamplePairs('## Existing pairs\n\nNone yet.\n\n## Other\n'), { found: true, rows: [], invalid: [] });
+});
+
+test('Check 6 with --examples: a row that is no pair is skipped, so its differences stay bugs', () => {
+  const head = '## System values\n\n| Value | Field | Source |\n|---|---|---|\n| `Платіж відхилено` | `errorReason` | code |\n\n## Existing pairs\n\n| UA value | EN value | Type | Pages |\n|---|---|---|---|\n';
+  const rows = [
+    ['| `x` | `x` | example | a/a |', /the same/],
+    ['| `y` | | example | a/a |', /needs both/],
+    ['| `z` | `w` | other | a/a |', /neither 'example' nor 'system'/],
+    ['| `Іваненко` | `Ivanenko` | example | |', /needs the pages/],
+    ['| `Сидоренко` | `Sydorenko` | example | a/a.md |', /has an extension/],
+    ['| `Коваль` | `Koval` | example | /a/a |', /not a path relative to the content root/],
+    ['| `Мельник` | `Melnyk` | example | ../a/a |', /'\.' or '\.\.' segment/],
+    ['| `Ткач` | `Tkach` | example | a/*, b/b |', /not a path relative/],
+    ['| `Платіж відхилено` | `Payment declined` | example | a/a |', /is a system value \(line 5\)/],
+    ['| `Олена` | `Olena` | example | a/a |', /more than one EN value \(lines 20, 21\)/],
+    ['| `Олена` | `Helen` | example | b/b |', /more than one EN value/],
+    ['| `Бондар` | `Bondar` | example | a/a |', null],
+    ['| `Бондар` | `Bondar` | example | b/b |', /listed twice \(line 22\)/],
+  ];
+  const t = parseExamplePairs(head + rows.map(([r]) => r).join('\n') + '\n');
+  assert.deepEqual(t.rows.map((r) => r.ua), ['Бондар']);
+  const expected = rows.map(([, re], i) => [11 + i, re]).filter(([, re]) => re);
+  assert.equal(t.invalid.length, expected.length);
+  expected.forEach(([line, re], i) => {
+    assert.equal(t.invalid[i].line, line);
+    assert.match(t.invalid[i].reason, re);
+  });
+  // A `system` pair may name a system value: that is what it is for.
+  assert.deepEqual(parseExamplePairs(head + '| `Платіж відхилено` | `Payment declined` | system | a/a |\n').invalid, []);
+  // In a comparison, each invalid row is a warning on its line, and the difference it would have covered stays a bug.
+  const bad = compare(XUA, XEN, withEx(EXAMPLES.replace('| system | `api/create-payment` |', '| system | |')));
+  assert.deepEqual(bad.warnings.map((w) => [w.flag, w.line, w.file]), [['EXAMPLE-PAIR-INVALID', 25, 'example-values.md']]);
+  assert.deepEqual(check6(bad), [['CODE-BLOCK-MISMATCH', 15]]);
+});
+
+test('Check 6 with --examples: a listed pair is the same value on its pages, in either direction of main (AC-1)', () => {
+  // Without the file, every pair is a code-block bug: the two blocks differ from their first data line.
+  assert.deepEqual(check6(compare(XUA, XEN, AT)), [['CODE-BLOCK-MISMATCH', 6], ['CODE-BLOCK-MISMATCH', 13]]);
+  const r = compare(XUA, XEN, withEx());
+  assert.deepEqual(check6(r), []);
+  assert.ok(r.passed.some((p) => p.check === 6 && p.name === 'Code blocks keep their code'));
+  assert.deepEqual(r.examples, {
+    pairs: 4,
+    here: 4,
+    matched: [
+      { ua: 'Петренко Олег', en: 'John Smith', type: 'example', lines: 2 },
+      { ua: 'TEST Petrenko Oleh', en: 'John Smith', type: 'example', lines: 1 },
+      { ua: 'Кошти не надійшли.', en: 'The funds did not arrive.', type: 'example', lines: 1 },
+      { ua: 'Оплата послуг', en: 'Service payment', type: 'system', lines: 1 },
+    ],
+  });
+  // EN as main: the pairs still go from UA to EN.
+  assert.deepEqual(check6(compare(XEN, XUA, withEx(EXAMPLES, ENAT))), []);
+  // An EN page that copied the UA value passes too: a system value stays verbatim, and data used to stay.
+  const copied = edit(XEN, '"paymentPurpose": "Service payment"', '"paymentPurpose": "Оплата послуг"');
+  const c = compare(XUA, copied, withEx());
+  assert.deepEqual(check6(c), []);
+  assert.deepEqual(c.warnings, []);
+  assert.ok(!c.examples.matched.some((m) => m.type === 'system'));
+  // An EN page that kept the UA value of an `example` pair is not a code-block bug, but a warning on each such line:
+  // the translator writes the EN value, so a re-translated block that put the UA value back is caught.
+  const keptEn = edit(edit(XEN, '"recipient": "John Smith", //', '"recipient": "Петренко Олег", //'), '"John Smith", "comment"', '"Петренко Олег", "comment"');
+  const kept = compare(XUA, keptEn, withEx());
+  assert.deepEqual(check6(kept), []);
+  assert.deepEqual(kept.warnings.map((w) => [w.flag, w.line, w.file]), [['EXAMPLE-PAIR-NOT-APPLIED', 6, AT.secondaryPath], ['EXAMPLE-PAIR-NOT-APPLIED', 13, AT.secondaryPath]]);
+  assert.match(kept.warnings[0].description, /keeps the UA value 'Петренко Олег' of an existing pair; its EN value is 'John Smith'/);
+  // EN as main: the warning points at the EN file, which is then main.
+  const keptMain = compare(edit(XEN, '"recipient": "John Smith", //', '"recipient": "Петренко Олег", //'), XUA, withEx(EXAMPLES, ENAT));
+  assert.deepEqual(keptMain.warnings.map((w) => [w.flag, w.line, w.file]), [['EXAMPLE-PAIR-NOT-APPLIED', 13, ENAT.mainPath]]);
+  // The same identical lines without the file are no finding at all.
+  assert.deepEqual(compare(XUA, edit(XEN, '"recipient": "John Smith", //', '"recipient": "Петренко Олег", //'), AT).warnings, []);
+  // Without --examples the report has no examples field.
+  assert.equal(compare(XUA, XEN, AT).examples, undefined);
+});
+
+test('Check 6 with --examples: off its pages, a pair changes nothing', () => {
+  // Another page: the same differences are the same bugs, with no warning.
+  const other = { mainPath: 'docs/api/refund.md', secondaryPath: 'i18n/en/docusaurus-plugin-content-docs/current/api/refund.md' };
+  const r = compare(XUA, XEN, withEx(EXAMPLES, other));
+  assert.deepEqual(check6(r), check6(compare(XUA, XEN, other)));
+  assert.deepEqual(r.warnings, []);
+  assert.deepEqual(r.examples, { pairs: 4, here: 0, matched: [] });
+  // The system pair holds on api/create-payment only: on the disputes page a translated system value is a bug, while
+  // the comment pair, which lists the disputes page too, still holds there.
+  const dUa = '# Диспут\n\n```json\n{ "comment": "Кошти не надійшли.", "paymentPurpose": "Оплата послуг" }\n```\n';
+  const dEn = '# Dispute\n\n```json\n{ "comment": "The funds did not arrive.", "paymentPurpose": "Service payment" }\n```\n';
+  const disputes = { mainPath: 'docs/disputes/disputes.md', secondaryPath: 'i18n/en/docusaurus-plugin-content-docs/current/disputes/disputes.md' };
+  assert.deepEqual(check6(compare(dUa, dEn, withEx(EXAMPLES, disputes))), [['CODE-BLOCK-MISMATCH', 4]]);
+  assert.deepEqual(check6(compare(dUa, dEn.replace('"Service payment"', '"Оплата послуг"'), withEx(EXAMPLES, disputes))), []);
+  // A page in the content root's form, with the root in front, or an .mdx file: matched by the path's end.
+  for (const page of ['docs/api/create-payment', 'create-payment']) {
+    assert.deepEqual(check6(compare(XUA, XEN, withEx(EXAMPLES.replaceAll('`api/create-payment`', `\`${page}\``)))), [], page);
+  }
+  assert.deepEqual(check6(compare(XUA, XEN, withEx(EXAMPLES, { mainPath: 'docs/api/create-payment.mdx', secondaryPath: 'en/api/create-payment.mdx' }))), []);
+  // A path that only ends with the same letters is another page.
+  assert.equal(compare(XUA, XEN, withEx(EXAMPLES, { mainPath: 'docs/api/old-create-payment.md', secondaryPath: 'en/api/old-create-payment.md' })).examples.here, 0);
+});
+
+test('Check 6 with --examples: every other difference is still a bug (AC-1)', () => {
+  const examples = withEx();
+  for (const [what, ua, en, line] of [
+    ['a value outside the file', XUA, edit(XEN, '"+380000000001"', '"+380000000002"'), 16],
+    ["an EN value other than the pair's", XUA, edit(XEN, '"recipient": "John Smith", //', '"recipient": "Jane Smith", //'), 13],
+    ["a pair's UA value changed on the UA side", edit(XUA, '"recipient": "Петренко Олег", //', '"recipient": "Петренко Ольга", //'), XEN, 13],
+    ['a pair written the other way round', edit(XUA, '"sender": "TEST Petrenko Oleh"', '"sender": "John Smith"'), edit(XEN, '"sender": "John Smith"', '"sender": "TEST Petrenko Oleh"'), 14],
+    ["a pair's UA value inside a longer string", edit(XUA, '"TEST Petrenko Oleh"', '"Петренко Олег Іванович"'), edit(XEN, '"sender": "John Smith"', '"sender": "John Smith Іванович"'), 14],
+    ["a pair's UA value in single quotes inside a JSON string", edit(XUA, '"TEST Petrenko Oleh"', `"Платник 'Петренко Олег' не відповів"`), edit(XEN, '"sender": "John Smith"', `"sender": "Платник 'John Smith' не відповів"`), 14],
+    ["a pair's UA value in backticks inside a JSON string", edit(XUA, '"TEST Petrenko Oleh"', '"Платник `Петренко Олег` не відповів"'), edit(XEN, '"sender": "John Smith"', '"sender": "Платник `John Smith` не відповів"'), 14],
+    ['other quotes on the EN side', XUA, edit(XEN, '"recipient": "John Smith", //', "\"recipient\": 'John Smith', //"), 13],
+    ['a key, not a value', XUA, edit(XEN, '"recipient": "John Smith", //', '"recipientName": "John Smith", //'), 13],
+  ]) {
+    assert.deepEqual(check6(compare(ua, en, examples)), [['CODE-BLOCK-MISMATCH', line]], what);
+  }
+  // A pair's EN value in a comment is reader text, translated: not compared.
+  assert.deepEqual(check6(compare(XUA, edit(XEN, '// recipient', '// John Smith'), examples)), []);
+  // A language with single-quoted strings: a whole single-quoted value is a pair.
+  const js = (v) => `# A\n\n\`\`\`js\nconst recipient = '${v}'; // хто\n\`\`\`\n`;
+  assert.deepEqual(check6(compare(js('Петренко Олег'), js('John Smith').replace('// хто', '// who'), examples)), []);
+});
+
+test('Check 6 with --examples: no pairs section, no UA page', () => {
+  const none = compare(XUA, XEN, withEx('## Example values\n'));
+  assert.deepEqual(flags(none), ['CODE-BLOCK-MISMATCH', 'CODE-BLOCK-MISMATCH', 'EXAMPLE-PAIRS-MISSING']);
+  assert.equal(none.warnings[0].file, 'example-values.md');
+  assert.deepEqual(none.examples, { pairs: 0, here: 0, matched: [] });
+  // Two pages with no Cyrillic: a pair has a direction, so it is not used.
+  assert.ok(flags(compare(XEN, XEN, withEx())).includes('EXAMPLES-SKIPPED'));
+});
+
+test('CLI: --examples reads the existing pairs of an example values file', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'doc-align-'));
+  const files = { ua: path.join(dir, 'docs', 'api', 'create-payment.md'), en: path.join(dir, 'en', 'api', 'create-payment.md'), ex: path.join(dir, 'example-values.md') };
+  await fs.mkdir(path.dirname(files.ua), { recursive: true });
+  await fs.mkdir(path.dirname(files.en), { recursive: true });
+  await fs.writeFile(files.ua, XUA);
+  await fs.writeFile(files.en, XEN);
+  await fs.writeFile(files.ex, EXAMPLES);
+  const r = await cli(files.ua, files.en, '--examples', files.ex);
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(Object.keys(r.out), ['main', 'secondary', 'ua', 'bugs', 'warnings', 'passed', 'examples']);
+  assert.deepEqual(r.out.bugs, []);
+  assert.deepEqual([r.out.examples.pairs, r.out.examples.here], [4, 4]);
+  const plain = await cli(files.ua, files.en);
+  assert.equal(plain.out.bugs.filter((b) => b.check === 6).length, 2);
+  const missing = await cli(files.ua, files.en, '--examples', path.join(dir, 'nope.md'));
+  assert.equal(missing.code, 2);
+  assert.match(missing.out.error, /file not found/);
+  const ids = await cli(files.ua, files.en, '--propose-ids', '--examples', files.ex);
+  assert.equal(ids.code, 2);
+  assert.match(ids.out.error, /--examples does not go with --propose-ids/);
+});
+
+// --propose-ids: the missing UA heading ids, taken from the EN anchors, and the links to the old fragments
+// (heading-anchors.md, rules 2, 6 and 8). Invented pages.
+const IDS_UA = `---
+title: Баланси
+---
+
+# Баланси
+
+Дивіться [огляд](#огляд-балансів), [перший довідник](#довідкова-інформація) і [другий](#довідкова-інформація-1).
+
+## Огляд балансів
+
+Текст. \`[код](#огляд-балансів)\`
+
+### Фільтри
+
+\`\`\`md
+[у коді](#фільтри)
+\`\`\`
+
+## Довідкова інформація
+
+## Готовий розділ {/* #ready-section */}
+
+## Довідкова інформація
+
+## Комісії й ліміти
+
+## Повтор
+`;
+
+const IDS_EN = `---
+title: Balances
+---
+
+# Balances
+
+See the [overview](#balances-overview), the [first reference](#reference-information-create-balance) and the [second](#reference-information-close-balance). The [filters](#фільтри) link was copied from UA.
+
+## Balances overview
+
+Text. \`[code](#balances-overview)\`
+
+### Filters
+
+\`\`\`md
+[in code](#фільтри)
+\`\`\`
+
+## Reference information {#reference-information-create-balance}
+
+## Ready section
+
+## Reference information {#reference-information-close-balance}
+
+## Fees & limits
+
+## Ready section
+`;
+
+async function idsFixture() {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'doc-align-ids-'));
+  const put = async (rel, text) => {
+    await fs.mkdir(path.dirname(path.join(dir, rel)), { recursive: true });
+    await fs.writeFile(path.join(dir, rel), text);
+  };
+  await put('docs/02-balances/balances.md', IDS_UA);
+  await put('i18n/en/current/02-balances/balances.md', IDS_EN);
+  await put(
+    'docs/other/other.md',
+    [
+      '# Інша',
+      '',
+      '[a](/balances/#огляд-балансів) [b](/02-balances/balances#%D1%84%D1%96%D0%BB%D1%8C%D1%82%D1%80%D0%B8) [c](../02-balances/balances.md#огляд-балансів)',
+      '[d](/other/#огляд-балансів) [e](../02-balances/#фільтри) [f](https://example.com/balances/#огляд-балансів) [g](/02-balances/balances.md#фільтри)',
+      '<Link to="/balances/#фільтри">h</Link>',
+      '',
+    ].join('\n'),
+  );
+  await put('docs/.sources/notes.md', '[x](/balances/#огляд-балансів)\n');
+  return { dir, ua: path.join(dir, 'docs/02-balances/balances.md'), en: path.join(dir, 'i18n/en/current/02-balances/balances.md'), other: path.join(dir, 'docs/other/other.md'), root: path.join(dir, 'docs') };
+}
+
+test('--propose-ids: each id is the EN anchor at the same position, explicit or generated (AC-1)', async () => {
+  const r = await proposeIds(IDS_UA, IDS_EN, { uaPath: 'ua.md', enPath: 'en.md' });
+  const rows = r.proposals.map((p) => [p.line, p.id, p.from, p.oldFragment, p.problem ?? null]);
+  assert.deepEqual(rows.slice(0, 4), [
+    [9, 'balances-overview', 'generated', 'огляд-балансів', null],
+    [13, 'filters', 'generated', 'фільтри', null],
+    [19, 'reference-information-create-balance', 'explicit', 'довідкова-інформація', null],
+    [23, 'reference-information-close-balance', 'explicit', 'довідкова-інформація-1', null],
+  ]);
+  assert.equal(r.proposals.length, 6);
+  // A slug that is not kebab-case is not written.
+  assert.deepEqual(rows[4].slice(0, 2), [25, 'fees--limits']);
+  assert.match(rows[4][4], /not lowercase ASCII kebab-case/);
+  // The second "Ready section" gets `ready-section-1` in EN, numbered like Docusaurus numbers it: a valid id.
+  assert.deepEqual(rows[5], [27, 'ready-section-1', 'generated', 'повтор', null]);
+  assert.deepEqual(
+    r.links.map((l) => [l.file, l.line, l.url, l.newUrl]),
+    [
+      ['ua.md', 7, '#огляд-балансів', '#balances-overview'],
+      ['ua.md', 7, '#довідкова-інформація', '#reference-information-create-balance'],
+      ['ua.md', 7, '#довідкова-інформація-1', '#reference-information-close-balance'],
+      ['en.md', 7, '#фільтри', '#filters'],
+    ],
+    'links in inline code and code blocks are not links; an EN link copied from UA is found too',
+  );
+  assert.deepEqual(r.warnings, ['no --root given: only links on the UA and EN pages themselves are found']);
+
+  // An id another UA heading already has is not written either.
+  const taken = await proposeIds('# Т\n\n## Огляд {/* #overview */}\n\n## Вступ\n', '# T\n\n## Overview\n\n## Overview {#overview}\n', { uaPath: 'ua.md', enPath: 'en.md' });
+  assert.match(taken.proposals[0].problem, /already the id of the UA heading on line 3/);
+});
+
+test('--propose-ids: links across the roots by route, file path and relative .md path; the rest unresolved', async () => {
+  const f = await idsFixture();
+  const r = await proposeIds(IDS_UA, IDS_EN, { uaPath: f.ua, enPath: f.en, roots: [{ dir: f.root, prefix: '/' }] });
+  const other = r.links.filter((l) => l.file.endsWith('other/other.md')).map((l) => [l.line, l.url, l.newUrl]);
+  assert.deepEqual(other, [
+    [3, '/balances/#огляд-балансів', '/balances/#balances-overview'],
+    [3, '/02-balances/balances#%D1%84%D1%96%D0%BB%D1%8C%D1%82%D1%80%D0%B8', '/02-balances/balances#filters'],
+    [3, '../02-balances/balances.md#огляд-балансів', '../02-balances/balances.md#balances-overview'],
+    [4, '/02-balances/balances.md#фільтри', '/02-balances/balances.md#filters'],
+    [5, '/balances/#фільтри', '/balances/#filters'],
+  ]);
+  assert.deepEqual(r.unresolved.map((u) => [u.line, u.url]), [[4, '../02-balances/#фільтри']]);
+  assert.ok(!r.links.some((l) => l.url.startsWith('/other/') || l.url.startsWith('https:')), 'a link to another page or site is not listed');
+  assert.ok(!r.links.some((l) => l.file.includes('.sources')), 'folders starting with a dot are not searched');
+  assert.equal(r.warnings, undefined);
+});
+
+test('--propose-ids: nothing is proposed when the heading counts differ; an explicit {#id} on a UA heading is skipped', async () => {
+  const r = await proposeIds(IDS_UA, IDS_EN.replace('## Fees & limits\n\n', ''), { uaPath: 'ua.md', enPath: 'en.md' });
+  assert.equal(r.proposals.length, 0);
+  assert.match(r.reason, /positions don't line up/);
+  assert.equal(r.skipped.length, 6);
+  const ex = await proposeIds('# Т\n\n## Огляд {#overview}\n', '# T\n\n## Overview\n', { uaPath: 'ua.md', enPath: 'en.md' });
+  assert.deepEqual([ex.proposals.length, ex.skipped.length], [0, 1]);
+  assert.match(ex.skipped[0].reason, /explicit id/);
+  const none = await proposeIds('# Т\n\n## Огляд {/* #overview */}\n', '# T\n\n## Overview\n', { uaPath: 'ua.md', enPath: 'en.md' });
+  assert.deepEqual([none.proposals, none.links, none.skipped], [[], [], []]);
+});
+
+test('CLI --propose-ids --write: only the id comments and the link fragments change', async () => {
+  const f = await idsFixture();
+  const before = { ua: await fs.readFile(f.ua, 'utf8'), other: await fs.readFile(f.other, 'utf8'), en: await fs.readFile(f.en, 'utf8') };
+  const dry = await cli(f.ua, f.en, '--propose-ids', '--root', `${f.root}=/`);
+  assert.equal(dry.code, 0, dry.stderr);
+  assert.deepEqual(Object.keys(dry.out), ['ua', 'en', 'proposals', 'links', 'unresolved', 'skipped']);
+  assert.equal(await fs.readFile(f.ua, 'utf8'), before.ua, 'nothing is written without --write');
+
+  const r = await cli(f.en, f.ua, '--propose-ids', '--root', f.root, '--write');
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.out.ua, f.ua, 'the UA page is found from its Cyrillic text');
+  assert.deepEqual(r.out.written, [f.ua, f.en, path.relative(process.cwd(), f.other)]);
+  const ua = await fs.readFile(f.ua, 'utf8');
+  let want = before.ua;
+  for (const [from, to] of [
+    ['## Огляд балансів\n', '## Огляд балансів {/* #balances-overview */}\n'],
+    ['### Фільтри\n', '### Фільтри {/* #filters */}\n'],
+    ['## Довідкова інформація\n\n## Готовий', '## Довідкова інформація {/* #reference-information-create-balance */}\n\n## Готовий'],
+    ['## Довідкова інформація\n\n## Комісії', '## Довідкова інформація {/* #reference-information-close-balance */}\n\n## Комісії'],
+    ['## Повтор\n', '## Повтор {/* #ready-section-1 */}\n'],
+    ['(#огляд-балансів),', '(#balances-overview),'],
+    ['(#довідкова-інформація)', '(#reference-information-create-balance)'],
+    ['(#довідкова-інформація-1)', '(#reference-information-close-balance)'],
+  ]) want = edit(want, from, to);
+  assert.equal(ua, want);
+  assert.equal(ua.split('\n').length, before.ua.split('\n').length);
+  assert.ok(ua.includes('## Комісії й ліміти\n'), 'a proposal with a problem is not written');
+  assert.ok(ua.includes('`[код](#огляд-балансів)`') && ua.includes('[у коді](#фільтри)'), 'code is untouched');
+  const other = await fs.readFile(f.other, 'utf8');
+  assert.equal(other.split('\n').length, before.other.split('\n').length);
+  assert.ok(other.includes('[a](/balances/#balances-overview)') && other.includes('<Link to="/balances/#filters">') && other.includes('[e](../02-balances/#фільтри)') && other.includes('[d](/other/#огляд-балансів)'));
+  assert.equal(await fs.readFile(f.en, 'utf8'), edit(before.en, '[filters](#фільтри)', '[filters](#filters)'), 'in EN, only the copied link changes');
+
+  // Afterwards the alignment check finds a missing id only on the heading whose proposal had a problem.
+  const after = await cli(f.ua, f.en, '--ua', 'main');
+  assert.deepEqual(after.out.warnings.filter((w) => w.flag === 'HEADING-ID-MISSING').map((w) => w.line), [25]);
+  assert.ok(!after.out.warnings.some((w) => w.flag === 'HEADING-ID-MISMATCH'));
+});
+
+test('CLI --propose-ids: usage errors', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'doc-align-'));
+  const ua = path.join(dir, 'ua.md');
+  const en = path.join(dir, 'en.md');
+  await fs.writeFile(ua, '# Тест\n\n## Огляд\n');
+  await fs.writeFile(en, '# Test\n\n## Overview\n');
+  for (const [args, message] of [
+    [[ua, en, '--write'], /--root and --write go with --propose-ids/],
+    [[ua, en, '--propose-ids', '--root', path.join(dir, 'nope')], /--root: not a folder/],
+    [[ua, en, '--propose-ids', '--names', ua], /--names does not go with --propose-ids/],
+    [[en, en, '--propose-ids'], /cannot tell which page is UA/],
+  ]) {
+    const r = await cli(...args);
+    assert.equal(r.code, 2, args.join(' '));
+    assert.match(r.out.error, message);
+  }
+});
+
+// isIdOnlyChange: the id-only change of heading-anchors.md, the one implementation the scripts share.
+test('isIdOnlyChange: ids added and links rewritten to them; anything else is a real change', () => {
+  const before = '---\ntitle: Т\n---\n\n# Т\n\nДив. [огляд](#огляд-балансів) і `[код](#огляд-балансів)`.\n\n## Огляд балансів\n\nТекст.\n\n## Експорт {/* #export */}\n';
+  const after = before.replace('## Огляд балансів\n', '## Огляд балансів {/* #balances-overview */}\n').replace('[огляд](#огляд-балансів)', '[огляд](#balances-overview)');
+  const page = { path: 'docs/balances/balances.md', before, after };
+  assert.equal(isIdOnlyChange(page), true);
+  assert.equal(isIdOnlyChange({ ...page, after: before }), true, 'no change at all');
+  for (const [what, text] of [
+    ['a changed id', after.replace('{/* #export */}', '{/* #export-data */}')],
+    ['a removed id', after.replace(' {/* #export */}', '')],
+    ['a changed heading text', after.replace('## Огляд балансів {', '## Огляд рахунків {')],
+    ['a prose change', after.replace('Текст.', 'Інший текст.')],
+    ['a fragment in inline code', after.replace('`[код](#огляд-балансів)`', '`[код](#balances-overview)`')],
+    ['a fragment no heading got', after.replace('(#balances-overview)', '(#export)')],
+    ['an added line', `${after}\n`],
+  ]) assert.equal(isIdOnlyChange({ ...page, after: text }), false, what);
+
+  // A link on another page counts when its path resolves to a page of the same change whose heading got that id.
+  const other = { path: 'docs/other/other.md', before: 'Див. [огляд](/balances/#огляд-балансів).\n', after: 'Див. [огляд](/balances/#balances-overview).\n' };
+  assert.equal(isIdOnlyChange(other, [other, page]), true);
+  assert.equal(isIdOnlyChange({ ...other, before: other.before.replace('/balances/', '../balances/balances.md'), after: other.after.replace('/balances/', '../balances/balances.md') }, [other, page]), true, 'a relative file path');
+  assert.equal(isIdOnlyChange(other, [other]), false, 'the linked page is not part of the change');
+  assert.equal(isIdOnlyChange(other, [other, { ...page, after: before }]), false, 'the linked heading got no id');
+});
+
+// An explicit id is written `\{#id}`: a bare `{#id}` fails the MDX build in some hosts ("Could not parse expression with
+// acorn"). Every reader takes both forms, because existing pages may have either.
+const FORMS = ['\\{#reference-information-create-record}', '{#reference-information-create-record}'];
+
+test('explicit ids: both `\\{#id}` and `{#id}` are read as the EN id, and the backslash is not part of the heading text', () => {
+  for (const mark of FORMS) {
+    assert.equal(headingText(`Reference information ${mark}`), 'Reference information', mark);
+    const en = EN.replace(FORMS[1], mark);
+    assert.deepEqual(flags(compare(UA, en)), [], mark);
+    const other = compare(UA, EN.replace(FORMS[1], mark.replace('create-record', 'other')));
+    assert.deepEqual(flags(other), ['HEADING-ID-MISMATCH'], mark);
+    assert.match(other.warnings[0].description, /explicit id 'reference-information-other'/, mark);
+  }
+  const ids = enHeadingIds([{ raw: 'Overview \\{#overview-page}' }, { raw: 'Fees {#fees-page}' }, { raw: 'Plain words' }]);
+  assert.deepEqual(ids.map((x) => [x.id, x.explicit]), [['overview-page', true], ['fees-page', true], ['plain-words', false]]);
+});
+
+test('explicit ids: --propose-ids reads an EN id in either form and skips a UA heading that has one; the id-only predicate does not take it for an added id', async () => {
+  for (const mark of ['\\{#overview-page}', '{#overview-page}']) {
+    const r = await proposeIds('# Т\n\n## Огляд\n', `# T\n\n## Overview ${mark}\n`, { uaPath: 'ua.md', enPath: 'en.md' });
+    assert.deepEqual([r.proposals.length, r.proposals[0].id, r.proposals[0].from, r.proposals[0].problem], [1, 'overview-page', 'explicit', undefined], mark);
+    const ex = await proposeIds(`# Т\n\n## Огляд ${mark}\n`, '# T\n\n## Overview\n', { uaPath: 'ua.md', enPath: 'en.md' });
+    assert.deepEqual([ex.proposals.length, ex.skipped.length], [0, 1], mark);
+    assert.match(ex.skipped[0].reason, /explicit id/);
+    const page = { path: 'a.md', before: `## Огляд ${mark}\n`, after: `## Огляд ${mark} {/* #overview-page */}\n` };
+    assert.equal(isIdOnlyChange(page), false, mark);
+  }
+});
+
+test('explicit ids: the texts that tell how to write one show the escaped form', async () => {
+  const plugin = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+  const files = ['context/doc-rules/project-rules/heading-anchors.md', 'context/doc-templates/user-guide-template.md', 'skills/doc-translator/SKILL.md', 'skills/user-guide-writer/SKILL.md'];
+  // A heading example (a heading line, or a heading inside inline code) that ends in an id with no backslash.
+  const bare = /^\s*#{2,6} .*(?<!\\)\{#|`#{2,6} [^`]*(?<!\\)\{#/;
+  let escaped = 0;
+  for (const f of files) {
+    for (const line of (await fs.readFile(path.join(plugin, f), 'utf8')).split('\n')) {
+      if (line.includes('\\{#')) escaped++;
+      assert.equal(bare.test(line), false, `${f}: ${line}`);
+    }
+  }
+  assert.ok(escaped >= 8, 'the escaped form is the one the texts show');
+});
+
+// ------------------------------------------------------------------ renaming ids (the ticket flow's id step)
+
+const RN_UA = '# Сторінка\n\n## Нові поля {/* #new-fields */}\n\nДив. [поля](#new-fields).\n\n## Статуси {/* #statuses */}\n';
+const RN_EN = '# Page\n\n## Added fields\n\nSee [fields](#new-fields).\n\n## Statuses\n';
+const RN_DE = '# Seite\n\n## Neue Felder {/* #new-fields */}\n\nSiehe [Felder](#new-fields).\n\n## Status {/* #statuses */}\n';
+
+test('headingIdMismatches: the UA and EN headings whose ids differ, with both lines; none when the counts differ', () => {
+  assert.deepEqual(headingIdMismatches(parse(RN_UA), parse(RN_EN)).map((x) => [x.index, x.uaLine, x.uaId, x.enLine, x.enId, x.explicit]), [[1, 3, 'new-fields', 3, 'added-fields', false]]);
+  assert.deepEqual(headingIdMismatches(parse(RN_UA), parse(RN_EN.replace('## Added fields', '## Added fields \\{#new-fields}'))), []);
+  assert.equal(headingIdMismatches(parse(RN_UA), parse('# Page\n')), null);
+});
+
+test('withExplicitId: the EN heading gets `\\{#id}` at its end, in place of another explicit id; no word changes', () => {
+  assert.equal(withExplicitId('## Added fields', 'new-fields'), '## Added fields \\{#new-fields}');
+  assert.equal(withExplicitId('## Added fields {#added}  \r', 'new-fields'), '## Added fields \\{#new-fields}\r');
+});
+
+test('renameIds: the UA comment, the same comment on every further locale page, and every link to the old id; no word changes', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'doc-align-rename-'));
+  const put = async (rel, text) => {
+    await fs.mkdir(path.dirname(path.join(dir, rel)), { recursive: true });
+    await fs.writeFile(path.join(dir, rel), text);
+    return path.join(dir, rel);
+  };
+  const ua = await put('docs/x/page.md', RN_UA);
+  const en = await put('i18n/en/current/x/page.md', RN_EN);
+  const de = await put('i18n/de/current/x/page.md', RN_DE);
+  const other = await put('docs/y/other.md', '# Інша\n\n[a](/x/page#new-fields) [b](/x/page#statuses) [c](/y/other#new-fields)\n');
+  const roots = [{ dir: path.join(dir, 'docs'), prefix: '/' }, { dir: path.join(dir, 'i18n/en/current'), prefix: '/' }, { dir: path.join(dir, 'i18n/de/current'), prefix: '/' }];
+  const r = await renameIds(RN_UA, RN_EN, { uaPath: ua, enPath: en, locales: [{ path: de, text: RN_DE }], roots, renames: [{ from: 'new-fields', to: 'added-fields' }, { from: 'gone', to: 'x' }, { from: 'statuses', to: 'Bad Id' }], write: true });
+  assert.deepEqual(r.renamed.map((x) => [x.from, x.to, x.line, x.locales.map((l) => l.line)]), [['new-fields', 'added-fields', 3, [3]]]);
+  assert.deepEqual(r.skipped.map((x) => x.from), ['gone', 'statuses']);
+  assert.equal(await fs.readFile(ua, 'utf8'), RN_UA.replaceAll('new-fields', 'added-fields'));
+  assert.equal(await fs.readFile(de, 'utf8'), RN_DE.replaceAll('new-fields', 'added-fields'), 'the locale carries the comment verbatim, and its own link');
+  assert.equal(await fs.readFile(en, 'utf8'), RN_EN.replace('#new-fields', '#added-fields'), 'EN: only the link it copied from UA');
+  assert.equal(await fs.readFile(other, 'utf8'), '# Інша\n\n[a](/x/page#added-fields) [b](/x/page#statuses) [c](/y/other#new-fields)\n', 'a link to another page keeps its fragment');
+  assert.deepEqual(r.written.length, 4);
+});
+
+test('renameIds: a chain of renames is made whole, the targets checked against the ids once every rename is made', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'doc-align-chain-'));
+  const put = async (rel, text) => {
+    await fs.mkdir(path.dirname(path.join(dir, rel)), { recursive: true });
+    await fs.writeFile(path.join(dir, rel), text);
+    return path.join(dir, rel);
+  };
+  const UA = '# Сторінка\n\n## Приклад {/* #example */}\n\nТекст.\n\n## Приклад {/* #example-1 */}\n\nДив. [перший](#example) і [другий](#example-1).\n\n## Інше {/* #other */}\n';
+  const EN = '# Page\n\n## Sample\n\nText.\n\n## Example\n\nSee [first](#example) and [second](#example-1).\n\n## Other\n';
+  const ua = await put('docs/x/page.md', UA);
+  const en = await put('i18n/en/current/x/page.md', EN);
+  const roots = [{ dir: path.join(dir, 'docs'), prefix: '/' }, { dir: path.join(dir, 'i18n/en/current'), prefix: '/' }];
+  const r = await renameIds(UA, EN, { uaPath: ua, enPath: en, roots, renames: [{ from: 'example', to: 'sample' }, { from: 'example-1', to: 'example' }], write: true });
+  assert.deepEqual(r.skipped, []);
+  assert.deepEqual(r.renamed.map((x) => [x.from, x.to]), [['example', 'sample'], ['example-1', 'example']]);
+  assert.equal(await fs.readFile(ua, 'utf8'), UA.replace('{/* #example */}', '{/* #sample */}').replace('{/* #example-1 */}', '{/* #example */}').replace('(#example) і [другий](#example-1)', '(#sample) і [другий](#example)'));
+  assert.equal(await fs.readFile(en, 'utf8'), EN.replace('(#example) and [second](#example-1)', '(#sample) and [second](#example)'));
+  // A target a heading keeps: skipped. One that two renames take: both skipped.
+  const kept = await renameIds(UA, EN, { uaPath: ua, enPath: en, renames: [{ from: 'example', to: 'other' }] });
+  assert.deepEqual(kept.skipped.map((x) => [x.from, x.to]), [['example', 'other']]);
+  assert.deepEqual(kept.renamed, []);
+  const twins = await renameIds(UA, EN, { uaPath: ua, enPath: en, renames: [{ from: 'example', to: 'twin' }, { from: 'example-1', to: 'twin' }] });
+  assert.deepEqual(twins.skipped.map((x) => [x.from, x.to]), [['example', 'twin'], ['example-1', 'twin']]);
+  assert.deepEqual(twins.renamed, []);
+});
+

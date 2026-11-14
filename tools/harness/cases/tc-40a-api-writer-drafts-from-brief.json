@@ -1,0 +1,138 @@
+{
+  "id": "tc-40a-api-writer-drafts-from-brief",
+  "description": "api-doc-writer on a complete brief with the interview skipped: one page at <API reference root>/<slug>/<slug>.md that follows the template (authentication, request, response, errors), takes every fact from the brief, writes in English, flags the one open fact instead of inventing it, and touches nothing else. Runs the skill directly; /create-api-doc has its own case (tc-40b).",
+  "fixture": {
+    "shape": "single"
+  },
+  "setup": [
+    "printf '%s\\n' '- **API reference root:** `api-reference/`' >> CLAUDE.md && mkdir -p api-docs/api-references && cat > api-docs/api-references/create-refund.md <<'EOF'\n# Create refund\n\n## Endpoint\n\n`POST https://api.demo-pay.test/v1/refunds`\n\n## Authentication\n\nCustom. The token goes in the `X-Demo-Token` header. The body is JSON, so the request also needs `Content-Type: application/json`.\n\n## Request body\n\n| Attribute | Type | Required | Description |\n|---|---|---|---|\n| `payment_id` | string | yes | The payment to refund. |\n| `amount` | integer | no | The amount to refund, in minor units. Omit it to refund the full amount. |\n| `reason` | string | no | One of `duplicate`, `fraudulent`, `requested_by_customer`. |\n\n## Example request\n\n```json\n{\n  \"payment_id\": \"pay_8f2k1x\",\n  \"amount\": 2500,\n  \"reason\": \"duplicate\"\n}\n```\n\n## Response (201)\n\n```json\n{\n  \"id\": \"ref_3m9q7t\",\n  \"payment_id\": \"pay_8f2k1x\",\n  \"amount\": 2500,\n  \"currency\": \"EUR\",\n  \"status\": \"pending\",\n  \"created_at\": \"2026-03-04T10:15:00Z\"\n}\n```\n\n| Attribute | Type | Description |\n|---|---|---|\n| `id` | string | The refund ID. |\n| `payment_id` | string | The refunded payment. |\n| `amount` | integer | The refunded amount, in minor units. |\n| `currency` | string | The currency, ISO 4217 code. |\n| `status` | string | `pending`, `succeeded` or `failed`. |\n| `created_at` | string | When the refund was created, ISO 8601 date and time. |\n\n## Errors\n\n| HTTP code | Error | When |\n|---|---|---|\n| 400 | `invalid_request` | The body is not valid JSON, or a required attribute is missing. |\n| 404 | `payment_not_found` | No payment has this ID. |\n| 409 | `already_refunded` | The payment was already refunded in full. |\n\n## Open\n\n- How long after a payment it can still be refunded is not decided yet. The team is checking.\nEOF\ngit add -A && git commit -q -m 'Case setup'"
+  ],
+  "prompt": "use api-doc-writer to document `create-refund`. Skip questions and draft with your best guess, then save the page.",
+  "options": {
+    "maxTurns": 60,
+    "permissionMode": "acceptEdits",
+    "allowedTools": [
+      "Bash(git:*)",
+      "Bash(node:*)",
+      "Bash(ls:*)",
+      "Bash(mkdir:*)"
+    ]
+  },
+  "assertions": [
+    {
+      "type": "skill-called",
+      "skill": "api-doc-writer"
+    },
+    {
+      "name": "page saved at <root>/<slug>/<slug>.md",
+      "type": "exists",
+      "path": "api-reference/create-refund/create-refund.md"
+    },
+    {
+      "type": "frontmatter",
+      "path": "api-reference/create-refund/create-refund.md"
+    },
+    {
+      "name": "title in the imperative",
+      "type": "match",
+      "path": "api-reference/create-refund/create-refund.md",
+      "pattern": "^title: ['\"]?Create\\b",
+      "flags": "m"
+    },
+    {
+      "name": "endpoint from the brief",
+      "type": "match",
+      "path": "api-reference/create-refund/create-refund.md",
+      "pattern": "POST https://api\\.demo-pay\\.test/v1/refunds"
+    },
+    {
+      "name": "authentication section",
+      "type": "match",
+      "path": "api-reference/create-refund/create-refund.md",
+      "pattern": "^## Authentication\\s*$",
+      "flags": "m"
+    },
+    {
+      "name": "request and response sections",
+      "type": "match",
+      "path": "api-reference/create-refund/create-refund.md",
+      "pattern": "(?=[\\s\\S]*^### Request\\s*$)(?=[\\s\\S]*^### Response\\s*$)",
+      "flags": "m"
+    },
+    {
+      "name": "errors section",
+      "type": "match",
+      "path": "api-reference/create-refund/create-refund.md",
+      "pattern": "^#{2,3} Possible errors\\s*$",
+      "flags": "m"
+    },
+    {
+      "name": "custom header in the headers table",
+      "type": "match",
+      "path": "api-reference/create-refund/create-refund.md",
+      "pattern": "^\\| `X-Demo-Token` \\|",
+      "flags": "m"
+    },
+    {
+      "name": "request body attributes in the table",
+      "type": "match",
+      "path": "api-reference/create-refund/create-refund.md",
+      "pattern": "(?=[\\s\\S]*^\\| `payment_id` \\|)(?=[\\s\\S]*^\\| `amount` \\|)(?=[\\s\\S]*^\\| `reason` \\|)",
+      "flags": "m"
+    },
+    {
+      "name": "all three errors from the brief",
+      "type": "match",
+      "path": "api-reference/create-refund/create-refund.md",
+      "pattern": "(?=[\\s\\S]*invalid_request)(?=[\\s\\S]*payment_not_found)(?=[\\s\\S]*already_refunded)"
+    },
+    {
+      "name": "samples in details blocks",
+      "type": "match",
+      "path": "api-reference/create-refund/create-refund.md",
+      "pattern": "<details>"
+    },
+    {
+      "name": "English page",
+      "type": "no-match",
+      "path": "api-reference/create-refund/create-refund.md",
+      "pattern": "[А-Яа-яІіЇїЄєҐґ]"
+    },
+    {
+      "name": "open fact flagged with a marker",
+      "type": "match",
+      "path": "api-reference/create-refund/create-refund.md",
+      "pattern": "\\{/\\* (NEEDS CONFIRMATION|ToDo)"
+    },
+    {
+      "name": "refund period not invented",
+      "type": "no-match",
+      "path": "api-reference/create-refund/create-refund.md",
+      "pattern": "\\b\\d+[- ]?days?\\b",
+      "flags": "i"
+    },
+    {
+      "type": "links",
+      "path": "api-reference/create-refund/create-refund.md",
+      "form": "root-relative"
+    },
+    {
+      "name": "one page written",
+      "type": "command",
+      "run": "test \"$(find api-reference -name '*.md' | wc -l | tr -d ' ')\" = 1"
+    },
+    {
+      "name": "report names the file",
+      "type": "match",
+      "path": "output",
+      "pattern": "api-reference/create-refund/create-refund\\.md"
+    },
+    {
+      "type": "changed-only",
+      "paths": [
+        "api-reference/create-refund/",
+        ".doc-toolkit/"
+      ]
+    }
+  ]
+}
