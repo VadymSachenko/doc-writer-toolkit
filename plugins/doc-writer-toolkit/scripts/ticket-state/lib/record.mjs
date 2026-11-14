@@ -1137,6 +1137,23 @@ export function cardStatusFor(l, dropped = []) {
 
 // `record <key> --run <json>` with no stage: the cost of a session, added to the ledger's runs. The runner records it
 // after each session; it checks nothing, since it changes no stage.
+// The ids of comments the runner posted on a ticket's card outside any stage (the links of a finding outside a ticket,
+// lib/findings.mjs), into `posted.card`, so that no rule reads them as a person's (`actedAfter`, the answers): what a
+// stage record's `posted` does for a session's comments. Not a record: no `seq`, no log line. A ticket with no ledger
+// is left alone (null).
+export function addPostedCard(settings, key, ids, now = Date.now()) {
+  const ledger = readLedger(settings.state, key);
+  if (!ledger) return null;
+  const l = structuredClone(ledger);
+  l.posted ??= { card: [], pr: [] };
+  l.posted.card ??= [];
+  const before = l.posted.card.length;
+  addAll(l.posted.card, ids);
+  if (l.posted.card.length === before) return null;
+  l.updatedAt = new Date(now).toISOString();
+  return writeLedger(settings.state, l);
+}
+
 function appendRun(settings, key, run, prRef, now) {
   const ledger = readLedger(settings.state, key);
   if (!ledger) throw new Refused('noLedger', `ticket ${key} has no ledger`);

@@ -156,6 +156,8 @@ test('AC: the same finding on a second ticket is linked to the open card, not fi
   assert.deepEqual(commentsOn(w, first), [`${HEADER}\n\nSeen again while on ${b.url}: the export page still lists FIVE interface languages!`], 'the card names the second ticket');
   assert.deepEqual(readFindings(w.settings.state).map((x) => [x.ticket, x.outcome, x.card.url, x.by]), [['1311', 'filed', first.url, undefined], ['1312', 'linked', first.url, 'fingerprint, as 1311 f1']]);
   assert.equal(commentsOn(w, a).length, 1);
+  // The pipeline's own comments on a ticket's card are kept as its own, so no rule reads them as a person's.
+  for (const k of ['1311', '1312']) assert.equal(read(w, k).posted.card.length, 1, k);
 
   // Triaged out of the docs' scope: known and decided, so linked again, not raised again.
   first.placeId = LISTS.outOfScope.id;
@@ -188,9 +190,28 @@ test('AC: a finding the session matched to an open card (an app bug filed by peo
   assert.deepEqual(commentsOn(w, t).map((x) => x.split('\n\n')[1]).slice(0, 2), [`Outside the ticket: App bug, a card of its own: ${bug.url}`, `Outside the ticket: App bug, a card of its own: ${w.tracker.cards.at(-3).url}`]);
   const lines = readFindings(w.settings.state);
   assert.deepEqual(lines.map((x) => [x.outcome, x.by ?? null]), [['linked', 'session'], ['filed', null], ['filed', null], ['filed', null]]);
+  assert.equal(read(w, '1321').posted.card.length, 4, "each link comment on the ticket's card is the pipeline's own");
   assert.match(lines[1].notes[0], /the card the session named \(.+\) is archived/);
   assert.match(lines[2].notes[0], /the card the session named \(.+NoSuchCard\) is gone/);
   assert.match(lines[3].notes[0], /is this ticket's own card/);
+});
+
+test('a finding whose open card is another ticket: the comment on that card is kept as the pipeline\'s in that ticket\'s ledger, unless another run holds its lock', async () => {
+  const w = world({ extra: withCard() });
+  const t = plainTicket(w, 1325);
+  const other = plainTicket(w, 1326);
+  const busy = plainTicket(w, 1327);
+  const f = { kind: 'page', title: 'A stale step', text: 'Step 3 names a removed button.', repo: 'guide-docs', page: 'docs/y/b.md' };
+  await findingsOf(w, '1325', [{ ...f, card: other.url }, { ...f, title: 'Another stale step', card: busy.url }]);
+  const { takeLock } = await import('../lib/locks.mjs');
+  takeLock(w.settings.state, { group: '1327', kind: 'schedule', leaseMinutes: 60, now: NOW });
+  assert.deepEqual((await route(w, ['1325'])).map((e) => e.outcome), ['linked', 'linked']);
+  assert.match(commentsOn(w, other)[0], /Seen again while on https:\/\/tracker\.example\/c\/\S+: A stale step/);
+  assert.equal(read(w, '1326').posted.card.length, 1);
+  assert.equal(commentsOn(w, busy).length, 1);
+  assert.deepEqual(read(w, '1327').posted.card, [], 'another run holds that ticket: its ledger is left to it');
+  assert.equal(read(w, '1325').posted.card.length, 2);
+  void t;
 });
 
 // ------------------------------------------------------------------ no template: no card, a report line

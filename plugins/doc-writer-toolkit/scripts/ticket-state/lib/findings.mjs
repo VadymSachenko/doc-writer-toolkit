@@ -3,7 +3,9 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { CliError } from './errors.mjs';
-import { prId, readLedger } from './ledger.mjs';
+import { keyOf, prId, readLedger } from './ledger.mjs';
+import { lockOf } from './locks.mjs';
+import { addPostedCard } from './record.mjs';
 
 // Findings outside the ticket (TASK-050). A session that comes across a problem its ticket doesn't change (another page,
 // a block of a changed page the ticket's change leaves alone, UI the ticket doesn't cover, an app bug) records it in the
@@ -200,7 +202,7 @@ export async function followFindings({ settings, clients, keys, now = Date.now()
     for (const f of l.sideFindings) {
       if (routed.has(`${key}|${f.id}`)) continue;
       try {
-        const line = await route({ settings, clients, l, f, lines, at: new Date(now).toISOString(), events });
+        const line = await route({ settings, clients, l, f, lines, at: new Date(now).toISOString(), events, keys, now });
         lines.push(line);
         routed.add(`${key}|${f.id}`);
       } catch (e) {
@@ -211,7 +213,7 @@ export async function followFindings({ settings, clients, keys, now = Date.now()
   return events;
 }
 
-async function route({ settings, clients, l, f, lines, at, events }) {
+async function route({ settings, clients, l, f, lines, at, events, keys = [], now = Date.now() }) {
   const key = l.key;
   const base = { at, ticket: key, id: f.id, fp: f.fp, kind: f.kind, title: f.title ?? null, stage: f.stage, ...(f.pr ? { pr: f.pr } : {}) };
   const write = (line) => {
@@ -280,13 +282,28 @@ async function route({ settings, clients, l, f, lines, at, events }) {
   };
   const ticketRef = l.card?.shortLink ?? l.card?.id ?? null;
   // The comments that link the two cards: one failed is a warning, never a second card (the line is written first).
-  const comment = async (ref, text, what) => {
+  // Each goes into `posted.card` of the ticket whose card it is on, as the pipeline's own: no rule reads it as a person's.
+  // Another ticket's ledger only while no other run holds its lock (its record could be lost under a write here).
+  const comment = async (ref, text, what, ticket) => {
     try {
-      await tracker.comment({ card: ref, text });
+      const c = await tracker.comment({ card: ref, text });
+      if (c.id && ticket) {
+        const lock = keys.includes(ticket.key) ? null : lockOf(settings.state, ticket.group ?? ticket.key, now);
+        if (!lock?.live) addPostedCard(settings, ticket.key, [c.id], now);
+      }
       return true;
     } catch (e) {
       events.push({ key, id: f.id, outcome: 'failed', note: `${f.id}: the comment on ${what} was not posted: ${String(e.message ?? e).split('\n')[0]}` });
       return false;
+    }
+  };
+  // The ticket a card is, if it has a ledger.
+  const ticketOf = (c) => {
+    try {
+      const other = readLedger(settings.state, keyOf(c));
+      return other && other.card?.id === c.id ? other : null;
+    } catch {
+      return null;
     }
   };
   if (held) {
@@ -294,15 +311,15 @@ async function route({ settings, clients, l, f, lines, at, events }) {
     // The module writes on the board only, and never on a card the settings keep unread.
     const onBoard = held.boardId === board && !neverRead.includes(held.status);
     const linked = {
-      ticket: ticketRef ? await comment(ticketRef, renderTemplate(t.onTicket, { ...values, card: held.url ?? held.shortLink }), "the ticket's card") : false,
-      card: onBoard ? await comment(held.id, renderTemplate(t.onExisting, values), `the card ${held.url}`) : false,
+      ticket: ticketRef ? await comment(ticketRef, renderTemplate(t.onTicket, { ...values, card: held.url ?? held.shortLink }), "the ticket's card", l) : false,
+      card: onBoard ? await comment(held.id, renderTemplate(t.onExisting, values), `the card ${held.url}`, ticketOf(held)) : false,
     };
     events.push({ key, id: f.id, outcome: 'linked', note: `${f.id} «${f.title}»: linked to the open card ${held.url} (${by})${onBoard ? '' : '; that card is on another board or kept unread, so only the ticket links it'}` });
     return { ...line, linked };
   }
   const made = await tracker.createCard({ status: 'intake', name: renderTemplate(t.name, values).split('\n')[0] || f.title, desc: renderTemplate(t.desc, values) });
   const line = write({ ...base, outcome: 'filed', card: { id: made.id, shortLink: made.shortLink ?? null, url: made.url ?? null }, ...(notes.length ? { notes } : {}) });
-  const linked = { ticket: ticketRef ? await comment(ticketRef, renderTemplate(t.onTicket, { ...values, card: made.url ?? made.shortLink }), "the ticket's card") : false };
+  const linked = { ticket: ticketRef ? await comment(ticketRef, renderTemplate(t.onTicket, { ...values, card: made.url ?? made.shortLink }), "the ticket's card", l) : false };
   events.push({ key, id: f.id, outcome: 'filed', note: `${f.id} «${f.title}»: filed in the intake list, ${made.url}` });
   return { ...line, linked };
 }
